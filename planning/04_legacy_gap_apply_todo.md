@@ -43,7 +43,7 @@
 ## Phase 0: 준비
 - [ ] `planning` 문서 승인
 - [x] FE/BE 공통 용어집 정의 (`vehicleNumber/plate/vin`, `reservation/rental`) (docs/common_glossary.md)
-- [ ] API 계약서 초안 작성 (OpenAPI 또는 markdown)
+- [x] API 계약서 초안 작성 (OpenAPI 또는 markdown) (`docs/api/openapi_v2_draft.yaml`, BK-002)
 
 ## Phase 1: 기반 구축
 - [ ] `src/api` 또는 `src/services` 생성
@@ -104,4 +104,3 @@
 - mock 데이터 없이도 현재 FE 주요 화면이 BE 데이터로 안정 동작한다.
 - 핵심 사용자 플로우(로그인→자산→예약→조치→매출)가 end-to-end로 검증된다.
 - 레거시에서 필요한 운영 기능(문의/장착신청/권한관리)이 최소 기능 단위로 이 레포에 통합된다.
-

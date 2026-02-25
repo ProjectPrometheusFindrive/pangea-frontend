@@ -1,0 +1,2061 @@
+openapi: 3.0.3
+info:
+  title: Pangea API v2 Draft (BK-002)
+  version: 0.1.0-bk002
+  description: |
+    BK-002(OpenAPI v2 초안 작성) 범위의 최소 계약서다.
+    본 문서는 인증/자산/예약/조치/결제/매출/설정 도메인을 포함한다.
+
+    용어 기준:
+    - vehicle 식별자: vehicleNumber (legacy plate는 API 경계에서 정규화)
+    - reservation type: reservation | rental | return
+    - status는 도메인별 enum으로 분리
+
+    참고 문서:
+    - docs/common_glossary.md (BK-001)
+    - planning/03_be_development_plan.md
+servers:
+  - url: https://api.pangea.local
+    description: Local/Dev placeholder
+tags:
+  - name: Auth
+    description: 인증/세션
+  - name: Assets
+    description: 차량 자산
+  - name: Reservations
+    description: 예약/계약
+  - name: ActionItems
+    description: 조치 필요 항목
+  - name: Payments
+    description: 결제/미납
+  - name: Revenue
+    description: 매출
+  - name: Settings
+    description: 회사/지오펜스/계정/대량반영
+security:
+  - bearerAuth: []
+paths:
+  /api/v2/auth/login:
+    post:
+      tags: [Auth]
+      summary: 로그인
+      security: []
+      operationId: postAuthLogin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: 로그인 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthLoginResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /api/v2/auth/me:
+    get:
+      tags: [Auth]
+      summary: 현재 사용자 조회
+      operationId: getAuthMe
+      responses:
+        '200':
+          description: 조회 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CurrentUserResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /api/v2/auth/logout:
+    post:
+      tags: [Auth]
+      summary: 로그아웃
+      operationId: postAuthLogout
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LogoutRequest'
+      responses:
+        '200':
+          description: 로그아웃 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /api/v2/assets:
+    get:
+      tags: [Assets]
+      summary: 자산 목록 조회
+      operationId: getAssets
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/PageSizeParam'
+        - in: query
+          name: search
+          schema:
+            type: string
+          description: vehicleNumber 또는 model 검색
+        - in: query
+          name: status
+          schema:
+            $ref: '#/components/schemas/VehicleStatus'
+        - in: query
+          name: model
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 조회 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssetListResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+    post:
+      tags: [Assets]
+      summary: 자산 등록
+      operationId: postAssets
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssetCreateRequest'
+      responses:
+        '201':
+          description: 등록 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssetDetailResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '409':
+          $ref: '#/components/responses/ConflictError'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /api/v2/assets/{assetId}:
+    parameters:
+      - in: path
+        name: assetId
+        required: true
+        schema:
+          type: string
+    get:
+      tags: [Assets]
+      summary: 자산 상세 조회
+      operationId: getAssetById
+      responses:
+        '200':
+          description: 조회 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssetDetailResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+    patch:
+      tags: [Assets]
+      summary: 자산 정보 수정
+      operationId: patchAssetById
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssetUpdateRequest'
+      responses:
+        '200':
+          description: 수정 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssetDetailResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /api/v2/assets/{assetId}/history:
+    parameters:
+      - in: path
+        name: assetId
+        required: true
+        schema:
+          type: string
+    get:
+      tags: [Assets]
+      summary: 자산 이력 조회
+      operationId: getAssetHistory
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/PageSizeParam'
+      responses:
+        '200':
+          description: 조회 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssetHistoryListResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/v2/reservations:
+    get:
+      tags: [Reservations]
+      summary: 예약/계약 목록 조회
+      operationId: getReservations
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/PageSizeParam'
+        - in: query
+          name: type
+          schema:
+            $ref: '#/components/schemas/ReservationType'
+        - in: query
+          name: paymentStatus
+          schema:
+            $ref: '#/components/schemas/PaymentStatus'
+        - in: query
+          name: vehicleNumber
+          schema:
+            type: string
+        - in: query
+          name: customerName
+          schema:
+            type: string
+        - in: query
+          name: fromDate
+          schema:
+            type: string
+            format: date
+        - in: query
+          name: toDate
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: 조회 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReservationListResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+    post:
+      tags: [Reservations]
+      summary: 신규 계약 등록
+      operationId: postReservations
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReservationCreateRequest'
+      responses:
+        '201':
+          description: 등록 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReservationDetailResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /api/v2/reservations/{reservationId}:
+    parameters:
+      - in: path
+        name: reservationId
+        required: true
+        schema:
+          type: string
+    patch:
+      tags: [Reservations]
+      summary: 계약 정보/상태 수정 (반납/취소 포함)
+      operationId: patchReservationById
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReservationUpdateRequest'
+      responses:
+        '200':
+          description: 수정 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReservationDetailResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /api/v2/reservations/{reservationId}/accident:
+    parameters:
+      - in: path
+        name: reservationId
+        required: true
+        schema:
+          type: string
+    post:
+      tags: [Reservations]
+      summary: 사고 접수 등록
+      operationId: postReservationAccident
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AccidentCreateRequest'
+      responses:
+        '201':
+          description: 등록 성공 (조치 항목 생성)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActionItemDetailResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /api/v2/action-items:
+    get:
+      tags: [ActionItems]
+      summary: 조치 항목 목록 조회
+      operationId: getActionItems
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/PageSizeParam'
+        - in: query
+          name: type
+          schema:
+            $ref: '#/components/schemas/ActionItemType'
+        - in: query
+          name: status
+          schema:
+            $ref: '#/components/schemas/ActionStatus'
+        - in: query
+          name: severity
+          schema:
+            $ref: '#/components/schemas/Severity'
+        - in: query
+          name: vehicleNumber
+          schema:
+            type: string
+        - in: query
+          name: assignee
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 조회 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActionItemListResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /api/v2/action-items/{actionItemId}/status:
+    parameters:
+      - in: path
+        name: actionItemId
+        required: true
+        schema:
+          type: string
+    patch:
+      tags: [ActionItems]
+      summary: 조치 항목 상태 변경
+      operationId: patchActionItemStatus
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ActionItemStatusUpdateRequest'
+      responses:
+        '200':
+          description: 수정 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActionItemDetailResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /api/v2/action-items/{actionItemId}/memos:
+    parameters:
+      - in: path
+        name: actionItemId
+        required: true
+        schema:
+          type: string
+    post:
+      tags: [ActionItems]
+      summary: 조치 항목 메모 추가
+      operationId: postActionItemMemo
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ActionItemMemoCreateRequest'
+      responses:
+        '201':
+          description: 등록 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActionItemMemoResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /api/v2/payments:
+    get:
+      tags: [Payments]
+      summary: 결제 목록 조회
+      operationId: getPayments
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/PageSizeParam'
+        - in: query
+          name: status
+          schema:
+            $ref: '#/components/schemas/PaymentStatus'
+        - in: query
+          name: type
+          schema:
+            $ref: '#/components/schemas/PaymentType'
+        - in: query
+          name: vehicleNumber
+          schema:
+            type: string
+        - in: query
+          name: customerName
+          schema:
+            type: string
+        - in: query
+          name: dueDateFrom
+          schema:
+            type: string
+            format: date
+        - in: query
+          name: dueDateTo
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: 조회 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentListResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /api/v2/payments/{paymentId}:
+    parameters:
+      - in: path
+        name: paymentId
+        required: true
+        schema:
+          type: string
+    patch:
+      tags: [Payments]
+      summary: 결제 상태/정보 변경
+      operationId: patchPaymentById
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PaymentUpdateRequest'
+      responses:
+        '200':
+          description: 수정 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentDetailResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /api/v2/payments/unpaid-summary:
+    get:
+      tags: [Payments]
+      summary: 미납 요약 조회
+      operationId: getPaymentsUnpaidSummary
+      parameters:
+        - in: query
+          name: period
+          required: true
+          schema:
+            $ref: '#/components/schemas/PeriodType'
+      responses:
+        '200':
+          description: 조회 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UnpaidSummaryResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /api/v2/revenue/summary:
+    get:
+      tags: [Revenue]
+      summary: 기간별 매출 요약
+      operationId: getRevenueSummary
+      parameters:
+        - in: query
+          name: period
+          required: true
+          schema:
+            $ref: '#/components/schemas/PeriodType'
+      responses:
+        '200':
+          description: 조회 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RevenueSummaryResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /api/v2/revenue/charts:
+    get:
+      tags: [Revenue]
+      summary: 매출 차트 데이터
+      operationId: getRevenueCharts
+      parameters:
+        - in: query
+          name: period
+          required: true
+          schema:
+            $ref: '#/components/schemas/PeriodType'
+      responses:
+        '200':
+          description: 조회 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RevenueChartsResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /api/v2/company:
+    get:
+      tags: [Settings]
+      summary: 회사 정보 조회
+      operationId: getCompany
+      responses:
+        '200':
+          description: 조회 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompanyResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+    patch:
+      tags: [Settings]
+      summary: 회사 정보 수정
+      operationId: patchCompany
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CompanyUpdateRequest'
+      responses:
+        '200':
+          description: 수정 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompanyResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /api/v2/geofences:
+    get:
+      tags: [Settings]
+      summary: 지오펜스 목록 조회
+      operationId: getGeofences
+      responses:
+        '200':
+          description: 조회 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GeofenceListResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+    post:
+      tags: [Settings]
+      summary: 지오펜스 생성
+      operationId: postGeofence
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GeofenceCreateRequest'
+      responses:
+        '201':
+          description: 생성 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GeofenceDetailResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /api/v2/geofences/{geofenceId}:
+    parameters:
+      - in: path
+        name: geofenceId
+        required: true
+        schema:
+          type: string
+    patch:
+      tags: [Settings]
+      summary: 지오펜스 수정
+      operationId: patchGeofence
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GeofenceUpdateRequest'
+      responses:
+        '200':
+          description: 수정 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GeofenceDetailResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+    delete:
+      tags: [Settings]
+      summary: 지오펜스 삭제
+      operationId: deleteGeofence
+      responses:
+        '200':
+          description: 삭제 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/v2/users:
+    get:
+      tags: [Settings]
+      summary: 계정 목록 조회
+      operationId: getUsers
+      parameters:
+        - in: query
+          name: role
+          schema:
+            $ref: '#/components/schemas/AccountRole'
+        - in: query
+          name: status
+          schema:
+            $ref: '#/components/schemas/AccountStatus'
+      responses:
+        '200':
+          description: 조회 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserListResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /api/v2/users/{userId}:
+    parameters:
+      - in: path
+        name: userId
+        required: true
+        schema:
+          type: string
+    patch:
+      tags: [Settings]
+      summary: 계정 권한/상태 수정
+      operationId: patchUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserUpdateRequest'
+      responses:
+        '200':
+          description: 수정 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserDetailResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /api/v2/import/assets:
+    post:
+      tags: [Settings]
+      summary: 자산 CSV 대량 업로드
+      operationId: postImportAssets
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ImportRequest'
+      responses:
+        '202':
+          description: 업로드 접수
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImportJobResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /api/v2/import/reservations:
+    post:
+      tags: [Settings]
+      summary: 예약 CSV 대량 업로드
+      operationId: postImportReservations
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ImportRequest'
+      responses:
+        '202':
+          description: 업로드 접수
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImportJobResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    PageParam:
+      in: query
+      name: page
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+    PageSizeParam:
+      in: query
+      name: pageSize
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+
+  responses:
+    BadRequestError:
+      description: 잘못된 요청
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    UnauthorizedError:
+      description: 인증 실패
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    ForbiddenError:
+      description: 권한 없음
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    NotFoundError:
+      description: 리소스를 찾을 수 없음
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    ConflictError:
+      description: 리소스 충돌
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    ValidationError:
+      description: 유효성 검증 실패
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+
+  schemas:
+    SuccessMeta:
+      type: object
+      required: [requestId, timestamp]
+      properties:
+        requestId:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+
+    SuccessEnvelopeBase:
+      type: object
+      required: [success, meta]
+      properties:
+        success:
+          type: boolean
+          enum: [true]
+        meta:
+          $ref: '#/components/schemas/SuccessMeta'
+
+    ErrorEnvelope:
+      type: object
+      required: [success, error, meta]
+      properties:
+        success:
+          type: boolean
+          enum: [false]
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+            fields:
+              type: array
+              items:
+                type: object
+                properties:
+                  name:
+                    type: string
+                  reason:
+                    type: string
+        meta:
+          $ref: '#/components/schemas/SuccessMeta'
+
+    Pagination:
+      type: object
+      required: [page, pageSize, totalCount, totalPages]
+      properties:
+        page:
+          type: integer
+        pageSize:
+          type: integer
+        totalCount:
+          type: integer
+        totalPages:
+          type: integer
+
+    OperationData:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+
+    OperationResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelopeBase'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              $ref: '#/components/schemas/OperationData'
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 8
+
+    LogoutRequest:
+      type: object
+      properties:
+        refreshToken:
+          type: string
+
+    UserRole:
+      type: string
+      enum: [super_admin, admin, member, installer]
+
+    UserSummary:
+      type: object
+      required: [id, name, role, companyId]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        role:
+          $ref: '#/components/schemas/UserRole'
+        companyId:
+          type: string
+
+    AuthToken:
+      type: object
+      required: [accessToken, refreshToken, expiresAt, user]
+      properties:
+        accessToken:
+          type: string
+        refreshToken:
+          type: string
+        expiresAt:
+          type: string
+          format: date-time
+        user:
+          $ref: '#/components/schemas/UserSummary'
+
+    AuthLoginResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelopeBase'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              $ref: '#/components/schemas/AuthToken'
+
+    CurrentUserResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelopeBase'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              $ref: '#/components/schemas/UserSummary'
+
+    VehicleStatus:
+      type: string
+      enum: ['대여중', '예약', '가용', '정비중']
+
+    VehicleAsset:
+      type: object
+      required:
+        - id
+        - vehicleNumber
+        - vin
+        - model
+        - year
+        - owner
+        - status
+        - insuranceExpiry
+        - nextInspection
+      properties:
+        id:
+          type: string
+        vehicleNumber:
+          type: string
+          description: plate 정규화 결과 필드
+        vin:
+          type: string
+        model:
+          type: string
+        year:
+          type: integer
+        owner:
+          type: string
+        status:
+          $ref: '#/components/schemas/VehicleStatus'
+        hasPremiumDevice:
+          type: boolean
+        insuranceExpiry:
+          type: string
+          format: date
+        nextInspection:
+          type: string
+          format: date
+        issues:
+          type: array
+          items:
+            type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    AssetCreateRequest:
+      type: object
+      required:
+        - vehicleNumber
+        - vin
+        - model
+        - year
+        - owner
+        - status
+        - insuranceExpiry
+        - nextInspection
+      properties:
+        vehicleNumber:
+          type: string
+        vin:
+          type: string
+        model:
+          type: string
+        year:
+          type: integer
+        owner:
+          type: string
+        status:
+          $ref: '#/components/schemas/VehicleStatus'
+        insuranceExpiry:
+          type: string
+          format: date
+        nextInspection:
+          type: string
+          format: date
+
+    AssetUpdateRequest:
+      type: object
+      properties:
+        model:
+          type: string
+        owner:
+          type: string
+        status:
+          $ref: '#/components/schemas/VehicleStatus'
+        insuranceExpiry:
+          type: string
+          format: date
+        nextInspection:
+          type: string
+          format: date
+        hasPremiumDevice:
+          type: boolean
+        issues:
+          type: array
+          items:
+            type: string
+
+    AssetHistoryRecord:
+      type: object
+      required: [id, category, eventDate, summary]
+      properties:
+        id:
+          type: string
+        category:
+          type: string
+          enum: [reservation, maintenance, memo, accident, payment]
+        eventDate:
+          type: string
+          format: date-time
+        summary:
+          type: string
+        status:
+          type: string
+        author:
+          type: string
+
+    AssetListData:
+      type: object
+      required: [items, pagination]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/VehicleAsset'
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+
+    AssetListResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelopeBase'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              $ref: '#/components/schemas/AssetListData'
+
+    AssetDetailResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelopeBase'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              $ref: '#/components/schemas/VehicleAsset'
+
+    AssetHistoryListData:
+      type: object
+      required: [items, pagination]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/AssetHistoryRecord'
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+
+    AssetHistoryListResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelopeBase'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              $ref: '#/components/schemas/AssetHistoryListData'
+
+    ReservationType:
+      type: string
+      enum: [reservation, rental, return]
+
+    ReservationStatus:
+      type: string
+      enum: [scheduled, active, returned, canceled]
+
+    PaymentStatus:
+      type: string
+      enum: ['대기', '완료', '미납', '부분납부']
+
+    PaymentMethod:
+      type: string
+      enum: ['카드', '현금', '계좌이체']
+
+    Reservation:
+      type: object
+      required:
+        - id
+        - vehicleNumber
+        - customerName
+        - customerPhone
+        - type
+        - status
+        - startAt
+        - endAt
+        - amount
+        - deposit
+        - paymentStatus
+        - paymentMethod
+      properties:
+        id:
+          type: string
+        vehicleNumber:
+          type: string
+        customerName:
+          type: string
+        customerPhone:
+          type: string
+        type:
+          $ref: '#/components/schemas/ReservationType'
+        status:
+          $ref: '#/components/schemas/ReservationStatus'
+        startAt:
+          type: string
+          format: date-time
+        endAt:
+          type: string
+          format: date-time
+        pickupLocation:
+          type: string
+        returnLocation:
+          type: string
+        amount:
+          type: number
+          format: double
+        deposit:
+          type: number
+          format: double
+        paymentStatus:
+          $ref: '#/components/schemas/PaymentStatus'
+        paymentMethod:
+          $ref: '#/components/schemas/PaymentMethod'
+        issues:
+          type: array
+          items:
+            type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    ReservationCreateRequest:
+      type: object
+      required:
+        - vehicleNumber
+        - customerName
+        - customerPhone
+        - type
+        - startAt
+        - endAt
+        - amount
+        - deposit
+        - paymentStatus
+        - paymentMethod
+      properties:
+        vehicleNumber:
+          type: string
+        customerName:
+          type: string
+        customerPhone:
+          type: string
+        customerIdNumber:
+          type: string
+          description: 마스킹/암호화 저장 대상
+        customerLicenseNumber:
+          type: string
+        customerAddress:
+          type: string
+        type:
+          $ref: '#/components/schemas/ReservationType'
+        startAt:
+          type: string
+          format: date-time
+        endAt:
+          type: string
+          format: date-time
+        pickupLocation:
+          type: string
+        returnLocation:
+          type: string
+        amount:
+          type: number
+          format: double
+        deposit:
+          type: number
+          format: double
+        paymentStatus:
+          $ref: '#/components/schemas/PaymentStatus'
+        paymentMethod:
+          $ref: '#/components/schemas/PaymentMethod'
+
+    ReservationUpdateRequest:
+      type: object
+      properties:
+        status:
+          $ref: '#/components/schemas/ReservationStatus'
+        type:
+          $ref: '#/components/schemas/ReservationType'
+        endAt:
+          type: string
+          format: date-time
+        paymentStatus:
+          $ref: '#/components/schemas/PaymentStatus'
+        paymentMethod:
+          $ref: '#/components/schemas/PaymentMethod'
+        amount:
+          type: number
+          format: double
+        deposit:
+          type: number
+          format: double
+        issues:
+          type: array
+          items:
+            type: string
+
+    AccidentType:
+      type: string
+      enum: [major, medium, minor]
+
+    Severity:
+      type: string
+      enum: [High, Medium, Low]
+
+    AccidentCreateRequest:
+      type: object
+      required: [accidentType, description, assignee]
+      properties:
+        accidentType:
+          $ref: '#/components/schemas/AccidentType'
+        description:
+          type: string
+        assignee:
+          type: string
+        occurredAt:
+          type: string
+          format: date-time
+
+    ReservationListData:
+      type: object
+      required: [items, pagination]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Reservation'
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+
+    ReservationListResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelopeBase'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              $ref: '#/components/schemas/ReservationListData'
+
+    ReservationDetailResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelopeBase'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              $ref: '#/components/schemas/Reservation'
+
+    ActionStatus:
+      type: string
+      enum: [pending, in-progress, resolved]
+
+    ActionItemType:
+      type: string
+      enum:
+        - 사고 접수
+        - 반납 지연
+        - 미납/결제 문제
+        - 단말 OFF
+        - 도난 의심
+        - 정기점검
+        - 차량이상
+        - 보험 만료 임박
+
+    ActionItemMemo:
+      type: object
+      required: [id, content, author, status, createdAt]
+      properties:
+        id:
+          type: string
+        content:
+          type: string
+        author:
+          type: string
+        status:
+          $ref: '#/components/schemas/ActionStatus'
+        statusLabel:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    ActionItem:
+      type: object
+      required:
+        - id
+        - type
+        - vehicleNumber
+        - customerName
+        - date
+        - severity
+        - status
+        - assignee
+      properties:
+        id:
+          type: string
+        type:
+          $ref: '#/components/schemas/ActionItemType'
+        vehicleNumber:
+          type: string
+        customerName:
+          type: string
+        date:
+          type: string
+          format: date
+        severity:
+          $ref: '#/components/schemas/Severity'
+        status:
+          $ref: '#/components/schemas/ActionStatus'
+        assignee:
+          type: string
+        description:
+          type: string
+        memos:
+          type: array
+          items:
+            $ref: '#/components/schemas/ActionItemMemo'
+
+    ActionItemStatusUpdateRequest:
+      type: object
+      required: [status]
+      properties:
+        status:
+          $ref: '#/components/schemas/ActionStatus'
+        statusLabel:
+          type: string
+        assignee:
+          type: string
+
+    ActionItemMemoCreateRequest:
+      type: object
+      required: [content]
+      properties:
+        content:
+          type: string
+        status:
+          $ref: '#/components/schemas/ActionStatus'
+        statusLabel:
+          type: string
+
+    ActionItemListData:
+      type: object
+      required: [items, pagination]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ActionItem'
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+
+    ActionItemListResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelopeBase'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              $ref: '#/components/schemas/ActionItemListData'
+
+    ActionItemDetailResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelopeBase'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              $ref: '#/components/schemas/ActionItem'
+
+    ActionItemMemoResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelopeBase'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              $ref: '#/components/schemas/ActionItemMemo'
+
+    PaymentType:
+      type: string
+      enum: ['예약금', '본결제', '추가정산', '월렌트']
+
+    Payment:
+      type: object
+      required:
+        - id
+        - reservationId
+        - vehicleNumber
+        - customerName
+        - type
+        - amount
+        - dueDate
+        - status
+        - method
+      properties:
+        id:
+          type: string
+        reservationId:
+          type: string
+        vehicleNumber:
+          type: string
+        customerName:
+          type: string
+        type:
+          $ref: '#/components/schemas/PaymentType'
+        amount:
+          type: number
+          format: double
+        dueDate:
+          type: string
+          format: date
+        paidDate:
+          type: string
+          format: date
+        status:
+          $ref: '#/components/schemas/PaymentStatus'
+        method:
+          $ref: '#/components/schemas/PaymentMethod'
+        description:
+          type: string
+
+    PaymentUpdateRequest:
+      type: object
+      properties:
+        status:
+          $ref: '#/components/schemas/PaymentStatus'
+        method:
+          $ref: '#/components/schemas/PaymentMethod'
+        paidDate:
+          type: string
+          format: date
+        description:
+          type: string
+
+    PaymentListData:
+      type: object
+      required: [items, pagination]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Payment'
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+
+    PaymentListResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelopeBase'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              $ref: '#/components/schemas/PaymentListData'
+
+    PaymentDetailResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelopeBase'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              $ref: '#/components/schemas/Payment'
+
+    PeriodType:
+      type: string
+      enum: [weekly, monthly, yearly]
+
+    UnpaidSummaryItem:
+      type: object
+      required:
+        - paymentId
+        - vehicleNumber
+        - customerName
+        - dueDate
+        - overdueDays
+        - outstandingAmount
+        - lateFee
+        - totalAmount
+        - severity
+      properties:
+        paymentId:
+          type: string
+        vehicleNumber:
+          type: string
+        customerName:
+          type: string
+        dueDate:
+          type: string
+          format: date
+        overdueDays:
+          type: integer
+        outstandingAmount:
+          type: number
+          format: double
+        lateFee:
+          type: number
+          format: double
+        totalAmount:
+          type: number
+          format: double
+        severity:
+          $ref: '#/components/schemas/Severity'
+
+    UnpaidSummaryData:
+      type: object
+      required: [period, totalCount, totalAmount, totalLateFee, items]
+      properties:
+        period:
+          $ref: '#/components/schemas/PeriodType'
+        totalCount:
+          type: integer
+        totalAmount:
+          type: number
+          format: double
+        totalLateFee:
+          type: number
+          format: double
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/UnpaidSummaryItem'
+
+    UnpaidSummaryResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelopeBase'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              $ref: '#/components/schemas/UnpaidSummaryData'
+
+    RevenueSummaryPoint:
+      type: object
+      required: [label, revenue, rentals, averagePrice]
+      properties:
+        label:
+          type: string
+        revenue:
+          type: number
+          format: double
+        rentals:
+          type: integer
+        averagePrice:
+          type: number
+          format: double
+
+    RevenueSummaryData:
+      type: object
+      required:
+        - period
+        - totalRevenue
+        - totalRentals
+        - averagePrice
+        - growthRate
+        - data
+      properties:
+        period:
+          $ref: '#/components/schemas/PeriodType'
+        totalRevenue:
+          type: number
+          format: double
+        totalRentals:
+          type: integer
+        averagePrice:
+          type: number
+          format: double
+        growthRate:
+          type: number
+          format: double
+        comparedWith:
+          type: string
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/RevenueSummaryPoint'
+
+    RevenueSummaryResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelopeBase'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              $ref: '#/components/schemas/RevenueSummaryData'
+
+    PaymentMethodBreakdown:
+      type: object
+      required: [method, sharePercent, amount]
+      properties:
+        method:
+          $ref: '#/components/schemas/PaymentMethod'
+        sharePercent:
+          type: number
+          format: double
+        amount:
+          type: number
+          format: double
+
+    VehicleModelRevenue:
+      type: object
+      required: [model, revenue, rentals, utilizationRate]
+      properties:
+        model:
+          type: string
+        revenue:
+          type: number
+          format: double
+        rentals:
+          type: integer
+        utilizationRate:
+          type: number
+          format: double
+
+    RevenueChartsData:
+      type: object
+      required: [period, paymentMethods, vehicleModels]
+      properties:
+        period:
+          $ref: '#/components/schemas/PeriodType'
+        paymentMethods:
+          type: array
+          items:
+            $ref: '#/components/schemas/PaymentMethodBreakdown'
+        vehicleModels:
+          type: array
+          items:
+            $ref: '#/components/schemas/VehicleModelRevenue'
+
+    RevenueChartsResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelopeBase'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              $ref: '#/components/schemas/RevenueChartsData'
+
+    Company:
+      type: object
+      required:
+        - id
+        - name
+        - businessNumber
+        - contactName
+        - contactPhone
+        - address
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        businessNumber:
+          type: string
+        contactName:
+          type: string
+        contactPhone:
+          type: string
+        address:
+          type: string
+        timezone:
+          type: string
+          default: Asia/Seoul
+        currency:
+          type: string
+          default: KRW
+
+    CompanyUpdateRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        businessNumber:
+          type: string
+        contactName:
+          type: string
+        contactPhone:
+          type: string
+        address:
+          type: string
+        timezone:
+          type: string
+        currency:
+          type: string
+
+    CompanyResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelopeBase'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              $ref: '#/components/schemas/Company'
+
+    Geofence:
+      type: object
+      required: [id, name, latitude, longitude, radiusMeter, active]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        latitude:
+          type: number
+          format: double
+        longitude:
+          type: number
+          format: double
+        radiusMeter:
+          type: integer
+        vehicleCount:
+          type: integer
+        active:
+          type: boolean
+        updatedAt:
+          type: string
+          format: date-time
+
+    GeofenceCreateRequest:
+      type: object
+      required: [name, latitude, longitude, radiusMeter]
+      properties:
+        name:
+          type: string
+        latitude:
+          type: number
+          format: double
+        longitude:
+          type: number
+          format: double
+        radiusMeter:
+          type: integer
+        active:
+          type: boolean
+          default: true
+
+    GeofenceUpdateRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        latitude:
+          type: number
+          format: double
+        longitude:
+          type: number
+          format: double
+        radiusMeter:
+          type: integer
+        active:
+          type: boolean
+
+    GeofenceListData:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Geofence'
+
+    GeofenceListResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelopeBase'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              $ref: '#/components/schemas/GeofenceListData'
+
+    GeofenceDetailResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelopeBase'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              $ref: '#/components/schemas/Geofence'
+
+    AccountRole:
+      type: string
+      enum: [admin, operator, viewer, installer]
+
+    AccountStatus:
+      type: string
+      enum: [active, inactive]
+
+    UserAccount:
+      type: object
+      required: [id, name, email, role, status]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+        role:
+          $ref: '#/components/schemas/AccountRole'
+        status:
+          $ref: '#/components/schemas/AccountStatus'
+        companyId:
+          type: string
+
+    UserUpdateRequest:
+      type: object
+      properties:
+        role:
+          $ref: '#/components/schemas/AccountRole'
+        status:
+          $ref: '#/components/schemas/AccountStatus'
+
+    UserListData:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/UserAccount'
+
+    UserListResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelopeBase'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              $ref: '#/components/schemas/UserListData'
+
+    UserDetailResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelopeBase'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              $ref: '#/components/schemas/UserAccount'
+
+    ImportRequest:
+      type: object
+      required: [file]
+      properties:
+        file:
+          type: string
+          format: binary
+        dryRun:
+          type: boolean
+          default: true
+
+    ImportJob:
+      type: object
+      required:
+        - id
+        - type
+        - filename
+        - status
+        - totalRows
+        - validRows
+        - errorCount
+        - createdAt
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [assets, reservations]
+        filename:
+          type: string
+        status:
+          type: string
+          enum: [queued, processing, completed, failed]
+        totalRows:
+          type: integer
+        validRows:
+          type: integer
+        errorCount:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+
+    ImportJobResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelopeBase'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              $ref: '#/components/schemas/ImportJob'
