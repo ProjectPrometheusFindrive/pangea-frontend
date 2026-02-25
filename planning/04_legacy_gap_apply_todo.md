@@ -42,7 +42,7 @@
 
 ## Phase 0: 준비
 - [ ] `planning` 문서 승인
-- [ ] FE/BE 공통 용어집 정의 (`vehicleNumber/plate/vin`, `reservation/rental`)
+- [x] FE/BE 공통 용어집 정의 (`vehicleNumber/plate/vin`, `reservation/rental`) (docs/common_glossary.md)
 - [ ] API 계약서 초안 작성 (OpenAPI 또는 markdown)
 
 ## Phase 1: 기반 구축

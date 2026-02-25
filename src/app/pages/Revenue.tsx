@@ -197,7 +197,7 @@ export default function Revenue() {
     }
   };
 
-  // 활성 차량 수 계산 (대여중 + 예약됨 + 가용 = 정비중 제외)
+  // 활성 차량 수 계산 (대여중 + 예약 + 가용 = 정비중 제외)
   const getActiveVehicles = () => {
     return vehicleAssets.filter(v => v.status !== '정비중').length;
   };

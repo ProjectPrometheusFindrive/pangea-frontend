@@ -1,9 +1,9 @@
 # Prompt Library v1
 
-- Version: v1.2.2
+- Version: v1.2.3
 - Date: 2026-02-25
 - Owner: Pangea Frontend Team
-- Tags: prompt-library,workflow,branch-policy,history-policy,commit-policy,pr-automation,jira-traceability
+- Tags: prompt-library,workflow,branch-policy,history-policy,commit-policy,pr-automation,jira-traceability,end-prompt-protocol
 
 ## Context
 - 초기 세팅 작업에서 프롬프트 템플릿, 브랜치 정책, 문서화 절차를 반복 가능하게 표준화할 필요가 있음.
@@ -17,7 +17,7 @@
 
 ## Documentation Scope
 - 대상 문서: `docs/prompt_library/prompt_library_v1.md` (누적 관리, 신규 v2/v3 파일 생성 금지)
-- 이력 문서: `docs/prompt_history/{YYYYMMDD}_{slug}.md` (작업 1건당 1파일)
+- 이력 문서: `docs/prompt_history/{YYYYMMDD}_{TICKET-ID}-{slug}.md` (작업 1건당 1파일)
 - 본 워크플로우 수행 시 코드 변경 없이 문서 범위로 한정 가능해야 함.
 
 ## Version Policy
@@ -66,8 +66,10 @@ End Prompt:
   - 예시: `20260225_NO-JIRA-planning-backlog-mcp-registration.md`
 
 ## Prompt History Capture Rules
-- 세션 시작 시 사용한 `Start Prompt` 핵심 내용은 `## Prompt` 섹션에 반드시 포함.
-- `Start Prompt`에 의해 실제 반영된 변경사항은 `## Changes Summary`에 분리 기술.
+- `prompt_history`는 최소 섹션 `## Start Context`, `## Changes Summary`, `## Diffs & Files`, `## Notes`를 포함한다.
+- `Start Context`에는 Start Prompt 핵심 조건과 Jira 주요 요구사항(AC/제약)을 함께 요약한다.
+- `Changes Summary`에는 실제 반영 결과를 범위별로 기술하고, `Diffs & Files`에는 주요 수정 파일을 명시한다.
+- `Notes`에는 차기 권장 태스크만 기록하며 즉시 반영은 금지한다.
 - `prompt_library`는 공용 규칙/템플릿만 관리하고, 세션 특이사항은 `prompt_history`에 기록.
 
 ## Inputs
@@ -121,6 +123,7 @@ cp docs/prompt_history/_TEMPLATE.md docs/prompt_history/$(date +%Y%m%d)_your-tas
 - Production push triggers auto tag (`vX.Y.Z`)
 
 ## Version History
+- v1.2.3 (2026-02-25, SCRUM-22): Clarify End Prompt documentation protocol with required prompt_history sections and ticket-linked capture rules.
 - v1.2.2 (2026-02-25, NO-JIRA): Add NO-JIRA naming/PR fallback rules for non-ticket documentation runs.
 - v1.2.1 (2026-02-25, BK-003): Update prompt_history naming convention to include Jira ticket ID for traceability.
 - v1.2.0 (2026-02-25): Add Start Prompt capture rules and Push/PR automation convention (Korean PR to dev).
