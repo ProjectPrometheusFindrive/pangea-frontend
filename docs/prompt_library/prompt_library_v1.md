@@ -1,6 +1,6 @@
 # Prompt Library v1
 
-- Version: v1.2.1
+- Version: v1.2.2
 - Date: 2026-02-25
 - Owner: Pangea Frontend Team
 - Tags: prompt-library,workflow,branch-policy,history-policy,commit-policy,pr-automation,jira-traceability
@@ -62,6 +62,8 @@ End Prompt:
 - 형식: `{YYYYMMDD}_{TICKET-ID}-{slug}.md`
 - slug 규칙: lower-kebab-case, ASCII `[a-z0-9-]`, 3~8 단어
 - 예시: `20260225_BK-003-bootstrap-branch-policy.md`
+- Jira 티켓이 없는 작업은 `{TICKET-ID}`를 `NO-JIRA`로 표기
+  - 예시: `20260225_NO-JIRA-planning-backlog-mcp-registration.md`
 
 ## Prompt History Capture Rules
 - 세션 시작 시 사용한 `Start Prompt` 핵심 내용은 `## Prompt` 섹션에 반드시 포함.
@@ -105,6 +107,7 @@ cp docs/prompt_history/_TEMPLATE.md docs/prompt_history/$(date +%Y%m%d)_your-tas
 ## Push & PR Convention
 - Push: 현재 작업 브랜치를 원격에 반영 (`git push -u origin <branch>`)
 - PR: `base=dev`로 생성, 제목/본문은 한글 작성, UTF-8 인코딩 준수
+- Jira 티켓이 없는 경우 PR 본문의 `관련 티켓`에는 `Jira: 없음 (NO-JIRA)`로 명시
 - PR 본문 기본 포함 항목:
   - 작업 요약
   - 상세 변경 내용 (Start Prompt 반영분 포함)
@@ -118,6 +121,7 @@ cp docs/prompt_history/_TEMPLATE.md docs/prompt_history/$(date +%Y%m%d)_your-tas
 - Production push triggers auto tag (`vX.Y.Z`)
 
 ## Version History
+- v1.2.2 (2026-02-25, NO-JIRA): Add NO-JIRA naming/PR fallback rules for non-ticket documentation runs.
 - v1.2.1 (2026-02-25, BK-003): Update prompt_history naming convention to include Jira ticket ID for traceability.
 - v1.2.0 (2026-02-25): Add Start Prompt capture rules and Push/PR automation convention (Korean PR to dev).
 - v1.1.0 (2026-02-25): Add version policy table, prompt_history naming rules, end-of-task checklist, and commit message convention.
