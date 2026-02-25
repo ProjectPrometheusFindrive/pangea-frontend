@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react';
 import { Plus, Upload, X, Loader2, FileText, Calendar as CalendarIcon, DollarSign, AlertTriangle, Filter } from 'lucide-react';
 import { useSearchParams, useNavigate } from 'react-router';
 import { PremiumBanner } from '../components/PremiumBanner';
+import { PageStateBoundary } from '../components/PageStateBoundary';
 import { VehicleDetailModal } from '../components/VehicleDetailModal';
 import { vehicleAssets as mockVehicleAssets, type VehicleAsset } from '../data/mockData';
 
@@ -36,7 +37,9 @@ export default function Assets() {
     insurance: null,
     loanSchedule: null,
   });
-  const [assets, setAssets] = useState<Asset[]>(initialAssets);
+  const [assets, setAssets] = useState<Asset[]>([]);
+  const [isAssetsLoading, setIsAssetsLoading] = useState(true);
+  const [assetsError, setAssetsError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [issueFilter, setIssueFilter] = useState<string>('all');
@@ -48,6 +51,24 @@ export default function Assets() {
   const [detailTab, setDetailTab] = useState<'info' | 'history' | 'sensor'>('info');
 
   const navigate = useNavigate();
+
+  const hydrateAssets = () => {
+    setIsAssetsLoading(true);
+    setAssetsError(null);
+    try {
+      setAssets(initialAssets);
+    } catch (error) {
+      console.error(error);
+      setAssets([]);
+      setAssetsError('차량 자산 데이터를 불러오지 못했습니다.');
+    } finally {
+      setIsAssetsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    hydrateAssets();
+  }, []);
 
   // URL 파라미터에서 status, 검색어, vehicle 가져오기
   useEffect(() => {
@@ -337,60 +358,71 @@ export default function Assets() {
         </div>
 
         {/* 자산 테이블 */}
-        <div className="bg-white rounded-xl shadow-sm overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="bg-gray-50 border-b border-gray-200">
-                <tr>
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">차량번호</th>
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">차종</th>
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">상태</th>
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">상태이상 요약</th>
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">보험만료일</th>
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">다음 정기점검일</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-200">
-                {filteredAssets.map((asset) => (
-                  <tr key={asset.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => handleDetailModalOpen(asset)}>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                      {asset.vehicleNumber}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {asset.model}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span className={`px-2 py-1 text-xs font-medium rounded-full ${getStatusColor(asset.status)}`}>
-                        {asset.status}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="flex gap-2">
-                        {asset.issues.slice(0, 2).map((issue, idx) => (
-                          <span
-                            key={idx}
-                            className="px-2 py-1 text-xs font-medium rounded-full bg-orange-100 text-orange-700"
-                          >
-                            {issue}
-                          </span>
-                        ))}
-                        {asset.issues.length === 0 && (
-                          <span className="text-sm text-gray-400">-</span>
-                        )}
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
-                      {asset.insuranceExpiry}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
-                      {asset.nextInspection}
-                    </td>
+        <PageStateBoundary
+          isLoading={isAssetsLoading}
+          error={assetsError}
+          isEmpty={!isAssetsLoading && !assetsError && filteredAssets.length === 0}
+          errorDescription="차량 자산 목록을 불러오는 중 문제가 발생했습니다."
+          emptyTitle="조건에 맞는 차량이 없습니다"
+          emptyDescription="검색어 또는 필터를 조정해 다시 확인해 주세요."
+          onRetry={hydrateAssets}
+          className="min-h-[280px]"
+        >
+          <div className="bg-white rounded-xl shadow-sm overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead className="bg-gray-50 border-b border-gray-200">
+                  <tr>
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">차량번호</th>
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">차종</th>
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">상태</th>
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">상태이상 요약</th>
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">보험만료일</th>
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">다음 정기점검일</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody className="divide-y divide-gray-200">
+                  {filteredAssets.map((asset) => (
+                    <tr key={asset.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => handleDetailModalOpen(asset)}>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                        {asset.vehicleNumber}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        {asset.model}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span className={`px-2 py-1 text-xs font-medium rounded-full ${getStatusColor(asset.status)}`}>
+                          {asset.status}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="flex gap-2">
+                          {asset.issues.slice(0, 2).map((issue, idx) => (
+                            <span
+                              key={idx}
+                              className="px-2 py-1 text-xs font-medium rounded-full bg-orange-100 text-orange-700"
+                            >
+                              {issue}
+                            </span>
+                          ))}
+                          {asset.issues.length === 0 && (
+                            <span className="text-sm text-gray-400">-</span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                        {asset.insuranceExpiry}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                        {asset.nextInspection}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
-        </div>
+        </PageStateBoundary>
 
         {/* OCR 업로드 모달 */}
         {showModal && (

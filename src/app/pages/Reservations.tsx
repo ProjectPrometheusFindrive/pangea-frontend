@@ -4,6 +4,7 @@ import { useSearchParams, useNavigate } from 'react-router';
 import { ChevronLeft, ChevronRight, Plus, ArrowRight, Car, Calendar, AlertCircle, DollarSign, AlertTriangle, X } from 'lucide-react';
 import { AccidentReportModal } from '../components/AccidentReportModal';
 import { NewContractModal } from '../components/NewContractModal';
+import { PageStateBoundary } from '../components/PageStateBoundary';
 import type { AccidentReport } from '../utils/issueUtils';
 import { reservations as mockReservations, vehicleAssets as mockVehicleAssets, type Reservation, type VehicleAsset } from '../data/mockData';
 
@@ -28,7 +29,10 @@ export default function Reservations() {
   const [activeTab, setActiveTab] = useState<'reservation' | 'payment' | 'vehicle'>('reservation');
   const [showReturnConfirm, setShowReturnConfirm] = useState(false);
   const [showAccidentModal, setShowAccidentModal] = useState(false);
-  const [reservationsData, setReservationsData] = useState<Reservation[]>(mockReservations);
+  const [reservationsData, setReservationsData] = useState<Reservation[]>([]);
+  const [vehicleAssets, setVehicleAssets] = useState<VehicleAsset[]>([]);
+  const [isPageLoading, setIsPageLoading] = useState(true);
+  const [pageError, setPageError] = useState<string | null>(null);
   const [targetDate, setTargetDate] = useState('');
   
   // 동적 날짜 로딩을 위한 상태
@@ -40,6 +44,26 @@ export default function Reservations() {
   const [dragStart, setDragStart] = useState<{ vehicle: string; date: number } | null>(null);
   const [dragEnd, setDragEnd] = useState<{ vehicle: string; date: number } | null>(null);
   const [dragSelection, setDragSelection] = useState<DragSelection>(null);
+
+  const hydrateReservationsData = () => {
+    setIsPageLoading(true);
+    setPageError(null);
+    try {
+      setReservationsData(mockReservations);
+      setVehicleAssets(mockVehicleAssets);
+    } catch (error) {
+      console.error(error);
+      setReservationsData([]);
+      setVehicleAssets([]);
+      setPageError('예약 데이터를 불러오지 못했습니다.');
+    } finally {
+      setIsPageLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    hydrateReservationsData();
+  }, []);
 
   // URL 파라미터에서 필터 가져오기
   useEffect(() => {
@@ -62,17 +86,14 @@ export default function Reservations() {
     }
   };
 
-  // 차량 목록 - mockVehicleAssets에서 추출
-  const vehicles = mockVehicleAssets.map(v => v.vehicleNumber);
+  // 차량 목록
+  const vehicles = vehicleAssets.map(v => v.vehicleNumber);
   
   // 0 = 월요일, 1 = 화요일, ... 6 = 일요일
   const daysOfWeek = ['월', '화', '수', '목', '금', '토', '일'];
   const dates = Array.from({ length: totalDaysToShow }, (_, i) => currentWeekStart + i); // 동적으로 날짜 생성
 
   const reservations: Reservation[] = reservationsData;
-
-  // 차량 자산 정보 - mockData 사용
-  const vehicleAssets: VehicleAsset[] = mockVehicleAssets;
 
   // 고유 차종 목록 추출
   const uniqueModels = Array.from(new Set(vehicleAssets.map(v => v.model))).sort();
@@ -404,156 +425,167 @@ export default function Reservations() {
           </div>
           
           {/* 가로 스크롤 가능한 컨테이너 */}
-          <div className="overflow-x-auto flex-1" ref={scrollContainerRef} onScroll={handleScroll}>
-            <div style={{ minWidth: `${120 + totalDaysToShow * 85}px` }} className="h-full">
-              {/* 날짜 헤더 */}
-              <div style={{ display: 'grid', gridTemplateColumns: `120px repeat(${totalDaysToShow}, 1fr)` }} className="border-b border-gray-200">
-                <div className="px-3 py-2 bg-gray-50 font-semibold text-sm text-gray-600 border-r border-gray-200 sticky left-0 z-10">
-                  차량
-                </div>
-                {dates.map((dayOffset, index) => {
-                  const date = new Date(2025, 1, 17 + dayOffset);
-                  const dayOfWeek = daysOfWeek[date.getDay() === 0 ? 6 : date.getDay() - 1];
-                  const prevDate = index > 0 ? new Date(2025, 1, 17 + dates[index - 1]) : null;
-                  const showMonth = !prevDate || prevDate.getMonth() !== date.getMonth();
-                  
-                  return (
-                    <div
-                      key={index}
-                      className="px-2 py-2 bg-gray-50 text-center border-r border-gray-200"
-                    >
-                      {showMonth && (
-                        <div className="text-xs font-semibold text-blue-600 mb-0.5">
-                          {date.getMonth() + 1}월
-                        </div>
-                      )}
-                      <div className="text-xs text-gray-500">{dayOfWeek}</div>
-                      <div className="text-sm font-medium text-gray-900 mt-0.5">
-                        {date.getDate()}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* 차량 행 */}
-              {filteredVehicles.map((vehicle, vIndex) => (
-                <div key={vIndex} className="relative border-b border-gray-200">
-                  <div style={{ display: 'grid', gridTemplateColumns: `120px repeat(${totalDaysToShow}, 1fr)` }}>
-                    {/* 차량번호 */}
-                    <div className="px-3 py-3 bg-gray-50 font-medium text-sm text-gray-900 border-r border-gray-200 flex items-center sticky left-0 z-10">
-                      {vehicle}
-                    </div>
-
-                    {/* 날짜 셀들 */}
-                    {dates.map((dayOffset, dateIndex) => {
-                      const cellDate = currentWeekStart + dateIndex;
-                      const isInDragSelection = dragStart && dragEnd && 
-                        dragStart.vehicle === vehicle &&
-                        cellDate >= Math.min(dragStart.date, dragEnd.date) &&
-                        cellDate <= Math.max(dragStart.date, dragEnd.date);
-
-                      // 충돌 검증: 이 셀에 기존 예약이 있는지 확인
-                      const hasConflict = filteredReservations.some(res => 
-                        res.vehicleNumber === vehicle &&
-                        cellDate >= res.startDate &&
-                        cellDate <= res.endDate
-                      );
-
-                      return (
-                        <div
-                          key={dateIndex}
-                          className={`h-14 border-r border-gray-100 relative cursor-crosshair ${
-                            isInDragSelection ? (hasConflict ? 'bg-red-200/50' : 'bg-blue-200/50') : 'hover:bg-blue-50/30'
-                          }`}
-                          onMouseDown={() => {
-                            setIsDragging(true);
-                            setDragStart({ vehicle, date: cellDate });
-                            setDragEnd({ vehicle, date: cellDate });
-                            setDragSelection(null);
-                          }}
-                          onMouseEnter={() => {
-                            if (isDragging && dragStart) {
-                              setDragEnd({ vehicle, date: cellDate });
-                            }
-                          }}
-                          onMouseUp={() => {
-                            if (isDragging && dragStart && dragEnd) {
-                              const startDate = Math.min(dragStart.date, dragEnd.date);
-                              const endDate = Math.max(dragStart.date, dragEnd.date);
-                              
-                              // 충돌 검사
-                              const conflicts = filteredReservations.filter(res => 
-                                res.vehicleNumber === vehicle &&
-                                !(endDate < res.startDate || startDate > res.endDate)
-                              );
-
-                              if (conflicts.length > 0) {
-                                alert(`선택한 기간에 이미 예약이 있습니다.\\n\\n${conflicts.map(c => `${c.customer}: ${c.startDateFull} ~ ${c.endDateFull}`).join('\\n')}`);
-                              } else {
-                                setDragSelection({ vehicleNumber: vehicle, startDate, endDate });
-                                setShowModal(true);
-                              }
-                            }
-                            setIsDragging(false);
-                            setDragStart(null);
-                            setDragEnd(null);
-                          }}
-                        >
-                        </div>
-                      );
-                    })}
+          <PageStateBoundary
+            isLoading={isPageLoading}
+            error={pageError}
+            isEmpty={!isPageLoading && !pageError && filteredVehicles.length === 0}
+            errorDescription="예약 캘린더 데이터를 불러오는 중 문제가 발생했습니다."
+            emptyTitle="조건에 맞는 차량이 없습니다"
+            emptyDescription="필터를 완화하거나 차량번호 검색어를 지워 다시 확인해 주세요."
+            onRetry={hydrateReservationsData}
+            className="m-3 min-h-[320px]"
+          >
+            <div className="overflow-x-auto flex-1" ref={scrollContainerRef} onScroll={handleScroll}>
+              <div style={{ minWidth: `${120 + totalDaysToShow * 85}px` }} className="h-full">
+                {/* 날짜 헤더 */}
+                <div style={{ display: 'grid', gridTemplateColumns: `120px repeat(${totalDaysToShow}, 1fr)` }} className="border-b border-gray-200">
+                  <div className="px-3 py-2 bg-gray-50 font-semibold text-sm text-gray-600 border-r border-gray-200 sticky left-0 z-10">
+                    차량
                   </div>
+                  {dates.map((dayOffset, index) => {
+                    const date = new Date(2025, 1, 17 + dayOffset);
+                    const dayOfWeek = daysOfWeek[date.getDay() === 0 ? 6 : date.getDay() - 1];
+                    const prevDate = index > 0 ? new Date(2025, 1, 17 + dates[index - 1]) : null;
+                    const showMonth = !prevDate || prevDate.getMonth() !== date.getMonth();
 
-                  {/* 예약 블록 오버레이 - absolute로 전체 행 위에 배치 */}
-                  <div className="absolute inset-0 left-[120px] pointer-events-none">
-                    {filteredReservations
-                      .filter(res => res.vehicleNumber === vehicle)
-                      .filter(res => {
-                        // 현재 보이는 범위와 겹치는 예약만 표시
-                        const viewEnd = currentWeekStart + totalDaysToShow - 1;
-                        return !(res.endDate < currentWeekStart || res.startDate > viewEnd);
-                      })
-                      .map(res => {
-                        // 블록의 시작 위치 계산 (현재 뷰 기준)
-                        const blockStart = Math.max(res.startDate, currentWeekStart);
-                        const blockEnd = Math.min(res.endDate, currentWeekStart + totalDaysToShow - 1);
-                        const startIndex = blockStart - currentWeekStart;
-                        const duration = blockEnd - blockStart + 1;
-                        
-                        // 셀 너비 계산
-                        const cellWidth = 100 / totalDaysToShow;
-                        const left = startIndex * cellWidth;
-                        const width = duration * cellWidth;
-                        
-                        const isHighlighted = searchQuery && res.customer.includes(searchQuery);
-                        
+                    return (
+                      <div
+                        key={index}
+                        className="px-2 py-2 bg-gray-50 text-center border-r border-gray-200"
+                      >
+                        {showMonth && (
+                          <div className="text-xs font-semibold text-blue-600 mb-0.5">
+                            {date.getMonth() + 1}월
+                          </div>
+                        )}
+                        <div className="text-xs text-gray-500">{dayOfWeek}</div>
+                        <div className="text-sm font-medium text-gray-900 mt-0.5">
+                          {date.getDate()}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* 차량 행 */}
+                {filteredVehicles.map((vehicle, vIndex) => (
+                  <div key={vIndex} className="relative border-b border-gray-200">
+                    <div style={{ display: 'grid', gridTemplateColumns: `120px repeat(${totalDaysToShow}, 1fr)` }}>
+                      {/* 차량번호 */}
+                      <div className="px-3 py-3 bg-gray-50 font-medium text-sm text-gray-900 border-r border-gray-200 flex items-center sticky left-0 z-10">
+                        {vehicle}
+                      </div>
+
+                      {/* 날짜 셀들 */}
+                      {dates.map((dayOffset, dateIndex) => {
+                        const cellDate = currentWeekStart + dateIndex;
+                        const isInDragSelection = dragStart && dragEnd &&
+                          dragStart.vehicle === vehicle &&
+                          cellDate >= Math.min(dragStart.date, dragEnd.date) &&
+                          cellDate <= Math.max(dragStart.date, dragEnd.date);
+
+                        // 충돌 검증: 이 셀에 기존 예약이 있는지 확인
+                        const hasConflict = filteredReservations.some(res =>
+                          res.vehicleNumber === vehicle &&
+                          cellDate >= res.startDate &&
+                          cellDate <= res.endDate
+                        );
+
                         return (
                           <div
-                            key={res.id}
-                            onClick={() => handleReservationClick(res)}
-                            className={`absolute top-1.5 h-11 ${getBlockColor(res)} rounded px-2 py-1 text-white text-xs flex flex-col justify-between cursor-pointer hover:opacity-90 transition-opacity pointer-events-auto ${
-                              isHighlighted ? 'ring-4 ring-yellow-400' : ''
+                            key={dateIndex}
+                            className={`h-14 border-r border-gray-100 relative cursor-crosshair ${
+                              isInDragSelection ? (hasConflict ? 'bg-red-200/50' : 'bg-blue-200/50') : 'hover:bg-blue-50/30'
                             }`}
-                            style={{
-                              left: `${left}%`,
-                              width: `${width}%`,
+                            onMouseDown={() => {
+                              setIsDragging(true);
+                              setDragStart({ vehicle, date: cellDate });
+                              setDragEnd({ vehicle, date: cellDate });
+                              setDragSelection(null);
+                            }}
+                            onMouseEnter={() => {
+                              if (isDragging && dragStart) {
+                                setDragEnd({ vehicle, date: cellDate });
+                              }
+                            }}
+                            onMouseUp={() => {
+                              if (isDragging && dragStart && dragEnd) {
+                                const startDate = Math.min(dragStart.date, dragEnd.date);
+                                const endDate = Math.max(dragStart.date, dragEnd.date);
+
+                                // 충돌 검사
+                                const conflicts = filteredReservations.filter(res =>
+                                  res.vehicleNumber === vehicle &&
+                                  !(endDate < res.startDate || startDate > res.endDate)
+                                );
+
+                                if (conflicts.length > 0) {
+                                  alert(`선택한 기간에 이미 예약이 있습니다.\\n\\n${conflicts.map(c => `${c.customer}: ${c.startDateFull} ~ ${c.endDateFull}`).join('\\n')}`);
+                                } else {
+                                  setDragSelection({ vehicleNumber: vehicle, startDate, endDate });
+                                  setShowModal(true);
+                                }
+                              }
+                              setIsDragging(false);
+                              setDragStart(null);
+                              setDragEnd(null);
                             }}
                           >
-                            <span className="font-medium truncate">{res.customer}</span>
-                            {res.issues && res.issues.length > 0 && (
-                              <span className="bg-white/30 px-1 rounded text-[10px]">
-                                {res.issues[0]}
-                              </span>
-                            )}
                           </div>
                         );
                       })}
+                    </div>
+
+                    {/* 예약 블록 오버레이 - absolute로 전체 행 위에 배치 */}
+                    <div className="absolute inset-0 left-[120px] pointer-events-none">
+                      {filteredReservations
+                        .filter(res => res.vehicleNumber === vehicle)
+                        .filter(res => {
+                          // 현재 보이는 범위와 겹치는 예약만 표시
+                          const viewEnd = currentWeekStart + totalDaysToShow - 1;
+                          return !(res.endDate < currentWeekStart || res.startDate > viewEnd);
+                        })
+                        .map(res => {
+                          // 블록의 시작 위치 계산 (현재 뷰 기준)
+                          const blockStart = Math.max(res.startDate, currentWeekStart);
+                          const blockEnd = Math.min(res.endDate, currentWeekStart + totalDaysToShow - 1);
+                          const startIndex = blockStart - currentWeekStart;
+                          const duration = blockEnd - blockStart + 1;
+
+                          // 셀 너비 계산
+                          const cellWidth = 100 / totalDaysToShow;
+                          const left = startIndex * cellWidth;
+                          const width = duration * cellWidth;
+
+                          const isHighlighted = searchQuery && res.customer.includes(searchQuery);
+
+                          return (
+                            <div
+                              key={res.id}
+                              onClick={() => handleReservationClick(res)}
+                              className={`absolute top-1.5 h-11 ${getBlockColor(res)} rounded px-2 py-1 text-white text-xs flex flex-col justify-between cursor-pointer hover:opacity-90 transition-opacity pointer-events-auto ${
+                                isHighlighted ? 'ring-4 ring-yellow-400' : ''
+                              }`}
+                              style={{
+                                left: `${left}%`,
+                                width: `${width}%`,
+                              }}
+                            >
+                              <span className="font-medium truncate">{res.customer}</span>
+                              {res.issues && res.issues.length > 0 && (
+                                <span className="bg-white/30 px-1 rounded text-[10px]">
+                                  {res.issues[0]}
+                                </span>
+                              )}
+                            </div>
+                          );
+                        })}
+                    </div>
                   </div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
-          </div>
+          </PageStateBoundary>
         </div>
 
         {/* 범례 */}
