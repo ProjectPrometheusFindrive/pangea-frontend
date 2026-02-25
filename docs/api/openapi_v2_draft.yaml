@@ -3,6 +3,9 @@ info:
   title: Pangea API v2 Draft (BK-002)
   version: 0.1.0-bk002
   description: |
+    [REFERENCE ONLY] 본 문서는 pangea-front의 참조용 사본이다.
+    최신 API 계약의 source of truth는 BE 저장소에서 관리한다.
+
     BK-002(OpenAPI v2 초안 작성) 범위의 최소 계약서다.
     본 문서는 인증/자산/예약/조치/결제/매출/설정 도메인을 포함한다.
 
@@ -14,6 +17,11 @@ info:
     참고 문서:
     - docs/common_glossary.md (BK-001)
     - planning/03_be_development_plan.md
+x-reference-only: true
+x-source-of-truth:
+  repository: _legacy/Project_Prometheus_BE
+  ticket: SCRUM-23
+  note: Latest OpenAPI contract is maintained in BE repository.
 servers:
   - url: https://api.pangea.local
     description: Local/Dev placeholder

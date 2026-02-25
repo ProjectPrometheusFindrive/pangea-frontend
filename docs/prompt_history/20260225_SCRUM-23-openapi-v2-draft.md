@@ -53,6 +53,7 @@ npx --yes @apidevtools/swagger-cli validate docs/api/openapi_v2_draft.yaml
 
 ## Notes
 - 본 문서는 BK-002 "초안" 범위이며, 구현 단계(BK-010/BK-011 이후)에서 실제 응답 포맷/필수 필드가 일부 조정될 수 있다.
+- 본 문서는 `pangea-front` 기준 참조용 사본이며, 최신 OpenAPI 계약의 source of truth는 BE 저장소(`_legacy/Project_Prometheus_BE`)에서 관리한다.
 - 다음 권장 태스크:
   - BK-010에서 라우팅 스켈레톤과 operationId/경로를 1:1 정렬
   - BK-011에서 공통 응답/에러 형식을 실제 런타임 포맷으로 확정

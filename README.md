@@ -19,6 +19,6 @@ Run `npm run dev` to start the development server.
 ## Terminology Standard (BK-001)
 
 - FE/BE common glossary: [docs/common_glossary.md](docs/common_glossary.md)
-- FE/BE API v2 draft contract (BK-002): [docs/api/openapi_v2_draft.yaml](docs/api/openapi_v2_draft.yaml)
+- FE/BE API v2 draft contract (BK-002): [docs/api/openapi_v2_draft.yaml](docs/api/openapi_v2_draft.yaml) (참조용 사본, 최신 기준은 BE 저장소)
 - Jira operating rules (BK-003): [docs/jira_operating_rules.md](docs/jira_operating_rules.md)
 - This glossary is the source of truth for `vehicleNumber/vin/plate`, `reservation/rental`, and domain-scoped `status` values.
