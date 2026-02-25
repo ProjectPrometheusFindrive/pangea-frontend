@@ -2,12 +2,14 @@ import { Layout } from '../components/Layout';
 import { useSearchParams, useNavigate } from 'react-router';
 import { useState, useEffect } from 'react';
 import { Search, X, ArrowUp, ArrowDown, Clock, User, CheckCircle2 } from 'lucide-react';
+import { PageStateBoundary } from '../components/PageStateBoundary';
 import { 
   mockPayments, 
   getUnpaidPayments, 
   calculateOverdueDays, 
   calculateLateFee, 
   getPaymentSeverity,
+  type Payment,
 } from '../utils/paymentUtils';
 import { actionItems as mockActionItems, type MemoLog, type ActionItem as BaseActionItem } from '../data/mockData';
 
@@ -45,6 +47,10 @@ export default function ActionRequired() {
   const [currentMemo, setCurrentMemo] = useState('');
   const [currentStatus, setCurrentStatus] = useState('');
   const [resolvedItemIds, setResolvedItemIds] = useState<Set<string>>(new Set());
+  const [sourceActionItems, setSourceActionItems] = useState<BaseActionItem[]>([]);
+  const [sourcePayments, setSourcePayments] = useState<Payment[]>([]);
+  const [isItemsLoading, setIsItemsLoading] = useState(true);
+  const [itemsError, setItemsError] = useState<string | null>(null);
 
   // URL 파라미터에서 필터 읽기
   useEffect(() => {
@@ -65,8 +71,28 @@ export default function ActionRequired() {
     '보험 만료 임박',
   ];
 
+  const hydrateActionItems = () => {
+    setIsItemsLoading(true);
+    setItemsError(null);
+    try {
+      setSourceActionItems(mockActionItems);
+      setSourcePayments(mockPayments);
+    } catch (error) {
+      console.error(error);
+      setSourceActionItems([]);
+      setSourcePayments([]);
+      setItemsError('조치 필요 항목 데이터를 불러오지 못했습니다.');
+    } finally {
+      setIsItemsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    hydrateActionItems();
+  }, []);
+
   // mockData.ts의 actionItems를 ActionItem 형식으로 변환
-  const convertedActionItems: ActionItem[] = mockActionItems.map(item => ({
+  const convertedActionItems: ActionItem[] = sourceActionItems.map(item => ({
     id: item.id,
     type: item.category,
     vehicleNumber: item.vehicleNumber,
@@ -79,7 +105,7 @@ export default function ActionRequired() {
   }));
 
   // 미납 데이터를 ActionItem으로 변환
-  const unpaidPayments = getUnpaidPayments(mockPayments);
+  const unpaidPayments = getUnpaidPayments(sourcePayments);
   const unpaidActionItems: ActionItem[] = unpaidPayments.map(payment => {
     const overdueDays = calculateOverdueDays(payment.dueDate);
     const lateFee = calculateLateFee(payment.amount, overdueDays);
@@ -257,97 +283,108 @@ export default function ActionRequired() {
         </div>
 
         {/* 테이블 */}
-        <div className="bg-white rounded-xl shadow-sm overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="bg-gray-50 border-b border-gray-200">
-                <tr>
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider cursor-pointer" onClick={() => handleSort('type')}>
-                    유형
-                    {sortField === 'type' && (sortDirection === 'asc' ? <ArrowUp className="inline-block ml-1 w-3 h-3" /> : <ArrowDown className="inline-block ml-1 w-3 h-3" />)}
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider cursor-pointer" onClick={() => handleSort('vehicleNumber')}>
-                    차량번호
-                    {sortField === 'vehicleNumber' && (sortDirection === 'asc' ? <ArrowUp className="inline-block ml-1 w-3 h-3" /> : <ArrowDown className="inline-block ml-1 w-3 h-3" />)}
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider cursor-pointer" onClick={() => handleSort('customerName')}>
-                    고객명
-                    {sortField === 'customerName' && (sortDirection === 'asc' ? <ArrowUp className="inline-block ml-1 w-3 h-3" /> : <ArrowDown className="inline-block ml-1 w-3 h-3" />)}
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider cursor-pointer" onClick={() => handleSort('date')}>
-                    발생일
-                    {sortField === 'date' && (sortDirection === 'asc' ? <ArrowUp className="inline-block ml-1 w-3 h-3" /> : <ArrowDown className="inline-block ml-1 w-3 h-3" />)}
-                  </th>
-                  {isUnpaidFilterActive && (
-                    <th className="px-6 py-3 text-right text-xs font-semibold text-gray-600 uppercase tracking-wider">
-                      미납금액
+        <PageStateBoundary
+          isLoading={isItemsLoading}
+          error={itemsError}
+          isEmpty={!isItemsLoading && !itemsError && sortedItems.length === 0}
+          errorDescription="조치 필요 항목 목록을 불러오는 중 문제가 발생했습니다."
+          emptyTitle="조건에 맞는 조치 항목이 없습니다"
+          emptyDescription="필터나 검색어를 조정해 다시 확인해 주세요."
+          onRetry={hydrateActionItems}
+          className="min-h-[280px]"
+        >
+          <div className="bg-white rounded-xl shadow-sm overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead className="bg-gray-50 border-b border-gray-200">
+                  <tr>
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider cursor-pointer" onClick={() => handleSort('type')}>
+                      유형
+                      {sortField === 'type' && (sortDirection === 'asc' ? <ArrowUp className="inline-block ml-1 w-3 h-3" /> : <ArrowDown className="inline-block ml-1 w-3 h-3" />)}
                     </th>
-                  )}
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider cursor-pointer" onClick={() => handleSort('severity')}>
-                    심각도
-                    {sortField === 'severity' && (sortDirection === 'asc' ? <ArrowUp className="inline-block ml-1 w-3 h-3" /> : <ArrowDown className="inline-block ml-1 w-3 h-3" />)}
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider cursor-pointer" onClick={() => handleSort('status')}>
-                    상태
-                    {sortField === 'status' && (sortDirection === 'asc' ? <ArrowUp className="inline-block ml-1 w-3 h-3" /> : <ArrowDown className="inline-block ml-1 w-3 h-3" />)}
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider cursor-pointer" onClick={() => handleSort('assignee')}>
-                    담당자
-                    {sortField === 'assignee' && (sortDirection === 'asc' ? <ArrowUp className="inline-block ml-1 w-3 h-3" /> : <ArrowDown className="inline-block ml-1 w-3 h-3" />)}
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">액션</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-200">
-                {sortedItems.map((item) => (
-                  <tr
-                    key={item.id}
-                    className="hover:bg-gray-50"
-                  >
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{item.type}</td>
-                    <td 
-                      className="px-6 py-4 whitespace-nowrap text-sm font-medium text-blue-600 hover:text-blue-800 cursor-pointer hover:underline"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        navigate(`/assets?vehicle=${encodeURIComponent(item.vehicleNumber)}`);
-                      }}
-                    >
-                      {item.vehicleNumber}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{item.customerName}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">{item.date}</td>
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider cursor-pointer" onClick={() => handleSort('vehicleNumber')}>
+                      차량번호
+                      {sortField === 'vehicleNumber' && (sortDirection === 'asc' ? <ArrowUp className="inline-block ml-1 w-3 h-3" /> : <ArrowDown className="inline-block ml-1 w-3 h-3" />)}
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider cursor-pointer" onClick={() => handleSort('customerName')}>
+                      고객명
+                      {sortField === 'customerName' && (sortDirection === 'asc' ? <ArrowUp className="inline-block ml-1 w-3 h-3" /> : <ArrowDown className="inline-block ml-1 w-3 h-3" />)}
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider cursor-pointer" onClick={() => handleSort('date')}>
+                      발생일
+                      {sortField === 'date' && (sortDirection === 'asc' ? <ArrowUp className="inline-block ml-1 w-3 h-3" /> : <ArrowDown className="inline-block ml-1 w-3 h-3" />)}
+                    </th>
                     {isUnpaidFilterActive && (
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-right">
-                        {item.paymentInfo ? (
-                          <span className="font-bold text-red-600">
-                            {item.paymentInfo.totalAmount.toLocaleString()}원
-                          </span>
-                        ) : (
-                          <span className="text-gray-400">-</span>
-                        )}
-                      </td>
+                      <th className="px-6 py-3 text-right text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                        미납금액
+                      </th>
                     )}
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span className={`px-2 py-1 text-xs font-medium rounded-full ${getSeverityColor(item.severity)}`}>
-                        {item.severity}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{item.status}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">{item.assignee}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm">
-                      <button 
-                        className="text-blue-600 hover:text-blue-800 font-medium"
-                        onClick={() => setSelectedItem(item)}
-                      >
-                        보기
-                      </button>
-                    </td>
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider cursor-pointer" onClick={() => handleSort('severity')}>
+                      심각도
+                      {sortField === 'severity' && (sortDirection === 'asc' ? <ArrowUp className="inline-block ml-1 w-3 h-3" /> : <ArrowDown className="inline-block ml-1 w-3 h-3" />)}
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider cursor-pointer" onClick={() => handleSort('status')}>
+                      상태
+                      {sortField === 'status' && (sortDirection === 'asc' ? <ArrowUp className="inline-block ml-1 w-3 h-3" /> : <ArrowDown className="inline-block ml-1 w-3 h-3" />)}
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider cursor-pointer" onClick={() => handleSort('assignee')}>
+                      담당자
+                      {sortField === 'assignee' && (sortDirection === 'asc' ? <ArrowUp className="inline-block ml-1 w-3 h-3" /> : <ArrowDown className="inline-block ml-1 w-3 h-3" />)}
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">액션</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody className="divide-y divide-gray-200">
+                  {sortedItems.map((item) => (
+                    <tr
+                      key={item.id}
+                      className="hover:bg-gray-50"
+                    >
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{item.type}</td>
+                      <td
+                        className="px-6 py-4 whitespace-nowrap text-sm font-medium text-blue-600 hover:text-blue-800 cursor-pointer hover:underline"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          navigate(`/assets?vehicle=${encodeURIComponent(item.vehicleNumber)}`);
+                        }}
+                      >
+                        {item.vehicleNumber}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{item.customerName}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">{item.date}</td>
+                      {isUnpaidFilterActive && (
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-right">
+                          {item.paymentInfo ? (
+                            <span className="font-bold text-red-600">
+                              {item.paymentInfo.totalAmount.toLocaleString()}원
+                            </span>
+                          ) : (
+                            <span className="text-gray-400">-</span>
+                          )}
+                        </td>
+                      )}
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span className={`px-2 py-1 text-xs font-medium rounded-full ${getSeverityColor(item.severity)}`}>
+                          {item.severity}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{item.status}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">{item.assignee}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm">
+                        <button
+                          className="text-blue-600 hover:text-blue-800 font-medium"
+                          onClick={() => setSelectedItem(item)}
+                        >
+                          보기
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
-        </div>
+        </PageStateBoundary>
 
         {/* 상세 패널 (오른쪽 슬라이드) */}
         {selectedItem && (

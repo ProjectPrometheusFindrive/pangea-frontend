@@ -1,6 +1,7 @@
 import { Layout } from '../components/Layout';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Camera, CheckCircle, XCircle, AlertCircle, Zap, Signal } from 'lucide-react';
+import { PageStateBoundary } from '../components/PageStateBoundary';
 import { vehicleAssets, type VehicleAsset } from '../data/mockData';
 import { useAuth } from '../context/AuthContext';
 
@@ -19,21 +20,24 @@ interface InstallationVehicle extends VehicleAsset {
   };
 }
 
+const buildInstallationVehicles = (): InstallationVehicle[] =>
+  vehicleAssets.slice(0, 10).map(v => ({
+    ...v,
+    installationStatus: v.hasPremiumDevice ? 'completed' : 'pending',
+    deviceSerialNumber: v.hasPremiumDevice ? v.deviceSerialNumber : undefined,
+    healthCheck: v.hasPremiumDevice ? {
+      signal: 'good',
+      battery: 85,
+      gps: true,
+      lastContact: '방금 전',
+    } : undefined,
+  }));
+
 export default function DeviceInstallation() {
   const { user } = useAuth();
-  const [vehicles, setVehicles] = useState<InstallationVehicle[]>(
-    vehicleAssets.slice(0, 10).map(v => ({
-      ...v,
-      installationStatus: v.hasPremiumDevice ? 'completed' : 'pending',
-      deviceSerialNumber: v.hasPremiumDevice ? v.deviceSerialNumber : undefined,
-      healthCheck: v.hasPremiumDevice ? {
-        signal: 'good',
-        battery: 85,
-        gps: true,
-        lastContact: '방금 전',
-      } : undefined,
-    }))
-  );
+  const [vehicles, setVehicles] = useState<InstallationVehicle[]>([]);
+  const [isVehiclesLoading, setIsVehiclesLoading] = useState(true);
+  const [vehiclesError, setVehiclesError] = useState<string | null>(null);
 
   const [selectedVehicleNumber, setSelectedVehicleNumber] = useState('');
   const [deviceSerial, setDeviceSerial] = useState('');
@@ -41,6 +45,24 @@ export default function DeviceInstallation() {
   const [installationPhotoPreview, setInstallationPhotoPreview] = useState<string>('');
   const [serialPhotoFile, setSerialPhotoFile] = useState<File | null>(null);
   const [serialPhotoPreview, setSerialPhotoPreview] = useState<string>('');
+
+  const hydrateVehicles = () => {
+    setIsVehiclesLoading(true);
+    setVehiclesError(null);
+    try {
+      setVehicles(buildInstallationVehicles());
+    } catch (error) {
+      console.error(error);
+      setVehicles([]);
+      setVehiclesError('장착 대상 차량 데이터를 불러오지 못했습니다.');
+    } finally {
+      setIsVehiclesLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    hydrateVehicles();
+  }, []);
 
   const handleInstallDevice = () => {
     if (!selectedVehicleNumber || !deviceSerial || !installationPhotoFile || !serialPhotoFile) {
@@ -319,145 +341,156 @@ export default function DeviceInstallation() {
         </div>
 
         {/* 장착 대상 차량 리스트 - 테이블 형태 */}
-        <div className="bg-white rounded-lg shadow-sm overflow-hidden">
-          <div className="px-4 py-3 border-b border-gray-200 bg-gray-50">
-            <h3 className="text-sm font-bold text-gray-900">장착 대상 차량 리스트</h3>
-          </div>
+        <PageStateBoundary
+          isLoading={isVehiclesLoading}
+          error={vehiclesError}
+          isEmpty={!isVehiclesLoading && !vehiclesError && vehicles.length === 0}
+          errorDescription="장착 대상 차량 목록을 불러오는 중 문제가 발생했습니다."
+          emptyTitle="장착 대상 차량이 없습니다"
+          emptyDescription="새 차량이 동기화되면 목록에 표시됩니다."
+          onRetry={hydrateVehicles}
+          className="min-h-[280px]"
+        >
+          <div className="bg-white rounded-lg shadow-sm overflow-hidden">
+            <div className="px-4 py-3 border-b border-gray-200 bg-gray-50">
+              <h3 className="text-sm font-bold text-gray-900">장착 대상 차량 리스트</h3>
+            </div>
 
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="bg-gray-50 border-b border-gray-200">
-                <tr>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">상태</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">차량번호</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">차종</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">연식</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">단말 시리얼</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">작업자</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">장착 일시</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">Health Check</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">장착사진</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">시리얼사진</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-200">
-                {vehicles.map((vehicle) => (
-                  <tr
-                    key={vehicle.vehicleNumber}
-                    className="hover:bg-gray-50 transition-colors"
-                  >
-                    {/* 상태 */}
-                    <td className="px-4 py-3">
-                      {getStatusBadge(vehicle.installationStatus)}
-                    </td>
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead className="bg-gray-50 border-b border-gray-200">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">상태</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">차량번호</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">차종</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">연식</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">단말 시리얼</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">작업자</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">장착 일시</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">Health Check</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">장착사진</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">시리얼사진</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200">
+                  {vehicles.map((vehicle) => (
+                    <tr
+                      key={vehicle.vehicleNumber}
+                      className="hover:bg-gray-50 transition-colors"
+                    >
+                      {/* 상태 */}
+                      <td className="px-4 py-3">
+                        {getStatusBadge(vehicle.installationStatus)}
+                      </td>
 
-                    {/* 차량번호 */}
-                    <td className="px-4 py-3">
-                      <span className="font-bold text-gray-900 text-sm">
-                        {vehicle.vehicleNumber}
-                      </span>
-                    </td>
-
-                    {/* 차종 */}
-                    <td className="px-4 py-3">
-                      <span className="text-sm text-gray-700">{vehicle.model}</span>
-                    </td>
-
-                    {/* 연식 */}
-                    <td className="px-4 py-3">
-                      <span className="text-sm text-gray-600">{vehicle.year}년</span>
-                    </td>
-
-                    {/* 단말 시리얼 */}
-                    <td className="px-4 py-3">
-                      {vehicle.deviceSerialNumber ? (
-                        <span className="font-mono text-xs text-gray-900 bg-gray-100 px-2 py-1 rounded">
-                          {vehicle.deviceSerialNumber}
+                      {/* 차량번호 */}
+                      <td className="px-4 py-3">
+                        <span className="font-bold text-gray-900 text-sm">
+                          {vehicle.vehicleNumber}
                         </span>
-                      ) : (
-                        <span className="text-xs text-gray-400">-</span>
-                      )}
-                    </td>
+                      </td>
 
-                    {/* 작업자 */}
-                    <td className="px-4 py-3">
-                      {vehicle.installer ? (
-                        <span className="text-sm text-gray-700">{vehicle.installer}</span>
-                      ) : (
-                        <span className="text-xs text-gray-400">-</span>
-                      )}
-                    </td>
+                      {/* 차종 */}
+                      <td className="px-4 py-3">
+                        <span className="text-sm text-gray-700">{vehicle.model}</span>
+                      </td>
 
-                    {/* 장착 일시 */}
-                    <td className="px-4 py-3">
-                      {vehicle.installedAt ? (
-                        <span className="text-xs text-gray-600">
-                          {new Date(vehicle.installedAt).toLocaleString('ko-KR', {
-                            month: '2-digit',
-                            day: '2-digit',
-                            hour: '2-digit',
-                            minute: '2-digit',
-                          })}
-                        </span>
-                      ) : (
-                        <span className="text-xs text-gray-400">-</span>
-                      )}
-                    </td>
+                      {/* 연식 */}
+                      <td className="px-4 py-3">
+                        <span className="text-sm text-gray-600">{vehicle.year}년</span>
+                      </td>
 
-                    {/* Health Check */}
-                    <td className="px-4 py-3">
-                      {vehicle.healthCheck ? (
-                        <div className="flex items-center gap-2">
-                          {getSignalIcon(vehicle.healthCheck.signal)}
-                          <div className="text-xs">
-                            <div className="flex items-center gap-1">
-                              <span className="font-semibold text-gray-700">
-                                {vehicle.healthCheck.signal === 'good' ? '정상' : vehicle.healthCheck.signal === 'weak' ? '약함' : '없음'}
-                              </span>
-                            </div>
-                            <div className="text-gray-500">
-                              배터리: {vehicle.healthCheck.battery}%
+                      {/* 단말 시리얼 */}
+                      <td className="px-4 py-3">
+                        {vehicle.deviceSerialNumber ? (
+                          <span className="font-mono text-xs text-gray-900 bg-gray-100 px-2 py-1 rounded">
+                            {vehicle.deviceSerialNumber}
+                          </span>
+                        ) : (
+                          <span className="text-xs text-gray-400">-</span>
+                        )}
+                      </td>
+
+                      {/* 작업자 */}
+                      <td className="px-4 py-3">
+                        {vehicle.installer ? (
+                          <span className="text-sm text-gray-700">{vehicle.installer}</span>
+                        ) : (
+                          <span className="text-xs text-gray-400">-</span>
+                        )}
+                      </td>
+
+                      {/* 장착 일시 */}
+                      <td className="px-4 py-3">
+                        {vehicle.installedAt ? (
+                          <span className="text-xs text-gray-600">
+                            {new Date(vehicle.installedAt).toLocaleString('ko-KR', {
+                              month: '2-digit',
+                              day: '2-digit',
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })}
+                          </span>
+                        ) : (
+                          <span className="text-xs text-gray-400">-</span>
+                        )}
+                      </td>
+
+                      {/* Health Check */}
+                      <td className="px-4 py-3">
+                        {vehicle.healthCheck ? (
+                          <div className="flex items-center gap-2">
+                            {getSignalIcon(vehicle.healthCheck.signal)}
+                            <div className="text-xs">
+                              <div className="flex items-center gap-1">
+                                <span className="font-semibold text-gray-700">
+                                  {vehicle.healthCheck.signal === 'good' ? '정상' : vehicle.healthCheck.signal === 'weak' ? '약함' : '없음'}
+                                </span>
+                              </div>
+                              <div className="text-gray-500">
+                                배터리: {vehicle.healthCheck.battery}%
+                              </div>
                             </div>
                           </div>
-                        </div>
-                      ) : (
-                        <span className="text-xs text-gray-400">-</span>
-                      )}
-                    </td>
+                        ) : (
+                          <span className="text-xs text-gray-400">-</span>
+                        )}
+                      </td>
 
-                    {/* 장착사진 */}
-                    <td className="px-4 py-3">
-                      {vehicle.photoUrl ? (
-                        <button
-                          onClick={() => window.open(vehicle.photoUrl, '_blank')}
-                          className="text-blue-600 hover:text-blue-700 text-xs underline"
-                        >
-                          보기
-                        </button>
-                      ) : (
-                        <span className="text-xs text-gray-400">-</span>
-                      )}
-                    </td>
+                      {/* 장착사진 */}
+                      <td className="px-4 py-3">
+                        {vehicle.photoUrl ? (
+                          <button
+                            onClick={() => window.open(vehicle.photoUrl, '_blank')}
+                            className="text-blue-600 hover:text-blue-700 text-xs underline"
+                          >
+                            보기
+                          </button>
+                        ) : (
+                          <span className="text-xs text-gray-400">-</span>
+                        )}
+                      </td>
 
-                    {/* 시리얼사진 */}
-                    <td className="px-4 py-3">
-                      {vehicle.serialPhotoUrl ? (
-                        <button
-                          onClick={() => window.open(vehicle.serialPhotoUrl, '_blank')}
-                          className="text-blue-600 hover:text-blue-700 text-xs underline"
-                        >
-                          보기
-                        </button>
-                      ) : (
-                        <span className="text-xs text-gray-400">-</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                      {/* 시리얼사진 */}
+                      <td className="px-4 py-3">
+                        {vehicle.serialPhotoUrl ? (
+                          <button
+                            onClick={() => window.open(vehicle.serialPhotoUrl, '_blank')}
+                            className="text-blue-600 hover:text-blue-700 text-xs underline"
+                          >
+                            보기
+                          </button>
+                        ) : (
+                          <span className="text-xs text-gray-400">-</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
-        </div>
+        </PageStateBoundary>
       </div>
     </Layout>
   );

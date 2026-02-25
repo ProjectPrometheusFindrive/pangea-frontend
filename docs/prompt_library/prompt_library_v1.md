@@ -1,9 +1,9 @@
 # Prompt Library v1
 
-- Version: v1.2.7
-- Date: 2026-02-25
+- Version: v1.2.8
+- Date: 2026-02-26
 - Owner: Pangea Frontend Team
-- Tags: prompt-library,workflow,branch-policy,history-policy,commit-policy,pr-automation,jira-traceability,end-prompt-protocol,worktree-cleanup,jira-status-sync,ac-evidence
+- Tags: prompt-library,workflow,branch-policy,history-policy,commit-policy,pr-automation,jira-traceability,end-prompt-protocol,worktree-cleanup,jira-status-sync,jira-comment-sync,ac-evidence
 
 ## Context
 - 초기 세팅 작업에서 프롬프트 템플릿, 브랜치 정책, 문서화 절차를 반복 가능하게 표준화할 필요가 있음.
@@ -15,6 +15,7 @@
 - 세션 시작 시점의 `Start Prompt` 작업분을 라이브러리와 분리해 히스토리에 보존.
 - 문서 작업 종료 후 `Push` 및 한글 `PR` 생성까지 자동화.
 - PR 생성 직후 워크트리 정리와 Jira 상태(`Resolved`) 전환까지 종료 절차를 명시.
+- Jira 티켓 작업 종료 시 핵심 변경/특이사항을 Jira 코멘트로 남겨 PR-이슈 추적성을 보강.
 
 ## Documentation Scope
 - 대상 문서: `docs/prompt_library/prompt_library_v1.md` (누적 관리, 신규 v2/v3 파일 생성 금지)
@@ -102,6 +103,7 @@ cp docs/prompt_history/_TEMPLATE.md docs/prompt_history/$(date +%Y%m%d)_your-tas
 - `dev` 대상 한글 PR 생성(UTF-8)
 - PR 생성 완료 후 베이스 저장소에서 `git worktree remove <worktree-path>` 수행
 - Jira 티켓 작업이면 PR 생성 직후 Jira 상태를 `Resolved`로 변경 (`NO-JIRA` 작업은 생략 사유 기록)
+- Jira 티켓 작업이면 상태 전환 직후 핵심 변경 사항/특이사항/PR 링크를 Jira 코멘트로 기록
 - 결과 출력에 아래 항목 포함:
   - 변경/추가된 파일
   - 주요 변경 요약
@@ -119,6 +121,7 @@ cp docs/prompt_history/_TEMPLATE.md docs/prompt_history/$(date +%Y%m%d)_your-tas
 - Jira 티켓이 없는 경우 PR 본문의 `관련 티켓`에는 `Jira: 없음 (NO-JIRA)`로 명시
 - Cleanup: PR 생성 후 베이스 저장소로 이동해 작업 워크트리를 제거 (`git worktree remove`)
 - Jira 상태: 티켓이 있는 작업은 PR 생성 후 `In Progress -> Resolved` 전환, 티켓이 없는 작업은 `NO-JIRA`로 명시
+- Jira 코멘트: 티켓 작업은 `Resolved` 전환 직후 핵심 변경 사항, 특이사항(리스크/검증), PR 링크를 코멘트로 남긴다.
 - PR 본문 기본 포함 항목:
   - 작업 요약
   - 상세 변경 내용 (Start Prompt 반영분 포함)
@@ -132,8 +135,9 @@ cp docs/prompt_history/_TEMPLATE.md docs/prompt_history/$(date +%Y%m%d)_your-tas
 - Production push triggers auto tag (`vX.Y.Z`)
 
 ## Version History
-- v1.2.6 (2026-02-25, NO-JIRA): Add End Prompt finalization rules for post-PR worktree cleanup and Jira status transition to `Resolved`.
+- v1.2.8 (2026-02-26, SCRUM-31): Require Jira completion comments (key changes, notable points, PR link) immediately after `Resolved` transition.
 - v1.2.7 (2026-02-25, SCRUM-29): Require AC-to-code evidence and build/test validation records in prompt_history for code-delivery tickets.
+- v1.2.6 (2026-02-25, NO-JIRA): Add End Prompt finalization rules for post-PR worktree cleanup and Jira status transition to `Resolved`.
 - v1.2.5 (2026-02-25, SCRUM-24): Add synchronization rule for Jira operating rules docs (`docs/jira_operating_rules.md` and `planning/06_jira_backlog_breakdown.md`).
 - v1.2.4 (2026-02-25, SCRUM-23): Add rule to record OpenAPI/YAML validation results in prompt_history `Validation` for API contract tasks.
 - v1.2.3 (2026-02-25, SCRUM-22): Clarify End Prompt documentation protocol with required prompt_history sections and ticket-linked capture rules.
