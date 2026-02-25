@@ -23,7 +23,7 @@ interface Notification {
 export function Layout({ children, title }: LayoutProps) {
   const location = useLocation();
   const navigate = useNavigate();
-  const { user } = useAuth(); // 사용자 권한 정보 가져오기
+  const { viewRole, logout } = useAuth();
   const { company, isLoading: isCompanyLoading, isUpdating: isCompanyUpdating, error: companyError, updateCompany } = useCompany();
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
@@ -164,9 +164,11 @@ export function Layout({ children, title }: LayoutProps) {
     sessionStorage.setItem('premiumBannerDismissed', 'true');
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    await logout();
     alert('로그아웃되었습니다');
     setShowAccountMenu(false);
+    navigate('/');
   };
 
   const handleOpenSettings = () => {
@@ -241,8 +243,9 @@ export function Layout({ children, title }: LayoutProps) {
   ];
 
   // 현재 사용자 권한에 따라 메뉴 필터링
+  const effectiveViewRole = viewRole ?? 'rental-business';
   const filteredMenuItems = menuItems.filter(item => 
-    item.roles.includes(user.role)
+    item.roles.includes(effectiveViewRole)
   );
 
   return (
