@@ -276,9 +276,9 @@ export default function Assets() {
               대여중 ({assets.filter(a => a.status === '대여중').length})
             </button>
             <button
-              onClick={() => setStatusFilter('예약됨')}
+              onClick={() => setStatusFilter('예약')}
               className={`px-4 py-2 rounded-lg font-medium text-sm transition-colors ${
-                statusFilter === '예약됨'
+                statusFilter === '예약' || statusFilter === '예약됨'
                   ? 'bg-purple-600 text-white'
                   : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
               }`}

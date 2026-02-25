@@ -63,7 +63,7 @@ export default function Settings() {
     } else {
       csv = '예약ID,차량번호,고객명,시작일,종료일,유형,전화번호,결제방법,금액,선금\n';
       reservations.slice(0, 10).forEach(r => {
-        const type = r.type === 'rental' ? '대여중' : r.type === 'reservation' ? '예약됨' : '반납완료';
+        const type = r.type === 'rental' ? '대여중' : r.type === 'reservation' ? '예약' : '반납완료';
         csv += `${r.id},${r.vehicleNumber},${r.customer},${r.startDateFull},${r.endDateFull},${type},${r.phone},${r.paymentMethod},${r.amount},${r.deposit}\n`;
       });
       filename = 'reservation_template.csv';
@@ -92,7 +92,7 @@ export default function Settings() {
     } else {
       csv = '예약ID,차량번호,고객명,시작일,종료일,유형,전화번호,결제방법,금액,보증금\n';
       reservations.slice(0, 10).forEach(r => {
-        const type = r.type === 'rental' ? '대여중' : r.type === 'reservation' ? '예약됨' : '반납완료';
+        const type = r.type === 'rental' ? '대여중' : r.type === 'reservation' ? '예약' : '반납완료';
         csv += `${r.id},${r.vehicleNumber},${r.customer},${r.startDateFull},${r.endDateFull},${type},${r.phone},${r.paymentMethod},${r.amount},${r.deposit}\n`;
       });
       filename = 'reservations_current.csv';
@@ -122,12 +122,15 @@ export default function Settings() {
         errors.push(`${rowNum}행: 차종이 없습니다`);
         return;
       }
-      if (!['대여중', '예약됨', '가용', '정비중'].includes(row['상태'])) {
-        errors.push(`${rowNum}행: 상태는 '대여중', '예약됨', '가용', '정비중' 중 하나여야 합니다`);
+      if (!['대여중', '예약', '예약됨', '가용', '정비중'].includes(row['상태'])) {
+        errors.push(`${rowNum}행: 상태는 '대여중', '예약', '가용', '정비중' 중 하나여야 합니다 (호환값 '예약됨' 허용)`);
         return;
       }
 
-      valid.push(row);
+      valid.push({
+        ...row,
+        상태: row['상태'] === '예약됨' ? '예약' : row['상태'],
+      });
     });
 
     return { valid, errors };
@@ -152,12 +155,15 @@ export default function Settings() {
         errors.push(`${rowNum}행: 고객명이 없습니다`);
         return;
       }
-      if (!['대여중', '예약됨', '반납완료'].includes(row['유형'])) {
-        errors.push(`${rowNum}행: 유형은 '대여중', '예약됨', '반납완료' 중 하나여야 합니다`);
+      if (!['대여중', '예약', '예약됨', '반납완료'].includes(row['유형'])) {
+        errors.push(`${rowNum}행: 유형은 '대여중', '예약', '반납완료' 중 하나여야 합니다 (호환값 '예약됨' 허용)`);
         return;
       }
 
-      valid.push(row);
+      valid.push({
+        ...row,
+        유형: row['유형'] === '예약됨' ? '예약' : row['유형'],
+      });
     });
 
     return { valid, errors };

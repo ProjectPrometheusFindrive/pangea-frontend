@@ -165,6 +165,7 @@ export default function Reservations() {
         return 'bg-blue-100 text-blue-700';
       case '정비중':
         return 'bg-red-100 text-red-700';
+      case '예약':
       case '예약됨':
         return 'bg-yellow-100 text-yellow-700';
       default:
