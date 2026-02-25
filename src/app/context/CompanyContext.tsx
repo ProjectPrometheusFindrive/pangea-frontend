@@ -108,12 +108,6 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const updateCompany = useCallback(async (payload: CompanyUpdateRequest) => {
-    const baseCompany = company ?? fallbackCompany;
-    const optimisticCompany = {
-      ...baseCompany,
-      ...payload,
-    };
-
     setIsUpdating(true);
     setError(null);
 
@@ -123,15 +117,12 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
       writeCachedCompany(updatedCompany);
       return updatedCompany;
     } catch (updateError) {
-      // API 저장 실패 시에도 전역 상태 일관성을 위해 로컬 상태를 유지한다.
-      setCompany(optimisticCompany);
-      writeCachedCompany(optimisticCompany);
       setError(toErrorMessage(updateError, '회사 정보를 저장하지 못했습니다.'));
-      return optimisticCompany;
+      throw updateError;
     } finally {
       setIsUpdating(false);
     }
-  }, [company]);
+  }, []);
 
   useEffect(() => {
     void refreshCompany();
