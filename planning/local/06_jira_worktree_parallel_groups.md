@@ -5,19 +5,24 @@
 - BE Repo: `_legacy/Project_Prometheus_BE`
 - 아래 순서는 `planning/06_jira_backlog_breakdown.md`의 `Depends On` 기준
 - **볼드** 의존 티켓 = 다른 팀(BE↔FE) 크로스 의존 → 팀 간 동기화 필요
+- 상태 체크 기준: Jira `SCRUM` 프로젝트 조회 결과 (2026-02-26)
+- 본 문서의 "신규 티켓"은 `SCRUM-78`, `SCRUM-79`, `SCRUM-80`을 의미
 
 ## 전체 진행 순서도
 
 ```
-┌─────────────────── 초반 셋업 ───────────────────┐
-│                                                  │
-│  G0 BK-001 용어집                                │
-│    ├── G1 BK-003 Jira 규칙  (공통)               │
-│    ├── BE B0 → B1 → B2 → B3  (BE Worktree)      │
-│    └── FE F0 → F1 → F2 → F3  (FE Worktree)      │
-│              ↕ 크로스 의존 ↕                      │
-│                                                  │
-└──────────────────────────────────────────────────┘
+┌──────────────── 초반 셋업 + 신규 티켓 트랙 ────────────────┐
+│                                                          │
+│  G0 BK-001 용어집                                        │
+│    ├── G1 BK-003 Jira 규칙  (공통)                       │
+│    ├── BE B0 → B1 → B2 → B3  (BE Worktree)              │
+│    │     └── D0 SCRUM-79 OpenAPI canonical 문서화       │
+│    │          └── D1 SCRUM-80 FE 사본 제거 (after D0)   │
+│    ├── FE F0 → F1 → F2 → F3  (FE Worktree)              │
+│    │     └── H0 SCRUM-78 CompanyContext 저장 실패 버그   │
+│    └── ↕ 크로스 의존 ↕                                   │
+│                                                          │
+└──────────────────────────────────────────────────────────┘
                        │
           BE B3 완료(BK-090) + FE F3 완료(BK-091)
                        ▼
@@ -41,6 +46,11 @@
 > `[공통]` `[BE]` `[FE]` 로 담당 구분. **볼드** = 크로스팀 의존.
 > `⏸` = 같은 병렬 그룹 구분선. 그룹 내 티켓은 **동일 선행 의존** → 동시 착수 가능.
 
+## Jira 상태 스냅샷 (2026-02-26)
+- 완료: BK-001, BK-002, BK-003, BK-010, BK-012, BK-013, BK-020, BK-022, BK-023
+- 진행 중: BK-011 (`SCRUM-26`)
+- 신규(비-BK): `SCRUM-78`, `SCRUM-79`, `SCRUM-80`
+
 ### Step 0 — 시작점
 - [x] `[공통]` BK-001 FE/BE 공통 용어집 확정
 
@@ -52,19 +62,28 @@
 
 ### Step 2 — BK-002 이후 (병렬)
 > ┌ 병렬 그룹 ── after BK-002
-- [ ] `[BE]` BK-010 `/api/v2` 라우팅 스켈레톤 추가 (after BK-002)
-- [ ] `[FE]` BK-020 공통 API 클라이언트 구축 (after **BK-002**)
+- [x] `[BE]` BK-010 `/api/v2` 라우팅 스켈레톤 추가 (after BK-002)
+- [x] `[FE]` BK-020 공통 API 클라이언트 구축 (after **BK-002**)
 > └
 
-### Step 3 — BE 플랫폼 + FE 기반 (병렬)
+### Step 3 — BE 플랫폼 + FE 기반 (병렬, 일부 완료)
 > ┌ BE 병렬 그룹 ── after BK-010
-- [ ] `[BE]` BK-011 공통 응답/에러 포맷 통일 (after BK-010)
-- [ ] `[BE]` BK-012 v2 인증 + tenant guard 적용 (after BK-010)
-- [ ] `[BE]` BK-013 신규 컬렉션/인덱스 마이그레이션 (after BK-010)
+- [ ] `[BE]` BK-011 공통 응답/에러 포맷 통일 (after BK-010, Jira: 진행 중)
+- [x] `[BE]` BK-012 v2 인증 + tenant guard 적용 (after BK-010)
+- [x] `[BE]` BK-013 신규 컬렉션/인덱스 마이그레이션 (after BK-010)
 > └
 > ┌ FE 병렬 그룹 ── after BK-020
-- [ ] `[FE]` BK-022 CompanyContext 도입 (after BK-020)
-- [ ] `[FE]` BK-023 공통 loading/error/empty UI (after BK-020)
+- [x] `[FE]` BK-022 CompanyContext 도입 (after BK-020)
+- [x] `[FE]` BK-023 공통 loading/error/empty UI (after BK-020)
+> └
+
+### Step 3.5 — 신규 티켓 트랙 (2026-02-26 추가, 병렬)
+> ┌ FE 버그 그룹 ── after BK-022
+- [ ] `[FE]` SCRUM-78 CompanyContext 저장 실패 시 성공 알림 노출 버그 수정 (relates BK-022)
+> └
+> ┌ OpenAPI 문서 그룹 ── relates BK-011
+- [ ] `[BE]` SCRUM-79 BE OpenAPI v2 source-of-truth 정책 문서화 (relates BK-011)
+- [ ] `[FE]` SCRUM-80 FE OpenAPI v2 사본 제거 + canonical 링크 문서화 (after SCRUM-79, relates BK-011)
 > └
 
 ### Step 4 — 도메인 API 1차 + FE 인증 기반 (병렬, 대량)
