@@ -1,7 +1,7 @@
 # FE-BE Common Glossary (BK-001)
 
 - Last Updated: 2026-02-25
-- Scope: `pangea-front`, `_legacy/Project_Prometheus_BE`
+- Scope: `pangea-front`, `Project_Prometheus_BE`
 - Source Ticket: `SCRUM-22` (`[BK-001] FE-BE 공통 용어집 확정`)
 
 ## 1. Purpose

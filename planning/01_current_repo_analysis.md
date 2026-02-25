@@ -9,7 +9,7 @@
 ### 루트
 - `src/`: 현재 버전 FE 소스
 - `_legacy/Project_Prometheus_FE`: 이전 FE
-- `_legacy/Project_Prometheus_BE`: 이전 BE
+- `Project_Prometheus_BE`: 이전 BE
 - 문서: `DEVELOPER_GUIDE.md`, `USER_MANUAL_FOR_PPT.md`
 
 ### 현재 FE 핵심 디렉터리
@@ -105,4 +105,3 @@
 ## 7. 완료 기준 (Step 1 DoD)
 - 현재 FE의 구조, 데이터 흐름, 리스크가 문서화되어 후속 단계(차이 분석/BE 설계) 입력으로 사용 가능하다.
 - 페이지별로 "어떤 API/DB 데이터가 필요한지" 추적 가능한 수준의 분석이 완료된다.
-

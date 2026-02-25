@@ -1,63 +1,63 @@
 Temp ID,Issue Type,Summary,Epic,Repo,Priority,Depends On,Stage,Labels
 EP-001,Epic,Contract & Program Setup,,,Highest,,"S0","epic|common"
-EP-002,Epic,BE V2 Platform,,_legacy/Project_Prometheus_BE,Highest,,"S1","epic|backend"
+EP-002,Epic,BE V2 Platform,,Project_Prometheus_BE,Highest,,"S1","epic|backend"
 EP-003,Epic,FE Runtime Platform,,pangea-front,Highest,,"S1","epic|frontend"
-EP-004,Epic,Core Domain Integration,,pangea-front+_legacy/Project_Prometheus_BE,Highest,,"S3-S6","epic|integration"
-EP-005,Epic,Ops & Premium Integration,,pangea-front+_legacy/Project_Prometheus_BE,High,,"S7","epic|ops"
-EP-006,Epic,QA & Release,,pangea-front+_legacy/Project_Prometheus_BE,Highest,,"S8","epic|qa"
-BK-001,Task,[BK-001] FE-BE 공통 용어집 확정,EP-001,pangea-front+_legacy/Project_Prometheus_BE,Highest,,S0,common|contract
-BK-002,Story,[BK-002] OpenAPI v2 초안 작성,EP-001,_legacy/Project_Prometheus_BE,Highest,BK-001,S0,backend|contract|openapi
-BK-003,Task,[BK-003] Jira 운영 규칙 확정,EP-001,pangea-front+_legacy/Project_Prometheus_BE,High,BK-001,S0,common|jira
-BK-010,Story,[BK-010] /api/v2 라우팅 스켈레톤 추가,EP-002,_legacy/Project_Prometheus_BE,Highest,BK-002,S1,backend|api-v2
-BK-011,Story,[BK-011] 공통 응답-에러 포맷 통일,EP-002,_legacy/Project_Prometheus_BE,Highest,BK-010,S1,backend|api-v2|error
-BK-012,Story,[BK-012] v2 인증-tenant guard 적용,EP-002,_legacy/Project_Prometheus_BE,Highest,BK-010,S1,backend|security|tenant
-BK-013,Story,[BK-013] 컬렉션-인덱스 마이그레이션,EP-002,_legacy/Project_Prometheus_BE,Highest,BK-010,S1,backend|db|migration
+EP-004,Epic,Core Domain Integration,,pangea-front+Project_Prometheus_BE,Highest,,"S3-S6","epic|integration"
+EP-005,Epic,Ops & Premium Integration,,pangea-front+Project_Prometheus_BE,High,,"S7","epic|ops"
+EP-006,Epic,QA & Release,,pangea-front+Project_Prometheus_BE,Highest,,"S8","epic|qa"
+BK-001,Task,[BK-001] FE-BE 공통 용어집 확정,EP-001,pangea-front+Project_Prometheus_BE,Highest,,S0,common|contract
+BK-002,Story,[BK-002] OpenAPI v2 초안 작성,EP-001,Project_Prometheus_BE,Highest,BK-001,S0,backend|contract|openapi
+BK-003,Task,[BK-003] Jira 운영 규칙 확정,EP-001,pangea-front+Project_Prometheus_BE,High,BK-001,S0,common|jira
+BK-010,Story,[BK-010] /api/v2 라우팅 스켈레톤 추가,EP-002,Project_Prometheus_BE,Highest,BK-002,S1,backend|api-v2
+BK-011,Story,[BK-011] 공통 응답-에러 포맷 통일,EP-002,Project_Prometheus_BE,Highest,BK-010,S1,backend|api-v2|error
+BK-012,Story,[BK-012] v2 인증-tenant guard 적용,EP-002,Project_Prometheus_BE,Highest,BK-010,S1,backend|security|tenant
+BK-013,Story,[BK-013] 컬렉션-인덱스 마이그레이션,EP-002,Project_Prometheus_BE,Highest,BK-010,S1,backend|db|migration
 BK-020,Story,[BK-020] FE 공통 API 클라이언트 구축,EP-003,pangea-front,Highest,BK-002,S1,frontend|api-client
 BK-021,Story,[BK-021] AuthContext JWT 기반 교체,EP-003,pangea-front,Highest,"BK-020;BK-012",S1,frontend|auth
 BK-022,Story,[BK-022] CompanyContext 도입,EP-003,pangea-front,High,BK-020,S1,frontend|context|company
 BK-023,Task,[BK-023] 공통 loading-error-empty UI 추가,EP-003,pangea-front,High,BK-020,S1,frontend|ux
-BK-030,Story,[BK-030] v2 auth API(login-me-logout) 구현,EP-002,_legacy/Project_Prometheus_BE,Highest,"BK-011;BK-012",S2,backend|auth|api-v2
+BK-030,Story,[BK-030] v2 auth API(login-me-logout) 구현,EP-002,Project_Prometheus_BE,Highest,"BK-011;BK-012",S2,backend|auth|api-v2
 BK-031,Story,[BK-031] 로그인-보호 라우트 연동,EP-003,pangea-front,Highest,"BK-021;BK-030",S2,frontend|auth|routing
 BK-032,Task,[BK-032] 로그아웃-만료 처리 UX 정리,EP-003,pangea-front,High,BK-031,S2,frontend|auth|ux
-BK-040,Story,[BK-040] v2 assets 조회 API(list-detail),EP-004,_legacy/Project_Prometheus_BE,Highest,"BK-011;BK-013",S3,backend|assets|api-v2
-BK-041,Story,[BK-041] v2 assets 쓰기 API(create-patch-history),EP-004,_legacy/Project_Prometheus_BE,Highest,BK-040,S3,backend|assets|api-v2
+BK-040,Story,[BK-040] v2 assets 조회 API(list-detail),EP-004,Project_Prometheus_BE,Highest,"BK-011;BK-013",S3,backend|assets|api-v2
+BK-041,Story,[BK-041] v2 assets 쓰기 API(create-patch-history),EP-004,Project_Prometheus_BE,Highest,BK-040,S3,backend|assets|api-v2
 BK-042,Story,[BK-042] Assets 페이지 조회 연동,EP-004,pangea-front,Highest,"BK-040;BK-031",S3,frontend|assets|integration
 BK-043,Story,[BK-043] Assets 수정-등록 연동,EP-004,pangea-front,Highest,"BK-041;BK-042",S3,frontend|assets|integration
 BK-044,Task,[BK-044] Assets mock 제거,EP-004,pangea-front,High,BK-043,S3,frontend|assets|mock-removal
-BK-050,Story,[BK-050] v2 reservations 조회-쓰기 API,EP-004,_legacy/Project_Prometheus_BE,Highest,"BK-011;BK-013",S4,backend|reservations|api-v2
-BK-051,Story,[BK-051] 계약 상태전환 API(v2) 연동,EP-004,_legacy/Project_Prometheus_BE,High,BK-050,S4,backend|state-machine|reservations
+BK-050,Story,[BK-050] v2 reservations 조회-쓰기 API,EP-004,Project_Prometheus_BE,Highest,"BK-011;BK-013",S4,backend|reservations|api-v2
+BK-051,Story,[BK-051] 계약 상태전환 API(v2) 연동,EP-004,Project_Prometheus_BE,High,BK-050,S4,backend|state-machine|reservations
 BK-052,Story,[BK-052] Reservations 조회 연동,EP-004,pangea-front,Highest,"BK-050;BK-031",S4,frontend|reservations|integration
 BK-053,Story,[BK-053] Reservations 쓰기 연동(create-return-accident),EP-004,pangea-front,Highest,"BK-052;BK-051",S4,frontend|reservations|integration
 BK-054,Task,[BK-054] Reservations mock 제거,EP-004,pangea-front,High,BK-053,S4,frontend|reservations|mock-removal
-BK-060,Story,[BK-060] payments API-컬렉션 구현,EP-004,_legacy/Project_Prometheus_BE,Highest,"BK-013;BK-011",S5,backend|payments|api-v2
-BK-061,Story,[BK-061] action-items API 구현,EP-004,_legacy/Project_Prometheus_BE,Highest,"BK-013;BK-011",S5,backend|action-items|api-v2
+BK-060,Story,[BK-060] payments API-컬렉션 구현,EP-004,Project_Prometheus_BE,Highest,"BK-013;BK-011",S5,backend|payments|api-v2
+BK-061,Story,[BK-061] action-items API 구현,EP-004,Project_Prometheus_BE,Highest,"BK-013;BK-011",S5,backend|action-items|api-v2
 BK-062,Story,[BK-062] ActionRequired 조회 연동,EP-004,pangea-front,Highest,"BK-061;BK-060",S5,frontend|action-required|integration
 BK-063,Story,[BK-063] ActionRequired 쓰기 연동(status-memo),EP-004,pangea-front,High,BK-062,S5,frontend|action-required|integration
 BK-064,Story,[BK-064] 결제 상태 연동 통합(reservations-home-action),EP-004,pangea-front,High,"BK-060;BK-053;BK-062",S5,frontend|payments|integration
 BK-065,Task,[BK-065] Action-Payment mock 제거,EP-004,pangea-front,High,BK-064,S5,frontend|mock-removal
-BK-070,Story,[BK-070] 홈 집계 API 제공,EP-004,_legacy/Project_Prometheus_BE,Highest,"BK-060;BK-061;BK-050",S6,backend|dashboard|api-v2
-BK-071,Story,[BK-071] 매출 집계 API 제공,EP-004,_legacy/Project_Prometheus_BE,High,"BK-060;BK-050",S6,backend|revenue|api-v2
-BK-072,Story,[BK-072] company-geofences-members v2 정리,EP-004,_legacy/Project_Prometheus_BE,High,"BK-011;BK-012",S6,backend|settings|api-v2
+BK-070,Story,[BK-070] 홈 집계 API 제공,EP-004,Project_Prometheus_BE,Highest,"BK-060;BK-061;BK-050",S6,backend|dashboard|api-v2
+BK-071,Story,[BK-071] 매출 집계 API 제공,EP-004,Project_Prometheus_BE,High,"BK-060;BK-050",S6,backend|revenue|api-v2
+BK-072,Story,[BK-072] company-geofences-members v2 정리,EP-004,Project_Prometheus_BE,High,"BK-011;BK-012",S6,backend|settings|api-v2
 BK-073,Story,[BK-073] Home API 연동,EP-004,pangea-front,Highest,"BK-070;BK-064",S6,frontend|home|integration
 BK-074,Story,[BK-074] Revenue API 연동,EP-004,pangea-front,High,BK-071,S6,frontend|revenue|integration
 BK-075,Story,[BK-075] Settings API 연동,EP-004,pangea-front,High,"BK-072;BK-022",S6,frontend|settings|integration
 BK-076,Task,[BK-076] 역할 기반 메뉴-권한 하드닝,EP-004,pangea-front,High,"BK-031;BK-075",S6,frontend|rbac
-BK-080,Story,[BK-080] v2 업로드 서명-세션 API 안정화,EP-005,_legacy/Project_Prometheus_BE,High,"BK-011;BK-012",S7,backend|uploads|api-v2
-BK-081,Story,[BK-081] v2 OCR 추출 어댑터 구현,EP-005,_legacy/Project_Prometheus_BE,High,BK-080,S7,backend|ocr|api-v2
-BK-082,Story,[BK-082] terminal-requests API 정리,EP-005,_legacy/Project_Prometheus_BE,Medium,BK-011,S7,backend|terminal-requests
-BK-083,Story,[BK-083] support-tickets API 정리,EP-005,_legacy/Project_Prometheus_BE,Medium,BK-011,S7,backend|support
-BK-084,Story,[BK-084] device-installations API 구현,EP-005,_legacy/Project_Prometheus_BE,Medium,"BK-013;BK-011",S7,backend|device-installation
+BK-080,Story,[BK-080] v2 업로드 서명-세션 API 안정화,EP-005,Project_Prometheus_BE,High,"BK-011;BK-012",S7,backend|uploads|api-v2
+BK-081,Story,[BK-081] v2 OCR 추출 어댑터 구현,EP-005,Project_Prometheus_BE,High,BK-080,S7,backend|ocr|api-v2
+BK-082,Story,[BK-082] terminal-requests API 정리,EP-005,Project_Prometheus_BE,Medium,BK-011,S7,backend|terminal-requests
+BK-083,Story,[BK-083] support-tickets API 정리,EP-005,Project_Prometheus_BE,Medium,BK-011,S7,backend|support
+BK-084,Story,[BK-084] device-installations API 구현,EP-005,Project_Prometheus_BE,Medium,"BK-013;BK-011",S7,backend|device-installation
 BK-085,Story,[BK-085] OCR 플로우 연동(Assets-NewContract),EP-005,pangea-front,High,"BK-081;BK-043;BK-053",S7,frontend|ocr|integration
 BK-086,Story,[BK-086] Premium CTA -> 장착신청 연동,EP-005,pangea-front,Medium,"BK-082;BK-073",S7,frontend|premium|integration
 BK-087,Story,[BK-087] 고객센터 UI-연동 추가,EP-005,pangea-front,Medium,"BK-083;BK-031",S7,frontend|support|integration
 BK-088,Story,[BK-088] DeviceInstallation 서버 연동,EP-005,pangea-front,Medium,"BK-084;BK-031",S7,frontend|device-installation|integration
-BK-090,Story,[BK-090] BE API 통합 테스트 보강,EP-006,_legacy/Project_Prometheus_BE,High,BK-084,S8,backend|qa|tests
+BK-090,Story,[BK-090] BE API 통합 테스트 보강,EP-006,Project_Prometheus_BE,High,BK-084,S8,backend|qa|tests
 BK-091,Story,[BK-091] FE E2E 테스트 보강,EP-006,pangea-front,High,BK-088,S8,frontend|qa|e2e
-BK-092,Task,[BK-092] 테넌시-권한 보안 회귀,EP-006,pangea-front+_legacy/Project_Prometheus_BE,Highest,"BK-090;BK-091",S8,security|tenant|qa
-BK-093,Task,[BK-093] 스테이징 리허설-마이그레이션 드라이런,EP-006,pangea-front+_legacy/Project_Prometheus_BE,Highest,BK-092,S8,release|staging
-BK-094,Task,[BK-094] 릴리즈 체크리스트-롤아웃,EP-006,pangea-front+_legacy/Project_Prometheus_BE,Highest,BK-093,S8,release|operations
-BK-095,Story,[BK-095] 운영 관측성 구축(Sentry-APM-알람),EP-006,pangea-front+_legacy/Project_Prometheus_BE,Highest,BK-094,S8,observability|monitoring|ops
-BK-096,Story,[BK-096] 성능-부하 테스트 및 튜닝,EP-006,pangea-front+_legacy/Project_Prometheus_BE,High,BK-093,S8,performance|load-test
-BK-097,Story,[BK-097] 보안 하드닝(rate limit-bruteforce-upload 검증),EP-006,_legacy/Project_Prometheus_BE,Highest,"BK-012;BK-080",S8,security|hardening
-BK-098,Task,[BK-098] 백업-복구 리허설(실행),EP-006,_legacy/Project_Prometheus_BE,Highest,BK-093,S8,backup|disaster-recovery
-BK-099,Task,[BK-099] 릴리즈 전략(canary-rollback) 자동화,EP-006,pangea-front+_legacy/Project_Prometheus_BE,Highest,"BK-094;BK-095",S8,release|canary|rollback
+BK-092,Task,[BK-092] 테넌시-권한 보안 회귀,EP-006,pangea-front+Project_Prometheus_BE,Highest,"BK-090;BK-091",S8,security|tenant|qa
+BK-093,Task,[BK-093] 스테이징 리허설-마이그레이션 드라이런,EP-006,pangea-front+Project_Prometheus_BE,Highest,BK-092,S8,release|staging
+BK-094,Task,[BK-094] 릴리즈 체크리스트-롤아웃,EP-006,pangea-front+Project_Prometheus_BE,Highest,BK-093,S8,release|operations
+BK-095,Story,[BK-095] 운영 관측성 구축(Sentry-APM-알람),EP-006,pangea-front+Project_Prometheus_BE,Highest,BK-094,S8,observability|monitoring|ops
+BK-096,Story,[BK-096] 성능-부하 테스트 및 튜닝,EP-006,pangea-front+Project_Prometheus_BE,High,BK-093,S8,performance|load-test
+BK-097,Story,[BK-097] 보안 하드닝(rate limit-bruteforce-upload 검증),EP-006,Project_Prometheus_BE,Highest,"BK-012;BK-080",S8,security|hardening
+BK-098,Task,[BK-098] 백업-복구 리허설(실행),EP-006,Project_Prometheus_BE,Highest,BK-093,S8,backup|disaster-recovery
+BK-099,Task,[BK-099] 릴리즈 전략(canary-rollback) 자동화,EP-006,pangea-front+Project_Prometheus_BE,Highest,"BK-094;BK-095",S8,release|canary|rollback

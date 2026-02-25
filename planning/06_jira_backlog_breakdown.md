@@ -2,7 +2,7 @@
 
 ## 1. 사용 목적
 - Jira에 백로그 등록하기 전에 티켓 단위를 확정한다.
-- FE 레포(`pangea-front`)와 BE 레포(`_legacy/Project_Prometheus_BE`)를 같은 로드맵에서 관리한다.
+- FE 레포(`pangea-front`)와 BE 레포(`Project_Prometheus_BE`)를 같은 로드맵에서 관리한다.
 
 ## 2. Epic 구조 (제안)
 

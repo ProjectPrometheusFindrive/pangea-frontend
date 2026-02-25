@@ -1,6 +1,6 @@
 # Prompt Library v1
 
-- Version: v1.2.12
+- Version: v1.2.13
 - Date: 2026-02-26
 - Owner: Pangea Frontend Team
 - Tags: prompt-library,workflow,branch-policy,history-policy,commit-policy,pr-automation,jira-traceability,end-prompt-protocol,worktree-cleanup,jira-status-sync,jira-comment-sync,ac-evidence
@@ -80,6 +80,7 @@ End Prompt:
 - FE에서 API 계약 문서가 외부 canonical(BE)로 관리될 경우, FE는 사본을 유지하지 않고 참조 문서(예: `docs/api/README.md`)와 canonical 링크만 유지한다.
 - Jira 운영 규칙(BK-003 계열) 변경 시 `docs/jira_operating_rules.md`와 `planning/06_jira_backlog_breakdown.md`를 함께 동기화한다.
 - `planning/local/06_jira_worktree_parallel_groups.md`를 갱신할 때는 Jira 스냅샷 기준일과 신규 티켓 범위를 문서 `기준` 섹션에 명시한다.
+- 문서/백로그 메타데이터의 BE 저장소 표기는 `Project_Prometheus_BE`를 canonical로 사용하고 legacy 접두 경로 표기는 사용하지 않는다.
 
 ## Inputs
 - 작업 목표 한 줄
@@ -138,6 +139,7 @@ cp docs/prompt_history/_TEMPLATE.md docs/prompt_history/$(date +%Y%m%d)_your-tas
 - Production push triggers auto tag (`vX.Y.Z`)
 
 ## Version History
+- v1.2.13 (2026-02-26, NO-JIRA): Add canonical BE repo naming rule (`Project_Prometheus_BE`) and disallow legacy-prefixed BE repo path in docs metadata.
 - v1.2.12 (2026-02-26, SCRUM-80): Add rule to keep FE API-contract docs as canonical references only when BE owns the OpenAPI source.
 - v1.2.11 (2026-02-26, SCRUM-78): Add prompt_history capture rule to document success/failure branch evidence for save-flow bug fixes.
 - v1.2.10 (2026-02-26, NO-JIRA): Add rule to record Jira snapshot date and new-ticket scope when updating local parallel-group planning docs.
