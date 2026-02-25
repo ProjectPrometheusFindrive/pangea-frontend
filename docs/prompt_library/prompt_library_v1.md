@@ -1,9 +1,9 @@
 # Prompt Library v1
 
-- Version: v1.1.0
+- Version: v1.2.0
 - Date: 2026-02-25
 - Owner: Pangea Frontend Team
-- Tags: prompt-library,workflow,branch-policy,history-policy,commit-policy
+- Tags: prompt-library,workflow,branch-policy,history-policy,commit-policy,pr-automation
 
 ## Context
 - 초기 세팅 작업에서 프롬프트 템플릿, 브랜치 정책, 문서화 절차를 반복 가능하게 표준화할 필요가 있음.
@@ -12,6 +12,8 @@
 - Start/End Prompt를 기준으로 작업 재현성 확보.
 - `dev -> production` 브랜치 운영 정책과 문서화 규칙을 일관되게 적용.
 - 작업 기록(`prompt_history`)과 재사용 템플릿(`prompt_library`)의 연결 고정.
+- 세션 시작 시점의 `Start Prompt` 작업분을 라이브러리와 분리해 히스토리에 보존.
+- 문서 작업 종료 후 `Push` 및 한글 `PR` 생성까지 자동화.
 
 ## Documentation Scope
 - 대상 문서: `docs/prompt_library/prompt_library_v1.md` (누적 관리, 신규 v2/v3 파일 생성 금지)
@@ -41,8 +43,8 @@ For API changes, update docs/ together with code.
 
 ## User Prompt (canonical)
 ```text
-Purpose: prompt_library and prompt_history documentation
-Prohibited: push / tag / rebase / reset
+Purpose: prompt_library and prompt_history documentation + automation (Push & PR)
+Start Prompt work items must be recorded in prompt_history separately from prompt_library.
 
 Start Prompt:
 - Base branch: dev
@@ -52,13 +54,19 @@ Start Prompt:
 End Prompt:
 - Update docs/prompt_library/prompt_library_v1.md version metadata
 - Add docs/prompt_history/{YYYYMMDD}_{task-summary}.md from template
-- No push/tag/rebase/reset
+- Commit step: do not run push/tag/rebase/reset
+- Then run git push and create PR to dev in Korean (UTF-8)
 ```
 
 ## Prompt History Naming Rules
 - 형식: `{YYYYMMDD}_{작업-요약}.md`
 - slug 규칙: lower-kebab-case, ASCII `[a-z0-9-]`, 3~8 단어
 - 예시: `20251028_blueprint-registry-update.md`
+
+## Prompt History Capture Rules
+- 세션 시작 시 사용한 `Start Prompt` 핵심 내용은 `## Prompt` 섹션에 반드시 포함.
+- `Start Prompt`에 의해 실제 반영된 변경사항은 `## Changes Summary`에 분리 기술.
+- `prompt_library`는 공용 규칙/템플릿만 관리하고, 세션 특이사항은 `prompt_history`에 기록.
 
 ## Inputs
 - 작업 목표 한 줄
@@ -80,6 +88,9 @@ cp docs/prompt_history/_TEMPLATE.md docs/prompt_history/$(date +%Y%m%d)_your-tas
 ## End-of-Task Checklist
 - `prompt_library_v1.md` 상단 `Version`/`Date`/`Version History` 갱신
 - `docs/prompt_history/_TEMPLATE.md` 기반 이력 파일 추가
+- `prompt_history`에 `Start Prompt` 핵심 내용 및 반영 결과 포함
+- 현재 작업 브랜치 `git push` 수행
+- `dev` 대상 한글 PR 생성(UTF-8)
 - 결과 출력에 아래 항목 포함:
   - 변경/추가된 파일
   - 주요 변경 요약
@@ -89,7 +100,15 @@ cp docs/prompt_history/_TEMPLATE.md docs/prompt_history/$(date +%Y%m%d)_your-tas
 ## Commit Message Convention
 - Subject: `Docs: update prompt_library to vX.Y.Z; add {YYYYMMDD}_{summary}.md`
 - Body: `prompt_history`의 `Changes Summary` 상위 3~5개 bullet 요약
-- 금지: push / tag / rebase / reset
+- 커밋 단계 금지: push / tag / rebase / reset
+
+## Push & PR Convention
+- Push: 현재 작업 브랜치를 원격에 반영 (`git push -u origin <branch>`)
+- PR: `base=dev`로 생성, 제목/본문은 한글 작성, UTF-8 인코딩 준수
+- PR 본문 기본 포함 항목:
+  - 작업 요약
+  - 상세 변경 내용 (Start Prompt 반영분 포함)
+  - 비고 (Notes/Follow-ups 참조)
 
 ## Dependencies & Assumptions
 - Default branch: `dev`
@@ -99,5 +118,6 @@ cp docs/prompt_history/_TEMPLATE.md docs/prompt_history/$(date +%Y%m%d)_your-tas
 - Production push triggers auto tag (`vX.Y.Z`)
 
 ## Version History
+- v1.2.0 (2026-02-25): Add Start Prompt capture rules and Push/PR automation convention (Korean PR to dev).
 - v1.1.0 (2026-02-25): Add version policy table, prompt_history naming rules, end-of-task checklist, and commit message convention.
 - v1.0.0 (2026-02-25): Initial baseline for prompt library + history workflow and branch policy alignment.
