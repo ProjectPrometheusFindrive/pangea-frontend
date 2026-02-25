@@ -106,9 +106,9 @@ flowchart TD
 | S7 | S6 | BK-080~BK-088 |
 | S8 | S7 | BK-090~BK-099 |
 
-## 6. Jira 등록 시 필드 매핑 가이드
-- `Summary`: `"[BK-xxx] ..."` 형태로 시작하면 추적이 쉽다.
-- `Labels`: `repo-fe`, `repo-be`, `stage-#`, `epic-###`, `priority-*`
-- `Components`: `frontend`, `backend`, `integration`, `qa`
-- `Description`: 본 문서의 완료 기준 + API 계약 링크 + 테스트 기준 포함
-- `Issue Links`: `is blocked by`로 `Depends On` 매핑
+## 6. Jira 운영 규칙 (BK-003 확정)
+- 상세 규칙 문서: `docs/jira_operating_rules.md`
+- `Labels`: `repo-fe/repo-be`, `stage-s#`, `temp-bk-###(또는 temp-ep-###)`, 도메인 라벨 조합을 사용한다.
+- `Components`: 표준 세트 `frontend/backend/integration/qa/ops`를 사용한다.
+- `DoR/DoD`: 상태 전환 전 체크리스트를 적용한다.
+- `Issue Links`: `A Depends On B`는 Jira에서 `B blocks A`(A 화면에서는 `is blocked by B`)로 매핑한다.
