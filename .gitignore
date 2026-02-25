@@ -3,6 +3,9 @@ node_modules/
 .pnpm-store/
 .npm/
 .yarn/
+.venv/
+.venv*/
+venv/
 
 # Build outputs
 dist/
@@ -27,6 +30,8 @@ pnpm-debug.log*
 .parcel-cache/
 .turbo/
 .eslintcache
+__pycache__/
+*.pyc
 
 # Editors / OS
 .vscode/
