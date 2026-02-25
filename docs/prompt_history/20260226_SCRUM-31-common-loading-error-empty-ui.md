@@ -23,7 +23,7 @@
 - `Assets`, `Reservations`, `ActionRequired`, `DeviceInstallation` 페이지에 공통 경계 컴포넌트를 연결해 페이지 단위 fallback을 일관되게 적용했다.
 - 각 페이지에 hydrate 함수를 추가해 데이터 로드 흐름을 `isLoading/error/empty` 조건으로 명시적으로 분리하고, 에러 시 재시도 버튼을 공통 패턴으로 제공했다.
 - 필터/검색 결과가 없는 경우 기존 빈 상태 공백을 공통 empty fallback으로 통합해 UX 일관성을 높였다.
-- `prompt_library_v1.md`를 `v1.2.8`로 갱신하고, PR 후 Jira `Resolved` 전환 직후 Jira 코멘트(핵심 변경/특이사항/PR 링크) 기록 규칙을 추가했다.
+- `prompt_library_v1.md`를 `v1.2.9`로 갱신하고, PR 후 Jira `Resolved` 전환 직후 Jira 코멘트(핵심 변경/특이사항/PR 링크) 기록 규칙을 추가했다.
 
 ## Diffs & Files
 - `src/app/components/PageStateBoundary.tsx` (new): 공통 `loading/error/empty` fallback 렌더링 및 상태 경계
@@ -31,7 +31,7 @@
 - `src/app/pages/Reservations.tsx`: 예약 캘린더 데이터 hydrate + 공통 fallback 연결
 - `src/app/pages/ActionRequired.tsx`: 조치항목 소스 로드 상태 분리 + 공통 fallback 연결
 - `src/app/pages/DeviceInstallation.tsx`: 장착 대상 데이터 hydrate + 공통 fallback 연결
-- `docs/prompt_library/prompt_library_v1.md`: `v1.2.8` 버전 반영 및 Jira 완료 코멘트 규칙 추가
+- `docs/prompt_library/prompt_library_v1.md`: `v1.2.9` 버전 반영 및 Jira 완료 코멘트 규칙 추가
 - `docs/prompt_history/20260226_SCRUM-31-common-loading-error-empty-ui.md` (new): 본 작업 이력 기록
 
 ## Validation

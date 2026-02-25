@@ -1,6 +1,6 @@
 # Prompt Library v1
 
-- Version: v1.2.8
+- Version: v1.2.9
 - Date: 2026-02-26
 - Owner: Pangea Frontend Team
 - Tags: prompt-library,workflow,branch-policy,history-policy,commit-policy,pr-automation,jira-traceability,end-prompt-protocol,worktree-cleanup,jira-status-sync,jira-comment-sync,ac-evidence
@@ -135,7 +135,8 @@ cp docs/prompt_history/_TEMPLATE.md docs/prompt_history/$(date +%Y%m%d)_your-tas
 - Production push triggers auto tag (`vX.Y.Z`)
 
 ## Version History
-- v1.2.8 (2026-02-26, SCRUM-31): Require Jira completion comments (key changes, notable points, PR link) immediately after `Resolved` transition.
+- v1.2.8 (2026-02-25, SCRUM-32): Add Jira comment update requirement to End-of-Task checklist after PR creation.
+- v1.2.9 (2026-02-26, SCRUM-31): Require Jira completion comments (key changes, notable points, PR link) immediately after `Resolved` transition.
 - v1.2.7 (2026-02-25, SCRUM-29): Require AC-to-code evidence and build/test validation records in prompt_history for code-delivery tickets.
 - v1.2.6 (2026-02-25, NO-JIRA): Add End Prompt finalization rules for post-PR worktree cleanup and Jira status transition to `Resolved`.
 - v1.2.5 (2026-02-25, SCRUM-24): Add synchronization rule for Jira operating rules docs (`docs/jira_operating_rules.md` and `planning/06_jira_backlog_breakdown.md`).
