@@ -43,7 +43,7 @@
 ## Phase 0: 준비
 - [ ] `planning` 문서 승인
 - [x] FE/BE 공통 용어집 정의 (`vehicleNumber/plate/vin`, `reservation/rental`) (docs/common_glossary.md)
-- [x] API 계약서 초안 작성 (OpenAPI 또는 markdown) (`docs/api/openapi_v2_draft.yaml`, BK-002)
+- [x] API 계약서 초안 작성 (OpenAPI 또는 markdown) (`docs/api/README.md` -> BE canonical OpenAPI, BK-002)
 
 ## Phase 1: 기반 구축
 - [ ] `src/api` 또는 `src/services` 생성
