@@ -2,6 +2,7 @@ import { Link, useLocation, useNavigate } from 'react-router';
 import { Home, AlertCircle, Car, Calendar, Settings, Bell, Menu, TrendingUp, X, AlertTriangle, Shield, FileText, Signal, DollarSign, AlertOctagon, Wrench, Clock, Sparkles, LogOut, User, Building2, Trash2, ChevronDown, Zap } from 'lucide-react';
 import { ReactNode, useState, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { useCompany } from '../context/CompanyContext';
 
 interface LayoutProps {
   children: ReactNode;
@@ -23,15 +24,16 @@ export function Layout({ children, title }: LayoutProps) {
   const location = useLocation();
   const navigate = useNavigate();
   const { user } = useAuth(); // 사용자 권한 정보 가져오기
+  const { company, isLoading: isCompanyLoading, isUpdating: isCompanyUpdating, error: companyError, updateCompany } = useCompany();
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [showAccountMenu, setShowAccountMenu] = useState(false);
   const [showAccountSettings, setShowAccountSettings] = useState(false);
   const [accountName, setAccountName] = useState('김민수');
-  const [companyName, setCompanyName] = useState('렌터카(주)');
   const [editName, setEditName] = useState('');
   const [editCompany, setEditCompany] = useState('');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const companyName = company?.name ?? '회사 정보 없음';
   const [showPremiumBanner, setShowPremiumBanner] = useState(() => {
     const bannerDismissed = sessionStorage.getItem('premiumBannerDismissed');
     return !bannerDismissed;
@@ -174,13 +176,18 @@ export function Layout({ children, title }: LayoutProps) {
     setEditCompany(companyName);
   };
 
-  const handleSaveSettings = () => {
-    if (editName.trim()) {
-      setAccountName(editName);
+  const handleSaveSettings = async () => {
+    const trimmedName = editName.trim();
+    const trimmedCompany = editCompany.trim();
+
+    if (trimmedName) {
+      setAccountName(trimmedName);
     }
-    if (editCompany.trim()) {
-      setCompanyName(editCompany);
+
+    if (trimmedCompany && trimmedCompany !== companyName) {
+      await updateCompany({ name: trimmedCompany });
     }
+
     setShowAccountSettings(false);
     alert('계정 정보가 저장되었습니다');
   };
@@ -407,7 +414,7 @@ export function Layout({ children, title }: LayoutProps) {
                       </div>
                       <div className="flex-1 min-w-0">
                         <h4 className="text-sm font-bold text-gray-900 truncate">{accountName}</h4>
-                        <p className="text-xs text-gray-600">{companyName}</p>
+                        <p className="text-xs text-gray-600">{isCompanyLoading ? '회사 정보 확인 중...' : companyName}</p>
                       </div>
                     </div>
                   </div>
@@ -484,9 +491,11 @@ export function Layout({ children, title }: LayoutProps) {
                     type="text"
                     value={editCompany}
                     onChange={(e) => setEditCompany(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-500"
                     placeholder="회사명을 입력하세요"
+                    disabled={isCompanyUpdating}
                   />
+                  {companyError && <p className="mt-2 text-xs text-red-600">{companyError}</p>}
                 </div>
 
                 {/* 위험 영역 */}
@@ -506,15 +515,17 @@ export function Layout({ children, title }: LayoutProps) {
               <div className="px-6 py-4 border-t border-gray-200 flex gap-3">
                 <button
                   onClick={() => setShowAccountSettings(false)}
-                  className="flex-1 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 font-medium"
+                  className="flex-1 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 font-medium disabled:opacity-60"
+                  disabled={isCompanyUpdating}
                 >
                   취소
                 </button>
                 <button
                   onClick={handleSaveSettings}
-                  className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium"
+                  className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium disabled:opacity-60"
+                  disabled={isCompanyUpdating}
                 >
-                  저장
+                  {isCompanyUpdating ? '저장 중...' : '저장'}
                 </button>
               </div>
             </div>
