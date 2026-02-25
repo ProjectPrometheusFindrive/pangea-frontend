@@ -1,9 +1,9 @@
 # Prompt Library v1
 
-- Version: v1.2.0
+- Version: v1.2.1
 - Date: 2026-02-25
 - Owner: Pangea Frontend Team
-- Tags: prompt-library,workflow,branch-policy,history-policy,commit-policy,pr-automation
+- Tags: prompt-library,workflow,branch-policy,history-policy,commit-policy,pr-automation,jira-traceability
 
 ## Context
 - 초기 세팅 작업에서 프롬프트 템플릿, 브랜치 정책, 문서화 절차를 반복 가능하게 표준화할 필요가 있음.
@@ -59,9 +59,9 @@ End Prompt:
 ```
 
 ## Prompt History Naming Rules
-- 형식: `{YYYYMMDD}_{작업-요약}.md`
+- 형식: `{YYYYMMDD}_{TICKET-ID}-{slug}.md`
 - slug 규칙: lower-kebab-case, ASCII `[a-z0-9-]`, 3~8 단어
-- 예시: `20251028_blueprint-registry-update.md`
+- 예시: `20260225_BK-003-bootstrap-branch-policy.md`
 
 ## Prompt History Capture Rules
 - 세션 시작 시 사용한 `Start Prompt` 핵심 내용은 `## Prompt` 섹션에 반드시 포함.
@@ -118,6 +118,7 @@ cp docs/prompt_history/_TEMPLATE.md docs/prompt_history/$(date +%Y%m%d)_your-tas
 - Production push triggers auto tag (`vX.Y.Z`)
 
 ## Version History
+- v1.2.1 (2026-02-25, BK-003): Update prompt_history naming convention to include Jira ticket ID for traceability.
 - v1.2.0 (2026-02-25): Add Start Prompt capture rules and Push/PR automation convention (Korean PR to dev).
 - v1.1.0 (2026-02-25): Add version policy table, prompt_history naming rules, end-of-task checklist, and commit message convention.
 - v1.0.0 (2026-02-25): Initial baseline for prompt library + history workflow and branch policy alignment.

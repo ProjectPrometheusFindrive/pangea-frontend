@@ -8,4 +8,12 @@
   Run `npm i` to install the dependencies.
 
   Run `npm run dev` to start the development server.
+
+  ## Branch strategy
+
+  - Default branch: `dev`
+  - Development flow: `feature/*` -> `dev` (PR + review required)
+  - Release flow: `dev` -> `production` (PR + review required)
+  - `main` branch is not used in this repository.
+  - Tags: on push to `production`, GitHub Actions creates the next patch tag (`vX.Y.Z`).
   
