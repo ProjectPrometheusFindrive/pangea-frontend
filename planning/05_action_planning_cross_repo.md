@@ -2,7 +2,7 @@
 
 ## 1. 목적
 - 실제 개발 착수 시 혼선 없이 진행할 수 있도록, 작업 순서를 "의존성 기준"으로 고정한다.
-- FE 레포(`pangea-front`)와 BE 레포(`_legacy/Project_Prometheus_BE`)의 할 일을 분리하되, 동기화 포인트를 명확히 한다.
+- FE 레포(`pangea-front`)와 BE 레포(`Project_Prometheus_BE`)의 할 일을 분리하되, 동기화 포인트를 명확히 한다.
 
 ## 2. 권장 진행 원칙
 - 원칙 1: API 계약을 먼저 고정하고 UI 연결을 시작한다.
@@ -27,7 +27,7 @@
 - [ ] 현재 FE 타입 정의를 API DTO 기준으로 분리 초안 작성 (`view model` vs `api model`)
 - [ ] 기존 mock 의존 지점 목록화 및 제거 순서 확정
 
-### BE 레포에서 할 일 (`_legacy/Project_Prometheus_BE`)
+### BE 레포에서 할 일 (`Project_Prometheus_BE`)
 - [ ] v2 API 범위 확정 (`/api/v2/...` 권장)
 - [ ] endpoint/요청/응답 스키마 문서화
 - [ ] role/tenant 규칙 문서화 (`super_admin/admin/member/installer`)
