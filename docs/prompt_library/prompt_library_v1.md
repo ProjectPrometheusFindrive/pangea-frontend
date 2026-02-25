@@ -1,9 +1,9 @@
 # Prompt Library v1
 
-- Version: v1.0.0
+- Version: v1.1.0
 - Date: 2026-02-25
 - Owner: Pangea Frontend Team
-- Tags: prompt-library,workflow,bootstrap,branch-policy
+- Tags: prompt-library,workflow,branch-policy,history-policy,commit-policy
 
 ## Context
 - 초기 세팅 작업에서 프롬프트 템플릿, 브랜치 정책, 문서화 절차를 반복 가능하게 표준화할 필요가 있음.
@@ -12,6 +12,19 @@
 - Start/End Prompt를 기준으로 작업 재현성 확보.
 - `dev -> production` 브랜치 운영 정책과 문서화 규칙을 일관되게 적용.
 - 작업 기록(`prompt_history`)과 재사용 템플릿(`prompt_library`)의 연결 고정.
+
+## Documentation Scope
+- 대상 문서: `docs/prompt_library/prompt_library_v1.md` (누적 관리, 신규 v2/v3 파일 생성 금지)
+- 이력 문서: `docs/prompt_history/{YYYYMMDD}_{slug}.md` (작업 1건당 1파일)
+- 본 워크플로우 수행 시 코드 변경 없이 문서 범위로 한정 가능해야 함.
+
+## Version Policy
+
+| 변경 범위 | 예시 | 버전 변화 |
+|---|---|---|
+| 구조적 섹션 추가 | 새로운 API Design Spec 추가 | +0.1 (minor) |
+| 세부 내용 수정 | Blueprint Helper 문장 수정 | +0.0.1 (patch) |
+| 전체 리팩터링 | 구조 재편, TOC 변경 | +1.0 (major) |
 
 ## System Prompt
 ```text
@@ -28,6 +41,9 @@ For API changes, update docs/ together with code.
 
 ## User Prompt (canonical)
 ```text
+Purpose: prompt_library and prompt_history documentation
+Prohibited: push / tag / rebase / reset
+
 Start Prompt:
 - Base branch: dev
 - Work only through PR into dev
@@ -35,9 +51,14 @@ Start Prompt:
 
 End Prompt:
 - Update docs/prompt_library/prompt_library_v1.md version metadata
-- Add docs/prompt_history/{YYYYMMDD}_{task}.md from template
+- Add docs/prompt_history/{YYYYMMDD}_{task-summary}.md from template
 - No push/tag/rebase/reset
 ```
+
+## Prompt History Naming Rules
+- 형식: `{YYYYMMDD}_{작업-요약}.md`
+- slug 규칙: lower-kebab-case, ASCII `[a-z0-9-]`, 3~8 단어
+- 예시: `20251028_blueprint-registry-update.md`
 
 ## Inputs
 - 작업 목표 한 줄
@@ -56,6 +77,20 @@ cp docs/prompt_history/_TEMPLATE.md docs/prompt_history/$(date +%Y%m%d)_your-tas
 # 작업 종료 시 prompt_library_v1.md Version/Date/Version History 갱신
 ```
 
+## End-of-Task Checklist
+- `prompt_library_v1.md` 상단 `Version`/`Date`/`Version History` 갱신
+- `docs/prompt_history/_TEMPLATE.md` 기반 이력 파일 추가
+- 결과 출력에 아래 항목 포함:
+  - 변경/추가된 파일
+  - 주요 변경 요약
+  - 다음 반영 대상 브랜치 (`dev`, PR 대상)
+  - 배포 필요 시 (`dev -> production` PR)
+
+## Commit Message Convention
+- Subject: `Docs: update prompt_library to vX.Y.Z; add {YYYYMMDD}_{summary}.md`
+- Body: `prompt_history`의 `Changes Summary` 상위 3~5개 bullet 요약
+- 금지: push / tag / rebase / reset
+
 ## Dependencies & Assumptions
 - Default branch: `dev`
 - Release branch: `production`
@@ -64,4 +99,5 @@ cp docs/prompt_history/_TEMPLATE.md docs/prompt_history/$(date +%Y%m%d)_your-tas
 - Production push triggers auto tag (`vX.Y.Z`)
 
 ## Version History
+- v1.1.0 (2026-02-25): Add version policy table, prompt_history naming rules, end-of-task checklist, and commit message convention.
 - v1.0.0 (2026-02-25): Initial baseline for prompt library + history workflow and branch policy alignment.
