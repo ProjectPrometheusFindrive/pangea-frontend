@@ -1,6 +1,6 @@
 # Prompt Library v1
 
-- Version: v1.2.11
+- Version: v1.2.12
 - Date: 2026-02-26
 - Owner: Pangea Frontend Team
 - Tags: prompt-library,workflow,branch-policy,history-policy,commit-policy,pr-automation,jira-traceability,end-prompt-protocol,worktree-cleanup,jira-status-sync,jira-comment-sync,ac-evidence
@@ -73,6 +73,7 @@ End Prompt:
 - `Changes Summary`에는 실제 반영 결과를 범위별로 기술하고, `Diffs & Files`에는 주요 수정 파일을 명시한다.
 - 코드 변경이 포함된 Jira 티켓은 AC 항목별 구현 근거(파일/함수 기준)를 `Changes Summary` 또는 `Diffs & Files`에 반드시 남긴다.
 - 코드 변경이 포함된 Jira 티켓은 `Validation` 섹션에 최소 1개의 실행 명령 결과(`build` 또는 `test`)를 기록한다.
+- 저장/수정 흐름 버그 티켓은 `Changes Summary` 또는 `Diffs & Files`에 성공/실패 분기 처리 근거(성공 시 동작, 실패 시 동작)를 모두 기록한다.
 - `Notes`에는 차기 권장 태스크만 기록하며 즉시 반영은 금지한다.
 - `prompt_library`는 공용 규칙/템플릿만 관리하고, 세션 특이사항은 `prompt_history`에 기록.
 - API 계약 문서(OpenAPI/YAML) 변경 시 `Validation` 섹션에 스펙 유효성 검증 결과를 포함한다.
@@ -137,7 +138,8 @@ cp docs/prompt_history/_TEMPLATE.md docs/prompt_history/$(date +%Y%m%d)_your-tas
 - Production push triggers auto tag (`vX.Y.Z`)
 
 ## Version History
-- v1.2.11 (2026-02-26, SCRUM-80): Add rule to keep FE API-contract docs as canonical references only when BE owns the OpenAPI source.
+- v1.2.12 (2026-02-26, SCRUM-80): Add rule to keep FE API-contract docs as canonical references only when BE owns the OpenAPI source.
+- v1.2.11 (2026-02-26, SCRUM-78): Add prompt_history capture rule to document success/failure branch evidence for save-flow bug fixes.
 - v1.2.10 (2026-02-26, NO-JIRA): Add rule to record Jira snapshot date and new-ticket scope when updating local parallel-group planning docs.
 - v1.2.9 (2026-02-26, SCRUM-31): Require Jira completion comments (key changes, notable points, PR link) immediately after `Resolved` transition.
 - v1.2.8 (2026-02-25, SCRUM-32): Add Jira comment update requirement to End-of-Task checklist after PR creation.

@@ -23,7 +23,7 @@
 - FE 참조 문서 `docs/api/README.md`를 신설해 canonical 링크 및 운영 규칙(사본 비유지, 링크 동기화 원칙)을 문서화했다.
 - `README.md`의 BK-002 링크를 사본 파일에서 참조 문서로 교체했다.
 - `planning/04_legacy_gap_apply_todo.md`의 BK-002 참조 경로를 canonical 참조 구조로 교체했다.
-- `docs/prompt_library/prompt_library_v1.md`를 `v1.2.11`로 갱신하고, FE API 계약 문서의 canonical 참조-only 운영 규칙을 추가했다.
+- `docs/prompt_library/prompt_library_v1.md`를 `v1.2.12`로 갱신하고, FE API 계약 문서의 canonical 참조-only 운영 규칙을 추가했다.
 
 ## Diffs & Files
 - Updated: `README.md`
