@@ -185,7 +185,11 @@ export function Layout({ children, title }: LayoutProps) {
     }
 
     if (trimmedCompany && trimmedCompany !== companyName) {
-      await updateCompany({ name: trimmedCompany });
+      try {
+        await updateCompany({ name: trimmedCompany });
+      } catch {
+        return;
+      }
     }
 
     setShowAccountSettings(false);
