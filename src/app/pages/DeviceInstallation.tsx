@@ -85,7 +85,7 @@ export default function DeviceInstallation() {
           installationStatus: 'completed',
           deviceSerialNumber: deviceSerial,
           installedAt: new Date().toISOString(),
-          installer: user.name,
+          installer: user?.name ?? '미인증 사용자',
           photoUrl: installationPhotoPreview,
           serialPhotoUrl: serialPhotoPreview,
           hasPremiumDevice: true,
