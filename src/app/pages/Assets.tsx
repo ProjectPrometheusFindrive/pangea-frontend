@@ -23,7 +23,7 @@ import {
   isPayloadEmpty,
   usePageEndpointState,
 } from '../hooks/usePageEndpointState';
-import type { VehicleAsset } from '../data/mockData';
+import type { VehicleAsset } from '../types/assets';
 import { ApiError } from '../../services/api';
 import {
   createAsset,

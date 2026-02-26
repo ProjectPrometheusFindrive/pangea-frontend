@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { X, Upload, CheckCircle } from 'lucide-react';
-import type { VehicleAsset } from '../data/mockData';
+import type { VehicleAsset } from '../types/assets';
 
 interface DragSelection {
   vehicleNumber: string;
