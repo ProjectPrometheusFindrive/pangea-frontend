@@ -1,10 +1,10 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { ApiError, setApiAccessTokenProvider, setApiUnauthorizedHandler } from '../../services/api';
+import { ApiError, apiClient, setApiAccessTokenProvider } from '../../services/api';
 import {
   getMe,
   postLogin,
-  postRefresh,
   postLogout,
+  postRefresh,
   toViewRole,
   type AuthLoginPayload,
   type AuthRefreshData,
@@ -16,6 +16,7 @@ type AuthStatus = 'checking' | 'authenticated' | 'unauthenticated';
 
 interface LogoutOptions {
   silent?: boolean;
+  redirectToLogin?: boolean;
 }
 
 interface AuthContextType {
@@ -38,7 +39,104 @@ interface AuthSession {
 }
 
 const AUTH_SESSION_KEY = 'pangea.auth.v1';
+const AUTH_RETURN_URL_KEY = 'pangea.auth.return-url.v1';
+const AUTH_STORAGE_KEYS = [
+  AUTH_SESSION_KEY,
+  'pangea.auth.token',
+  'pangea.refresh.token',
+  'accessToken',
+  'refreshToken',
+];
+const LOGIN_PATH = '/login';
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
+
+function isLoginPath(path: string): boolean {
+  return path === LOGIN_PATH || path.startsWith(`${LOGIN_PATH}?`) || path.startsWith(`${LOGIN_PATH}#`);
+}
+
+function isAbsoluteUrl(value: string): boolean {
+  return /^https?:\/\//i.test(value);
+}
+
+function normalizeReturnUrl(value: string): string | null {
+  const trimmedValue = value.trim();
+  if (!trimmedValue.startsWith('/') || isLoginPath(trimmedValue)) {
+    return null;
+  }
+  return trimmedValue;
+}
+
+function buildCurrentPath(): string {
+  if (typeof window === 'undefined') {
+    return '/';
+  }
+  return `${window.location.pathname}${window.location.search}${window.location.hash}`;
+}
+
+function removeStorageItem(storage: Storage, key: string): void {
+  try {
+    storage.removeItem(key);
+  } catch {
+    // storage 접근이 제한된 환경에서는 제거를 건너뛴다.
+  }
+}
+
+function clearStoredReturnUrl(): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  removeStorageItem(window.sessionStorage, AUTH_RETURN_URL_KEY);
+}
+
+export function rememberReturnUrl(path: string): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  const normalizedPath = normalizeReturnUrl(path);
+  if (!normalizedPath) {
+    return;
+  }
+
+  try {
+    window.sessionStorage.setItem(AUTH_RETURN_URL_KEY, normalizedPath);
+  } catch {
+    // storage 접근이 제한된 환경에서는 저장을 건너뛴다.
+  }
+}
+
+export function rememberCurrentPathAsReturnUrl(): void {
+  rememberReturnUrl(buildCurrentPath());
+}
+
+export function consumeStoredReturnUrl(): string | null {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  try {
+    const rawValue = window.sessionStorage.getItem(AUTH_RETURN_URL_KEY);
+    removeStorageItem(window.sessionStorage, AUTH_RETURN_URL_KEY);
+
+    if (!rawValue) {
+      return null;
+    }
+
+    return normalizeReturnUrl(rawValue);
+  } catch {
+    return null;
+  }
+}
+
+function redirectToLogin(reason: 'manual' | 'expired'): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  const targetUrl = new URL(LOGIN_PATH, window.location.origin);
+  targetUrl.searchParams.set('reason', reason);
+  window.location.assign(`${targetUrl.pathname}${targetUrl.search}`);
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
@@ -79,10 +177,13 @@ function parseStoredSession(rawValue: string | null): AuthSession | null {
   try {
     const parsedValue: unknown = JSON.parse(rawValue);
     if (!isAuthSession(parsedValue)) {
+      removeStorageItem(window.localStorage, AUTH_SESSION_KEY);
       return null;
     }
 
     if (parsedValue.expiresAt <= Date.now()) {
+      removeStorageItem(window.localStorage, AUTH_SESSION_KEY);
+      removeStorageItem(window.sessionStorage, AUTH_SESSION_KEY);
       return null;
     }
 
@@ -122,10 +223,10 @@ function clearStoredSession(): void {
     return;
   }
 
-  try {
-    window.localStorage.removeItem(AUTH_SESSION_KEY);
-  } catch {
-    // localStorage 접근이 제한된 환경에서는 캐시 제거를 건너뛴다.
+  for (const storage of [window.localStorage, window.sessionStorage]) {
+    for (const key of AUTH_STORAGE_KEYS) {
+      removeStorageItem(storage, key);
+    }
   }
 }
 
@@ -157,13 +258,26 @@ function toSessionFromTokenResponse(
   };
 }
 
+function toRequestPath(path: string): string {
+  if (isAbsoluteUrl(path)) {
+    try {
+      return new URL(path).pathname;
+    } catch {
+      return path;
+    }
+  }
+  return path;
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<AuthStatus>('checking');
   const [user, setUser] = useState<AuthUser | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const refreshPromiseRef = useRef<Promise<boolean> | null>(null);
+  const [isSessionExpiredModalOpen, setIsSessionExpiredModalOpen] = useState(false);
+  const refreshPromiseRef = useRef<Promise<AuthSession | null> | null>(null);
+  const sessionExpiredHandledRef = useRef(false);
 
   const applySession = useCallback((session: AuthSession) => {
     setToken(session.token);
@@ -181,49 +295,56 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setApiAccessTokenProvider(undefined);
   }, []);
 
-  const executeTokenRefresh = useCallback(async (): Promise<boolean> => {
+  const handleSessionExpired = useCallback(() => {
+    if (sessionExpiredHandledRef.current) {
+      return;
+    }
+
+    sessionExpiredHandledRef.current = true;
+    refreshPromiseRef.current = null;
+    rememberCurrentPathAsReturnUrl();
+    clearSession();
+    setError('세션이 만료되었습니다. 다시 로그인해 주세요.');
+    setIsLoading(false);
+    setIsSessionExpiredModalOpen(true);
+  }, [clearSession]);
+
+  const refreshAccessToken = useCallback(async (): Promise<AuthSession | null> => {
+    if (refreshPromiseRef.current) {
+      return refreshPromiseRef.current;
+    }
+
     const storedSession = readStoredSession();
-
     if (!storedSession) {
-      clearSession();
-      return false;
+      return null;
     }
 
-    try {
-      const refreshData = await postRefresh();
-      if (!refreshData?.token) {
-        throw new Error('토큰 갱신 응답이 올바르지 않습니다.');
-      }
-
-      const refreshedSession = toSessionFromTokenResponse(refreshData, storedSession.user);
-      applySession(refreshedSession);
-
+    const refreshPromise = (async () => {
       try {
-        const nextUser = await getMe();
-        applySession({
-          ...refreshedSession,
-          user: nextUser,
-        });
+        const refreshData = await postRefresh();
+        const nextToken = typeof refreshData.token === 'string' && refreshData.token.trim().length > 0
+          ? refreshData.token
+          : storedSession.token;
+
+        const refreshedSession = toSessionFromTokenResponse(
+          {
+            ...refreshData,
+            token: nextToken,
+          },
+          storedSession.user,
+        );
+        applySession(refreshedSession);
+        return refreshedSession;
       } catch {
-        // /me 실패 시 refresh 응답의 user(또는 기존 user)를 유지한다.
-      }
-
-      return true;
-    } catch (refreshError) {
-      clearSession();
-      setError(toErrorMessage(refreshError, '세션이 만료되어 로그아웃되었습니다.'));
-      return false;
-    }
-  }, [applySession, clearSession]);
-
-  const refreshAccessToken = useCallback(async (): Promise<boolean> => {
-    if (!refreshPromiseRef.current) {
-      refreshPromiseRef.current = executeTokenRefresh().finally(() => {
+        return null;
+      } finally {
         refreshPromiseRef.current = null;
-      });
-    }
-    return refreshPromiseRef.current;
-  }, [executeTokenRefresh]);
+      }
+    })();
+
+    refreshPromiseRef.current = refreshPromise;
+    return refreshPromise;
+  }, [applySession]);
 
   const refreshSession = useCallback(async () => {
     const storedSession = readStoredSession();
@@ -248,12 +369,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         user: nextUser,
       });
     } catch (refreshError) {
-      clearSession();
-      setError(toErrorMessage(refreshError, '세션 정보를 확인하지 못했습니다.'));
+      if (refreshError instanceof ApiError && refreshError.status === 401) {
+        const refreshedSession = await refreshAccessToken();
+
+        if (!refreshedSession) {
+          handleSessionExpired();
+          return;
+        }
+
+        try {
+          const refreshedUser = await getMe();
+          applySession({
+            ...refreshedSession,
+            user: refreshedUser,
+          });
+        } catch {
+          handleSessionExpired();
+          return;
+        }
+      } else {
+        clearSession();
+        setError(toErrorMessage(refreshError, '세션 정보를 확인하지 못했습니다.'));
+      }
     } finally {
       setIsLoading(false);
     }
-  }, [applySession, clearSession]);
+  }, [applySession, clearSession, handleSessionExpired, refreshAccessToken]);
 
   const login = useCallback(async (payload: AuthLoginPayload) => {
     setError(null);
@@ -264,6 +405,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const loginData = await postLogin(payload);
       const initialSession = toSessionFromTokenResponse(loginData, null);
 
+      sessionExpiredHandledRef.current = false;
+      setIsSessionExpiredModalOpen(false);
       applySession(initialSession);
 
       try {
@@ -297,17 +440,82 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setError(toErrorMessage(logoutError, '로그아웃 처리 중 오류가 발생했습니다.'));
       }
     } finally {
+      clearStoredReturnUrl();
+      refreshPromiseRef.current = null;
+      sessionExpiredHandledRef.current = false;
+      setIsSessionExpiredModalOpen(false);
       clearSession();
       setIsLoading(false);
+
+      if (options?.redirectToLogin !== false) {
+        redirectToLogin('manual');
+      }
     }
   }, [clearSession, token]);
 
+  const handleSessionExpiredConfirm = useCallback(() => {
+    setIsSessionExpiredModalOpen(false);
+    redirectToLogin('expired');
+  }, []);
+
   useEffect(() => {
-    setApiUnauthorizedHandler(refreshAccessToken);
-    return () => {
-      setApiUnauthorizedHandler(undefined);
-    };
-  }, [refreshAccessToken]);
+    const removeInterceptor = apiClient.useResponseInterceptor(async (context) => {
+      if (context.response.status !== 401 || context.request.config.skipAuth) {
+        return context;
+      }
+
+      if (!readStoredSession()) {
+        return context;
+      }
+
+      if (sessionExpiredHandledRef.current) {
+        return context;
+      }
+
+      const requestPath = toRequestPath(context.request.config.path);
+      if (requestPath === '/api/v2/auth/login' || requestPath === '/api/v2/auth/refresh') {
+        return context;
+      }
+
+      if (requestPath === '/api/v2/auth/logout') {
+        return context;
+      }
+
+      if (context.request.config.internal?.hasRetriedAuth) {
+        handleSessionExpired();
+        return context;
+      }
+
+      const refreshedSession = await refreshAccessToken();
+      if (!refreshedSession) {
+        handleSessionExpired();
+        return context;
+      }
+
+      try {
+        const retriedBody = await apiClient.request<unknown>({
+          ...context.request.config,
+          internal: {
+            ...context.request.config.internal,
+            hasRetriedAuth: true,
+          },
+        });
+
+        return {
+          ...context,
+          response: new Response(null, { status: 200, statusText: 'OK' }),
+          body: retriedBody,
+        };
+      } catch (retryError) {
+        if (retryError instanceof ApiError && retryError.status === 401) {
+          handleSessionExpired();
+        }
+        throw retryError;
+      }
+    });
+
+    return removeInterceptor;
+  }, [handleSessionExpired, refreshAccessToken]);
 
   useEffect(() => {
     void refreshSession();
@@ -326,11 +534,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const nextSession = parseStoredSession(event.newValue);
       if (!nextSession) {
         clearSession();
+        sessionExpiredHandledRef.current = false;
+        setIsSessionExpiredModalOpen(false);
         setError(null);
         setIsLoading(false);
         return;
       }
 
+      sessionExpiredHandledRef.current = false;
+      setIsSessionExpiredModalOpen(false);
       applySession(nextSession);
       setError(null);
       setIsLoading(false);
@@ -365,6 +577,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   return (
     <AuthContext.Provider value={contextValue}>
       {children}
+      {isSessionExpiredModalOpen && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 px-4">
+          <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl">
+            <h2 className="text-lg font-semibold text-gray-900">세션이 만료되었습니다</h2>
+            <p className="mt-2 text-sm text-gray-600">
+              보안을 위해 로그인 세션이 종료되었습니다. 다시 로그인해 주세요.
+            </p>
+            <div className="mt-6 flex justify-end">
+              <button
+                type="button"
+                onClick={handleSessionExpiredConfirm}
+                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-700"
+              >
+                로그인으로 이동
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </AuthContext.Provider>
   );
 }

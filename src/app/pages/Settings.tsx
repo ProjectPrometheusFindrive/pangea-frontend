@@ -1,8 +1,17 @@
 import { Layout } from '../components/Layout';
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router';
 import { Plus, MapPin, Upload, Download, FileSpreadsheet, CheckCircle, XCircle, AlertCircle, FileText } from 'lucide-react';
 import Papa from 'papaparse';
+import { PageStateBoundary } from '../components/PageStateBoundary';
+import {
+  getPageErrorActionLabel,
+  handlePageErrorAction,
+  isPayloadEmpty,
+  usePageEndpointState,
+} from '../hooks/usePageEndpointState';
 import { vehicleAssets, reservations } from '../data/mockData';
+import { getSettingsDashboard } from '../../services/dashboard';
 
 type TabType = 'bulk' | 'geofence' | 'accounts';
 type UploadType = 'vehicles' | 'reservations' | 'ocr';
@@ -15,12 +24,35 @@ interface UploadResult {
 }
 
 export default function Settings() {
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<TabType>('bulk');
   const [uploadType, setUploadType] = useState<UploadType>('vehicles');
   const [uploadResult, setUploadResult] = useState<UploadResult | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [previewData, setPreviewData] = useState<any[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const {
+    isLoading: isSettingsLoading,
+    error: settingsError,
+    errorKind: settingsErrorKind,
+    isEmpty: isSettingsApiEmpty,
+    run: hydrateSettings,
+  } = usePageEndpointState<unknown>({
+    request: (signal) => getSettingsDashboard({ signal }),
+    isEmpty: (payload) => isPayloadEmpty(payload, ['settings', 'items', 'rows', 'list']),
+  });
+
+  useEffect(() => {
+    void hydrateSettings();
+  }, []);
+
+  const handleSettingsRetry = useCallback(() => {
+    void hydrateSettings();
+  }, [hydrateSettings]);
+
+  const handleSettingsErrorAction = useCallback(() => {
+    handlePageErrorAction(settingsErrorKind, navigate);
+  }, [navigate, settingsErrorKind]);
 
   const geofences = [
     { id: '1', name: '서울 강남 영업소', radius: '500m', vehicleCount: 12, active: true },
@@ -253,7 +285,21 @@ export default function Settings() {
 
   return (
     <Layout title="설정">
-      <div className="p-6">
+      <PageStateBoundary
+        isLoading={isSettingsLoading}
+        error={settingsError}
+        isEmpty={isSettingsApiEmpty}
+        errorDescription="설정 데이터를 불러오는 중 문제가 발생했습니다."
+        emptyTitle="표시할 설정 데이터가 없습니다"
+        emptyDescription="잠시 후 다시 시도하거나 관리자에게 문의해 주세요."
+        onRetry={handleSettingsRetry}
+        errorActionLabel={getPageErrorActionLabel(settingsErrorKind)}
+        onErrorAction={handleSettingsErrorAction}
+        emptyActionLabel="다시 불러오기"
+        onEmptyAction={handleSettingsRetry}
+        className="m-6 min-h-[320px]"
+      >
+        <div className="p-6">
         {/* 탭 */}
         <div className="flex gap-2 mb-6 border-b border-gray-200">
           <button
@@ -761,6 +807,7 @@ export default function Settings() {
           </div>
         )}
       </div>
+      </PageStateBoundary>
     </Layout>
   );
 }

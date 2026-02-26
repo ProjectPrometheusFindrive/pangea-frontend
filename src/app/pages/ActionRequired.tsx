@@ -1,8 +1,15 @@
 import { Layout } from '../components/Layout';
 import { useSearchParams, useNavigate } from 'react-router';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Search, X, ArrowUp, ArrowDown, Clock, User, CheckCircle2 } from 'lucide-react';
 import { PageStateBoundary } from '../components/PageStateBoundary';
+import {
+  getCollectionFromPayload,
+  getPageErrorActionLabel,
+  handlePageErrorAction,
+  isPayloadEmpty,
+  usePageEndpointState,
+} from '../hooks/usePageEndpointState';
 import { 
   mockPayments, 
   getUnpaidPayments, 
@@ -12,6 +19,7 @@ import {
   type Payment,
 } from '../utils/paymentUtils';
 import { actionItems as mockActionItems, type MemoLog, type ActionItem as BaseActionItem } from '../data/mockData';
+import { getActionRequiredDashboard } from '../../services/dashboard';
 
 interface ActionItem {
   id: string;
@@ -36,6 +44,166 @@ interface ActionItem {
 type SortField = 'type' | 'vehicleNumber' | 'customerName' | 'date' | 'severity' | 'status' | 'assignee';
 type SortDirection = 'asc' | 'desc' | null;
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function toStringValue(value: unknown): string | null {
+  if (typeof value === 'string') {
+    const normalized = value.trim();
+    return normalized ? normalized : null;
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return String(value);
+  }
+  return null;
+}
+
+function toNumberValue(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === 'string') {
+    const parsedValue = Number(value);
+    if (Number.isFinite(parsedValue)) {
+      return parsedValue;
+    }
+  }
+  return null;
+}
+
+function normalizeActionPriority(priorityValue: string | null): BaseActionItem['priority'] {
+  if (priorityValue === 'high' || priorityValue === 'medium' || priorityValue === 'low') {
+    return priorityValue;
+  }
+  if (priorityValue === 'High') {
+    return 'high';
+  }
+  if (priorityValue === 'Medium') {
+    return 'medium';
+  }
+  return 'low';
+}
+
+function normalizeActionStatus(statusValue: string | null): BaseActionItem['status'] {
+  if (statusValue === 'pending' || statusValue === 'in-progress' || statusValue === 'resolved') {
+    return statusValue;
+  }
+  if (statusValue === '대기중') {
+    return 'pending';
+  }
+  if (statusValue === '진행중') {
+    return 'in-progress';
+  }
+  if (statusValue === '완료') {
+    return 'resolved';
+  }
+  return 'pending';
+}
+
+function toActionItems(payload: unknown): BaseActionItem[] {
+  const rows = getCollectionFromPayload(payload, ['actionItems', 'items', 'rows', 'list']);
+  if (!rows) {
+    return mockActionItems;
+  }
+
+  if (rows.length === 0) {
+    return [];
+  }
+
+  const normalizedRows: BaseActionItem[] = rows
+    .map((row, index) => {
+      if (!isRecord(row)) {
+        return null;
+      }
+
+      const category = toStringValue(row.category) ?? toStringValue(row.type);
+      const vehicleNumber = toStringValue(row.vehicleNumber) ?? toStringValue(row.plateNumber);
+      if (!category || !vehicleNumber) {
+        return null;
+      }
+
+      return {
+        id: toStringValue(row.id) ?? `AR-${index + 1}`,
+        category,
+        vehicleNumber,
+        customer: toStringValue(row.customer) ?? toStringValue(row.customerName) ?? undefined,
+        issue: toStringValue(row.issue) ?? category,
+        dueDate: toStringValue(row.dueDate) ?? toStringValue(row.date) ?? '1970-01-01',
+        priority: normalizeActionPriority(toStringValue(row.priority)),
+        status: normalizeActionStatus(toStringValue(row.status)),
+        assignee: toStringValue(row.assignee) ?? undefined,
+      };
+    })
+    .filter((row): row is BaseActionItem => row !== null);
+
+  return normalizedRows.length > 0 ? normalizedRows : mockActionItems;
+}
+
+function normalizePaymentType(value: string | null): Payment['type'] {
+  if (value === '예약금' || value === '본결제' || value === '추가정산' || value === '월렌트') {
+    return value;
+  }
+  return '본결제';
+}
+
+function normalizePaymentStatus(value: string | null): Payment['status'] {
+  if (value === '대기' || value === '완료' || value === '미납' || value === '부분납부') {
+    return value;
+  }
+  return '대기';
+}
+
+function normalizePaymentMethod(value: string | null): Payment['method'] {
+  if (value === '카드' || value === '현금' || value === '계좌이체') {
+    return value;
+  }
+  return '카드';
+}
+
+function toPayments(payload: unknown): Payment[] {
+  const rows = getCollectionFromPayload(payload, ['payments', 'paymentItems', 'receivables']);
+  if (!rows) {
+    return mockPayments;
+  }
+
+  if (rows.length === 0) {
+    return [];
+  }
+
+  const normalizedRows: Payment[] = rows
+    .map((row, index) => {
+      if (!isRecord(row)) {
+        return null;
+      }
+
+      const vehicleNumber = toStringValue(row.vehicleNumber) ?? toStringValue(row.plateNumber);
+      const customerName = toStringValue(row.customerName) ?? toStringValue(row.customer);
+      const amount = toNumberValue(row.amount);
+      const dueDate = toStringValue(row.dueDate);
+      if (!vehicleNumber || !customerName || amount === null || !dueDate) {
+        return null;
+      }
+
+      return {
+        id: toStringValue(row.id) ?? `PAY-${index + 1}`,
+        reservationId: toStringValue(row.reservationId) ?? '-',
+        vehicleNumber,
+        customerName,
+        type: normalizePaymentType(toStringValue(row.type)),
+        amount,
+        dueDate,
+        paidDate: toStringValue(row.paidDate) ?? undefined,
+        status: normalizePaymentStatus(toStringValue(row.status)),
+        method: normalizePaymentMethod(toStringValue(row.method)),
+        description: toStringValue(row.description) ?? undefined,
+      };
+    })
+    .filter((row): row is Payment => row !== null);
+
+  return normalizedRows.length > 0 ? normalizedRows : mockPayments;
+}
+
 export default function ActionRequired() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -49,8 +217,6 @@ export default function ActionRequired() {
   const [resolvedItemIds, setResolvedItemIds] = useState<Set<string>>(new Set());
   const [sourceActionItems, setSourceActionItems] = useState<BaseActionItem[]>([]);
   const [sourcePayments, setSourcePayments] = useState<Payment[]>([]);
-  const [isItemsLoading, setIsItemsLoading] = useState(true);
-  const [itemsError, setItemsError] = useState<string | null>(null);
 
   // URL 파라미터에서 필터 읽기
   useEffect(() => {
@@ -71,25 +237,44 @@ export default function ActionRequired() {
     '보험 만료 임박',
   ];
 
-  const hydrateActionItems = () => {
-    setIsItemsLoading(true);
-    setItemsError(null);
-    try {
-      setSourceActionItems(mockActionItems);
-      setSourcePayments(mockPayments);
-    } catch (error) {
-      console.error(error);
-      setSourceActionItems([]);
-      setSourcePayments([]);
-      setItemsError('조치 필요 항목 데이터를 불러오지 못했습니다.');
-    } finally {
-      setIsItemsLoading(false);
-    }
-  };
+  const {
+    isLoading: isItemsLoading,
+    error: itemsError,
+    errorKind: itemsErrorKind,
+    isEmpty: isActionApiEmpty,
+    run: hydrateActionItems,
+  } = usePageEndpointState<unknown>({
+    request: (signal) => getActionRequiredDashboard({ signal }),
+    onSuccess: (payload) => {
+      setSourceActionItems(toActionItems(payload));
+      setSourcePayments(toPayments(payload));
+    },
+    isEmpty: (payload) => {
+      const actionRows = getCollectionFromPayload(payload, ['actionItems', 'items', 'rows', 'list']);
+      const paymentRows = getCollectionFromPayload(payload, ['payments', 'paymentItems', 'receivables']);
+      if (actionRows || paymentRows) {
+        return (actionRows?.length ?? 0) === 0 && (paymentRows?.length ?? 0) === 0;
+      }
+      return isPayloadEmpty(payload, ['actionItems', 'items', 'rows', 'list']);
+    },
+  });
 
   useEffect(() => {
-    hydrateActionItems();
+    void hydrateActionItems();
   }, []);
+
+  const handleActionItemsRetry = useCallback(() => {
+    void hydrateActionItems();
+  }, [hydrateActionItems]);
+
+  const resetActionFilters = useCallback(() => {
+    setSelectedFilters([]);
+    setSearchQuery('');
+  }, []);
+
+  const handleActionErrorAction = useCallback(() => {
+    handlePageErrorAction(itemsErrorKind, navigate);
+  }, [itemsErrorKind, navigate]);
 
   // mockData.ts의 actionItems를 ActionItem 형식으로 변환
   const convertedActionItems: ActionItem[] = sourceActionItems.map(item => ({
@@ -286,11 +471,15 @@ export default function ActionRequired() {
         <PageStateBoundary
           isLoading={isItemsLoading}
           error={itemsError}
-          isEmpty={!isItemsLoading && !itemsError && sortedItems.length === 0}
+          isEmpty={!isItemsLoading && !itemsError && (isActionApiEmpty || sortedItems.length === 0)}
           errorDescription="조치 필요 항목 목록을 불러오는 중 문제가 발생했습니다."
           emptyTitle="조건에 맞는 조치 항목이 없습니다"
           emptyDescription="필터나 검색어를 조정해 다시 확인해 주세요."
-          onRetry={hydrateActionItems}
+          onRetry={handleActionItemsRetry}
+          errorActionLabel={getPageErrorActionLabel(itemsErrorKind)}
+          onErrorAction={handleActionErrorAction}
+          emptyActionLabel="필터 초기화"
+          onEmptyAction={resetActionFilters}
           className="min-h-[280px]"
         >
           <div className="bg-white rounded-xl shadow-sm overflow-hidden">

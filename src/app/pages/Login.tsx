@@ -1,8 +1,9 @@
-import { FormEvent, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { Navigate, useNavigate, useSearchParams } from 'react-router';
 import { Loader2, RefreshCw } from 'lucide-react';
+import { toast } from 'sonner';
 
-import { useAuth } from '../context/AuthContext';
+import { consumeStoredReturnUrl, useAuth } from '../context/AuthContext';
 import { ApiError } from '../../services/api';
 
 interface LoginUiError {
@@ -40,8 +41,14 @@ function toLoginUiError(error: unknown): LoginUiError {
 
 export default function Login() {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
-  const { status, isAuthenticated, login } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const {
+    status,
+    isAuthenticated,
+    login,
+    error: authError,
+    isLoading,
+  } = useAuth();
 
   const returnUrl = useMemo(
     () => normalizeReturnUrl(searchParams.get('returnUrl')),
@@ -53,6 +60,26 @@ export default function Login() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [lastPayload, setLastPayload] = useState<{ userId: string; password: string } | null>(null);
   const [uiError, setUiError] = useState<LoginUiError | null>(null);
+
+  const isBusy = isSubmitting || isLoading;
+  const errorMessage = uiError?.message ?? authError;
+
+  useEffect(() => {
+    const reason = searchParams.get('reason');
+    if (!reason) {
+      return;
+    }
+
+    if (reason === 'manual') {
+      toast.success('로그아웃되었습니다.');
+    } else if (reason === 'expired') {
+      toast.info('세션이 만료되어 다시 로그인해 주세요.');
+    }
+
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.delete('reason');
+    setSearchParams(nextParams, { replace: true });
+  }, [searchParams, setSearchParams]);
 
   if (status === 'checking') {
     return (
@@ -89,7 +116,9 @@ export default function Login() {
 
     try {
       await login(payload);
-      navigate(returnUrl, { replace: true });
+      const storedReturnUrl = consumeStoredReturnUrl();
+      const targetPath = returnUrl !== '/' ? returnUrl : storedReturnUrl ?? '/';
+      navigate(targetPath, { replace: true });
     } catch (error) {
       setUiError(toLoginUiError(error));
     } finally {
@@ -107,7 +136,9 @@ export default function Login() {
 
     try {
       await login(lastPayload);
-      navigate(returnUrl, { replace: true });
+      const storedReturnUrl = consumeStoredReturnUrl();
+      const targetPath = returnUrl !== '/' ? returnUrl : storedReturnUrl ?? '/';
+      navigate(targetPath, { replace: true });
     } catch (error) {
       setUiError(toLoginUiError(error));
     } finally {
@@ -138,7 +169,7 @@ export default function Login() {
               onChange={(event) => setUserId(event.target.value)}
               autoComplete="username"
               className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-              disabled={isSubmitting}
+              disabled={isBusy}
             />
           </div>
 
@@ -153,22 +184,22 @@ export default function Login() {
               onChange={(event) => setPassword(event.target.value)}
               autoComplete="current-password"
               className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-              disabled={isSubmitting}
+              disabled={isBusy}
             />
           </div>
 
-          {uiError && (
+          {errorMessage && (
             <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-              {uiError.message}
+              {errorMessage}
             </div>
           )}
 
           <button
             type="submit"
-            disabled={isSubmitting}
+            disabled={isBusy}
             className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {isSubmitting && <Loader2 className="h-4 w-4 animate-spin" />}
+            {isBusy && <Loader2 className="h-4 w-4 animate-spin" />}
             로그인
           </button>
         </form>
@@ -177,7 +208,7 @@ export default function Login() {
           <button
             type="button"
             onClick={handleRetry}
-            disabled={isSubmitting}
+            disabled={isBusy}
             className="mt-3 inline-flex items-center gap-1 text-sm font-medium text-blue-600 transition hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <RefreshCw className="h-4 w-4" />

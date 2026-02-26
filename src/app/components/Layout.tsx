@@ -165,9 +165,8 @@ export function Layout({ children, title }: LayoutProps) {
   };
 
   const handleLogout = async () => {
-    await logout();
+    await logout({ silent: true, redirectToLogin: true });
     setShowAccountMenu(false);
-    navigate('/login', { replace: true });
   };
 
   const handleOpenSettings = () => {

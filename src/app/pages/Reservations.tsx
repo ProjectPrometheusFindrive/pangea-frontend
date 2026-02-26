@@ -1,12 +1,20 @@
 import { Layout } from '../components/Layout';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useSearchParams, useNavigate } from 'react-router';
 import { ChevronLeft, ChevronRight, Plus, ArrowRight, Car, Calendar, AlertCircle, DollarSign, AlertTriangle, X } from 'lucide-react';
 import { AccidentReportModal } from '../components/AccidentReportModal';
 import { NewContractModal } from '../components/NewContractModal';
 import { PageStateBoundary } from '../components/PageStateBoundary';
 import type { AccidentReport } from '../utils/issueUtils';
+import {
+  getCollectionFromPayload,
+  getPageErrorActionLabel,
+  handlePageErrorAction,
+  isPayloadEmpty,
+  usePageEndpointState,
+} from '../hooks/usePageEndpointState';
 import { reservations as mockReservations, vehicleAssets as mockVehicleAssets, type Reservation, type VehicleAsset } from '../data/mockData';
+import { getReservationsDashboard } from '../../services/dashboard';
 
 // 드래그 선택 타입 정의
 type DragSelection = {
@@ -14,6 +22,191 @@ type DragSelection = {
   startDate: number;
   endDate: number;
 } | null;
+
+const CALENDAR_BASE_DATE = new Date(2025, 1, 17);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function toStringValue(value: unknown): string | null {
+  if (typeof value === 'string') {
+    const normalized = value.trim();
+    return normalized ? normalized : null;
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return String(value);
+  }
+  return null;
+}
+
+function toNumberValue(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === 'string') {
+    const parsedValue = Number(value);
+    if (Number.isFinite(parsedValue)) {
+      return parsedValue;
+    }
+  }
+  return null;
+}
+
+function toDateOffset(value: unknown): number | null {
+  const numericOffset = toNumberValue(value);
+  if (numericOffset !== null) {
+    return numericOffset;
+  }
+
+  const dateString = toStringValue(value);
+  if (!dateString) {
+    return null;
+  }
+
+  const parsedDate = new Date(dateString);
+  if (Number.isNaN(parsedDate.getTime())) {
+    return null;
+  }
+
+  return Math.floor((parsedDate.getTime() - CALENDAR_BASE_DATE.getTime()) / (1000 * 60 * 60 * 24));
+}
+
+function normalizeReservationType(value: string | null): Reservation['type'] {
+  if (value === 'reservation' || value === 'rental' || value === 'return') {
+    return value;
+  }
+  if (value === '예약') {
+    return 'reservation';
+  }
+  if (value === '대여중' || value === '대여') {
+    return 'rental';
+  }
+  if (value === '반납' || value === '반납완료') {
+    return 'return';
+  }
+  return 'reservation';
+}
+
+function normalizeIssues(issueValue: unknown): string[] {
+  if (!Array.isArray(issueValue)) {
+    return [];
+  }
+
+  return issueValue
+    .map((entry) => {
+      if (typeof entry === 'string') {
+        return entry.trim();
+      }
+      if (isRecord(entry)) {
+        return toStringValue(entry.label) ?? toStringValue(entry.name) ?? toStringValue(entry.type) ?? '';
+      }
+      return '';
+    })
+    .filter((entry) => entry.length > 0);
+}
+
+function toReservationRows(payload: unknown): Reservation[] {
+  const rows = getCollectionFromPayload(payload, ['reservations', 'items', 'rows', 'list']);
+  if (!rows) {
+    return mockReservations;
+  }
+
+  if (rows.length === 0) {
+    return [];
+  }
+
+  const normalizedRows: Reservation[] = rows
+    .map((row, index) => {
+      if (!isRecord(row)) {
+        return null;
+      }
+
+      const vehicleNumber = toStringValue(row.vehicleNumber) ?? toStringValue(row.plateNumber);
+      const customer = toStringValue(row.customer) ?? toStringValue(row.customerName);
+      if (!vehicleNumber || !customer) {
+        return null;
+      }
+
+      const startDateOffset = toDateOffset(row.startDate) ?? toDateOffset(row.startDateFull) ?? 0;
+      const endDateOffsetCandidate = toDateOffset(row.endDate) ?? toDateOffset(row.endDateFull) ?? startDateOffset;
+      const endDateOffset = endDateOffsetCandidate < startDateOffset ? startDateOffset : endDateOffsetCandidate;
+
+      return {
+        id: toStringValue(row.id) ?? `R${String(index + 1).padStart(3, '0')}`,
+        vehicleNumber,
+        customer,
+        startDate: startDateOffset,
+        endDate: endDateOffset,
+        type: normalizeReservationType(toStringValue(row.type)),
+        issues: normalizeIssues(row.issues),
+        phone: toStringValue(row.phone) ?? '-',
+        paymentMethod: '카드',
+        amount: toStringValue(row.amount) ?? '0원',
+        deposit: toStringValue(row.deposit) ?? '0원',
+        paymentStatus: '대기',
+        startDateFull: toStringValue(row.startDateFull) ?? '',
+        endDateFull: toStringValue(row.endDateFull) ?? '',
+      };
+    })
+    .filter((row): row is Reservation => row !== null);
+
+  return normalizedRows.length > 0 ? normalizedRows : mockReservations;
+}
+
+function normalizeVehicleStatus(statusValue: string | null): VehicleAsset['status'] {
+  if (statusValue === '대여중' || statusValue === '예약' || statusValue === '가용' || statusValue === '정비중') {
+    return statusValue;
+  }
+  if (statusValue === 'reserved' || statusValue === '예약됨') {
+    return '예약';
+  }
+  if (statusValue === 'rental' || statusValue === 'in_use') {
+    return '대여중';
+  }
+  if (statusValue === 'maintenance' || statusValue === 'repair') {
+    return '정비중';
+  }
+  return '가용';
+}
+
+function toVehicleRows(payload: unknown): VehicleAsset[] {
+  const rows = getCollectionFromPayload(payload, ['vehicleAssets', 'vehicles', 'assets']);
+  if (!rows) {
+    return mockVehicleAssets;
+  }
+
+  if (rows.length === 0) {
+    return [];
+  }
+
+  const normalizedRows: VehicleAsset[] = rows
+    .map((row) => {
+      if (!isRecord(row)) {
+        return null;
+      }
+
+      const vehicleNumber = toStringValue(row.vehicleNumber) ?? toStringValue(row.plateNumber);
+      if (!vehicleNumber) {
+        return null;
+      }
+
+      return {
+        vehicleNumber,
+        model: toStringValue(row.model) ?? toStringValue(row.vehicleModel) ?? '차종 미확인',
+        status: normalizeVehicleStatus(toStringValue(row.status)),
+        issues: normalizeIssues(row.issues),
+        insuranceExpiry: toStringValue(row.insuranceExpiry) ?? '-',
+        nextInspection: toStringValue(row.nextInspection) ?? '-',
+        vin: toStringValue(row.vin) ?? '-',
+        year: toStringValue(row.year) ?? '-',
+        owner: toStringValue(row.owner) ?? '-',
+      };
+    })
+    .filter((row): row is VehicleAsset => row !== null);
+
+  return normalizedRows.length > 0 ? normalizedRows : mockVehicleAssets;
+}
 
 export default function Reservations() {
   const [searchParams] = useSearchParams();
@@ -31,8 +224,6 @@ export default function Reservations() {
   const [showAccidentModal, setShowAccidentModal] = useState(false);
   const [reservationsData, setReservationsData] = useState<Reservation[]>([]);
   const [vehicleAssets, setVehicleAssets] = useState<VehicleAsset[]>([]);
-  const [isPageLoading, setIsPageLoading] = useState(true);
-  const [pageError, setPageError] = useState<string | null>(null);
   const [targetDate, setTargetDate] = useState('');
   
   // 동적 날짜 로딩을 위한 상태
@@ -45,25 +236,45 @@ export default function Reservations() {
   const [dragEnd, setDragEnd] = useState<{ vehicle: string; date: number } | null>(null);
   const [dragSelection, setDragSelection] = useState<DragSelection>(null);
 
-  const hydrateReservationsData = () => {
-    setIsPageLoading(true);
-    setPageError(null);
-    try {
-      setReservationsData(mockReservations);
-      setVehicleAssets(mockVehicleAssets);
-    } catch (error) {
-      console.error(error);
-      setReservationsData([]);
-      setVehicleAssets([]);
-      setPageError('예약 데이터를 불러오지 못했습니다.');
-    } finally {
-      setIsPageLoading(false);
-    }
-  };
+  const {
+    isLoading: isPageLoading,
+    error: pageError,
+    errorKind: pageErrorKind,
+    isEmpty: isReservationsApiEmpty,
+    run: hydrateReservationsData,
+  } = usePageEndpointState<unknown>({
+    request: (signal) => getReservationsDashboard({ signal }),
+    onSuccess: (payload) => {
+      setReservationsData(toReservationRows(payload));
+      setVehicleAssets(toVehicleRows(payload));
+    },
+    isEmpty: (payload) => {
+      const rows = getCollectionFromPayload(payload, ['reservations', 'items', 'rows', 'list']);
+      if (rows) {
+        return rows.length === 0;
+      }
+      return isPayloadEmpty(payload, ['reservations', 'items', 'rows', 'list']);
+    },
+  });
 
   useEffect(() => {
-    hydrateReservationsData();
+    void hydrateReservationsData();
   }, []);
+
+  const handleReservationsRetry = useCallback(() => {
+    void hydrateReservationsData();
+  }, [hydrateReservationsData]);
+
+  const resetReservationFilters = useCallback(() => {
+    setViewFilter('all');
+    setModelFilter('all');
+    setVehicleSearchQuery('');
+    setSearchQuery('');
+  }, []);
+
+  const handleReservationsErrorAction = useCallback(() => {
+    handlePageErrorAction(pageErrorKind, navigate);
+  }, [navigate, pageErrorKind]);
 
   // URL 파라미터에서 필터 가져오기
   useEffect(() => {
@@ -428,11 +639,15 @@ export default function Reservations() {
           <PageStateBoundary
             isLoading={isPageLoading}
             error={pageError}
-            isEmpty={!isPageLoading && !pageError && filteredVehicles.length === 0}
+            isEmpty={!isPageLoading && !pageError && (isReservationsApiEmpty || filteredVehicles.length === 0)}
             errorDescription="예약 캘린더 데이터를 불러오는 중 문제가 발생했습니다."
             emptyTitle="조건에 맞는 차량이 없습니다"
             emptyDescription="필터를 완화하거나 차량번호 검색어를 지워 다시 확인해 주세요."
-            onRetry={hydrateReservationsData}
+            onRetry={handleReservationsRetry}
+            errorActionLabel={getPageErrorActionLabel(pageErrorKind)}
+            onErrorAction={handleReservationsErrorAction}
+            emptyActionLabel="필터 초기화"
+            onEmptyAction={resetReservationFilters}
             className="m-3 min-h-[320px]"
           >
             <div className="overflow-x-auto flex-1" ref={scrollContainerRef} onScroll={handleScroll}>

@@ -1,11 +1,19 @@
 import { Layout } from '../components/Layout';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Plus, Upload, X, Loader2, FileText, Calendar as CalendarIcon, DollarSign, AlertTriangle, Filter } from 'lucide-react';
 import { useSearchParams, useNavigate } from 'react-router';
 import { PremiumBanner } from '../components/PremiumBanner';
 import { PageStateBoundary } from '../components/PageStateBoundary';
 import { VehicleDetailModal } from '../components/VehicleDetailModal';
+import {
+  getCollectionFromPayload,
+  getPageErrorActionLabel,
+  handlePageErrorAction,
+  isPayloadEmpty,
+  usePageEndpointState,
+} from '../hooks/usePageEndpointState';
 import { vehicleAssets as mockVehicleAssets, type VehicleAsset } from '../data/mockData';
+import { getAssetsDashboard } from '../../services/dashboard';
 
 interface Asset extends VehicleAsset {
   id?: string;
@@ -25,6 +33,127 @@ const initialAssets: Asset[] = mockVehicleAssets.map((asset, index) => ({
   hasDevice: index % 10 === 0, // 10대당 1대는 단말 설치되어 있다고 가정
 }));
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function toStringValue(value: unknown): string | null {
+  if (typeof value === 'string') {
+    const normalized = value.trim();
+    return normalized ? normalized : null;
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return String(value);
+  }
+  return null;
+}
+
+function toBooleanValue(value: unknown): boolean | null {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+  return null;
+}
+
+function normalizeAssetStatus(statusValue: string | null): VehicleAsset['status'] {
+  if (statusValue === '대여중' || statusValue === '예약' || statusValue === '가용' || statusValue === '정비중') {
+    return statusValue;
+  }
+
+  if (statusValue === 'reserved' || statusValue === '예약됨') {
+    return '예약';
+  }
+  if (statusValue === 'rental' || statusValue === 'in_use') {
+    return '대여중';
+  }
+  if (statusValue === 'available' || statusValue === 'idle') {
+    return '가용';
+  }
+  if (statusValue === 'maintenance' || statusValue === 'repair') {
+    return '정비중';
+  }
+
+  return '가용';
+}
+
+function normalizeAssetIssues(issueValue: unknown): string[] {
+  if (!Array.isArray(issueValue)) {
+    return [];
+  }
+
+  return issueValue
+    .map((entry) => {
+      if (typeof entry === 'string') {
+        return entry.trim();
+      }
+      if (isRecord(entry)) {
+        return toStringValue(entry.label) ?? toStringValue(entry.name) ?? toStringValue(entry.type) ?? '';
+      }
+      return '';
+    })
+    .filter((entry) => entry.length > 0);
+}
+
+function toAssetRows(payload: unknown): Asset[] {
+  const rows = getCollectionFromPayload(payload, ['assets', 'items', 'rows', 'list']);
+  if (!rows) {
+    return initialAssets;
+  }
+
+  if (rows.length === 0) {
+    return [];
+  }
+
+  const normalizedRows: Asset[] = rows
+    .map((row, index) => {
+      if (!isRecord(row)) {
+        return null;
+      }
+
+      const vehicleNumber = toStringValue(row.vehicleNumber)
+        ?? toStringValue(row.plateNumber)
+        ?? toStringValue(row.plate)
+        ?? toStringValue(row.number);
+
+      if (!vehicleNumber) {
+        return null;
+      }
+
+      const model = toStringValue(row.model) ?? toStringValue(row.vehicleModel) ?? '차종 미확인';
+      const status = normalizeAssetStatus(
+        toStringValue(row.status) ?? toStringValue(row.assetStatus),
+      );
+      const insuranceExpiry = toStringValue(row.insuranceExpiry)
+        ?? toStringValue(row.insuranceExpiryDate)
+        ?? '-';
+      const nextInspection = toStringValue(row.nextInspection)
+        ?? toStringValue(row.nextInspectionDate)
+        ?? '-';
+      const vin = toStringValue(row.vin) ?? toStringValue(row.chassisNumber) ?? '-';
+      const year = toStringValue(row.year) ?? toStringValue(row.modelYear) ?? '-';
+      const owner = toStringValue(row.owner) ?? toStringValue(row.ownerName) ?? '-';
+      const hasDevice = toBooleanValue(row.hasDevice) ?? toBooleanValue(row.hasPremiumDevice) ?? false;
+
+      return {
+        id: toStringValue(row.id) ?? `A${String(index + 1).padStart(3, '0')}`,
+        vehicleNumber,
+        model,
+        status,
+        issues: normalizeAssetIssues(row.issues),
+        insuranceExpiry,
+        nextInspection,
+        vin,
+        year,
+        owner,
+        hasPremiumDevice: hasDevice,
+        hasDevice,
+      };
+    })
+    .filter((row): row is Asset => row !== null);
+
+  return normalizedRows.length > 0 ? normalizedRows : initialAssets;
+}
+
 export default function Assets() {
   const [searchParams] = useSearchParams();
   const [showModal, setShowModal] = useState(false);
@@ -38,8 +167,6 @@ export default function Assets() {
     loanSchedule: null,
   });
   const [assets, setAssets] = useState<Asset[]>([]);
-  const [isAssetsLoading, setIsAssetsLoading] = useState(true);
-  const [assetsError, setAssetsError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [issueFilter, setIssueFilter] = useState<string>('all');
@@ -52,23 +179,44 @@ export default function Assets() {
 
   const navigate = useNavigate();
 
-  const hydrateAssets = () => {
-    setIsAssetsLoading(true);
-    setAssetsError(null);
-    try {
-      setAssets(initialAssets);
-    } catch (error) {
-      console.error(error);
-      setAssets([]);
-      setAssetsError('차량 자산 데이터를 불러오지 못했습니다.');
-    } finally {
-      setIsAssetsLoading(false);
-    }
-  };
+  const {
+    isLoading: isAssetsLoading,
+    error: assetsError,
+    errorKind: assetsErrorKind,
+    isEmpty: isAssetsApiEmpty,
+    run: hydrateAssets,
+  } = usePageEndpointState<unknown>({
+    request: (signal) => getAssetsDashboard({ signal }),
+    onSuccess: (payload) => {
+      setAssets(toAssetRows(payload));
+    },
+    isEmpty: (payload) => {
+      const rows = getCollectionFromPayload(payload, ['assets', 'items', 'rows', 'list']);
+      if (rows) {
+        return rows.length === 0;
+      }
+      return isPayloadEmpty(payload, ['assets', 'items', 'rows', 'list']);
+    },
+  });
 
   useEffect(() => {
-    hydrateAssets();
+    void hydrateAssets();
   }, []);
+
+  const handleAssetsRetry = useCallback(() => {
+    void hydrateAssets();
+  }, [hydrateAssets]);
+
+  const resetAssetFilters = useCallback(() => {
+    setSearchQuery('');
+    setStatusFilter('all');
+    setIssueFilter('all');
+    setModelFilter('all');
+  }, []);
+
+  const handleAssetsErrorAction = useCallback(() => {
+    handlePageErrorAction(assetsErrorKind, navigate);
+  }, [assetsErrorKind, navigate]);
 
   // URL 파라미터에서 status, 검색어, vehicle 가져오기
   useEffect(() => {
@@ -118,7 +266,6 @@ export default function Assets() {
     const matchesModel = modelFilter === 'all' || asset.model === modelFilter;
     
     // "예약"과 "예약됨"을 모두 처리
-    let assetStatus = asset.status;
     if (statusFilter === '예약' || statusFilter === '예약됨') {
       const matchesStatus = asset.status === '예약' || asset.status === '예약됨';
       const matchesSearch = searchQuery === '' || 
@@ -361,11 +508,15 @@ export default function Assets() {
         <PageStateBoundary
           isLoading={isAssetsLoading}
           error={assetsError}
-          isEmpty={!isAssetsLoading && !assetsError && filteredAssets.length === 0}
+          isEmpty={!isAssetsLoading && !assetsError && (isAssetsApiEmpty || filteredAssets.length === 0)}
           errorDescription="차량 자산 목록을 불러오는 중 문제가 발생했습니다."
           emptyTitle="조건에 맞는 차량이 없습니다"
           emptyDescription="검색어 또는 필터를 조정해 다시 확인해 주세요."
-          onRetry={hydrateAssets}
+          onRetry={handleAssetsRetry}
+          errorActionLabel={getPageErrorActionLabel(assetsErrorKind)}
+          onErrorAction={handleAssetsErrorAction}
+          emptyActionLabel="필터 초기화"
+          onEmptyAction={resetAssetFilters}
           className="min-h-[280px]"
         >
           <div className="bg-white rounded-xl shadow-sm overflow-hidden">

@@ -1,16 +1,46 @@
 import { Layout } from '../components/Layout';
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router';
 import { TrendingUp, DollarSign, CreditCard, Wallet, Car, Users, Calendar, ArrowUp, ArrowDown, AlertCircle } from 'lucide-react';
 import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { PageStateBoundary } from '../components/PageStateBoundary';
+import {
+  getPageErrorActionLabel,
+  handlePageErrorAction,
+  isPayloadEmpty,
+  usePageEndpointState,
+} from '../hooks/usePageEndpointState';
 import { getUnpaidStatsByPeriod } from '../utils/paymentUtils';
 import { vehicleAssets } from '../data/mockData';
+import { getRevenueSummaryDashboard } from '../../services/dashboard';
 
 type Period = 'weekly' | 'monthly' | 'yearly';
 
 export default function Revenue() {
   const [selectedPeriod, setSelectedPeriod] = useState<Period>('monthly');
   const navigate = useNavigate();
+  const {
+    isLoading: isRevenueLoading,
+    error: revenueError,
+    errorKind: revenueErrorKind,
+    isEmpty: isRevenueApiEmpty,
+    run: hydrateRevenueSummary,
+  } = usePageEndpointState<unknown>({
+    request: (signal) => getRevenueSummaryDashboard({ signal }),
+    isEmpty: (payload) => isPayloadEmpty(payload, ['summary', 'stats', 'items', 'cards']),
+  });
+
+  useEffect(() => {
+    void hydrateRevenueSummary();
+  }, []);
+
+  const handleRevenueRetry = useCallback(() => {
+    void hydrateRevenueSummary();
+  }, [hydrateRevenueSummary]);
+
+  const handleRevenueErrorAction = useCallback(() => {
+    handlePageErrorAction(revenueErrorKind, navigate);
+  }, [navigate, revenueErrorKind]);
 
   // 기간별 미납금 계산
   const unpaidStats = getUnpaidStatsByPeriod();
@@ -210,7 +240,21 @@ export default function Revenue() {
 
   return (
     <Layout title="매출 요약">
-      <div className="p-4 h-full overflow-auto">
+      <PageStateBoundary
+        isLoading={isRevenueLoading}
+        error={revenueError}
+        isEmpty={isRevenueApiEmpty}
+        errorDescription="매출 요약 데이터를 불러오는 중 문제가 발생했습니다."
+        emptyTitle="표시할 매출 요약 데이터가 없습니다"
+        emptyDescription="기간을 바꾸거나 잠시 후 다시 확인해 주세요."
+        onRetry={handleRevenueRetry}
+        errorActionLabel={getPageErrorActionLabel(revenueErrorKind)}
+        onErrorAction={handleRevenueErrorAction}
+        emptyActionLabel="다시 불러오기"
+        onEmptyAction={handleRevenueRetry}
+        className="m-4 min-h-[320px]"
+      >
+        <div className="p-4 h-full overflow-auto">
         {/* 기간 선택 */}
         <div className="flex items-center gap-2 mb-4">
           <span className="text-sm font-semibold text-gray-600">기간:</span>
@@ -509,6 +553,7 @@ export default function Revenue() {
           </div>
         </div>
       </div>
+      </PageStateBoundary>
     </Layout>
   );
 }
