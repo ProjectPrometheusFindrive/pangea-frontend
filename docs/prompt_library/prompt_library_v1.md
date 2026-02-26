@@ -1,6 +1,6 @@
 # Prompt Library v1
 
-- Version: v1.2.16
+- Version: v1.2.17
 - Date: 2026-02-26
 - Owner: Pangea Frontend Team
 - Tags: prompt-library,workflow,branch-policy,history-policy,commit-policy,pr-automation,jira-traceability,end-prompt-protocol,worktree-cleanup,jira-status-sync,jira-comment-sync,ac-evidence
@@ -72,6 +72,7 @@ End Prompt:
 - `Start Context`에는 Start Prompt 핵심 조건과 Jira 주요 요구사항(AC/제약)을 함께 요약한다.
 - `Changes Summary`에는 실제 반영 결과를 범위별로 기술하고, `Diffs & Files`에는 주요 수정 파일을 명시한다.
 - 코드 변경이 포함된 Jira 티켓은 AC 항목별 구현 근거(파일/함수 기준)를 `Changes Summary` 또는 `Diffs & Files`에 반드시 남긴다.
+- Assets 조회 연동 티켓(BK-042 계열)은 `prompt_history`에 `page/size/status/q` 쿼리스트링-API 파라미터 동기화와 `400/401/403/404/5xx` 분기 근거를 함께 기록한다.
 - 공통 상태 UI 티켓(loading/error/empty)은 `Validation`에 `Retry 재호출`, `401/403/5xx 분기`, `skeleton/empty CTA` 확인 근거를 함께 기록한다.
 - 인증 컨텍스트 교체 티켓(BK-021/BK-031 계열)은 `prompt_history`에 세션 저장 키, API 토큰 provider 연동 방식, role 매핑 규칙을 반드시 기록한다.
 - 코드 변경이 포함된 Jira 티켓은 `Validation` 섹션에 최소 1개의 실행 명령 결과(`build` 또는 `test`)를 기록한다.
@@ -142,6 +143,7 @@ cp docs/prompt_history/_TEMPLATE.md docs/prompt_history/$(date +%Y%m%d)_your-tas
 - Production push triggers auto tag (`vX.Y.Z`)
 
 ## Version History
+- v1.2.17 (2026-02-26, SCRUM-38): Add prompt_history capture rule for BK-042 assets read integration evidence (`page/size/status/q` sync + 400/401/403/404/5xx handling).
 - v1.2.16 (2026-02-26, SCRUM-31): Add prompt_history evidence rule for common loading/error/empty UI tickets (Retry + 401/403/5xx + skeleton/empty CTA checks).
 - v1.2.15 (2026-02-26, NO-JIRA): Add rule to annotate BK items with mapped SCRUM IDs and Jira browse links when updating local parallel-group planning docs.
 - v1.2.14 (2026-02-26, SCRUM-30): Add prompt_history capture rule for auth-context migration tickets (session key, token provider wiring, role mapping evidence).
