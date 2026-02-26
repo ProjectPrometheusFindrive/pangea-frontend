@@ -1,9 +1,9 @@
 # Prompt Library v1
 
-- Version: v1.2.30
+- Version: v1.2.32
 - Date: 2026-02-27
 - Owner: Pangea Frontend Team
-- Tags: prompt-library,workflow,branch-policy,history-policy,commit-policy,pr-automation,jira-traceability,end-prompt-protocol,worktree-cleanup,jira-status-sync,jira-comment-sync,ac-evidence,mock-removal,reservations-write,reservations-mock-removal,ocr-flow,revenue-api,settings-api,payment-status-sync,support-center
+- Tags: prompt-library,workflow,branch-policy,history-policy,commit-policy,pr-automation,jira-traceability,end-prompt-protocol,worktree-cleanup,jira-status-sync,jira-comment-sync,ac-evidence,mock-removal,reservations-write,reservations-mock-removal,ocr-flow,revenue-api,settings-api,payment-status-sync,home-api,home-summary,action-payment-mock-removal,support-center
 
 ## Context
 - 초기 세팅 작업에서 프롬프트 템플릿, 브랜치 정책, 문서화 절차를 반복 가능하게 표준화할 필요가 있음.
@@ -78,6 +78,7 @@ End Prompt:
 - Reservations 쓰기 연동 티켓(BK-053/SCRUM-44 계열)은 `prompt_history`에 create/return/accident API 연동, 제출 중/중복 제출 방지, 생성 성공 시 상세 ID 동기화, `400 필드/폼 오류·403 권한·409 상태충돌·5xx 재시도 토스트` 분기 근거를 함께 기록한다.
 - OCR 연동 티켓(BK-085/SCRUM-64 계열)은 `prompt_history`에 `assets/upload -> ocr/extract -> ocr/jobs/{jobId}` 흐름, polling 상태 전환(처리중/복귀), partial prefill 처리, re-upload 시 이전 OCR 제안 폐기, `400/413 파일 오류·5xx/timeout 재시도·수동 입력 fallback` 분기 근거를 함께 기록한다.
 - Revenue API 연동 티켓(BK-074/SCRUM-56 계열)은 `prompt_history`에 `/api/v2/revenue/summary(from,to,granularity)` 및 `/api/v2/revenue/trend(from,to)` 파라미터 동기화, 기간/단위 변경 시 loading 갱신, empty-state, `400/401/403/5xx+network` 분기와 Retry/이전 스냅샷 복원 근거를 함께 기록한다.
+- Home API 연동 티켓(BK-073/SCRUM-55 계열)은 `prompt_history`에 `/api/v2/home/summary(from,to,tenantId)` 파라미터 동기화, 기간 필터 변경 재조회, `loading/empty/401/403/5xx+network` 분기, race-safe 요청 처리와 재조회 실패 시 이전 스냅샷 유지 근거, null-safe 기본값 렌더 및 Home 런타임 mock 경로 제거 근거를 함께 기록한다.
 - Settings API 연동 티켓(BK-075/SCRUM-57 계열)은 `prompt_history`에 company/geofences/members API 연결 근거, 회사 정보 dirty-check/부분 업데이트(schemaVersion 포함)/저장 상태 분기, 권한 기반 읽기전용 처리, `400 필드 오류·403 권한·409 충돌 재로딩·5xx+network 재시도`, 저장/미저장 상태 이탈 경고(beforeunload) 근거를 함께 기록한다.
 - 고객센터 UI/연동 티켓(BK-087/SCRUM-66 계열)은 `prompt_history`에 `/api/v2/support/categories`, `/api/v2/support/tickets`, `/api/v2/support/tickets/{ticketId}` 연동 근거, 카테고리 loading/empty/직접입력 분기, 문의 submitting/중복 제출 방지/성공 ticketId 복구, `400/401/403/5xx+network` 분기와 Retry/권한 액션, 첨부파일 용량 제한 정책 반영 근거를 함께 기록한다.
 - Reservations mock 제거 티켓(BK-054/SCRUM-45 계열)은 `prompt_history`에 Reservations 프로덕션 경로의 mock import/fixture 제거 근거, v2 reservations endpoint 단일 호출 경로, API 실패 시 mock fallback 미사용 근거를 함께 기록한다.
@@ -89,6 +90,7 @@ End Prompt:
 - ActionRequired 조회 연동 티켓(BK-062/SCRUM-48 계열)은 목록 쿼리(page/size/status/priority/assignee), 상세 조회(404 fallback), 필터 변경 race 방지 근거를 반드시 기록한다.
 - ActionRequired 쓰기 연동 티켓(BK-063/SCRUM-49 계열)은 상태 변경/해결 완료/메모 저장 API 연동 근거, saving 중복 제출 방지, 실패 시 낙관적 업데이트 롤백, `400/403/409/5xx+network` 분기와 Retry 제공 근거, 상태 변경 후 필터 이탈 처리 근거를 반드시 기록한다.
 - 결제 상태 연동 통합 티켓(BK-064/SCRUM-50 계열)은 결제 상태 canonical 매핑/우선순위(다중 결제/부분환불/out-of-order timestamp) 근거, Reservations/Home/Action 화면 동기화 지점, `401/403/404/5xx+network` 분기와 last-known fallback + 재시도 UX 근거를 반드시 기록한다.
+- Action/Payment mock 제거 티켓(BK-065/SCRUM-52 계열)은 Action/Payment 경로의 `mockData`/`mockPayments` 의존 제거 근거, 결제 상태 동기화가 `/api/v2/payments/status`와 `/api/v2/payments/{paymentId}`만 사용하도록 정리된 근거(`/api/v2/payments` list fallback 제거 포함), `401/403/404/5xx` 분기와 Retry, stale 응답 최신값 반영 근거를 반드시 기록한다.
 - 코드 변경이 포함된 Jira 티켓은 `Validation` 섹션에 최소 1개의 실행 명령 결과(`build` 또는 `test`)를 기록한다.
 - 저장/수정 흐름 버그 티켓은 `Changes Summary` 또는 `Diffs & Files`에 성공/실패 분기 처리 근거(성공 시 동작, 실패 시 동작)를 모두 기록한다.
 - `Notes`에는 차기 권장 태스크만 기록하며 즉시 반영은 금지한다.
@@ -157,7 +159,9 @@ cp docs/prompt_history/_TEMPLATE.md docs/prompt_history/$(date +%Y%m%d)_your-tas
 - Production push triggers auto tag (`vX.Y.Z`)
 
 ## Version History
-- v1.2.30 (2026-02-27, SCRUM-66): Add prompt_history evidence rule for BK-087 support-center integration (categories/create/detail endpoints, loading-empty-manual-category flow, submit dedupe/receipt restore, 400/401/403/5xx+retry, attachment size policy evidence).
+- v1.2.32 (2026-02-27, SCRUM-66): Add prompt_history evidence rule for BK-087 support-center integration (categories/create/detail endpoints, loading-empty-manual-category flow, submit dedupe/receipt restore, 400/401/403/5xx+retry, attachment size policy evidence).
+- v1.2.31 (2026-02-27, SCRUM-55): Add prompt_history evidence rule for BK-073 home API integration (`/api/v2/home/summary` param sync, filter requery, loading/error/empty + 401/403/5xx branches, race-safe + snapshot retention, mock path removal evidence).
+- v1.2.30 (2026-02-27, SCRUM-52): Add prompt_history evidence rule for BK-065 Action/Payment mock removal (mock dependency removal + payments status/detail endpoints-only + retry/error/stale-response evidence).
 - v1.2.29 (2026-02-27, SCRUM-56): Add prompt_history evidence rule for BK-074 revenue API integration (summary/trend param sync, loading/error/empty, 400/401/403/5xx+network retry and previous snapshot restoration evidence).
 - v1.2.28 (2026-02-26, SCRUM-57): Add prompt_history evidence rule for BK-075 settings API integration (company/geofences/members wiring, dirty/partial-save/schemaVersion, RBAC read-only, 400/403/409/5xx+retry, beforeunload guard).
 - v1.2.27 (2026-02-26, SCRUM-50): Add prompt_history evidence rule for BK-064 payment status sync integration (canonical mapping/priority + reservations-home-action sync + 401/403/404/5xx fallback+retry evidence).

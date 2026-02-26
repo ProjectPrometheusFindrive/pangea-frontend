@@ -1,7 +1,6 @@
 import { ApiError } from '../../services/api';
 import {
   getPaymentById,
-  getPaymentsList,
   getPaymentStatusByReservation,
 } from '../../services/payments';
 
@@ -17,7 +16,6 @@ export type PaymentStatusCanonical =
 type PaymentStatusSource =
   | 'status-endpoint'
   | 'payment-detail'
-  | 'payments-list'
   | 'fallback'
   | 'cache'
   | 'not-found';
@@ -62,9 +60,8 @@ const STATUS_PRIORITY: Record<PaymentStatusCanonical, number> = {
 const SOURCE_PRIORITY: Record<PaymentStatusSource, number> = {
   'payment-detail': 600,
   'status-endpoint': 500,
-  'payments-list': 400,
-  fallback: 300,
-  cache: 200,
+  fallback: 400,
+  cache: 300,
   'not-found': 100,
 };
 
@@ -452,32 +449,6 @@ function dedupeTargets(targets: PaymentSyncTarget[]): PaymentSyncTarget[] {
   return Array.from(map.values());
 }
 
-function mergeByReservationId(
-  targetMap: Map<string, PaymentStatusSnapshot[]>,
-  snapshot: PaymentStatusSnapshot,
-): void {
-  if (!snapshot.reservationId) {
-    return;
-  }
-  const list = targetMap.get(snapshot.reservationId) ?? [];
-  list.push(snapshot);
-  targetMap.set(snapshot.reservationId, list);
-}
-
-function mergeByPaymentId(
-  targetMap: Map<string, PaymentStatusSnapshot>,
-  snapshot: PaymentStatusSnapshot,
-): void {
-  if (!snapshot.paymentId) {
-    return;
-  }
-  const currentSnapshot = targetMap.get(snapshot.paymentId) ?? null;
-  const selectedSnapshot = chooseBetterSnapshot(currentSnapshot, snapshot);
-  if (selectedSnapshot) {
-    targetMap.set(snapshot.paymentId, selectedSnapshot);
-  }
-}
-
 function resolveErrorMessage(error: ApiError): string {
   if (error.status === 401) {
     return '세션이 만료되었습니다. 다시 로그인해 주세요.';
@@ -517,45 +488,6 @@ export async function resolvePaymentStatuses(
 
   let hasRetriableFailure = false;
   let errorMessage: string | null = null;
-
-  let isPaymentsListLoaded = false;
-  const listSnapshotsByReservationId = new Map<string, PaymentStatusSnapshot[]>();
-  const listSnapshotsByPaymentId = new Map<string, PaymentStatusSnapshot>();
-
-  const ensurePaymentsListFallback = async (): Promise<void> => {
-    if (isPaymentsListLoaded) {
-      return;
-    }
-    isPaymentsListLoaded = true;
-
-    try {
-      const payload = await getPaymentsList({
-        page: 1,
-        pageSize: 200,
-        signal: options.signal,
-      });
-
-      const snapshots = toRecordCollection(payload)
-        .map((row) => toSnapshotFromRecord(row, 'payments-list'))
-        .filter((snapshot): snapshot is PaymentStatusSnapshot => snapshot !== null);
-
-      snapshots.forEach((snapshot) => {
-        mergeByReservationId(listSnapshotsByReservationId, snapshot);
-        mergeByPaymentId(listSnapshotsByPaymentId, snapshot);
-      });
-    } catch (error) {
-      if (error instanceof ApiError) {
-        errorMessage ??= resolveErrorMessage(error);
-        if (isRetryableApiError(error)) {
-          hasRetriableFailure = true;
-        }
-      } else if (error instanceof Error) {
-        errorMessage ??= error.message;
-      } else {
-        errorMessage ??= '결제 상태 동기화에 실패했습니다.';
-      }
-    }
-  };
 
   for (const target of normalizedTargets) {
     const candidates: PaymentStatusSnapshot[] = [];
@@ -613,8 +545,6 @@ export async function resolvePaymentStatuses(
         if (error instanceof ApiError) {
           if (error.status === 404) {
             isNotFoundFromStatusEndpoint = true;
-          } else if (error.status === 400 || error.status === 405 || error.status === 501) {
-            // Fallback to list endpoint for environments where status endpoint is not available.
           } else {
             errorMessage ??= resolveErrorMessage(error);
             if (isRetryableApiError(error)) {
@@ -654,18 +584,6 @@ export async function resolvePaymentStatuses(
         } else if (error instanceof Error) {
           errorMessage ??= error.message;
         }
-      }
-    }
-
-    await ensurePaymentsListFallback();
-    if (target.reservationId) {
-      const listSnapshots = listSnapshotsByReservationId.get(target.reservationId) ?? [];
-      candidates.push(...listSnapshots);
-    }
-    if (target.paymentId) {
-      const listSnapshot = listSnapshotsByPaymentId.get(target.paymentId);
-      if (listSnapshot) {
-        candidates.push(listSnapshot);
       }
     }
 
