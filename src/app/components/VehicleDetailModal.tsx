@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { X, Activity, History, Info, Zap, AlertTriangle, Loader2 } from 'lucide-react';
-import type { VehicleAsset } from '../data/mockData';
+import type { VehicleAsset } from '../types/assets';
 import { useNavigate } from 'react-router';
 
 interface AssetHistoryChange {

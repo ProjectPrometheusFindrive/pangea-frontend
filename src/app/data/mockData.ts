@@ -1,51 +1,9 @@
 // 중앙 집중식 Mock 데이터
 // 모든 페이지에서 이 데이터를 참조하여 일관성 유지
 
-// 차량 단말 센서 데이터 인터페이스
-export interface VehicleDeviceStatus {
-  // 클러스터 경고등 기반 센서 데이터
-  engineWarning: boolean;           // 엔진 경고등 (Check Engine Light)
-  batteryVoltage: number;           // 배터리 전압 (정상: 12.5-14.5V)
-  oilPressure: number;              // 오일 압력 (정상: 25-65 PSI)
-  coolantTemp: number;              // 냉각수 온도 (정상: 85-105°C)
-  tirePressure: [number, number, number, number]; // 타이어 공기압 (정상: 32-36 PSI) [FL, FR, RL, RR]
-  brakeFluid: number;               // 브레이크액 잔량 (정상: 80-100%)
-  absWarning: boolean;              // ABS 경고등
-  airbagWarning: boolean;           // 에어백 경고등
-  transmissionTemp: number;         // 변속기 온도 (정상: 80-100°C)
-  fuelLevel: number;                // 연료량 (%)
-  lastUpdate: string;               // 마지막 업데이트
-}
+import type { DTCRecord, VehicleAsset, VehicleDeviceStatus } from '../types/assets';
 
-// DTC (Diagnostic Trouble Code) 이상 코드 인터페이스
-export interface DTCRecord {
-  id: string;
-  vehicleNumber: string;
-  dtcCode: string;                  // DTC 코드 (예: P0420, C0035)
-  description: string;              // 이상 내용
-  detectedAt: string;               // 발생일시
-  severity: 'high' | 'medium' | 'low';
-  status: 'pending' | 'in-progress' | 'resolved';
-  resolvedAt?: string;              // 처리 완료 일시 (정상 복귀 일시)
-  resolvedBy?: string;              // 처리자
-  notes?: string;                   // 조치 내용 메모
-}
-
-export interface VehicleAsset {
-  vehicleNumber: string;
-  model: string;
-  status: '대여중' | '예약' | '가용' | '정비중';
-  issues: string[];
-  insuranceExpiry: string;
-  nextInspection: string;
-  vin: string;
-  year: string;
-  owner: string;
-  hasPremiumDevice?: boolean;       // 단말 장착 여부 (프리미엄)
-  deviceStatus?: VehicleDeviceStatus; // 센서 데이터 (단말 장착 시)
-  dtcHistory?: DTCRecord[];         // DTC 이상 코드 히스토리
-  deviceSerialNumber?: string;      // 단말 시리얼 번호
-}
+export type { DTCRecord, VehicleAsset, VehicleDeviceStatus } from '../types/assets';
 
 export interface Reservation {
   id: string;

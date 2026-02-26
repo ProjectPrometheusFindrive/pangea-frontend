@@ -13,7 +13,8 @@ import {
   isPayloadEmpty,
   usePageEndpointState,
 } from '../hooks/usePageEndpointState';
-import { reservations as mockReservations, vehicleAssets as mockVehicleAssets, type Reservation, type VehicleAsset } from '../data/mockData';
+import { reservations as mockReservations, vehicleAssets as mockVehicleAssets, type Reservation } from '../data/mockData';
+import type { VehicleAsset } from '../types/assets';
 import { getReservationsDashboard } from '../../services/dashboard';
 
 // 드래그 선택 타입 정의
