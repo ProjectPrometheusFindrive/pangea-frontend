@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
-import { AlertTriangle, Inbox, Loader2 } from 'lucide-react';
+import { AlertTriangle, Inbox } from 'lucide-react';
 
+import { Skeleton } from './ui/skeleton';
 import { cn } from './ui/utils';
 
 type PageFallbackVariant = 'loading' | 'error' | 'empty';
@@ -11,6 +12,8 @@ interface PageFallbackProps {
   description?: string;
   onRetry?: () => void;
   retryLabel?: string;
+  actionLabel?: string;
+  onAction?: () => void;
   className?: string;
 }
 
@@ -35,9 +38,42 @@ export function PageFallback({
   description,
   onRetry,
   retryLabel = '다시 시도',
+  actionLabel,
+  onAction,
   className,
 }: PageFallbackProps) {
   const copy = DEFAULT_FALLBACK_COPY[variant];
+
+  if (variant === 'loading') {
+    return (
+      <div
+        className={cn(
+          'flex min-h-[280px] items-center justify-center rounded-xl border border-dashed border-gray-300 bg-white px-6 py-8',
+          className,
+        )}
+      >
+        <div className="w-full max-w-4xl space-y-4">
+          <Skeleton className="h-7 w-56" />
+          <div className="grid gap-3 md:grid-cols-3">
+            <Skeleton className="h-20 w-full" />
+            <Skeleton className="h-20 w-full" />
+            <Skeleton className="h-20 w-full" />
+          </div>
+          <div className="space-y-2">
+            <Skeleton className="h-5 w-full" />
+            <Skeleton className="h-5 w-full" />
+            <Skeleton className="h-5 w-3/4" />
+          </div>
+          {(title || description) && (
+            <div className="pt-2 text-left">
+              <h3 className="text-sm font-semibold text-gray-700">{title ?? copy.title}</h3>
+              <p className="mt-1 text-xs text-gray-500">{description ?? copy.description}</p>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -50,26 +86,35 @@ export function PageFallback({
         <div
           className={cn(
             'mb-3 rounded-full p-3',
-            variant === 'loading' && 'bg-blue-50 text-blue-600',
             variant === 'error' && 'bg-red-50 text-red-600',
             variant === 'empty' && 'bg-gray-100 text-gray-600',
           )}
         >
-          {variant === 'loading' && <Loader2 className="h-6 w-6 animate-spin" />}
           {variant === 'error' && <AlertTriangle className="h-6 w-6" />}
           {variant === 'empty' && <Inbox className="h-6 w-6" />}
         </div>
         <h3 className="text-base font-semibold text-gray-900">{title ?? copy.title}</h3>
         <p className="mt-1 text-sm text-gray-500">{description ?? copy.description}</p>
-        {variant === 'error' && onRetry && (
-          <button
-            type="button"
-            onClick={onRetry}
-            className="mt-4 inline-flex items-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
-          >
-            {retryLabel}
-          </button>
-        )}
+        <div className="mt-4 flex items-center gap-2">
+          {variant === 'error' && onRetry && (
+            <button
+              type="button"
+              onClick={onRetry}
+              className="inline-flex items-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
+            >
+              {retryLabel}
+            </button>
+          )}
+          {actionLabel && onAction && (
+            <button
+              type="button"
+              onClick={onAction}
+              className="inline-flex items-center rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-100"
+            >
+              {actionLabel}
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -87,6 +132,10 @@ interface PageStateBoundaryProps {
   emptyDescription?: string;
   onRetry?: () => void;
   retryLabel?: string;
+  errorActionLabel?: string;
+  onErrorAction?: () => void;
+  emptyActionLabel?: string;
+  onEmptyAction?: () => void;
   className?: string;
   children: ReactNode;
 }
@@ -103,6 +152,10 @@ export function PageStateBoundary({
   emptyDescription,
   onRetry,
   retryLabel,
+  errorActionLabel,
+  onErrorAction,
+  emptyActionLabel,
+  onEmptyAction,
   className,
   children,
 }: PageStateBoundaryProps) {
@@ -125,6 +178,8 @@ export function PageStateBoundary({
         description={errorDescription ?? error}
         onRetry={onRetry}
         retryLabel={retryLabel}
+        actionLabel={errorActionLabel}
+        onAction={onErrorAction}
         className={className}
       />
     );
@@ -136,6 +191,8 @@ export function PageStateBoundary({
         variant="empty"
         title={emptyTitle}
         description={emptyDescription}
+        actionLabel={emptyActionLabel}
+        onAction={onEmptyAction}
         className={className}
       />
     );

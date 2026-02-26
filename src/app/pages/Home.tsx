@@ -2,13 +2,43 @@ import { Layout } from '../components/Layout';
 import { Clock, Car, FileText, TrendingUp, AlertCircle, Calendar, DollarSign, Lock, Sparkles, AlertOctagon, Signal, Wrench, Shield, AlertTriangle, MessageSquare, ClipboardCheck } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 import { useNavigate } from 'react-router';
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
+import { PageStateBoundary } from '../components/PageStateBoundary';
+import {
+  getPageErrorActionLabel,
+  handlePageErrorAction,
+  isPayloadEmpty,
+  usePageEndpointState,
+} from '../hooks/usePageEndpointState';
 import { vehicleAssets, reservations, actionItems, getTodayStats } from '../data/mockData';
 import { mockPayments, getUnpaidPayments } from '../utils/paymentUtils';
+import { getHomeSummaryDashboard } from '../../services/dashboard';
 
 export default function Home() {
   const navigate = useNavigate();
   const [showPremiumModal, setShowPremiumModal] = useState(false);
+  const {
+    isLoading: isHomeLoading,
+    error: homeError,
+    errorKind: homeErrorKind,
+    isEmpty: isHomeApiEmpty,
+    run: hydrateHomeSummary,
+  } = usePageEndpointState<unknown>({
+    request: (signal) => getHomeSummaryDashboard({ signal }),
+    isEmpty: (payload) => isPayloadEmpty(payload, ['summary', 'stats', 'items', 'cards']),
+  });
+
+  useEffect(() => {
+    void hydrateHomeSummary();
+  }, []);
+
+  const handleHomeRetry = useCallback(() => {
+    void hydrateHomeSummary();
+  }, [hydrateHomeSummary]);
+
+  const handleHomeErrorAction = useCallback(() => {
+    handlePageErrorAction(homeErrorKind, navigate);
+  }, [homeErrorKind, navigate]);
   
   // 오늘 할 일 통계
   const todayStats = getTodayStats();
@@ -213,7 +243,21 @@ export default function Home() {
 
   return (
     <Layout title="홈">
-      <div className="p-6 space-y-5">
+      <PageStateBoundary
+        isLoading={isHomeLoading}
+        error={homeError}
+        isEmpty={isHomeApiEmpty}
+        errorDescription="홈 요약 데이터를 불러오는 중 문제가 발생했습니다."
+        emptyTitle="표시할 홈 요약 데이터가 없습니다"
+        emptyDescription="요약 데이터가 준비되면 자동으로 표시됩니다."
+        onRetry={handleHomeRetry}
+        errorActionLabel={getPageErrorActionLabel(homeErrorKind)}
+        onErrorAction={handleHomeErrorAction}
+        emptyActionLabel="다시 불러오기"
+        onEmptyAction={handleHomeRetry}
+        className="m-6 min-h-[320px]"
+      >
+        <div className="p-6 space-y-5">
         {/* 오늘 할 일 & 상태이상 */}
         <div className="bg-white rounded-xl shadow-sm p-5">
           <h2 className="text-lg font-bold text-[#1e2939] mb-3">오늘 할 일</h2>
@@ -489,6 +533,7 @@ export default function Home() {
           </div>
         </div>
       </div>
+      </PageStateBoundary>
 
       {/* 프리미엄 모달 */}
       {showPremiumModal && (
