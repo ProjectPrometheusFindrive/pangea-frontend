@@ -11,6 +11,7 @@ import {
   ChevronLeft,
   ChevronRight,
 } from 'lucide-react';
+import { toast } from 'sonner';
 import { useSearchParams, useNavigate } from 'react-router';
 import { PremiumBanner } from '../components/PremiumBanner';
 import { PageStateBoundary } from '../components/PageStateBoundary';
@@ -24,11 +25,57 @@ import {
 } from '../hooks/usePageEndpointState';
 import type { VehicleAsset } from '../data/mockData';
 import { ApiError } from '../../services/api';
-import { getAssetDetail, getAssetsList } from '../../services/assets';
+import {
+  createAsset,
+  getAssetDetail,
+  getAssetHistory,
+  getAssetsList,
+  patchAsset,
+} from '../../services/assets';
 
 interface Asset extends VehicleAsset {
   id: string;
   hasDevice: boolean;
+  version?: number;
+  updatedAt?: string;
+  createdAt?: string;
+  plate?: string;
+  memo?: string;
+  category?: string;
+  color?: string;
+  contractStatus?: string;
+}
+
+interface AssetHistoryChange {
+  field: string;
+  before?: unknown;
+  after?: unknown;
+}
+
+interface AssetHistoryEntry {
+  event: string;
+  at: string;
+  actor: string | null;
+  versionFrom: number;
+  versionTo: number;
+  changes: AssetHistoryChange[];
+}
+
+interface AssetEditForm {
+  plate: string;
+  model: string;
+  year: string;
+  status: VehicleAsset['status'];
+  memo: string;
+}
+
+interface CreateFormState {
+  vehicleNumber: string;
+  vin: string;
+  model: string;
+  year: string;
+  owner: string;
+  insuranceExpiry: string;
 }
 
 interface UploadedFiles {
@@ -38,11 +85,30 @@ interface UploadedFiles {
 }
 
 type StatusFilterCode = 'all' | 'rental' | 'reserved' | 'available' | 'maintenance';
+type AssetEditField = keyof AssetEditForm;
+type CreateField = keyof Pick<CreateFormState, 'vehicleNumber' | 'vin' | 'model' | 'year'>;
+type FieldErrorMap<TField extends string> = Partial<Record<TField, string>>;
 
 const DEFAULT_PAGE = 1;
 const DEFAULT_PAGE_SIZE = 20;
+const ASSET_HISTORY_PAGE_SIZE = 20;
 const PAGE_SIZE_OPTIONS = [10, 20, 50];
 const TOTAL_COUNT_KEYS = ['total', 'totalCount', 'count', 'itemsCount', 'totalElements'];
+const DEFAULT_CREATE_FORM_STATE: CreateFormState = {
+  vehicleNumber: '',
+  vin: '',
+  model: '',
+  year: '',
+  owner: '',
+  insuranceExpiry: '',
+};
+const DEFAULT_ASSET_EDIT_FORM: AssetEditForm = {
+  plate: '',
+  model: '',
+  year: '',
+  status: '가용',
+  memo: '',
+};
 const STATUS_TO_QUERY_MAP: Record<string, Exclude<StatusFilterCode, 'all'>> = {
   rental: 'rental',
   in_use: 'rental',
@@ -145,7 +211,7 @@ function normalizeAssetStatus(statusValue: string | null): VehicleAsset['status'
     return statusValue;
   }
 
-  if (statusValue === 'reserved' || statusValue === '예약됨') {
+  if (statusValue === 'reserved' || statusValue === '예약됨' || statusValue === '예약중') {
     return '예약';
   }
   if (statusValue === 'rental' || statusValue === 'in_use') {
@@ -194,6 +260,10 @@ function toAssetRecord(row: unknown, index: number): Asset | null {
   }
 
   const hasDevice = toBooleanValue(row.hasDevice) ?? toBooleanValue(row.hasPremiumDevice) ?? false;
+  const plateValue = toStringValue(row.plate) ?? toStringValue(row.vehicleNumber) ?? vehicleNumber;
+  const statusValue = toStringValue(row.status)
+    ?? toStringValue(row.assetStatus)
+    ?? toStringValue(row.contractStatus);
 
   return {
     id: toStringValue(row.id)
@@ -201,14 +271,22 @@ function toAssetRecord(row: unknown, index: number): Asset | null {
       ?? toStringValue(row.uuid)
       ?? `A${String(index + 1).padStart(3, '0')}`,
     vehicleNumber,
+    plate: plateValue,
     model: toStringValue(row.model) ?? toStringValue(row.vehicleModel) ?? '차종 미확인',
-    status: normalizeAssetStatus(toStringValue(row.status) ?? toStringValue(row.assetStatus)),
+    status: normalizeAssetStatus(statusValue),
     issues: normalizeAssetIssues(row.issues),
     insuranceExpiry: toStringValue(row.insuranceExpiry) ?? toStringValue(row.insuranceExpiryDate) ?? '-',
     nextInspection: toStringValue(row.nextInspection) ?? toStringValue(row.nextInspectionDate) ?? '-',
     vin: toStringValue(row.vin) ?? toStringValue(row.chassisNumber) ?? '-',
     year: toStringValue(row.year) ?? toStringValue(row.modelYear) ?? '-',
     owner: toStringValue(row.owner) ?? toStringValue(row.ownerName) ?? '-',
+    version: toNumberValue(row.version) ?? undefined,
+    createdAt: toStringValue(row.createdAt) ?? undefined,
+    updatedAt: toStringValue(row.updatedAt) ?? undefined,
+    memo: toStringValue(row.memo) ?? undefined,
+    category: toStringValue(row.category) ?? undefined,
+    color: toStringValue(row.color) ?? undefined,
+    contractStatus: toStringValue(row.contractStatus) ?? undefined,
     hasPremiumDevice: hasDevice,
     hasDevice,
   };
@@ -257,6 +335,211 @@ function toAssetDetail(payload: unknown): Asset | null {
   }
 
   return toAssetRecord(unwrapAssetDetail(payload), 0);
+}
+
+function toAssetEditForm(asset: Asset): AssetEditForm {
+  return {
+    plate: (asset.plate ?? asset.vehicleNumber ?? '').trim(),
+    model: (asset.model ?? '').trim(),
+    year: (asset.year ?? '').trim(),
+    status: asset.status,
+    memo: (asset.memo ?? '').trim(),
+  };
+}
+
+function toAssetHistoryEntries(payload: unknown): AssetHistoryEntry[] {
+  const rows = getCollectionFromPayload(payload, ['items', 'rows', 'list', 'history']);
+  if (!rows || rows.length === 0) {
+    return [];
+  }
+
+  return rows
+    .map((row) => {
+      if (!isRecord(row)) {
+        return null;
+      }
+
+      const rawChanges = Array.isArray(row.changes) ? row.changes : [];
+      const changes = rawChanges
+        .map((entry) => {
+          if (!isRecord(entry)) {
+            return null;
+          }
+          const field = toStringValue(entry.field);
+          if (!field) {
+            return null;
+          }
+          return {
+            field,
+            before: entry.before,
+            after: entry.after,
+          };
+        })
+        .filter((entry): entry is AssetHistoryChange => entry !== null);
+
+      const event = toStringValue(row.event);
+      const at = toStringValue(row.at);
+      const versionFrom = toNumberValue(row.versionFrom);
+      const versionTo = toNumberValue(row.versionTo);
+
+      if (!event || !at || versionFrom === null || versionTo === null) {
+        return null;
+      }
+
+      return {
+        event,
+        at,
+        actor: toStringValue(row.actor),
+        versionFrom,
+        versionTo,
+        changes,
+      } satisfies AssetHistoryEntry;
+    })
+    .filter((entry): entry is AssetHistoryEntry => entry !== null);
+}
+
+function normalizePatchStatusValue(status: VehicleAsset['status']): string {
+  if (status === '예약') {
+    return '예약중';
+  }
+  return status;
+}
+
+function toErrorFieldEntries(error: ApiError): Array<{ name: string; reason: string }> {
+  const entries: Array<{ name: string; reason: string }> = [];
+
+  if (Array.isArray(error.fields)) {
+    for (const fieldEntry of error.fields) {
+      if (!isRecord(fieldEntry)) {
+        continue;
+      }
+
+      const name = toStringValue(fieldEntry.name) ?? toStringValue(fieldEntry.field);
+      const reason = toStringValue(fieldEntry.reason) ?? toStringValue(fieldEntry.message);
+      if (!name || !reason) {
+        continue;
+      }
+      entries.push({ name, reason });
+    }
+  }
+
+  const payloadError = isRecord(error.payload) && isRecord(error.payload.error)
+    ? error.payload.error
+    : null;
+
+  if (payloadError && Array.isArray(payloadError.details)) {
+    for (const detailEntry of payloadError.details) {
+      if (!isRecord(detailEntry)) {
+        continue;
+      }
+
+      const name = toStringValue(detailEntry.name)
+        ?? toStringValue(detailEntry.field)
+        ?? toStringValue(detailEntry.path)
+        ?? toStringValue(detailEntry.loc);
+      const reason = toStringValue(detailEntry.reason)
+        ?? toStringValue(detailEntry.message)
+        ?? toStringValue(detailEntry.detail)
+        ?? toStringValue(detailEntry.error);
+
+      if (!name || !reason) {
+        continue;
+      }
+      entries.push({ name, reason });
+    }
+  }
+
+  return entries;
+}
+
+function mapFieldErrors<TField extends string>(
+  entries: Array<{ name: string; reason: string }>,
+  fieldMap: Record<string, TField>,
+): FieldErrorMap<TField> {
+  const mapped: FieldErrorMap<TField> = {};
+
+  for (const { name, reason } of entries) {
+    const mappedName = fieldMap[name];
+    if (!mappedName) {
+      continue;
+    }
+    if (!mapped[mappedName]) {
+      mapped[mappedName] = reason;
+    }
+  }
+
+  return mapped;
+}
+
+function toCreateFieldErrors(error: ApiError): FieldErrorMap<CreateField> {
+  return mapFieldErrors<CreateField>(toErrorFieldEntries(error), {
+    vehicleNumber: 'vehicleNumber',
+    plate: 'vehicleNumber',
+    vin: 'vin',
+    model: 'model',
+    year: 'year',
+  });
+}
+
+function toAssetEditFieldErrors(error: ApiError): FieldErrorMap<AssetEditField> {
+  return mapFieldErrors<AssetEditField>(toErrorFieldEntries(error), {
+    vehicleNumber: 'plate',
+    plate: 'plate',
+    model: 'model',
+    year: 'year',
+    status: 'status',
+    memo: 'memo',
+  });
+}
+
+function toCreatePayload(form: CreateFormState): {
+  payload: {
+    vin: string;
+    plate: string;
+    vehicleNumber: string;
+    model?: string;
+    year?: number;
+  } | null;
+  fieldErrors: FieldErrorMap<CreateField>;
+} {
+  const fieldErrors: FieldErrorMap<CreateField> = {};
+
+  const vehicleNumber = form.vehicleNumber.trim();
+  const vin = form.vin.trim();
+  const model = form.model.trim();
+  const yearText = form.year.trim();
+
+  if (!vehicleNumber) {
+    fieldErrors.vehicleNumber = '차량번호를 입력해 주세요.';
+  }
+  if (!vin) {
+    fieldErrors.vin = '차대번호를 입력해 주세요.';
+  }
+
+  let year: number | undefined;
+  if (yearText.length > 0) {
+    const parsedYear = Number(yearText);
+    if (!Number.isInteger(parsedYear) || parsedYear < 1900 || parsedYear > 3000) {
+      fieldErrors.year = '연식은 4자리 숫자로 입력해 주세요.';
+    } else {
+      year = parsedYear;
+    }
+  }
+
+  if (Object.keys(fieldErrors).length > 0) {
+    return { payload: null, fieldErrors };
+  }
+
+  return {
+    payload: {
+      vin,
+      plate: vehicleNumber,
+      vehicleNumber,
+      model: model || undefined,
+      year,
+    },
+    fieldErrors,
+  };
 }
 
 function getTotalCountFromObject(source: unknown): number | null {
@@ -332,6 +615,10 @@ export default function Assets() {
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
   const [uploadStep, setUploadStep] = useState<'upload' | 'processing' | 'preview'>('upload');
+  const [createForm, setCreateForm] = useState<CreateFormState>(DEFAULT_CREATE_FORM_STATE);
+  const [createFieldErrors, setCreateFieldErrors] = useState<FieldErrorMap<CreateField>>({});
+  const [createSaveError, setCreateSaveError] = useState<string | null>(null);
+  const [isCreateSaving, setIsCreateSaving] = useState(false);
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFiles>({
     vehicleRegistration: null,
     insurance: null,
@@ -342,10 +629,19 @@ export default function Assets() {
   const [assetsErrorStatus, setAssetsErrorStatus] = useState<number | null>(null);
   const [detailNotice, setDetailNotice] = useState<string | null>(null);
   const [isDetailLoading, setIsDetailLoading] = useState(false);
-  const [newInsuranceExpiry, setNewInsuranceExpiry] = useState('');
-  const [newNextInspection, setNewNextInspection] = useState('');
+  const [detailForm, setDetailForm] = useState<AssetEditForm>(DEFAULT_ASSET_EDIT_FORM);
+  const [detailFieldErrors, setDetailFieldErrors] = useState<FieldErrorMap<AssetEditField>>({});
+  const [detailSaveError, setDetailSaveError] = useState<string | null>(null);
+  const [detailConflictNotice, setDetailConflictNotice] = useState<string | null>(null);
+  const [isDetailSaving, setIsDetailSaving] = useState(false);
+  const [assetHistory, setAssetHistory] = useState<AssetHistoryEntry[]>([]);
+  const [isAssetHistoryLoading, setIsAssetHistoryLoading] = useState(false);
+  const [assetHistoryError, setAssetHistoryError] = useState<string | null>(null);
   const detailRequestSequenceRef = useRef(0);
   const detailAbortControllerRef = useRef<AbortController | null>(null);
+  const historyRequestSequenceRef = useRef(0);
+  const historyAbortControllerRef = useRef<AbortController | null>(null);
+  const ocrProcessingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const updateAssetsSearchParams = useCallback((
     mutator: (params: URLSearchParams) => void,
@@ -430,9 +726,119 @@ export default function Assets() {
     void hydrateAssets();
   }, [hydrateAssets]);
 
+  const clearOcrProcessingTimer = useCallback(() => {
+    if (ocrProcessingTimeoutRef.current) {
+      clearTimeout(ocrProcessingTimeoutRef.current);
+      ocrProcessingTimeoutRef.current = null;
+    }
+  }, []);
+
+  const resetCreateModalState = useCallback(() => {
+    clearOcrProcessingTimer();
+    setUploadStep('upload');
+    setCreateForm(DEFAULT_CREATE_FORM_STATE);
+    setCreateFieldErrors({});
+    setCreateSaveError(null);
+    setIsCreateSaving(false);
+    setUploadedFiles({
+      vehicleRegistration: null,
+      insurance: null,
+      loanSchedule: null,
+    });
+  }, [clearOcrProcessingTimer]);
+
   useEffect(() => () => {
     detailAbortControllerRef.current?.abort();
-  }, []);
+    historyAbortControllerRef.current?.abort();
+    clearOcrProcessingTimer();
+  }, [clearOcrProcessingTimer]);
+
+  const isCreateDirty = useMemo(() => (
+    uploadStep !== 'upload'
+    || Boolean(createForm.vehicleNumber.trim())
+    || Boolean(createForm.vin.trim())
+    || Boolean(createForm.model.trim())
+    || Boolean(createForm.year.trim())
+    || Boolean(createForm.owner.trim())
+    || Boolean(createForm.insuranceExpiry.trim())
+    || uploadedFiles.vehicleRegistration !== null
+    || uploadedFiles.insurance !== null
+    || uploadedFiles.loanSchedule !== null
+  ), [createForm, uploadStep, uploadedFiles]);
+
+  const isDetailDirty = useMemo(() => {
+    if (!selectedAsset) {
+      return false;
+    }
+    const baseline = toAssetEditForm(selectedAsset);
+    return (
+      baseline.plate !== detailForm.plate.trim()
+      || baseline.model !== detailForm.model.trim()
+      || baseline.year !== detailForm.year.trim()
+      || baseline.status !== detailForm.status
+      || baseline.memo !== detailForm.memo.trim()
+    );
+  }, [detailForm, selectedAsset]);
+
+  useEffect(() => {
+    const hasUnsavedChanges = (
+      (showModal && isCreateDirty && !isCreateSaving)
+      || (showDetailModal && isDetailDirty && !isDetailSaving)
+    );
+    if (!hasUnsavedChanges || typeof window === 'undefined') {
+      return;
+    }
+
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [isCreateDirty, isCreateSaving, isDetailDirty, isDetailSaving, showDetailModal, showModal]);
+
+  const openCreateModal = useCallback(() => {
+    resetCreateModalState();
+    setShowModal(true);
+  }, [resetCreateModalState]);
+
+  const closeCreateModal = useCallback((): boolean => {
+    if (isCreateSaving) {
+      return false;
+    }
+    if (showModal && isCreateDirty && typeof window !== 'undefined') {
+      const shouldDiscard = window.confirm('저장하지 않은 등록 정보가 있습니다. 닫으시겠습니까?');
+      if (!shouldDiscard) {
+        return false;
+      }
+    }
+
+    setShowModal(false);
+    resetCreateModalState();
+    return true;
+  }, [isCreateDirty, isCreateSaving, resetCreateModalState, showModal]);
+
+  const closeDetailModalState = useCallback(() => {
+    detailAbortControllerRef.current?.abort();
+    historyAbortControllerRef.current?.abort();
+    setShowDetailModal(false);
+    setSelectedAsset(null);
+    setIsDetailLoading(false);
+    setDetailNotice(null);
+    setIsDetailSaving(false);
+    setDetailForm(DEFAULT_ASSET_EDIT_FORM);
+    setDetailFieldErrors({});
+    setDetailSaveError(null);
+    setDetailConflictNotice(null);
+    setAssetHistory([]);
+    setAssetHistoryError(null);
+    setIsAssetHistoryLoading(false);
+    updateAssetsSearchParams((params) => {
+      params.delete('assetId');
+      params.delete('vehicle');
+    }, true);
+  }, [updateAssetsSearchParams]);
 
   const resetAssetFilters = useCallback(() => {
     updateAssetsSearchParams((params) => {
@@ -487,7 +893,46 @@ export default function Assets() {
     vehicleQuery,
   ]);
 
-  const hydrateAssetDetail = useCallback(async (assetId: string) => {
+  const hydrateAssetHistory = useCallback(async (assetId: string) => {
+    const requestSequence = historyRequestSequenceRef.current + 1;
+    historyRequestSequenceRef.current = requestSequence;
+    historyAbortControllerRef.current?.abort();
+    const controller = new AbortController();
+    historyAbortControllerRef.current = controller;
+
+    setIsAssetHistoryLoading(true);
+    setAssetHistoryError(null);
+
+    try {
+      const payload = await getAssetHistory(assetId, {
+        page: 1,
+        pageSize: ASSET_HISTORY_PAGE_SIZE,
+        signal: controller.signal,
+      });
+      if (controller.signal.aborted || historyRequestSequenceRef.current !== requestSequence) {
+        return;
+      }
+      setAssetHistory(toAssetHistoryEntries(payload));
+    } catch (error) {
+      if (controller.signal.aborted || historyRequestSequenceRef.current !== requestSequence) {
+        return;
+      }
+      const historyErrorMessage = error instanceof ApiError
+        ? error.message
+        : '변경 이력을 불러오지 못했습니다.';
+      setAssetHistoryError(`이력 조회 실패: ${historyErrorMessage}`);
+      setAssetHistory([]);
+    } finally {
+      if (!controller.signal.aborted && historyRequestSequenceRef.current === requestSequence) {
+        setIsAssetHistoryLoading(false);
+      }
+    }
+  }, []);
+
+  const hydrateAssetDetail = useCallback(async (
+    assetId: string,
+    options: { preserveForm?: boolean; preserveConflictNotice?: boolean } = {},
+  ) => {
     const requestSequence = detailRequestSequenceRef.current + 1;
     detailRequestSequenceRef.current = requestSequence;
     detailAbortControllerRef.current?.abort();
@@ -512,9 +957,17 @@ export default function Assets() {
       }
 
       setSelectedAsset(nextAsset);
-      setNewInsuranceExpiry(nextAsset.insuranceExpiry);
-      setNewNextInspection(nextAsset.nextInspection);
+      if (!options.preserveForm) {
+        setDetailForm(toAssetEditForm(nextAsset));
+        setDetailFieldErrors({});
+        setDetailSaveError(null);
+      }
+      if (!options.preserveConflictNotice) {
+        setDetailConflictNotice(null);
+      }
+
       setShowDetailModal(true);
+      void hydrateAssetHistory(nextAsset.id);
     } catch (error) {
       if (controller.signal.aborted || detailRequestSequenceRef.current !== requestSequence) {
         return;
@@ -541,7 +994,7 @@ export default function Assets() {
         setIsDetailLoading(false);
       }
     }
-  }, [updateAssetsSearchParams]);
+  }, [hydrateAssetHistory, updateAssetsSearchParams]);
 
   useEffect(() => {
     if (!selectedAssetId) {
@@ -550,6 +1003,21 @@ export default function Assets() {
 
     void hydrateAssetDetail(selectedAssetId);
   }, [hydrateAssetDetail, selectedAssetId]);
+
+  const handleHistoryRetry = useCallback(() => {
+    if (!selectedAsset) {
+      return;
+    }
+    void hydrateAssetHistory(selectedAsset.id);
+  }, [hydrateAssetHistory, selectedAsset]);
+
+  const handleConflictRefresh = useCallback(() => {
+    if (!selectedAsset) {
+      return;
+    }
+    void hydrateAssetDetail(selectedAsset.id, { preserveForm: true });
+    void hydrateAssets();
+  }, [hydrateAssetDetail, hydrateAssets, selectedAsset]);
 
   const handleKeywordChange = useCallback((nextKeyword: string) => {
     updateAssetsSearchParams((params) => {
@@ -597,22 +1065,33 @@ export default function Assets() {
   }, [updateAssetsSearchParams]);
 
   const handleDetailModalOpen = useCallback((asset: Asset) => {
+    if (showDetailModal && isDetailDirty && typeof window !== 'undefined') {
+      const shouldDiscard = window.confirm('저장하지 않은 수정 내용이 있습니다. 다른 자산을 여시겠습니까?');
+      if (!shouldDiscard) {
+        return;
+      }
+    }
+
     updateAssetsSearchParams((params) => {
       params.set('assetId', asset.id);
       params.delete('vehicle');
     });
-  }, [updateAssetsSearchParams]);
+  }, [isDetailDirty, showDetailModal, updateAssetsSearchParams]);
 
-  const handleDetailModalClose = useCallback(() => {
-    detailAbortControllerRef.current?.abort();
-    setShowDetailModal(false);
-    setSelectedAsset(null);
-    setIsDetailLoading(false);
-    updateAssetsSearchParams((params) => {
-      params.delete('assetId');
-      params.delete('vehicle');
-    }, true);
-  }, [updateAssetsSearchParams]);
+  const handleDetailModalClose = useCallback((): boolean => {
+    if (isDetailSaving) {
+      return false;
+    }
+    if (showDetailModal && isDetailDirty && typeof window !== 'undefined') {
+      const shouldDiscard = window.confirm('저장하지 않은 수정 내용이 있습니다. 닫으시겠습니까?');
+      if (!shouldDiscard) {
+        return false;
+      }
+    }
+
+    closeDetailModalState();
+    return true;
+  }, [closeDetailModalState, isDetailDirty, isDetailSaving, showDetailModal]);
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -622,6 +1101,7 @@ export default function Assets() {
         return 'bg-blue-100 text-blue-700';
       case '예약':
       case '예약됨':
+      case '예약중':
         return 'bg-purple-100 text-purple-700';
       case '정비중':
         return 'bg-orange-100 text-orange-700';
@@ -629,16 +1109,6 @@ export default function Assets() {
         return 'bg-gray-100 text-gray-700';
     }
   };
-
-  // OCR 데이터 상태 추가
-  const [ocrData, setOcrData] = useState({
-    vehicleNumber: '',
-    vin: '',
-    model: '',
-    year: '',
-    owner: '',
-    insuranceExpiry: '',
-  });
 
   const statusCountMap = useMemo(() => ({
     rental: assets.filter((asset) => asset.status === '대여중').length,
@@ -668,15 +1138,48 @@ export default function Assets() {
   ) || isOutOfRangeError;
   const vehiclesWithoutDevice = assets.filter((asset) => !asset.hasDevice).length;
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleCreateFieldChange = useCallback((field: keyof CreateFormState, value: string) => {
+    setCreateForm((prev) => ({ ...prev, [field]: value }));
+    setCreateSaveError(null);
+    if (field in createFieldErrors) {
+      setCreateFieldErrors((prev) => {
+        const next = { ...prev };
+        delete next[field as CreateField];
+        return next;
+      });
+    }
+  }, [createFieldErrors]);
+
+  const handleDetailFieldChange = useCallback((field: AssetEditField, value: string) => {
+    if (field === 'status') {
+      setDetailForm((prev) => ({ ...prev, status: value as VehicleAsset['status'] }));
+    } else {
+      setDetailForm((prev) => ({ ...prev, [field]: value }));
+    }
+    setDetailSaveError(null);
+    setDetailConflictNotice(null);
+    if (field in detailFieldErrors) {
+      setDetailFieldErrors((prev) => {
+        const next = { ...prev };
+        delete next[field];
+        return next;
+      });
+    }
+  }, [detailFieldErrors]);
+
+  const handleFileUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       setUploadedFiles((prev) => ({ ...prev, vehicleRegistration: file }));
       setUploadStep('processing');
-      
-      // 시뮬레이션: OCR 처리
-      setTimeout(() => {
-        setOcrData({
+
+      setCreateSaveError(null);
+      setCreateFieldErrors({});
+      clearOcrProcessingTimer();
+
+      // OCR 자동 추출(BK-085에서 서버 연동 예정) 전 임시 프리뷰 채움.
+      ocrProcessingTimeoutRef.current = setTimeout(() => {
+        setCreateForm({
           vehicleNumber: '99허9999',
           vin: 'KMHXX00XXXX000000',
           model: '아이오닉5',
@@ -685,68 +1188,211 @@ export default function Assets() {
           insuranceExpiry: '2025-12-15',
         });
         setUploadStep('preview');
+        ocrProcessingTimeoutRef.current = null;
       }, 2000);
     }
-  };
+  }, [clearOcrProcessingTimer]);
 
-  const handleSave = () => {
-    // 저장 로직
-    alert('차량이 등록되었습니다.');
-    setShowModal(false);
-    setUploadStep('upload');
-    setUploadedFiles({
-      vehicleRegistration: null,
-      insurance: null,
-      loanSchedule: null,
-    });
-    setOcrData({
-      vehicleNumber: '',
-      vin: '',
-      model: '',
-      year: '',
-      owner: '',
-      insuranceExpiry: '',
-    });
-  };
-
-  const handleInsuranceFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      setUploadedFiles((prev) => ({ ...prev, insurance: file }));
-    }
-  };
-
-  const handleLoanScheduleUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleLoanScheduleUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       setUploadedFiles((prev) => ({ ...prev, loanSchedule: file }));
     }
-  };
+  }, []);
 
-  const handleDetailSave = () => {
-    if (!selectedAsset) return;
+  const handleCreateSave = useCallback(async () => {
+    if (isCreateSaving) {
+      return;
+    }
 
-    // assetsData 업데이트
-    const updatedAssets = assets.map(asset => {
-      if (asset.id === selectedAsset.id) {
-        return {
-          ...asset,
-          insuranceExpiry: newInsuranceExpiry,
-          nextInspection: newNextInspection,
-        };
+    const { payload, fieldErrors } = toCreatePayload(createForm);
+    if (!payload) {
+      setCreateFieldErrors(fieldErrors);
+      setCreateSaveError('필수 입력값을 확인해 주세요.');
+      return;
+    }
+
+    setIsCreateSaving(true);
+    setCreateSaveError(null);
+    setCreateFieldErrors({});
+
+    try {
+      const responsePayload = await createAsset(payload);
+      const createdAsset = toAssetDetail(responsePayload);
+      if (!createdAsset) {
+        throw new Error('생성 응답에서 자산 정보를 확인할 수 없습니다.');
       }
-      return asset;
-    });
 
-    setAssets(updatedAssets);
-    alert('차량 정보가 업데이트되었습니다.');
-    handleDetailModalClose();
-    setUploadedFiles({
-      vehicleRegistration: null,
-      insurance: null,
-      loanSchedule: null,
-    });
-  };
+      setShowModal(false);
+      resetCreateModalState();
+
+      updateAssetsSearchParams((params) => {
+        params.set('assetId', createdAsset.id);
+        params.delete('vehicle');
+      }, true);
+
+      void hydrateAssets();
+      toast.success('차량 자산이 등록되었습니다.');
+    } catch (error) {
+      if (error instanceof ApiError) {
+        if (error.status === 400) {
+          const nextFieldErrors = toCreateFieldErrors(error);
+          if (Object.keys(nextFieldErrors).length > 0) {
+            setCreateFieldErrors(nextFieldErrors);
+          }
+          setCreateSaveError(error.message || '입력값을 확인해 주세요.');
+          return;
+        }
+        if (error.status === 403) {
+          setCreateSaveError('차량 자산 등록 권한이 없습니다. 관리자에게 권한을 요청해 주세요.');
+          return;
+        }
+        if (error.status === 409) {
+          setCreateSaveError(error.message || '이미 등록된 차량 정보입니다. 입력값을 확인해 주세요.');
+          return;
+        }
+      }
+
+      setCreateSaveError('저장에 실패했습니다. 잠시 후 다시 시도해 주세요.');
+      toast.error('저장에 실패했습니다. 다시 시도해 주세요.');
+    } finally {
+      setIsCreateSaving(false);
+    }
+  }, [createForm, hydrateAssets, isCreateSaving, resetCreateModalState, updateAssetsSearchParams]);
+
+  const handleDetailSave = useCallback(async () => {
+    if (!selectedAsset || isDetailSaving) {
+      return;
+    }
+    if (!isDetailDirty) {
+      toast.info('변경된 내용이 없습니다.');
+      return;
+    }
+    if (typeof selectedAsset.version !== 'number') {
+      setDetailSaveError('자산 버전 정보를 확인할 수 없습니다. 상세 정보를 새로고침해 주세요.');
+      return;
+    }
+
+    const clientFieldErrors: FieldErrorMap<AssetEditField> = {};
+    const baseline = toAssetEditForm(selectedAsset);
+    const nextPlate = detailForm.plate.trim();
+    const nextModel = detailForm.model.trim();
+    const nextYearText = detailForm.year.trim();
+    const nextMemo = detailForm.memo.trim();
+
+    if (!nextPlate) {
+      clientFieldErrors.plate = '차량번호를 입력해 주세요.';
+    }
+
+    let parsedYear: number | undefined;
+    if (nextYearText.length > 0) {
+      const numericYear = Number(nextYearText);
+      if (!Number.isInteger(numericYear) || numericYear < 1900 || numericYear > 3000) {
+        clientFieldErrors.year = '연식은 4자리 숫자로 입력해 주세요.';
+      } else {
+        parsedYear = numericYear;
+      }
+    } else if (baseline.year.length > 0 && baseline.year !== nextYearText) {
+      clientFieldErrors.year = '연식을 수정하려면 유효한 숫자를 입력해 주세요.';
+    }
+
+    if (Object.keys(clientFieldErrors).length > 0) {
+      setDetailFieldErrors(clientFieldErrors);
+      setDetailSaveError('입력값을 확인해 주세요.');
+      return;
+    }
+
+    const payload: {
+      version: number;
+      plate?: string;
+      vehicleNumber?: string;
+      model?: string;
+      year?: number;
+      status?: string;
+      memo?: string;
+    } = {
+      version: selectedAsset.version,
+    };
+
+    if (baseline.plate !== nextPlate) {
+      payload.plate = nextPlate;
+      payload.vehicleNumber = nextPlate;
+    }
+    if (baseline.model !== nextModel) {
+      payload.model = nextModel || undefined;
+    }
+    if (baseline.year !== nextYearText && parsedYear !== undefined) {
+      payload.year = parsedYear;
+    }
+    if (baseline.status !== detailForm.status) {
+      payload.status = normalizePatchStatusValue(detailForm.status);
+    }
+    if (baseline.memo !== nextMemo) {
+      payload.memo = nextMemo;
+    }
+
+    if (Object.keys(payload).length === 1) {
+      toast.info('변경된 내용이 없습니다.');
+      return;
+    }
+
+    setIsDetailSaving(true);
+    setDetailSaveError(null);
+    setDetailFieldErrors({});
+    setDetailConflictNotice(null);
+
+    try {
+      const responsePayload = await patchAsset(selectedAsset.id, payload);
+      const updatedAsset = toAssetDetail(responsePayload);
+      if (!updatedAsset) {
+        throw new Error('수정 응답에서 자산 정보를 확인할 수 없습니다.');
+      }
+
+      setSelectedAsset(updatedAsset);
+      setDetailForm(toAssetEditForm(updatedAsset));
+      setDetailFieldErrors({});
+      setDetailSaveError(null);
+      setDetailConflictNotice(null);
+      setAssets((prevAssets) => prevAssets.map((asset) => (asset.id === updatedAsset.id ? { ...asset, ...updatedAsset } : asset)));
+      void hydrateAssetHistory(updatedAsset.id);
+      void hydrateAssets();
+      toast.success('차량 정보가 업데이트되었습니다.');
+    } catch (error) {
+      if (error instanceof ApiError) {
+        if (error.status === 400) {
+          const nextFieldErrors = toAssetEditFieldErrors(error);
+          if (Object.keys(nextFieldErrors).length > 0) {
+            setDetailFieldErrors(nextFieldErrors);
+          }
+          setDetailSaveError(error.message || '입력값을 확인해 주세요.');
+          return;
+        }
+        if (error.status === 403) {
+          setDetailSaveError('차량 자산 수정 권한이 없습니다. 관리자에게 권한을 요청해 주세요.');
+          return;
+        }
+        if (error.status === 409) {
+          setDetailConflictNotice('다른 변경 사항이 먼저 저장되었습니다. 최신 데이터로 새로고침 후 다시 저장해 주세요.');
+          setDetailSaveError(error.message || '버전 충돌이 발생했습니다.');
+          void hydrateAssetDetail(selectedAsset.id, { preserveForm: true, preserveConflictNotice: true });
+          return;
+        }
+      }
+
+      setDetailSaveError('저장에 실패했습니다. 잠시 후 다시 시도해 주세요.');
+      toast.error('저장에 실패했습니다. 다시 시도해 주세요.');
+    } finally {
+      setIsDetailSaving(false);
+    }
+  }, [
+    detailForm,
+    hydrateAssetDetail,
+    hydrateAssetHistory,
+    hydrateAssets,
+    isDetailDirty,
+    isDetailSaving,
+    selectedAsset,
+  ]);
 
   return (
     <Layout title="차량 자산">
@@ -874,7 +1520,7 @@ export default function Assets() {
             </div>
             
             <button
-              onClick={() => setShowModal(true)}
+              onClick={openCreateModal}
               className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium flex items-center gap-2"
             >
               <Plus className="w-4 h-4" />
@@ -997,15 +1643,24 @@ export default function Assets() {
                 <div className="flex items-center justify-between mb-6">
                   <h2 className="text-xl font-bold text-[#1e2939]">차량등록증 업로드 (OCR)</h2>
                   <button
-                    onClick={() => {
-                      setShowModal(false);
-                      setUploadStep('upload');
-                    }}
+                    onClick={closeCreateModal}
                     className="p-2 hover:bg-gray-100 rounded-lg"
                   >
                     <X className="w-5 h-5" />
                   </button>
                 </div>
+
+                {isCreateDirty && (
+                  <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700">
+                    저장 전 변경사항이 있습니다.
+                  </div>
+                )}
+
+                {createSaveError && (
+                  <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                    {createSaveError}
+                  </div>
+                )}
 
                 {/* 단계 표시 */}
                 <div className="flex items-center justify-center mb-8">
@@ -1127,48 +1782,60 @@ export default function Assets() {
                       <label className="block text-sm font-semibold text-gray-600 mb-2">차량번호</label>
                       <input
                         type="text"
-                        value={ocrData.vehicleNumber}
-                        onChange={(e) => setOcrData({ ...ocrData, vehicleNumber: e.target.value })}
+                        value={createForm.vehicleNumber}
+                        onChange={(e) => handleCreateFieldChange('vehicleNumber', e.target.value)}
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                       />
+                      {createFieldErrors.vehicleNumber && (
+                        <p className="mt-1 text-xs text-red-600">{createFieldErrors.vehicleNumber}</p>
+                      )}
                     </div>
 
                     <div>
                       <label className="block text-sm font-semibold text-gray-600 mb-2">차대번호</label>
                       <input
                         type="text"
-                        value={ocrData.vin}
-                        onChange={(e) => setOcrData({ ...ocrData, vin: e.target.value })}
+                        value={createForm.vin}
+                        onChange={(e) => handleCreateFieldChange('vin', e.target.value)}
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                       />
+                      {createFieldErrors.vin && (
+                        <p className="mt-1 text-xs text-red-600">{createFieldErrors.vin}</p>
+                      )}
                     </div>
 
                     <div>
                       <label className="block text-sm font-semibold text-gray-600 mb-2">차종</label>
                       <input
                         type="text"
-                        value={ocrData.model}
-                        onChange={(e) => setOcrData({ ...ocrData, model: e.target.value })}
+                        value={createForm.model}
+                        onChange={(e) => handleCreateFieldChange('model', e.target.value)}
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                       />
+                      {createFieldErrors.model && (
+                        <p className="mt-1 text-xs text-red-600">{createFieldErrors.model}</p>
+                      )}
                     </div>
 
                     <div>
                       <label className="block text-sm font-semibold text-gray-600 mb-2">연식</label>
                       <input
                         type="text"
-                        value={ocrData.year}
-                        onChange={(e) => setOcrData({ ...ocrData, year: e.target.value })}
+                        value={createForm.year}
+                        onChange={(e) => handleCreateFieldChange('year', e.target.value)}
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                       />
+                      {createFieldErrors.year && (
+                        <p className="mt-1 text-xs text-red-600">{createFieldErrors.year}</p>
+                      )}
                     </div>
 
                     <div>
                       <label className="block text-sm font-semibold text-gray-600 mb-2">소유자</label>
                       <input
                         type="text"
-                        value={ocrData.owner}
-                        onChange={(e) => setOcrData({ ...ocrData, owner: e.target.value })}
+                        value={createForm.owner}
+                        onChange={(e) => handleCreateFieldChange('owner', e.target.value)}
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                       />
                     </div>
@@ -1177,18 +1844,22 @@ export default function Assets() {
                       <label className="block text-sm font-semibold text-gray-600 mb-2">보험만료일</label>
                       <input
                         type="text"
-                        value={ocrData.insuranceExpiry}
-                        onChange={(e) => setOcrData({ ...ocrData, insuranceExpiry: e.target.value })}
+                        value={createForm.insuranceExpiry}
+                        onChange={(e) => handleCreateFieldChange('insuranceExpiry', e.target.value)}
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                       />
                     </div>
 
                     <div className="pt-4">
                       <button
-                        onClick={handleSave}
-                        className="w-full px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium"
+                        onClick={handleCreateSave}
+                        disabled={isCreateSaving}
+                        className="w-full px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium disabled:cursor-not-allowed disabled:opacity-60"
                       >
-                        확인 및 저장
+                        <span className="inline-flex items-center gap-2">
+                          {isCreateSaving && <Loader2 className="h-4 w-4 animate-spin" />}
+                          {isCreateSaving ? '저장 중...' : '확인 및 저장'}
+                        </span>
                       </button>
                     </div>
                   </div>
@@ -1202,16 +1873,20 @@ export default function Assets() {
         {selectedAsset && (
           <VehicleDetailModal
             asset={selectedAsset}
-            reservationHistory={[]}
+            historyEntries={assetHistory}
+            isHistoryLoading={isAssetHistoryLoading}
+            historyError={assetHistoryError}
+            onHistoryRetry={handleHistoryRetry}
+            onConflictRefresh={handleConflictRefresh}
             isOpen={showDetailModal}
             onClose={handleDetailModalClose}
-            newInsuranceExpiry={newInsuranceExpiry}
-            setNewInsuranceExpiry={setNewInsuranceExpiry}
-            newNextInspection={newNextInspection}
-            setNewNextInspection={setNewNextInspection}
-            uploadedFiles={{ insurance: uploadedFiles.insurance, loanSchedule: uploadedFiles.loanSchedule }}
-            handleInsuranceFileSelect={handleInsuranceFileSelect}
-            handleLoanScheduleUpload={handleLoanScheduleUpload}
+            editForm={detailForm}
+            fieldErrors={detailFieldErrors}
+            saveError={detailSaveError}
+            conflictNotice={detailConflictNotice}
+            isSaving={isDetailSaving}
+            isDirty={isDetailDirty}
+            onEditFieldChange={handleDetailFieldChange}
             handleSave={handleDetailSave}
             getStatusColor={getStatusColor}
           />

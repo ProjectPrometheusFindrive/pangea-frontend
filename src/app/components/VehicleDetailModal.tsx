@@ -1,52 +1,89 @@
 import { useState } from 'react';
-import { X, Activity, History, Info, Zap, AlertTriangle } from 'lucide-react';
+import { X, Activity, History, Info, Zap, AlertTriangle, Loader2 } from 'lucide-react';
 import type { VehicleAsset } from '../data/mockData';
 import { useNavigate } from 'react-router';
 
-interface VehicleReservationHistory {
-  id: string;
-  customer: string;
-  phone: string;
-  type: 'reservation' | 'rental' | 'return';
-  startDateFull: string;
-  endDateFull: string;
-  paymentMethod: string;
-  amount: string;
-  deposit: string;
-  issues?: string[];
+interface AssetHistoryChange {
+  field: string;
+  before?: unknown;
+  after?: unknown;
+}
+
+interface AssetHistoryEntry {
+  event: string;
+  at: string;
+  actor: string | null;
+  versionFrom: number;
+  versionTo: number;
+  changes: AssetHistoryChange[];
+}
+
+interface AssetEditForm {
+  plate: string;
+  model: string;
+  year: string;
+  status: string;
+  memo: string;
 }
 
 interface VehicleDetailModalProps {
-  asset: VehicleAsset;
-  reservationHistory?: VehicleReservationHistory[];
-  isOpen: boolean;
-  onClose: () => void;
-  newInsuranceExpiry: string;
-  setNewInsuranceExpiry: (value: string) => void;
-  newNextInspection: string;
-  setNewNextInspection: (value: string) => void;
-  uploadedFiles: {
-    insurance: File | null;
-    loanSchedule: File | null;
+  asset: VehicleAsset & {
+    id?: string;
+    version?: number;
+    updatedAt?: string;
+    memo?: string;
+    plate?: string;
   };
-  handleInsuranceFileSelect: (e: React.ChangeEvent<HTMLInputElement>) => void;
-  handleLoanScheduleUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  historyEntries: AssetHistoryEntry[];
+  isHistoryLoading: boolean;
+  historyError: string | null;
+  onHistoryRetry: () => void;
+  onConflictRefresh: () => void;
+  isOpen: boolean;
+  onClose: () => boolean;
+  editForm: AssetEditForm;
+  fieldErrors: Partial<Record<keyof AssetEditForm, string>>;
+  saveError: string | null;
+  conflictNotice: string | null;
+  isSaving: boolean;
+  isDirty: boolean;
+  onEditFieldChange: (field: keyof AssetEditForm, value: string) => void;
   handleSave: () => void;
   getStatusColor: (status: string) => string;
 }
 
+const ASSET_STATUS_OPTIONS = ['가용', '대여중', '예약', '정비중'] as const;
+
+function formatHistoryValue(value: unknown): string {
+  if (value === null || value === undefined || value === '') {
+    return '-';
+  }
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    return String(value);
+  }
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
 export function VehicleDetailModal({
   asset,
-  reservationHistory = [],
+  historyEntries,
+  isHistoryLoading,
+  historyError,
+  onHistoryRetry,
+  onConflictRefresh,
   isOpen,
   onClose,
-  newInsuranceExpiry,
-  setNewInsuranceExpiry,
-  newNextInspection,
-  setNewNextInspection,
-  uploadedFiles,
-  handleInsuranceFileSelect,
-  handleLoanScheduleUpload,
+  editForm,
+  fieldErrors,
+  saveError,
+  conflictNotice,
+  isSaving,
+  isDirty,
+  onEditFieldChange,
   handleSave,
   getStatusColor,
 }: VehicleDetailModalProps) {
@@ -54,8 +91,6 @@ export function VehicleDetailModal({
   const navigate = useNavigate();
 
   if (!isOpen) return null;
-
-  const vehicleReservations = reservationHistory;
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
@@ -66,8 +101,10 @@ export function VehicleDetailModal({
             <h2 className="text-xl font-bold text-[#1e2939]">차량 상세 정보</h2>
             <button
               onClick={() => {
-                onClose();
-                setDetailTab('info');
+                const closed = onClose();
+                if (closed) {
+                  setDetailTab('info');
+                }
               }}
               className="p-2 hover:bg-gray-100 rounded-lg"
             >
@@ -97,9 +134,9 @@ export function VehicleDetailModal({
               }`}
             >
               <History className="w-4 h-4" />
-              예약 히스토리
+              변경 이력
               <span className="px-2 py-0.5 bg-gray-200 text-gray-700 rounded-full text-xs font-semibold">
-                {vehicleReservations.length}
+                {historyEntries.length}
               </span>
             </button>
             <button
@@ -138,7 +175,7 @@ export function VehicleDetailModal({
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="text-xs font-semibold text-gray-500 uppercase">연식</label>
-                  <p className="text-lg text-gray-900 mt-1">{asset.year}년</p>
+                  <p className="text-lg text-gray-900 mt-1">{asset.year && asset.year !== '-' ? `${asset.year}년` : '-'}</p>
                 </div>
                 <div>
                   <label className="text-xs font-semibold text-gray-500 uppercase">차대번호</label>
@@ -159,6 +196,25 @@ export function VehicleDetailModal({
                 </div>
               </div>
 
+              <div className="grid grid-cols-3 gap-4">
+                <div>
+                  <label className="text-xs font-semibold text-gray-500 uppercase">자산 ID</label>
+                  <p className="text-sm text-gray-900 mt-1 font-mono">{asset.id ?? '-'}</p>
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-gray-500 uppercase">버전</label>
+                  <p className="text-sm text-gray-900 mt-1">{asset.version ?? '-'}</p>
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-gray-500 uppercase">최종 갱신</label>
+                  <p className="text-sm text-gray-900 mt-1">
+                    {asset.updatedAt
+                      ? new Date(asset.updatedAt).toLocaleString('ko-KR')
+                      : '-'}
+                  </p>
+                </div>
+              </div>
+
               {asset.issues.length > 0 && (
                 <div>
                   <label className="text-xs font-semibold text-gray-500 uppercase flex items-center gap-1 mb-2">
@@ -170,8 +226,10 @@ export function VehicleDetailModal({
                       <button
                         key={idx}
                         onClick={() => {
-                          onClose();
-                          navigate(`/action-required?filter=${encodeURIComponent(issue)}`);
+                          const closed = onClose();
+                          if (closed) {
+                            navigate(`/action-required?filter=${encodeURIComponent(issue)}`);
+                          }
                         }}
                         className="px-3 py-2 bg-red-100 text-red-700 rounded-lg font-medium hover:bg-red-200 transition-colors"
                       >
@@ -183,168 +241,175 @@ export function VehicleDetailModal({
               )}
 
               <div className="border-t pt-4 mt-4">
-                <h3 className="text-sm font-semibold text-gray-700 mb-4">보험 및 점검 정보 수정</h3>
-                
+                <div className="mb-4 flex items-center justify-between">
+                  <h3 className="text-sm font-semibold text-gray-700">자산 정보 수정</h3>
+                  {isDirty && (
+                    <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700">
+                      저장 전 변경사항 있음
+                    </span>
+                  )}
+                </div>
+
+                {conflictNotice && (
+                  <div className="mb-4 rounded-lg border border-orange-200 bg-orange-50 px-3 py-2 text-sm text-orange-700">
+                    <p>{conflictNotice}</p>
+                    <button
+                      type="button"
+                      onClick={onConflictRefresh}
+                      className="mt-2 text-xs font-semibold text-orange-800 underline underline-offset-2"
+                    >
+                      최신 데이터로 새로고침
+                    </button>
+                  </div>
+                )}
+
+                {saveError && (
+                  <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                    {saveError}
+                  </div>
+                )}
+
                 <div className="space-y-4">
                   <div>
-                    <label className="block text-sm font-semibold text-gray-600 mb-2">보험가입증서 업로드</label>
-                    <label className="cursor-pointer">
-                      <div className="flex items-center gap-2">
-                        <div className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 font-medium">
-                          파일 선택
-                        </div>
-                        {uploadedFiles.insurance ? (
-                          <span className="text-sm text-green-600">
-                            ✓ {uploadedFiles.insurance.name}
-                          </span>
-                        ) : (
-                          <span className="text-sm text-gray-500">선택된 파일 없음</span>
-                        )}
-                      </div>
-                      <input
-                        type="file"
-                        accept="image/*,application/pdf"
-                        onChange={handleInsuranceFileSelect}
-                        className="hidden"
-                      />
-                    </label>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-600 mb-2">보험만료일</label>
+                    <label className="block text-sm font-semibold text-gray-600 mb-2">차량번호</label>
                     <input
-                      type="date"
-                      value={newInsuranceExpiry}
-                      onChange={(e) => setNewInsuranceExpiry(e.target.value)}
+                      type="text"
+                      value={editForm.plate}
+                      onChange={(event) => onEditFieldChange('plate', event.target.value)}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                     />
+                    {fieldErrors.plate && (
+                      <p className="mt-1 text-xs text-red-600">{fieldErrors.plate}</p>
+                    )}
                   </div>
 
                   <div>
-                    <label className="block text-sm font-semibold text-gray-600 mb-2">자동차종합검사 결과표 업로드</label>
-                    <label className="cursor-pointer">
-                      <div className="flex items-center gap-2">
-                        <div className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 font-medium">
-                          파일 선택
-                        </div>
-                        <span className="text-sm text-gray-500">선택된 파일 없음</span>
-                      </div>
-                      <input
-                        type="file"
-                        accept=".pdf,.jpg,.jpeg,.png"
-                        className="hidden"
-                      />
-                    </label>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-600 mb-2">다음 정기점검일</label>
+                    <label className="block text-sm font-semibold text-gray-600 mb-2">차종</label>
                     <input
-                      type="date"
-                      value={newNextInspection}
-                      onChange={(e) => setNewNextInspection(e.target.value)}
+                      type="text"
+                      value={editForm.model}
+                      onChange={(event) => onEditFieldChange('model', event.target.value)}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                     />
+                    {fieldErrors.model && (
+                      <p className="mt-1 text-xs text-red-600">{fieldErrors.model}</p>
+                    )}
                   </div>
 
                   <div>
-                    <label className="block text-sm font-semibold text-gray-600 mb-2">차량구매 대출 상환계획서 업로드</label>
-                    <label className="cursor-pointer">
-                      <div className="flex items-center gap-2">
-                        <div className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 font-medium">
-                          파일 선택
-                        </div>
-                        {uploadedFiles.loanSchedule ? (
-                          <span className="text-sm text-green-600">
-                            ✓ {uploadedFiles.loanSchedule.name}
-                          </span>
-                        ) : (
-                          <span className="text-sm text-gray-500">선택된 파일 없음</span>
-                        )}
-                      </div>
-                      <input
-                        type="file"
-                        accept="application/pdf,image/*"
-                        onChange={handleLoanScheduleUpload}
-                        className="hidden"
-                      />
-                    </label>
+                    <label className="block text-sm font-semibold text-gray-600 mb-2">연식</label>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={editForm.year}
+                      onChange={(event) => onEditFieldChange('year', event.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                    {fieldErrors.year && (
+                      <p className="mt-1 text-xs text-red-600">{fieldErrors.year}</p>
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-600 mb-2">상태</label>
+                    <select
+                      value={editForm.status}
+                      onChange={(event) => onEditFieldChange('status', event.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      {ASSET_STATUS_OPTIONS.map((statusOption) => (
+                        <option key={statusOption} value={statusOption}>
+                          {statusOption}
+                        </option>
+                      ))}
+                    </select>
+                    {fieldErrors.status && (
+                      <p className="mt-1 text-xs text-red-600">{fieldErrors.status}</p>
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-600 mb-2">메모</label>
+                    <textarea
+                      value={editForm.memo}
+                      onChange={(event) => onEditFieldChange('memo', event.target.value)}
+                      rows={3}
+                      className="w-full resize-none px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                    {fieldErrors.memo && (
+                      <p className="mt-1 text-xs text-red-600">{fieldErrors.memo}</p>
+                    )}
                   </div>
                 </div>
               </div>
             </div>
           )}
 
-          {/* 예약 히스토리 탭 */}
+          {/* 변경 이력 탭 */}
           {detailTab === 'history' && (
             <div className="space-y-4">
-              {vehicleReservations.length > 0 ? (
+              {isHistoryLoading && (
+                <div className="flex items-center justify-center gap-2 rounded-lg border border-blue-200 bg-blue-50 py-6 text-sm text-blue-700">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  변경 이력을 불러오는 중입니다.
+                </div>
+              )}
+
+              {historyError && (
+                <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                  <p>{historyError}</p>
+                  <button
+                    type="button"
+                    onClick={onHistoryRetry}
+                    className="mt-2 text-xs font-semibold text-red-700 underline underline-offset-2"
+                  >
+                    다시 시도
+                  </button>
+                </div>
+              )}
+
+              {!isHistoryLoading && !historyError && historyEntries.length > 0 ? (
                 <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
                   <div className="overflow-x-auto">
                     <table className="w-full">
                       <thead className="bg-gray-50 border-b border-gray-200">
                         <tr>
-                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">예약번호</th>
-                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">고객명</th>
-                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">유형</th>
-                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">대여 기간</th>
-                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">결제 방법</th>
-                          <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase tracking-wider">대여료</th>
-                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">상태</th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">시각</th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">이벤트</th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">버전</th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">변경 내용</th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">작업자</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-200">
-                        {vehicleReservations.map((reservation) => (
-                          <tr key={reservation.id} className="hover:bg-gray-50">
-                            <td className="px-4 py-3 whitespace-nowrap text-sm font-medium">
-                              <button
-                                onClick={() => {
-                                  onClose();
-                                  navigate(`/reservations?search=${encodeURIComponent(reservation.id)}`);
-                                }}
-                                className="text-blue-600 hover:text-blue-800 hover:underline font-semibold"
-                              >
-                                {reservation.id}
-                              </button>
+                        {historyEntries.map((entry, entryIndex) => (
+                          <tr key={`${entry.event}-${entry.at}-${entryIndex}`} className="hover:bg-gray-50">
+                            <td className="px-4 py-3 whitespace-nowrap text-xs text-gray-700">
+                              {new Date(entry.at).toLocaleString('ko-KR')}
                             </td>
                             <td className="px-4 py-3 whitespace-nowrap">
-                              <div>
-                                <div className="text-sm font-medium text-gray-900">{reservation.customer}</div>
-                                <div className="text-xs text-gray-500">{reservation.phone}</div>
-                              </div>
-                            </td>
-                            <td className="px-4 py-3 whitespace-nowrap">
-                              <span className={`px-2 py-1 text-xs font-medium rounded-full ${
-                                reservation.type === 'reservation' 
-                                  ? 'bg-purple-100 text-purple-700'
-                                  : 'bg-blue-100 text-blue-700'
-                              }`}>
-                                {reservation.type === 'reservation' ? '예약' : '대여'}
+                              <span className="rounded-full bg-blue-100 px-2 py-1 text-xs font-medium text-blue-700">
+                                {entry.event}
                               </span>
                             </td>
-                            <td className="px-4 py-3 text-sm text-gray-900">
-                              <div className="whitespace-nowrap">{reservation.startDateFull}</div>
-                              <div className="whitespace-nowrap text-xs text-gray-500">~ {reservation.endDateFull}</div>
+                            <td className="px-4 py-3 whitespace-nowrap text-xs text-gray-700">
+                              v{entry.versionFrom} → v{entry.versionTo}
                             </td>
-                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
-                              {reservation.paymentMethod}
-                            </td>
-                            <td className="px-4 py-3 whitespace-nowrap text-right">
-                              <div className="text-sm font-bold text-blue-600">{reservation.amount}</div>
-                              <div className="text-xs text-gray-500">선금: {reservation.deposit}</div>
-                            </td>
-                            <td className="px-4 py-3 whitespace-nowrap">
-                              {reservation.issues && reservation.issues.length > 0 ? (
-                                <div className="flex items-center gap-1">
-                                  <AlertTriangle className="w-3 h-3 text-orange-600" />
-                                  <span className="text-xs text-orange-700 font-medium">
-                                    {reservation.issues[0]}
-                                  </span>
+                            <td className="px-4 py-3 text-xs text-gray-700">
+                              {entry.changes.length > 0 ? (
+                                <div className="space-y-1">
+                                  {entry.changes.map((change, changeIndex) => (
+                                    <p key={`${change.field}-${changeIndex}`}>
+                                      <span className="font-semibold">{change.field}</span>
+                                      {`: ${formatHistoryValue(change.before)} → ${formatHistoryValue(change.after)}`}
+                                    </p>
+                                  ))}
                                 </div>
                               ) : (
-                                <span className="text-xs text-green-600">정상</span>
+                                <span>-</span>
                               )}
                             </td>
+                            <td className="px-4 py-3 whitespace-nowrap text-xs text-gray-700">{entry.actor ?? '-'}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -352,10 +417,12 @@ export function VehicleDetailModal({
                   </div>
                 </div>
               ) : (
-                <div className="text-center py-12 text-gray-400">
-                  <History className="w-12 h-12 mx-auto mb-3 opacity-30" />
-                  <p className="text-sm">이 차량의 예약 히스토리가 없습니다.</p>
-                </div>
+                !isHistoryLoading && !historyError && (
+                  <div className="text-center py-12 text-gray-400">
+                    <History className="w-12 h-12 mx-auto mb-3 opacity-30" />
+                    <p className="text-sm">이 차량의 변경 이력이 없습니다.</p>
+                  </div>
+                )
               )}
             </div>
           )}
@@ -420,8 +487,10 @@ export function VehicleDetailModal({
                                   ) : (
                                     <button
                                       onClick={() => {
-                                        onClose();
-                                        navigate(`/action-required?filter=차량이상`);
+                                        const closed = onClose();
+                                        if (closed) {
+                                          navigate(`/action-required?filter=차량이상`);
+                                        }
                                       }}
                                       className="px-2 py-1 text-xs font-medium bg-red-100 text-red-700 rounded hover:bg-red-200 transition-colors"
                                     >
@@ -699,8 +768,10 @@ export function VehicleDetailModal({
           <div className="p-6 border-t border-gray-200 flex gap-3">
             <button
               onClick={() => {
-                onClose();
-                setDetailTab('info');
+                const closed = onClose();
+                if (closed) {
+                  setDetailTab('info');
+                }
               }}
               className="flex-1 px-4 py-3 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 font-medium"
             >
@@ -708,17 +779,23 @@ export function VehicleDetailModal({
             </button>
             <button
               onClick={handleSave}
-              className="flex-1 px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium"
+              disabled={isSaving}
+              className="flex-1 px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium disabled:cursor-not-allowed disabled:opacity-60"
             >
-              저장
+              <span className="inline-flex items-center gap-2">
+                {isSaving && <Loader2 className="h-4 w-4 animate-spin" />}
+                {isSaving ? '저장 중...' : '저장'}
+              </span>
             </button>
           </div>
         ) : (
           <div className="p-6 border-t border-gray-200">
             <button
               onClick={() => {
-                onClose();
-                setDetailTab('info');
+                const closed = onClose();
+                if (closed) {
+                  setDetailTab('info');
+                }
               }}
               className="w-full px-4 py-3 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 font-medium"
             >
