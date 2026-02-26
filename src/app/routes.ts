@@ -7,6 +7,7 @@ import Revenue from "./pages/Revenue";
 import Settings from "./pages/Settings";
 import DeviceInstallation from "./pages/DeviceInstallation";
 import Login from "./pages/Login";
+import { AuthRequiredRoute } from "./components/AuthRequiredRoute";
 
 export const router = createBrowserRouter([
   {
@@ -14,31 +15,36 @@ export const router = createBrowserRouter([
     Component: Login,
   },
   {
-    path: "/",
-    Component: Home,
-  },
-  {
-    path: "/action-required",
-    Component: ActionRequired,
-  },
-  {
-    path: "/assets",
-    Component: Assets,
-  },
-  {
-    path: "/reservations",
-    Component: Reservations,
-  },
-  {
-    path: "/revenue",
-    Component: Revenue,
-  },
-  {
-    path: "/settings",
-    Component: Settings,
-  },
-  {
-    path: "/device-installation",
-    Component: DeviceInstallation,
+    Component: AuthRequiredRoute,
+    children: [
+      {
+        path: "/",
+        Component: Home,
+      },
+      {
+        path: "/action-required",
+        Component: ActionRequired,
+      },
+      {
+        path: "/assets",
+        Component: Assets,
+      },
+      {
+        path: "/reservations",
+        Component: Reservations,
+      },
+      {
+        path: "/revenue",
+        Component: Revenue,
+      },
+      {
+        path: "/settings",
+        Component: Settings,
+      },
+      {
+        path: "/device-installation",
+        Component: DeviceInstallation,
+      },
+    ],
   },
 ]);

@@ -1,17 +1,37 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router';
-import { useAuth } from '../context/AuthContext';
+import { useNavigate, useSearchParams } from 'react-router';
+import { toast } from 'sonner';
+import { consumeStoredReturnUrl, useAuth } from '../context/AuthContext';
 
 export default function Login() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { login, error, isLoading, isAuthenticated } = useAuth();
   const [userId, setUserId] = useState('');
   const [password, setPassword] = useState('');
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   useEffect(() => {
+    const reason = searchParams.get('reason');
+    if (!reason) {
+      return;
+    }
+
+    if (reason === 'manual') {
+      toast.success('로그아웃되었습니다.');
+    } else if (reason === 'expired') {
+      toast.info('세션이 만료되어 다시 로그인해 주세요.');
+    }
+
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.delete('reason');
+    setSearchParams(nextParams, { replace: true });
+  }, [searchParams, setSearchParams]);
+
+  useEffect(() => {
     if (isAuthenticated) {
-      navigate('/');
+      const returnUrl = consumeStoredReturnUrl();
+      navigate(returnUrl ?? '/', { replace: true });
     }
   }, [isAuthenticated, navigate]);
 
@@ -21,7 +41,6 @@ export default function Login() {
 
     try {
       await login({ userId, password });
-      navigate('/');
     } catch {
       setSubmitError('로그인에 실패했습니다. 아이디/비밀번호를 확인해 주세요.');
     }

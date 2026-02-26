@@ -165,10 +165,8 @@ export function Layout({ children, title }: LayoutProps) {
   };
 
   const handleLogout = async () => {
-    await logout();
-    alert('로그아웃되었습니다');
+    await logout({ silent: true, redirectToLogin: true });
     setShowAccountMenu(false);
-    navigate('/');
   };
 
   const handleOpenSettings = () => {

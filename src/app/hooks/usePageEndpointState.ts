@@ -182,18 +182,12 @@ export function getPageErrorActionLabel(errorKind: PageErrorKind | null): string
 
 export function handlePageErrorAction(errorKind: PageErrorKind | null, navigate: NavigateFunction): void {
   if (errorKind === 'unauthorized') {
-    if (typeof window !== 'undefined') {
-      window.alert('세션이 만료되었습니다. 로그인 페이지로 이동합니다.');
-    }
-    navigate('/login');
+    navigate('/login', { replace: true });
     return;
   }
 
   if (errorKind === 'forbidden') {
-    if (typeof window !== 'undefined') {
-      window.alert('접근 권한이 없어 홈으로 이동합니다.');
-    }
-    navigate('/');
+    navigate('/', { replace: true });
   }
 }
 
