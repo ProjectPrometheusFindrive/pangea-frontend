@@ -23,6 +23,7 @@ import {
   isPayloadEmpty,
   usePageEndpointState,
 } from '../hooks/usePageEndpointState';
+import { useAuth } from '../context/AuthContext';
 import type { VehicleAsset } from '../types/assets';
 import { ApiError } from '../../services/api';
 import {
@@ -32,6 +33,14 @@ import {
   getAssetsList,
   patchAsset,
 } from '../../services/assets';
+import {
+  getOcrExtractJob,
+  signAssetUpload,
+  submitOcrExtractJob,
+  uploadFileToSignedUrl,
+  type OcrDocType,
+  type OcrExtractedField,
+} from '../../services/assetOcr';
 
 interface Asset extends VehicleAsset {
   id: string;
@@ -84,10 +93,26 @@ interface UploadedFiles {
   loanSchedule: File | null;
 }
 
+interface OcrSuggestion {
+  docType: OcrDocType;
+  fieldName: string;
+  value: string;
+  confidence: number;
+}
+
+type UploadStep = 'upload' | 'processing' | 'preview';
 type StatusFilterCode = 'all' | 'rental' | 'reserved' | 'available' | 'maintenance';
 type AssetEditField = keyof AssetEditForm;
 type CreateField = keyof Pick<CreateFormState, 'vehicleNumber' | 'vin' | 'model' | 'year'>;
 type FieldErrorMap<TField extends string> = Partial<Record<TField, string>>;
+type UploadedFileKey = keyof UploadedFiles;
+
+interface OcrDocConfig {
+  key: UploadedFileKey;
+  docType: OcrDocType;
+  label: string;
+  required: boolean;
+}
 
 const DEFAULT_PAGE = 1;
 const DEFAULT_PAGE_SIZE = 20;
@@ -123,6 +148,46 @@ const STATUS_TO_QUERY_MAP: Record<string, Exclude<StatusFilterCode, 'all'>> = {
   repair: 'maintenance',
   정비중: 'maintenance',
 };
+const OCR_DOC_CONFIGS: OcrDocConfig[] = [
+  {
+    key: 'vehicleRegistration',
+    docType: 'registrationDoc',
+    label: '차량등록증',
+    required: true,
+  },
+  {
+    key: 'insurance',
+    docType: 'insuranceDoc',
+    label: '보험가입증서',
+    required: false,
+  },
+  {
+    key: 'loanSchedule',
+    docType: 'amortizationSchedule',
+    label: '상환계획서',
+    required: false,
+  },
+];
+const OCR_ALLOWED_CONTENT_TYPES = new Set([
+  'application/pdf',
+  'image/png',
+  'image/jpeg',
+  'image/jpg',
+  'image/webp',
+  'image/x-icon',
+]);
+const OCR_EXTENSION_TO_CONTENT_TYPE: Record<string, string> = {
+  pdf: 'application/pdf',
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  webp: 'image/webp',
+  ico: 'image/x-icon',
+};
+const OCR_MAX_FILE_SIZE_BYTES = 25 * 1024 * 1024;
+const OCR_POLL_INTERVAL_MS = 1500;
+const OCR_HIDDEN_POLL_INTERVAL_MS = 3000;
+const OCR_POLL_TIMEOUT_MS = 90_000;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
@@ -157,6 +222,226 @@ function toBooleanValue(value: unknown): boolean | null {
     return value;
   }
   return null;
+}
+
+function toFileExtension(name: string): string | null {
+  const normalizedName = name.trim().toLowerCase();
+  const separatorIndex = normalizedName.lastIndexOf('.');
+  if (separatorIndex < 0 || separatorIndex >= normalizedName.length - 1) {
+    return null;
+  }
+  return normalizedName.slice(separatorIndex + 1);
+}
+
+function resolveOcrContentType(file: File): string | null {
+  const fileContentType = file.type.trim().toLowerCase();
+  if (OCR_ALLOWED_CONTENT_TYPES.has(fileContentType)) {
+    return fileContentType;
+  }
+
+  const extension = toFileExtension(file.name);
+  if (extension && OCR_EXTENSION_TO_CONTENT_TYPE[extension]) {
+    return OCR_EXTENSION_TO_CONTENT_TYPE[extension];
+  }
+
+  return null;
+}
+
+function toReadableFileSize(size: number): string {
+  if (size >= 1024 * 1024) {
+    return `${(size / (1024 * 1024)).toFixed(1)}MB`;
+  }
+  if (size >= 1024) {
+    return `${(size / 1024).toFixed(1)}KB`;
+  }
+  return `${size}B`;
+}
+
+function waitForDuration(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) {
+      reject(new ApiError('ABORTED', 'Request aborted'));
+      return;
+    }
+
+    const timeoutId = setTimeout(() => {
+      signal.removeEventListener('abort', handleAbort);
+      resolve();
+    }, ms);
+
+    const handleAbort = () => {
+      clearTimeout(timeoutId);
+      signal.removeEventListener('abort', handleAbort);
+      reject(new ApiError('ABORTED', 'Request aborted'));
+    };
+
+    signal.addEventListener('abort', handleAbort, { once: true });
+  });
+}
+
+function toRetryAfterSeconds(error: ApiError): number | null {
+  if (!isRecord(error.payload) || !isRecord(error.payload.error) || !Array.isArray(error.payload.error.details)) {
+    return null;
+  }
+
+  for (const detail of error.payload.error.details) {
+    if (!isRecord(detail)) {
+      continue;
+    }
+    const retryAfter = toNumberValue(detail.retryAfterSeconds);
+    if (retryAfter !== null && retryAfter > 0) {
+      return retryAfter;
+    }
+  }
+
+  return null;
+}
+
+function isRetryableOcrError(error: unknown): boolean {
+  if (error instanceof ApiError) {
+    if (error.status !== undefined && [429, 500, 502, 503, 504].includes(error.status)) {
+      return true;
+    }
+    return error.code === 'TIMEOUT' || error.code === 'NETWORK_ERROR';
+  }
+
+  return false;
+}
+
+function toOcrFailureMessage(error: unknown, documentLabel: string): string {
+  if (error instanceof ApiError) {
+    if (error.status === 400 || error.status === 415) {
+      return `${documentLabel}: 파일 형식이 올바르지 않습니다. PDF/JPG/PNG/WebP 파일을 사용해 주세요.`;
+    }
+    if (error.status === 413) {
+      return `${documentLabel}: 파일 크기가 OCR 제한(25MB)을 초과했습니다.`;
+    }
+    if (error.status === 403) {
+      return `${documentLabel}: 업로드/추출 권한이 없습니다. 회사 권한을 확인해 주세요.`;
+    }
+    if (error.status === 429) {
+      const retryAfterSeconds = toRetryAfterSeconds(error);
+      if (retryAfterSeconds !== null) {
+        return `${documentLabel}: OCR 요청이 많아 제한되었습니다. ${retryAfterSeconds}초 후 다시 시도해 주세요.`;
+      }
+      return `${documentLabel}: OCR 요청이 많아 제한되었습니다. 잠시 후 다시 시도해 주세요.`;
+    }
+    if (error.status === 504 || error.code === 'TIMEOUT') {
+      return `${documentLabel}: OCR 처리 시간이 초과되었습니다. 수동 입력으로 진행하거나 다시 시도해 주세요.`;
+    }
+    if (error.status !== undefined && error.status >= 500) {
+      return `${documentLabel}: 서버 오류로 OCR 처리에 실패했습니다. 다시 시도해 주세요.`;
+    }
+    if (error.code === 'NETWORK_ERROR') {
+      return `${documentLabel}: 네트워크 오류로 OCR 처리에 실패했습니다. 연결 상태를 확인해 주세요.`;
+    }
+
+    return `${documentLabel}: ${error.message || 'OCR 처리에 실패했습니다.'}`;
+  }
+
+  if (error instanceof Error && error.message) {
+    return `${documentLabel}: ${error.message}`;
+  }
+
+  return `${documentLabel}: OCR 처리에 실패했습니다.`;
+}
+
+function normalizeDateText(value: string): string {
+  const normalized = value.trim();
+  const match = normalized.match(/^(\d{4})[.\-/년\s]*(\d{1,2})[.\-/월\s]*(\d{1,2})/);
+  if (!match) {
+    return normalized;
+  }
+
+  const year = match[1];
+  const month = match[2].padStart(2, '0');
+  const day = match[3].padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function toSuggestionValue(value: unknown): string | null {
+  if (typeof value === 'string') {
+    const normalized = value.trim();
+    return normalized.length > 0 ? normalized : null;
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return String(value);
+  }
+  return null;
+}
+
+function applyOcrFieldsToCreateForm(
+  previousForm: CreateFormState,
+  extractedItems: Array<{ docType: OcrDocType; fields: OcrExtractedField[] }>,
+): {
+  nextForm: CreateFormState;
+  suggestions: OcrSuggestion[];
+  appliedValues: Partial<Record<keyof CreateFormState, string>>;
+} {
+  const nextForm: CreateFormState = {
+    ...previousForm,
+  };
+  const appliedValues: Partial<Record<keyof CreateFormState, string>> = {};
+  const suggestions: OcrSuggestion[] = [];
+
+  const applyField = (field: keyof CreateFormState, value: string) => {
+    const normalized = value.trim();
+    if (!normalized) {
+      return;
+    }
+    nextForm[field] = normalized;
+    appliedValues[field] = normalized;
+  };
+
+  for (const item of extractedItems) {
+    for (const field of item.fields) {
+      const suggestionValue = toSuggestionValue(field.value);
+      if (!suggestionValue) {
+        continue;
+      }
+
+      suggestions.push({
+        docType: item.docType,
+        fieldName: field.name,
+        value: suggestionValue,
+        confidence: field.confidence,
+      });
+
+      const normalizedName = field.name.trim().toLowerCase();
+      if (normalizedName === 'plate' || normalizedName === 'vehiclenumber') {
+        applyField('vehicleNumber', suggestionValue.replace(/\s+/g, '').toUpperCase());
+        continue;
+      }
+      if (normalizedName === 'vin') {
+        applyField('vin', suggestionValue.toUpperCase());
+        continue;
+      }
+      if (normalizedName === 'model') {
+        applyField('model', suggestionValue);
+        continue;
+      }
+      if (normalizedName === 'year') {
+        const yearMatch = suggestionValue.match(/\d{4}/);
+        if (yearMatch) {
+          applyField('year', yearMatch[0]);
+        }
+        continue;
+      }
+      if (normalizedName === 'insuranceexpirydate' || normalizedName === 'insuranceexpiry') {
+        applyField('insuranceExpiry', normalizeDateText(suggestionValue));
+        continue;
+      }
+      if (normalizedName === 'rentername' || normalizedName === 'owner' || normalizedName === 'name') {
+        applyField('owner', suggestionValue);
+      }
+    }
+  }
+
+  return {
+    nextForm,
+    suggestions,
+    appliedValues,
+  };
 }
 
 function toPositiveInteger(value: string | null, fallbackValue: number): number {
@@ -600,6 +885,7 @@ function cleanupAssetsQueryParams(params: URLSearchParams): void {
 export default function Assets() {
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
+  const { user } = useAuth();
 
   const page = toPositiveInteger(searchParams.get('page'), DEFAULT_PAGE);
   const pageSize = toPositiveInteger(searchParams.get('size'), DEFAULT_PAGE_SIZE);
@@ -614,11 +900,16 @@ export default function Assets() {
   const [showModal, setShowModal] = useState(false);
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
-  const [uploadStep, setUploadStep] = useState<'upload' | 'processing' | 'preview'>('upload');
+  const [uploadStep, setUploadStep] = useState<UploadStep>('upload');
   const [createForm, setCreateForm] = useState<CreateFormState>(DEFAULT_CREATE_FORM_STATE);
   const [createFieldErrors, setCreateFieldErrors] = useState<FieldErrorMap<CreateField>>({});
   const [createSaveError, setCreateSaveError] = useState<string | null>(null);
   const [isCreateSaving, setIsCreateSaving] = useState(false);
+  const [ocrProgressMessage, setOcrProgressMessage] = useState<string | null>(null);
+  const [ocrWarnings, setOcrWarnings] = useState<string[]>([]);
+  const [ocrSuggestions, setOcrSuggestions] = useState<OcrSuggestion[]>([]);
+  const [ocrCanRetry, setOcrCanRetry] = useState(false);
+  const [ocrAppliedValues, setOcrAppliedValues] = useState<Partial<Record<keyof CreateFormState, string>>>({});
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFiles>({
     vehicleRegistration: null,
     insurance: null,
@@ -641,7 +932,8 @@ export default function Assets() {
   const detailAbortControllerRef = useRef<AbortController | null>(null);
   const historyRequestSequenceRef = useRef(0);
   const historyAbortControllerRef = useRef<AbortController | null>(null);
-  const ocrProcessingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const ocrRequestSequenceRef = useRef(0);
+  const ocrAbortControllerRef = useRef<AbortController | null>(null);
 
   const updateAssetsSearchParams = useCallback((
     mutator: (params: URLSearchParams) => void,
@@ -726,32 +1018,40 @@ export default function Assets() {
     void hydrateAssets();
   }, [hydrateAssets]);
 
-  const clearOcrProcessingTimer = useCallback(() => {
-    if (ocrProcessingTimeoutRef.current) {
-      clearTimeout(ocrProcessingTimeoutRef.current);
-      ocrProcessingTimeoutRef.current = null;
-    }
+  const abortOcrProcessing = useCallback(() => {
+    ocrRequestSequenceRef.current += 1;
+    ocrAbortControllerRef.current?.abort();
+    ocrAbortControllerRef.current = null;
+  }, []);
+
+  const resetOcrFeedback = useCallback(() => {
+    setOcrProgressMessage(null);
+    setOcrWarnings([]);
+    setOcrSuggestions([]);
+    setOcrCanRetry(false);
+    setOcrAppliedValues({});
   }, []);
 
   const resetCreateModalState = useCallback(() => {
-    clearOcrProcessingTimer();
+    abortOcrProcessing();
     setUploadStep('upload');
     setCreateForm(DEFAULT_CREATE_FORM_STATE);
     setCreateFieldErrors({});
     setCreateSaveError(null);
     setIsCreateSaving(false);
+    resetOcrFeedback();
     setUploadedFiles({
       vehicleRegistration: null,
       insurance: null,
       loanSchedule: null,
     });
-  }, [clearOcrProcessingTimer]);
+  }, [abortOcrProcessing, resetOcrFeedback]);
 
   useEffect(() => () => {
     detailAbortControllerRef.current?.abort();
     historyAbortControllerRef.current?.abort();
-    clearOcrProcessingTimer();
-  }, [clearOcrProcessingTimer]);
+    abortOcrProcessing();
+  }, [abortOcrProcessing]);
 
   const isCreateDirty = useMemo(() => (
     uploadStep !== 'upload'
@@ -1167,38 +1467,286 @@ export default function Assets() {
     }
   }, [detailFieldErrors]);
 
-  const handleFileUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      setUploadedFiles((prev) => ({ ...prev, vehicleRegistration: file }));
-      setUploadStep('processing');
+  const pollOcrJobUntilTerminal = useCallback(async (
+    jobId: string,
+    docLabel: string,
+    controller: AbortController,
+    requestSequence: number,
+  ) => {
+    const startedAt = Date.now();
+    let pollCount = 0;
 
-      setCreateSaveError(null);
-      setCreateFieldErrors({});
-      clearOcrProcessingTimer();
+    while (Date.now() - startedAt < OCR_POLL_TIMEOUT_MS) {
+      if (controller.signal.aborted || requestSequence !== ocrRequestSequenceRef.current) {
+        throw new ApiError('ABORTED', 'Request aborted');
+      }
 
-      // OCR 자동 추출(BK-085에서 서버 연동 예정) 전 임시 프리뷰 채움.
-      ocrProcessingTimeoutRef.current = setTimeout(() => {
-        setCreateForm({
-          vehicleNumber: '99허9999',
-          vin: 'KMHXX00XXXX000000',
-          model: '아이오닉5',
-          year: '2024',
-          owner: '렌터카(주)',
-          insuranceExpiry: '2025-12-15',
-        });
-        setUploadStep('preview');
-        ocrProcessingTimeoutRef.current = null;
-      }, 2000);
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+        setOcrProgressMessage(`${docLabel} OCR 진행 상태를 백그라운드에서 확인 중입니다.`);
+        await waitForDuration(OCR_HIDDEN_POLL_INTERVAL_MS, controller.signal);
+        continue;
+      }
+
+      const jobPayload = await getOcrExtractJob(jobId, { signal: controller.signal });
+      if (controller.signal.aborted || requestSequence !== ocrRequestSequenceRef.current) {
+        throw new ApiError('ABORTED', 'Request aborted');
+      }
+
+      if (jobPayload.status === 'queued' || jobPayload.status === 'running') {
+        pollCount += 1;
+        setOcrProgressMessage(`${docLabel} OCR 분석 중... (${pollCount})`);
+        await waitForDuration(OCR_POLL_INTERVAL_MS, controller.signal);
+        continue;
+      }
+
+      return jobPayload;
     }
-  }, [clearOcrProcessingTimer]);
 
-  const handleLoanScheduleUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      setUploadedFiles((prev) => ({ ...prev, loanSchedule: file }));
-    }
+    throw new ApiError('TIMEOUT', `${docLabel} OCR 처리 시간이 초과되었습니다.`, {
+      status: 504,
+    });
   }, []);
+
+  const handleDocumentFileSelect = useCallback((fileKey: UploadedFileKey, file: File | null) => {
+    if (!file) {
+      return;
+    }
+
+    const matchedDocConfig = OCR_DOC_CONFIGS.find((item) => item.key === fileKey);
+    const docLabel = matchedDocConfig?.label ?? '문서';
+    const contentType = resolveOcrContentType(file);
+
+    if (!contentType) {
+      setCreateSaveError(`${docLabel}: 지원하지 않는 파일 형식입니다. PDF/JPG/PNG/WebP 파일을 사용해 주세요.`);
+      return;
+    }
+
+    if (file.size > OCR_MAX_FILE_SIZE_BYTES) {
+      setCreateSaveError(
+        `${docLabel}: 파일 크기가 너무 큽니다. 현재 ${toReadableFileSize(file.size)} / 최대 ${toReadableFileSize(OCR_MAX_FILE_SIZE_BYTES)}까지 허용됩니다.`,
+      );
+      return;
+    }
+
+    abortOcrProcessing();
+    setUploadStep('upload');
+    setCreateSaveError(null);
+    setCreateFieldErrors({});
+    setOcrProgressMessage(null);
+    setOcrWarnings([]);
+    setOcrSuggestions([]);
+    setOcrCanRetry(false);
+    setCreateForm((previous) => {
+      const nextForm = { ...previous };
+      for (const [fieldName, appliedValue] of Object.entries(ocrAppliedValues)) {
+        const key = fieldName as keyof CreateFormState;
+        if (nextForm[key].trim() === appliedValue) {
+          nextForm[key] = '';
+        }
+      }
+      return nextForm;
+    });
+    setOcrAppliedValues({});
+
+    setUploadedFiles((previous) => ({ ...previous, [fileKey]: file }));
+  }, [abortOcrProcessing, ocrAppliedValues]);
+
+  const handleStartOcrExtraction = useCallback(async () => {
+    if (isCreateSaving || uploadStep === 'processing') {
+      return;
+    }
+
+    const registrationFile = uploadedFiles.vehicleRegistration;
+    if (!registrationFile) {
+      setCreateSaveError('차량등록증 파일은 필수입니다.');
+      return;
+    }
+
+    const companyId = user?.companyId?.trim();
+    if (!companyId) {
+      setCreateSaveError('회사 정보가 없어 OCR 업로드를 시작할 수 없습니다. 다시 로그인 후 시도해 주세요.');
+      return;
+    }
+
+    const requestSequence = ocrRequestSequenceRef.current + 1;
+    ocrRequestSequenceRef.current = requestSequence;
+    ocrAbortControllerRef.current?.abort();
+    const controller = new AbortController();
+    ocrAbortControllerRef.current = controller;
+
+    const baseCreateForm = { ...createForm };
+    for (const [fieldName, appliedValue] of Object.entries(ocrAppliedValues)) {
+      const key = fieldName as keyof CreateFormState;
+      if (baseCreateForm[key].trim() === appliedValue) {
+        baseCreateForm[key] = '';
+      }
+    }
+
+    setCreateForm(baseCreateForm);
+    setOcrAppliedValues({});
+    setUploadStep('processing');
+    setCreateSaveError(null);
+    setCreateFieldErrors({});
+    setOcrProgressMessage('OCR 요청을 준비하고 있습니다...');
+    setOcrWarnings([]);
+    setOcrSuggestions([]);
+    setOcrCanRetry(false);
+
+    const warnings: string[] = [];
+    const extractedItems: Array<{ docType: OcrDocType; fields: OcrExtractedField[] }> = [];
+    let shouldEnableRetry = false;
+    let requiredDocumentFailureMessage: string | null = null;
+
+    try {
+      for (const docConfig of OCR_DOC_CONFIGS) {
+        const file = uploadedFiles[docConfig.key];
+        if (!file) {
+          continue;
+        }
+
+        try {
+          const resolvedContentType = resolveOcrContentType(file);
+          if (!resolvedContentType) {
+            throw new ApiError('UNSUPPORTED_MEDIA_TYPE', '지원하지 않는 파일 형식입니다.', {
+              status: 415,
+            });
+          }
+
+          if (file.size > OCR_MAX_FILE_SIZE_BYTES) {
+            throw new ApiError('PAYLOAD_TOO_LARGE', 'OCR 파일 크기 제한을 초과했습니다.', {
+              status: 413,
+            });
+          }
+
+          setOcrProgressMessage(`${docConfig.label} 업로드 URL 생성 중...`);
+          const signedUpload = await signAssetUpload({
+            fileName: file.name,
+            contentType: resolvedContentType,
+            fileSize: file.size,
+            folder: `company/${companyId}/docs`,
+          }, { signal: controller.signal });
+          if (controller.signal.aborted || requestSequence !== ocrRequestSequenceRef.current) {
+            return;
+          }
+
+          const uploadContentType = signedUpload.contentType?.trim() || resolvedContentType;
+          setOcrProgressMessage(`${docConfig.label} 업로드 중...`);
+          await uploadFileToSignedUrl(
+            signedUpload.uploadUrl,
+            file,
+            uploadContentType,
+            { signal: controller.signal },
+          );
+          if (controller.signal.aborted || requestSequence !== ocrRequestSequenceRef.current) {
+            return;
+          }
+
+          setOcrProgressMessage(`${docConfig.label} OCR 작업 생성 중...`);
+          let jobPayload = await submitOcrExtractJob({
+            docType: docConfig.docType,
+            objectName: signedUpload.objectName,
+            sourceName: file.name,
+            contentType: uploadContentType,
+          }, { signal: controller.signal });
+          if (controller.signal.aborted || requestSequence !== ocrRequestSequenceRef.current) {
+            return;
+          }
+
+          if (jobPayload.status === 'queued' || jobPayload.status === 'running') {
+            jobPayload = await pollOcrJobUntilTerminal(
+              jobPayload.jobId,
+              docConfig.label,
+              controller,
+              requestSequence,
+            );
+          }
+
+          if (jobPayload.status === 'failed') {
+            const errorType = jobPayload.error?.type ?? 'SERVER_ERROR';
+            const errorMessage = jobPayload.error?.message ?? 'OCR 작업이 실패했습니다.';
+            throw new ApiError(errorType, errorMessage, {
+              status: jobPayload.error?.httpStatus,
+              payload: jobPayload,
+            });
+          }
+
+          extractedItems.push({
+            docType: docConfig.docType,
+            fields: Array.isArray(jobPayload.extractedFields) ? jobPayload.extractedFields : [],
+          });
+          if (Array.isArray(jobPayload.warnings)) {
+            for (const warning of jobPayload.warnings) {
+              warnings.push(`[${docConfig.label}] ${warning.message}`);
+            }
+          }
+        } catch (error) {
+          if (controller.signal.aborted || requestSequence !== ocrRequestSequenceRef.current) {
+            return;
+          }
+
+          const failureMessage = toOcrFailureMessage(error, docConfig.label);
+          warnings.push(failureMessage);
+          shouldEnableRetry = shouldEnableRetry || isRetryableOcrError(error);
+          if (docConfig.required) {
+            requiredDocumentFailureMessage = failureMessage;
+            break;
+          }
+        }
+      }
+    } finally {
+      if (ocrAbortControllerRef.current === controller) {
+        ocrAbortControllerRef.current = null;
+      }
+    }
+
+    if (requestSequence !== ocrRequestSequenceRef.current) {
+      return;
+    }
+
+    const {
+      nextForm,
+      suggestions,
+      appliedValues,
+    } = applyOcrFieldsToCreateForm(baseCreateForm, extractedItems);
+
+    setCreateForm(nextForm);
+    setOcrAppliedValues(appliedValues);
+    setOcrSuggestions(suggestions);
+    setOcrWarnings(warnings);
+    setOcrCanRetry(shouldEnableRetry);
+    setOcrProgressMessage(null);
+    setUploadStep('preview');
+
+    if (requiredDocumentFailureMessage) {
+      setCreateSaveError(`${requiredDocumentFailureMessage} 수동 입력 모드로 계속 진행할 수 있습니다.`);
+      toast.error('OCR 자동 추출에 실패했습니다. 수동 입력으로 전환합니다.');
+      return;
+    }
+
+    if (suggestions.length === 0) {
+      setCreateSaveError('OCR 자동 추출 결과가 없어 수동 입력이 필요합니다.');
+      return;
+    }
+
+    setCreateSaveError(null);
+    toast.success(`OCR 추출 완료: ${suggestions.length}개 제안값을 확인해 주세요.`);
+  }, [
+    createForm,
+    isCreateSaving,
+    ocrAppliedValues,
+    pollOcrJobUntilTerminal,
+    uploadStep,
+    uploadedFiles,
+    user?.companyId,
+  ]);
+
+  const handleSwitchToManualMode = useCallback(() => {
+    abortOcrProcessing();
+    setUploadStep('preview');
+    setOcrProgressMessage(null);
+    setOcrCanRetry(true);
+    setCreateSaveError('OCR 처리를 중단하고 수동 입력 모드로 전환했습니다.');
+  }, [abortOcrProcessing]);
 
   const handleCreateSave = useCallback(async () => {
     if (isCreateSaving) {
@@ -1703,8 +2251,11 @@ export default function Assets() {
                         <p className="text-xs text-gray-500 mt-1">또는 파일을 드래그하세요</p>
                         <input
                           type="file"
-                          accept="image/*"
-                          onChange={handleFileUpload}
+                          accept="application/pdf,image/*"
+                          onChange={(event) => {
+                            handleDocumentFileSelect('vehicleRegistration', event.target.files?.[0] ?? null);
+                            event.target.value = '';
+                          }}
                           className="hidden"
                         />
                       </label>
@@ -1726,10 +2277,8 @@ export default function Assets() {
                           type="file"
                           accept="image/*,application/pdf"
                           onChange={(e) => {
-                            const file = e.target.files?.[0];
-                            if (file) {
-                              setUploadedFiles((prev) => ({ ...prev, insurance: file }));
-                            }
+                            handleDocumentFileSelect('insurance', e.target.files?.[0] ?? null);
+                            e.target.value = '';
                           }}
                           className="hidden"
                         />
@@ -1751,7 +2300,10 @@ export default function Assets() {
                         <input
                           type="file"
                           accept="image/*,application/pdf"
-                          onChange={handleLoanScheduleUpload}
+                          onChange={(event) => {
+                            handleDocumentFileSelect('loanSchedule', event.target.files?.[0] ?? null);
+                            event.target.value = '';
+                          }}
                           className="hidden"
                         />
                       </label>
@@ -1761,23 +2313,100 @@ export default function Assets() {
                     </div>
 
                     <p className="text-xs text-gray-500 mt-4">
-                      * 차량등록증은 필수 항목입니다. OCR을 통해 자동으로 정보를 추출합니다.
+                      * 차량등록증은 필수 항목입니다. 문서를 다시 업로드하면 이전 OCR 제안값은 폐기됩니다.
                     </p>
+
+                    <div className="pt-2 space-y-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void handleStartOcrExtraction();
+                        }}
+                        disabled={!uploadedFiles.vehicleRegistration || isCreateSaving}
+                        className="w-full px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        OCR 추출 시작
+                      </button>
+                      <p className="text-xs text-gray-500">
+                        추출 중에는 상태를 polling으로 확인하며, 느린 응답 시 수동 입력으로 전환할 수 있습니다.
+                      </p>
+                    </div>
                   </div>
                 )}
 
                 {/* 처리중 단계 */}
                 {uploadStep === 'processing' && (
-                  <div className="flex flex-col items-center justify-center py-12">
+                  <div className="flex flex-col items-center justify-center py-12 space-y-4">
                     <Loader2 className="w-12 h-12 text-blue-600 animate-spin mb-4" />
                     <p className="text-base text-gray-700">OCR 처리중...</p>
-                    <p className="text-sm text-gray-500 mt-2">잠시만 기다려주세요</p>
+                    <p className="text-sm text-gray-500 text-center">
+                      {ocrProgressMessage ?? '잠시만 기다려주세요'}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={handleSwitchToManualMode}
+                      className="rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                    >
+                      수동 입력으로 전환
+                    </button>
                   </div>
                 )}
 
                 {/* 미리보기 단계 */}
                 {uploadStep === 'preview' && (
                   <div className="space-y-4">
+                    <div className="flex items-center justify-between gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+                      <p className="text-xs text-gray-600">
+                        OCR 제안 {ocrSuggestions.length}건 · 경고 {ocrWarnings.length}건
+                      </p>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            void handleStartOcrExtraction();
+                          }}
+                          disabled={!uploadedFiles.vehicleRegistration || isCreateSaving}
+                          className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          OCR 다시 실행
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setUploadStep('upload')}
+                          disabled={isCreateSaving}
+                          className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          문서 다시 선택
+                        </button>
+                      </div>
+                    </div>
+
+                    {ocrSuggestions.length > 0 && (
+                      <div className="rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-xs text-green-800">
+                        OCR 결과를 폼에 자동 반영했습니다. 저장 전 값이 정확한지 확인해 주세요.
+                      </div>
+                    )}
+
+                    {ocrWarnings.length > 0 && (
+                      <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                        <p className="font-semibold">확인 필요</p>
+                        <ul className="mt-1 space-y-1">
+                          {ocrWarnings.slice(0, 4).map((warning, index) => (
+                            <li key={`${warning}-${index}`}>• {warning}</li>
+                          ))}
+                        </ul>
+                        {ocrWarnings.length > 4 && (
+                          <p className="mt-1">외 {ocrWarnings.length - 4}건</p>
+                        )}
+                      </div>
+                    )}
+
+                    {ocrCanRetry && (
+                      <p className="text-xs text-gray-500">
+                        OCR 실패/타임아웃이 포함되어 다시 시도할 수 있습니다.
+                      </p>
+                    )}
+
                     <div>
                       <label className="block text-sm font-semibold text-gray-600 mb-2">차량번호</label>
                       <input
