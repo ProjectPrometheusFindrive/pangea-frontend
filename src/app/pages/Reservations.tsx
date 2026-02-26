@@ -1,5 +1,5 @@
 import { Layout } from '../components/Layout';
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useSearchParams, useNavigate } from 'react-router';
 import { ChevronLeft, ChevronRight, Plus, Car, Calendar, AlertCircle, DollarSign, AlertTriangle, Loader2, X } from 'lucide-react';
 import { toast } from 'sonner';
@@ -23,6 +23,12 @@ import {
   isPayloadEmpty,
   usePageEndpointState,
 } from '../hooks/usePageEndpointState';
+import { usePaymentStatusSync } from '../hooks/usePaymentStatusSync';
+import {
+  isUnpaidPaymentStatus,
+  toReservationPaymentStatus,
+  type PaymentStatusSnapshot,
+} from '../utils/paymentStatusSync';
 import type { VehicleAsset } from '../types/assets';
 import type { Reservation } from '../types/reservations';
 import { ApiError } from '../../services/api';
@@ -194,6 +200,38 @@ function withIssueLabel(issues: string[] | undefined, label: string): string[] {
     nextIssues.push(label);
   }
   return nextIssues;
+}
+
+function withoutIssueLabel(issues: string[] | undefined, label: string): string[] {
+  if (!Array.isArray(issues) || issues.length === 0) {
+    return [];
+  }
+  return issues.filter((issue) => issue !== label);
+}
+
+function areIssueListsEqual(left: string[] | undefined, right: string[] | undefined): boolean {
+  const leftList = Array.isArray(left) ? left : [];
+  const rightList = Array.isArray(right) ? right : [];
+  if (leftList.length !== rightList.length) {
+    return false;
+  }
+  return leftList.every((item, index) => item === rightList[index]);
+}
+
+function applySyncedPaymentStatusToReservation(
+  reservation: Reservation,
+  syncedPaymentStatus: PaymentStatusSnapshot,
+): Reservation {
+  const nextPaymentStatus = toReservationPaymentStatus(syncedPaymentStatus.status);
+  const nextIssues = isUnpaidPaymentStatus(syncedPaymentStatus.status)
+    ? withIssueLabel(reservation.issues, '미납/결제 문제')
+    : withoutIssueLabel(reservation.issues, '미납/결제 문제');
+
+  return {
+    ...reservation,
+    paymentStatus: nextPaymentStatus,
+    issues: nextIssues,
+  };
 }
 
 function formatDateAsYmd(date: Date): string {
@@ -654,6 +692,25 @@ export default function Reservations() {
   const [dragEnd, setDragEnd] = useState<{ vehicle: string; date: number } | null>(null);
   const [dragSelection, setDragSelection] = useState<DragSelection>(null);
 
+  const paymentSyncTargets = useMemo(() => (
+    reservationsData.map((reservation) => ({
+      reservationId: reservation.id,
+      fallbackStatus: reservation.paymentStatus,
+    }))
+  ), [reservationsData]);
+
+  const {
+    byReservationId: syncedPaymentByReservationId,
+    isSyncing: isPaymentSyncing,
+    error: paymentSyncError,
+    usingLastKnown: isPaymentSyncUsingLastKnown,
+    retry: retryPaymentSync,
+  } = usePaymentStatusSync({
+    targets: paymentSyncTargets,
+    enabled: reservationsData.length > 0,
+    pollIntervalMs: 20_000,
+  });
+
   const updateReservationSearchParams = useCallback((
     mutator: (params: URLSearchParams) => void,
     replace = false,
@@ -811,6 +868,29 @@ export default function Reservations() {
     detailControllerRef.current?.abort();
   }, []);
 
+  useEffect(() => {
+    setSelectedReservation((previousReservation) => {
+      if (!previousReservation) {
+        return previousReservation;
+      }
+
+      const syncedPaymentStatus = syncedPaymentByReservationId[previousReservation.id];
+      if (!syncedPaymentStatus) {
+        return previousReservation;
+      }
+
+      const nextReservation = applySyncedPaymentStatusToReservation(previousReservation, syncedPaymentStatus);
+      if (
+        nextReservation.paymentStatus === previousReservation.paymentStatus
+        && areIssueListsEqual(nextReservation.issues, previousReservation.issues)
+      ) {
+        return previousReservation;
+      }
+
+      return nextReservation;
+    });
+  }, [syncedPaymentByReservationId]);
+
   const handleReservationsRetry = useCallback(() => {
     void hydrateReservationsData();
   }, [hydrateReservationsData]);
@@ -958,7 +1038,15 @@ export default function Reservations() {
   const daysOfWeek = ['월', '화', '수', '목', '금', '토', '일'];
   const dates = Array.from({ length: totalDaysToShow }, (_, i) => currentWeekStart + i); // 동적으로 날짜 생성
 
-  const reservations: Reservation[] = reservationsData;
+  const reservations: Reservation[] = useMemo(() => (
+    reservationsData.map((reservation) => {
+      const syncedPaymentStatus = syncedPaymentByReservationId[reservation.id];
+      if (!syncedPaymentStatus) {
+        return reservation;
+      }
+      return applySyncedPaymentStatusToReservation(reservation, syncedPaymentStatus);
+    })
+  ), [reservationsData, syncedPaymentByReservationId]);
 
   // 고유 차종 목록 추출
   const uniqueModels = Array.from(new Set(vehicleAssets.map(v => v.model))).sort();
@@ -1054,6 +1142,23 @@ export default function Reservations() {
         return 'bg-gray-100 text-gray-700';
     }
   };
+
+  const getPaymentStatusColor = (status: Reservation['paymentStatus']) => {
+    if (status === '완료') {
+      return 'bg-green-100 text-green-700';
+    }
+    if (status === '미납') {
+      return 'bg-red-100 text-red-700';
+    }
+    if (status === '부분납부') {
+      return 'bg-amber-100 text-amber-700';
+    }
+    return 'bg-gray-100 text-gray-700';
+  };
+
+  const selectedReservationPaymentSync = selectedReservation
+    ? syncedPaymentByReservationId[selectedReservation.id] ?? null
+    : null;
 
   const openReservationDetail = useCallback((reservation: Reservation) => {
     setSelectedReservation(reservation);
@@ -1504,6 +1609,33 @@ export default function Reservations() {
               </button>
             </div>
           </div>
+
+          {(paymentSyncError || isPaymentSyncing) && (
+            <div className={`mt-2 flex items-center justify-between gap-3 rounded-lg border px-3 py-2 text-xs ${
+              paymentSyncError
+                ? 'border-amber-200 bg-amber-50 text-amber-700'
+                : 'border-blue-200 bg-blue-50 text-blue-700'
+            }`}>
+              <span>
+                {paymentSyncError
+                  ? (
+                    isPaymentSyncUsingLastKnown
+                      ? '결제 상태 동기화에 실패해 마지막 정상 상태를 표시 중입니다.'
+                      : paymentSyncError
+                  )
+                  : '결제 상태를 동기화하는 중입니다.'}
+              </span>
+              {paymentSyncError && (
+                <button
+                  type="button"
+                  onClick={retryPaymentSync}
+                  className="rounded-md border border-amber-300 bg-white px-2 py-1 font-semibold text-amber-700 hover:bg-amber-100"
+                >
+                  다시 시도
+                </button>
+              )}
+            </div>
+          )}
         </div>
 
         {/* 주간 캘린더 */}
@@ -1957,6 +2089,24 @@ export default function Reservations() {
                     <div>
                       <label className="text-xs font-semibold text-gray-500 uppercase">결제 방법</label>
                       <p className="text-lg text-gray-900 mt-1">{selectedReservation.paymentMethod}</p>
+                    </div>
+                    <div>
+                      <label className="text-xs font-semibold text-gray-500 uppercase">결제 상태</label>
+                      <div className="mt-2 flex items-center gap-2">
+                        <span className={`inline-block px-3 py-1 rounded-full text-sm font-semibold ${getPaymentStatusColor(selectedReservation.paymentStatus)}`}>
+                          {selectedReservation.paymentStatus}
+                        </span>
+                        {selectedReservationPaymentSync?.status === 'not-found' && (
+                          <span className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-1">
+                            결제 정보 없음
+                          </span>
+                        )}
+                      </div>
+                      {selectedReservationPaymentSync?.updatedAt && (
+                        <p className="text-xs text-gray-500 mt-2">
+                          최근 반영: {new Date(selectedReservationPaymentSync.updatedAt).toLocaleString('ko-KR')}
+                        </p>
+                      )}
                     </div>
                   </div>
                 )}
