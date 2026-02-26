@@ -6,8 +6,13 @@ import Reservations from "./pages/Reservations";
 import Revenue from "./pages/Revenue";
 import Settings from "./pages/Settings";
 import DeviceInstallation from "./pages/DeviceInstallation";
+import Login from "./pages/Login";
 
 export const router = createBrowserRouter([
+  {
+    path: "/login",
+    Component: Login,
+  },
   {
     path: "/",
     Component: Home,
