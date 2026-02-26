@@ -1,10 +1,24 @@
 import { useState } from 'react';
 import { X, Activity, History, Info, Zap, AlertTriangle } from 'lucide-react';
-import { type VehicleAsset, reservations } from '../data/mockData';
+import type { VehicleAsset } from '../data/mockData';
 import { useNavigate } from 'react-router';
+
+interface VehicleReservationHistory {
+  id: string;
+  customer: string;
+  phone: string;
+  type: 'reservation' | 'rental' | 'return';
+  startDateFull: string;
+  endDateFull: string;
+  paymentMethod: string;
+  amount: string;
+  deposit: string;
+  issues?: string[];
+}
 
 interface VehicleDetailModalProps {
   asset: VehicleAsset;
+  reservationHistory?: VehicleReservationHistory[];
   isOpen: boolean;
   onClose: () => void;
   newInsuranceExpiry: string;
@@ -23,6 +37,7 @@ interface VehicleDetailModalProps {
 
 export function VehicleDetailModal({
   asset,
+  reservationHistory = [],
   isOpen,
   onClose,
   newInsuranceExpiry,
@@ -40,10 +55,7 @@ export function VehicleDetailModal({
 
   if (!isOpen) return null;
 
-  // 이 차량의 예약 히스토리 가져오기
-  const vehicleReservations = reservations
-    .filter(r => r.vehicleNumber === asset.vehicleNumber)
-    .sort((a, b) => b.startDate - a.startDate);
+  const vehicleReservations = reservationHistory;
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">

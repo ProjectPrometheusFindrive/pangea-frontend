@@ -1,6 +1,16 @@
 import { Layout } from '../components/Layout';
-import { useState, useEffect, useCallback } from 'react';
-import { Plus, Upload, X, Loader2, FileText, Calendar as CalendarIcon, DollarSign, AlertTriangle, Filter } from 'lucide-react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import {
+  Plus,
+  Upload,
+  X,
+  Loader2,
+  FileText,
+  Calendar as CalendarIcon,
+  DollarSign,
+  ChevronLeft,
+  ChevronRight,
+} from 'lucide-react';
 import { useSearchParams, useNavigate } from 'react-router';
 import { PremiumBanner } from '../components/PremiumBanner';
 import { PageStateBoundary } from '../components/PageStateBoundary';
@@ -12,12 +22,13 @@ import {
   isPayloadEmpty,
   usePageEndpointState,
 } from '../hooks/usePageEndpointState';
-import { vehicleAssets as mockVehicleAssets, type VehicleAsset } from '../data/mockData';
-import { getAssetsDashboard } from '../../services/dashboard';
+import type { VehicleAsset } from '../data/mockData';
+import { ApiError } from '../../services/api';
+import { getAssetDetail, getAssetsList } from '../../services/assets';
 
 interface Asset extends VehicleAsset {
-  id?: string;
-  hasDevice?: boolean; // 단말 설치 여부
+  id: string;
+  hasDevice: boolean;
 }
 
 interface UploadedFiles {
@@ -26,12 +37,26 @@ interface UploadedFiles {
   loanSchedule: File | null;
 }
 
-// mockVehicleAssets를 Asset 타입으로 변환
-const initialAssets: Asset[] = mockVehicleAssets.map((asset, index) => ({
-  ...asset,
-  id: `A${String(index + 1).padStart(3, '0')}`,
-  hasDevice: index % 10 === 0, // 10대당 1대는 단말 설치되어 있다고 가정
-}));
+type StatusFilterCode = 'all' | 'rental' | 'reserved' | 'available' | 'maintenance';
+
+const DEFAULT_PAGE = 1;
+const DEFAULT_PAGE_SIZE = 20;
+const PAGE_SIZE_OPTIONS = [10, 20, 50];
+const TOTAL_COUNT_KEYS = ['total', 'totalCount', 'count', 'itemsCount', 'totalElements'];
+const STATUS_TO_QUERY_MAP: Record<string, Exclude<StatusFilterCode, 'all'>> = {
+  rental: 'rental',
+  in_use: 'rental',
+  대여중: 'rental',
+  reserved: 'reserved',
+  예약: 'reserved',
+  예약됨: 'reserved',
+  available: 'available',
+  idle: 'available',
+  가용: 'available',
+  maintenance: 'maintenance',
+  repair: 'maintenance',
+  정비중: 'maintenance',
+};
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
@@ -48,11 +73,71 @@ function toStringValue(value: unknown): string | null {
   return null;
 }
 
+function toNumberValue(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === 'string') {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  return null;
+}
+
 function toBooleanValue(value: unknown): boolean | null {
   if (typeof value === 'boolean') {
     return value;
   }
   return null;
+}
+
+function toPositiveInteger(value: string | null, fallbackValue: number): number {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    return fallbackValue;
+  }
+  return parsed;
+}
+
+function toStatusFilterCode(statusValue: string | null): StatusFilterCode {
+  if (!statusValue) {
+    return 'all';
+  }
+
+  const normalized = statusValue.trim();
+  if (!normalized || normalized === 'all') {
+    return 'all';
+  }
+
+  return STATUS_TO_QUERY_MAP[normalized] ?? 'all';
+}
+
+function toStatusQueryValue(statusValue: string | null): string | undefined {
+  if (!statusValue) {
+    return undefined;
+  }
+
+  const normalized = statusValue.trim();
+  if (!normalized || normalized === 'all') {
+    return undefined;
+  }
+
+  return STATUS_TO_QUERY_MAP[normalized] ?? normalized;
+}
+
+function toCanonicalKnownStatus(statusValue: string | null): Exclude<StatusFilterCode, 'all'> | null {
+  if (!statusValue) {
+    return null;
+  }
+
+  const normalized = statusValue.trim();
+  if (!normalized || normalized === 'all') {
+    return null;
+  }
+
+  return STATUS_TO_QUERY_MAP[normalized] ?? null;
 }
 
 function normalizeAssetStatus(statusValue: string | null): VehicleAsset['status'] {
@@ -94,72 +179,158 @@ function normalizeAssetIssues(issueValue: unknown): string[] {
     .filter((entry) => entry.length > 0);
 }
 
+function toAssetRecord(row: unknown, index: number): Asset | null {
+  if (!isRecord(row)) {
+    return null;
+  }
+
+  const vehicleNumber = toStringValue(row.vehicleNumber)
+    ?? toStringValue(row.plateNumber)
+    ?? toStringValue(row.plate)
+    ?? toStringValue(row.number);
+
+  if (!vehicleNumber) {
+    return null;
+  }
+
+  const hasDevice = toBooleanValue(row.hasDevice) ?? toBooleanValue(row.hasPremiumDevice) ?? false;
+
+  return {
+    id: toStringValue(row.id)
+      ?? toStringValue(row.assetId)
+      ?? toStringValue(row.uuid)
+      ?? `A${String(index + 1).padStart(3, '0')}`,
+    vehicleNumber,
+    model: toStringValue(row.model) ?? toStringValue(row.vehicleModel) ?? '차종 미확인',
+    status: normalizeAssetStatus(toStringValue(row.status) ?? toStringValue(row.assetStatus)),
+    issues: normalizeAssetIssues(row.issues),
+    insuranceExpiry: toStringValue(row.insuranceExpiry) ?? toStringValue(row.insuranceExpiryDate) ?? '-',
+    nextInspection: toStringValue(row.nextInspection) ?? toStringValue(row.nextInspectionDate) ?? '-',
+    vin: toStringValue(row.vin) ?? toStringValue(row.chassisNumber) ?? '-',
+    year: toStringValue(row.year) ?? toStringValue(row.modelYear) ?? '-',
+    owner: toStringValue(row.owner) ?? toStringValue(row.ownerName) ?? '-',
+    hasPremiumDevice: hasDevice,
+    hasDevice,
+  };
+}
+
 function toAssetRows(payload: unknown): Asset[] {
   const rows = getCollectionFromPayload(payload, ['assets', 'items', 'rows', 'list']);
   if (!rows) {
-    return initialAssets;
+    return [];
   }
 
   if (rows.length === 0) {
     return [];
   }
 
-  const normalizedRows: Asset[] = rows
-    .map((row, index) => {
-      if (!isRecord(row)) {
-        return null;
-      }
-
-      const vehicleNumber = toStringValue(row.vehicleNumber)
-        ?? toStringValue(row.plateNumber)
-        ?? toStringValue(row.plate)
-        ?? toStringValue(row.number);
-
-      if (!vehicleNumber) {
-        return null;
-      }
-
-      const model = toStringValue(row.model) ?? toStringValue(row.vehicleModel) ?? '차종 미확인';
-      const status = normalizeAssetStatus(
-        toStringValue(row.status) ?? toStringValue(row.assetStatus),
-      );
-      const insuranceExpiry = toStringValue(row.insuranceExpiry)
-        ?? toStringValue(row.insuranceExpiryDate)
-        ?? '-';
-      const nextInspection = toStringValue(row.nextInspection)
-        ?? toStringValue(row.nextInspectionDate)
-        ?? '-';
-      const vin = toStringValue(row.vin) ?? toStringValue(row.chassisNumber) ?? '-';
-      const year = toStringValue(row.year) ?? toStringValue(row.modelYear) ?? '-';
-      const owner = toStringValue(row.owner) ?? toStringValue(row.ownerName) ?? '-';
-      const hasDevice = toBooleanValue(row.hasDevice) ?? toBooleanValue(row.hasPremiumDevice) ?? false;
-
-      return {
-        id: toStringValue(row.id) ?? `A${String(index + 1).padStart(3, '0')}`,
-        vehicleNumber,
-        model,
-        status,
-        issues: normalizeAssetIssues(row.issues),
-        insuranceExpiry,
-        nextInspection,
-        vin,
-        year,
-        owner,
-        hasPremiumDevice: hasDevice,
-        hasDevice,
-      };
-    })
+  return rows
+    .map((row, index) => toAssetRecord(row, index))
     .filter((row): row is Asset => row !== null);
+}
 
-  return normalizedRows.length > 0 ? normalizedRows : initialAssets;
+function unwrapAssetDetail(payload: unknown): unknown {
+  if (!isRecord(payload)) {
+    return payload;
+  }
+
+  if (isRecord(payload.asset)) {
+    return payload.asset;
+  }
+  if (isRecord(payload.item)) {
+    return payload.item;
+  }
+  if (isRecord(payload.detail)) {
+    return payload.detail;
+  }
+  if (isRecord(payload.data)) {
+    return unwrapAssetDetail(payload.data);
+  }
+
+  return payload;
+}
+
+function toAssetDetail(payload: unknown): Asset | null {
+  const rows = getCollectionFromPayload(payload, ['assets', 'items', 'rows', 'list']);
+  if (rows && rows.length > 0) {
+    return toAssetRecord(rows[0], 0);
+  }
+
+  return toAssetRecord(unwrapAssetDetail(payload), 0);
+}
+
+function getTotalCountFromObject(source: unknown): number | null {
+  if (!isRecord(source)) {
+    return null;
+  }
+
+  for (const key of TOTAL_COUNT_KEYS) {
+    const count = toNumberValue(source[key]);
+    if (count !== null) {
+      return count;
+    }
+  }
+
+  if (isRecord(source.meta)) {
+    const nestedCount = getTotalCountFromObject(source.meta);
+    if (nestedCount !== null) {
+      return nestedCount;
+    }
+  }
+
+  if (isRecord(source.page)) {
+    const nestedCount = getTotalCountFromObject(source.page);
+    if (nestedCount !== null) {
+      return nestedCount;
+    }
+  }
+
+  if (isRecord(source.pagination)) {
+    const nestedCount = getTotalCountFromObject(source.pagination);
+    if (nestedCount !== null) {
+      return nestedCount;
+    }
+  }
+
+  return null;
+}
+
+function cleanupAssetsQueryParams(params: URLSearchParams): void {
+  if (params.get('page') === String(DEFAULT_PAGE)) {
+    params.delete('page');
+  }
+
+  if (params.get('size') === String(DEFAULT_PAGE_SIZE)) {
+    params.delete('size');
+  }
+
+  if (params.get('status') === 'all') {
+    params.delete('status');
+  }
+
+  const query = params.get('q');
+  if (!query || query.trim().length === 0) {
+    params.delete('q');
+  }
 }
 
 export default function Assets() {
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
+
+  const page = toPositiveInteger(searchParams.get('page'), DEFAULT_PAGE);
+  const pageSize = toPositiveInteger(searchParams.get('size'), DEFAULT_PAGE_SIZE);
+  const statusParam = searchParams.get('status');
+  const statusFilterCode = toStatusFilterCode(statusParam);
+  const statusQueryValue = toStatusQueryValue(statusParam);
+  const vehicleQuery = (searchParams.get('vehicle') ?? '').trim();
+  const queryKeyword = searchParams.get('q') ?? searchParams.get('search') ?? '';
+  const keyword = (queryKeyword || vehicleQuery).trim();
+  const selectedAssetId = (searchParams.get('assetId') ?? '').trim();
+
   const [showModal, setShowModal] = useState(false);
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
-  const [showInsuranceUpload, setShowInsuranceUpload] = useState(false);
   const [uploadStep, setUploadStep] = useState<'upload' | 'processing' | 'preview'>('upload');
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFiles>({
     vehicleRegistration: null,
@@ -167,17 +338,77 @@ export default function Assets() {
     loanSchedule: null,
   });
   const [assets, setAssets] = useState<Asset[]>([]);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState<string>('all');
-  const [issueFilter, setIssueFilter] = useState<string>('all');
-  
-  // 차종 필터 추가
-  const [modelFilter, setModelFilter] = useState('all');
-  
-  // 차량 상세 모달 탭 상태 추가
-  const [detailTab, setDetailTab] = useState<'info' | 'history' | 'sensor'>('info');
+  const [totalCount, setTotalCount] = useState<number | null>(null);
+  const [assetsErrorStatus, setAssetsErrorStatus] = useState<number | null>(null);
+  const [detailNotice, setDetailNotice] = useState<string | null>(null);
+  const [isDetailLoading, setIsDetailLoading] = useState(false);
+  const [newInsuranceExpiry, setNewInsuranceExpiry] = useState('');
+  const [newNextInspection, setNewNextInspection] = useState('');
+  const detailRequestSequenceRef = useRef(0);
+  const detailAbortControllerRef = useRef<AbortController | null>(null);
 
-  const navigate = useNavigate();
+  const updateAssetsSearchParams = useCallback((
+    mutator: (params: URLSearchParams) => void,
+    replace = false,
+  ) => {
+    const nextParams = new URLSearchParams(searchParams);
+    mutator(nextParams);
+    cleanupAssetsQueryParams(nextParams);
+    setSearchParams(nextParams, { replace });
+  }, [searchParams, setSearchParams]);
+
+  useEffect(() => {
+    const legacySearch = searchParams.get('search');
+    const canonicalQuery = searchParams.get('q');
+    if (!legacySearch || canonicalQuery) {
+      return;
+    }
+
+    updateAssetsSearchParams((params) => {
+      params.set('q', legacySearch);
+      params.delete('search');
+    }, true);
+  }, [searchParams, updateAssetsSearchParams]);
+
+  useEffect(() => {
+    const canonicalStatus = toCanonicalKnownStatus(statusParam);
+    if (!statusParam || !canonicalStatus || statusParam === canonicalStatus) {
+      return;
+    }
+
+    updateAssetsSearchParams((params) => {
+      params.set('status', canonicalStatus);
+    }, true);
+  }, [statusParam, updateAssetsSearchParams]);
+
+  const requestAssets = useCallback(async (signal: AbortSignal) => {
+    try {
+      return await getAssetsList({
+        page,
+        size: pageSize,
+        status: statusQueryValue,
+        q: keyword || undefined,
+        signal,
+      });
+    } catch (error) {
+      setAssetsErrorStatus(error instanceof ApiError ? error.status ?? null : null);
+      throw error;
+    }
+  }, [keyword, page, pageSize, statusQueryValue]);
+
+  const handleAssetsSuccess = useCallback((payload: unknown) => {
+    setAssets(toAssetRows(payload));
+    setTotalCount(getTotalCountFromObject(payload));
+    setAssetsErrorStatus(null);
+  }, []);
+
+  const isAssetsPayloadEmpty = useCallback((payload: unknown) => {
+    const rows = getCollectionFromPayload(payload, ['assets', 'items', 'rows', 'list']);
+    if (rows) {
+      return rows.length === 0;
+    }
+    return isPayloadEmpty(payload, ['assets', 'items', 'rows', 'list']);
+  }, []);
 
   const {
     isLoading: isAssetsLoading,
@@ -186,60 +417,202 @@ export default function Assets() {
     isEmpty: isAssetsApiEmpty,
     run: hydrateAssets,
   } = usePageEndpointState<unknown>({
-    request: (signal) => getAssetsDashboard({ signal }),
-    onSuccess: (payload) => {
-      setAssets(toAssetRows(payload));
-    },
-    isEmpty: (payload) => {
-      const rows = getCollectionFromPayload(payload, ['assets', 'items', 'rows', 'list']);
-      if (rows) {
-        return rows.length === 0;
-      }
-      return isPayloadEmpty(payload, ['assets', 'items', 'rows', 'list']);
-    },
+    request: requestAssets,
+    onSuccess: handleAssetsSuccess,
+    isEmpty: isAssetsPayloadEmpty,
   });
 
   useEffect(() => {
     void hydrateAssets();
-  }, []);
+  }, [hydrateAssets]);
 
   const handleAssetsRetry = useCallback(() => {
     void hydrateAssets();
   }, [hydrateAssets]);
 
-  const resetAssetFilters = useCallback(() => {
-    setSearchQuery('');
-    setStatusFilter('all');
-    setIssueFilter('all');
-    setModelFilter('all');
+  useEffect(() => () => {
+    detailAbortControllerRef.current?.abort();
   }, []);
 
-  const handleAssetsErrorAction = useCallback(() => {
-    handlePageErrorAction(assetsErrorKind, navigate);
-  }, [assetsErrorKind, navigate]);
+  const resetAssetFilters = useCallback(() => {
+    updateAssetsSearchParams((params) => {
+      params.delete('q');
+      params.delete('search');
+      params.delete('status');
+      params.delete('assetId');
+      params.delete('vehicle');
+      params.set('page', String(DEFAULT_PAGE));
+      params.set('size', String(DEFAULT_PAGE_SIZE));
+    });
+  }, [updateAssetsSearchParams]);
 
-  // URL 파라미터에서 status, 검색어, vehicle 가져오기
+  const handleAssetsErrorAction = useCallback(() => {
+    if (assetsErrorStatus === 400) {
+      if (typeof window !== 'undefined') {
+        window.alert('잘못된 필터 값이 감지되어 필터를 초기화합니다.');
+      }
+      resetAssetFilters();
+      return;
+    }
+    handlePageErrorAction(assetsErrorKind, navigate);
+  }, [assetsErrorKind, assetsErrorStatus, navigate, resetAssetFilters]);
+
   useEffect(() => {
-    const search = searchParams.get('search');
-    const status = searchParams.get('status');
-    const vehicle = searchParams.get('vehicle');
-    
-    if (search) {
-      setSearchQuery(search);
+    if (!vehicleQuery || isAssetsLoading || assets.length === 0) {
+      return;
     }
-    if (status) {
-      setStatusFilter(status);
+
+    const targetAsset = assets.find((asset) => asset.vehicleNumber === vehicleQuery);
+    if (!targetAsset) {
+      return;
     }
-    if (vehicle) {
-      // vehicle 파라미터가 있으면 해당 차량 찾아서 상세 모달 열기
-      setSearchQuery(vehicle);
-      const targetAsset = assets.find(a => a.vehicleNumber === vehicle);
-      if (targetAsset) {
-        setSelectedAsset(targetAsset);
-        setShowDetailModal(true);
+
+    if (selectedAssetId === targetAsset.id && !searchParams.get('vehicle')) {
+      return;
+    }
+
+    updateAssetsSearchParams((params) => {
+      params.set('assetId', targetAsset.id);
+      params.set('q', vehicleQuery);
+      params.delete('search');
+      params.delete('vehicle');
+      params.set('page', '1');
+    }, true);
+  }, [
+    assets,
+    isAssetsLoading,
+    searchParams,
+    selectedAssetId,
+    updateAssetsSearchParams,
+    vehicleQuery,
+  ]);
+
+  const hydrateAssetDetail = useCallback(async (assetId: string) => {
+    const requestSequence = detailRequestSequenceRef.current + 1;
+    detailRequestSequenceRef.current = requestSequence;
+    detailAbortControllerRef.current?.abort();
+    const controller = new AbortController();
+    detailAbortControllerRef.current = controller;
+
+    setIsDetailLoading(true);
+    setDetailNotice(null);
+
+    try {
+      const payload = await getAssetDetail(assetId, { signal: controller.signal });
+      if (controller.signal.aborted || detailRequestSequenceRef.current !== requestSequence) {
+        return;
+      }
+
+      const nextAsset = toAssetDetail(payload);
+      if (!nextAsset) {
+        setSelectedAsset(null);
+        setShowDetailModal(false);
+        setDetailNotice('자산 상세 정보를 확인할 수 없습니다. 목록에서 다시 선택해 주세요.');
+        return;
+      }
+
+      setSelectedAsset(nextAsset);
+      setNewInsuranceExpiry(nextAsset.insuranceExpiry);
+      setNewNextInspection(nextAsset.nextInspection);
+      setShowDetailModal(true);
+    } catch (error) {
+      if (controller.signal.aborted || detailRequestSequenceRef.current !== requestSequence) {
+        return;
+      }
+
+      if (error instanceof ApiError && error.status === 404) {
+        setSelectedAsset(null);
+        setShowDetailModal(false);
+        setDetailNotice('요청한 자산이 존재하지 않습니다. 목록에서 다시 선택해 주세요.');
+        updateAssetsSearchParams((params) => {
+          params.delete('assetId');
+          params.delete('vehicle');
+        }, true);
+        return;
+      }
+
+      const detailErrorMessage = error instanceof ApiError
+        ? error.message
+        : '상세 정보를 불러오지 못했습니다.';
+      setDetailNotice(`상세 조회 실패: ${detailErrorMessage}`);
+      setShowDetailModal(false);
+    } finally {
+      if (!controller.signal.aborted && detailRequestSequenceRef.current === requestSequence) {
+        setIsDetailLoading(false);
       }
     }
-  }, [searchParams, assets]);
+  }, [updateAssetsSearchParams]);
+
+  useEffect(() => {
+    if (!selectedAssetId) {
+      return;
+    }
+
+    void hydrateAssetDetail(selectedAssetId);
+  }, [hydrateAssetDetail, selectedAssetId]);
+
+  const handleKeywordChange = useCallback((nextKeyword: string) => {
+    updateAssetsSearchParams((params) => {
+      if (nextKeyword.trim().length > 0) {
+        params.set('q', nextKeyword);
+      } else {
+        params.delete('q');
+      }
+      params.delete('search');
+      params.delete('assetId');
+      params.delete('vehicle');
+      params.set('page', '1');
+    });
+  }, [updateAssetsSearchParams]);
+
+  const handleStatusChange = useCallback((nextStatus: StatusFilterCode) => {
+    updateAssetsSearchParams((params) => {
+      if (nextStatus === 'all') {
+        params.delete('status');
+      } else {
+        params.set('status', nextStatus);
+      }
+      params.delete('assetId');
+      params.delete('vehicle');
+      params.set('page', '1');
+    });
+  }, [updateAssetsSearchParams]);
+
+  const handlePageChange = useCallback((nextPage: number) => {
+    const safeNextPage = Math.max(1, nextPage);
+    updateAssetsSearchParams((params) => {
+      params.set('page', String(safeNextPage));
+      params.delete('assetId');
+      params.delete('vehicle');
+    });
+  }, [updateAssetsSearchParams]);
+
+  const handlePageSizeChange = useCallback((nextPageSize: number) => {
+    updateAssetsSearchParams((params) => {
+      params.set('size', String(nextPageSize));
+      params.set('page', '1');
+      params.delete('assetId');
+      params.delete('vehicle');
+    });
+  }, [updateAssetsSearchParams]);
+
+  const handleDetailModalOpen = useCallback((asset: Asset) => {
+    updateAssetsSearchParams((params) => {
+      params.set('assetId', asset.id);
+      params.delete('vehicle');
+    });
+  }, [updateAssetsSearchParams]);
+
+  const handleDetailModalClose = useCallback(() => {
+    detailAbortControllerRef.current?.abort();
+    setShowDetailModal(false);
+    setSelectedAsset(null);
+    setIsDetailLoading(false);
+    updateAssetsSearchParams((params) => {
+      params.delete('assetId');
+      params.delete('vehicle');
+    }, true);
+  }, [updateAssetsSearchParams]);
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -256,30 +629,6 @@ export default function Assets() {
         return 'bg-gray-100 text-gray-700';
     }
   };
-  
-  // 고유 차종 목록 추출
-  const uniqueModels = Array.from(new Set(assets.map(a => a.model))).sort();
-
-  // 상태 필터링 (URL 파라미터 'status'에 따라)
-  const filteredAssets = assets.filter(asset => {
-    // 차종 필터
-    const matchesModel = modelFilter === 'all' || asset.model === modelFilter;
-    
-    // "예약"과 "예약됨"을 모두 처리
-    if (statusFilter === '예약' || statusFilter === '예약됨') {
-      const matchesStatus = asset.status === '예약' || asset.status === '예약됨';
-      const matchesSearch = searchQuery === '' || 
-        asset.vehicleNumber.includes(searchQuery) ||
-        asset.model.includes(searchQuery);
-      return matchesStatus && matchesSearch && matchesModel;
-    }
-    
-    const matchesStatus = statusFilter === 'all' || asset.status === statusFilter;
-    const matchesSearch = searchQuery === '' || 
-      asset.vehicleNumber.includes(searchQuery) ||
-      asset.model.includes(searchQuery);
-    return matchesStatus && matchesSearch && matchesModel;
-  });
 
   // OCR 데이터 상태 추가
   const [ocrData, setOcrData] = useState({
@@ -291,14 +640,38 @@ export default function Assets() {
     insuranceExpiry: '',
   });
 
-  // 상세 모달 수정 상태
-  const [newInsuranceExpiry, setNewInsuranceExpiry] = useState('');
-  const [newNextInspection, setNewNextInspection] = useState('');
+  const statusCountMap = useMemo(() => ({
+    rental: assets.filter((asset) => asset.status === '대여중').length,
+    reserved: assets.filter((asset) => asset.status === '예약').length,
+    available: assets.filter((asset) => asset.status === '가용').length,
+    maintenance: assets.filter((asset) => asset.status === '정비중').length,
+  }), [assets]);
+
+  const totalPages = useMemo(() => {
+    if (totalCount === null) {
+      return null;
+    }
+    return Math.max(1, Math.ceil(totalCount / pageSize));
+  }, [pageSize, totalCount]);
+  const hasPrevPage = page > 1;
+  const hasNextPage = totalPages !== null
+    ? page < totalPages
+    : assets.length >= pageSize && !isAssetsApiEmpty;
+  const isOutOfRangePage = totalPages !== null && page > totalPages;
+  const isOutOfRangeError = assetsErrorStatus === 400 && page > 1 && assets.length === 0;
+  const shouldShowOutOfRangeEmpty = isOutOfRangePage || isOutOfRangeError;
+
+  const isAssetsEmpty = (
+    !isAssetsLoading
+    && !assetsError
+    && (isAssetsApiEmpty || assets.length === 0)
+  ) || isOutOfRangeError;
+  const vehiclesWithoutDevice = assets.filter((asset) => !asset.hasDevice).length;
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      setUploadedFiles({ ...uploadedFiles, vehicleRegistration: file });
+      setUploadedFiles((prev) => ({ ...prev, vehicleRegistration: file }));
       setUploadStep('processing');
       
       // 시뮬레이션: OCR 처리
@@ -339,27 +712,15 @@ export default function Assets() {
   const handleInsuranceFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      setUploadedFiles({ ...uploadedFiles, insurance: file });
+      setUploadedFiles((prev) => ({ ...prev, insurance: file }));
     }
   };
 
   const handleLoanScheduleUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      setUploadedFiles({ ...uploadedFiles, loanSchedule: file });
+      setUploadedFiles((prev) => ({ ...prev, loanSchedule: file }));
     }
-  };
-
-  const handleDetailModalOpen = (asset: Asset) => {
-    setSelectedAsset(asset);
-    setNewInsuranceExpiry(asset.insuranceExpiry);
-    setNewNextInspection(asset.nextInspection);
-    setShowDetailModal(true);
-    setUploadedFiles({
-      vehicleRegistration: null,
-      insurance: null,
-      loanSchedule: null,
-    });
   };
 
   const handleDetailSave = () => {
@@ -379,8 +740,7 @@ export default function Assets() {
 
     setAssets(updatedAssets);
     alert('차량 정보가 업데이트되었습니다.');
-    setShowDetailModal(false);
-    setShowInsuranceUpload(false);
+    handleDetailModalClose();
     setUploadedFiles({
       vehicleRegistration: null,
       insurance: null,
@@ -393,26 +753,39 @@ export default function Assets() {
       <div className="p-6">
         {/* 프리미엄 배너 - 단말 미설치 차량 유도 */}
         <PremiumBanner 
-          vehiclesWithoutDevice={11}
+          vehiclesWithoutDevice={vehiclesWithoutDevice}
           onCTAClick={() => {
             alert('프리미엄 문의: 1588-XXXX\n\n단말 일괄 설치 신청이 접수되었습니다.\n담당자가 곧 연락드리겠습니다.');
           }}
         />
 
+        {detailNotice && (
+          <div className="mt-4 rounded-lg border border-orange-200 bg-orange-50 px-4 py-3 text-sm text-orange-700">
+            {detailNotice}
+          </div>
+        )}
+
+        {isDetailLoading && (
+          <div className="mt-4 flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-700">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            자산 상세 정보를 불러오는 중입니다.
+          </div>
+        )}
+
         {/* 상단 헤더 & 필터 */}
-        <div className="mb-6 space-y-4">
+        <div className="mb-6 mt-4 space-y-4">
           {/* 검색창 */}
           <div className="relative">
             <input
               type="text"
               placeholder="차량번호 또는 차종으로 검색..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
+              value={queryKeyword}
+              onChange={(e) => handleKeywordChange(e.target.value)}
               className="w-full pl-4 pr-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-base"
             />
-            {searchQuery && (
+            {queryKeyword && (
               <button
-                onClick={() => setSearchQuery('')}
+                onClick={() => handleKeywordChange('')}
                 className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
               >
                 <X className="w-5 h-5" />
@@ -424,9 +797,9 @@ export default function Assets() {
           <div className="flex items-center gap-3">
             <span className="text-sm font-semibold text-gray-700">차량 상태:</span>
             <button
-              onClick={() => setStatusFilter('all')}
+              onClick={() => handleStatusChange('all')}
               className={`px-4 py-2 rounded-lg font-medium text-sm transition-colors ${
-                statusFilter === 'all'
+                statusFilterCode === 'all'
                   ? 'bg-blue-600 text-white'
                   : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
               }`}
@@ -434,63 +807,69 @@ export default function Assets() {
               전체 ({assets.length})
             </button>
             <button
-              onClick={() => setStatusFilter('대여중')}
+              onClick={() => handleStatusChange('rental')}
               className={`px-4 py-2 rounded-lg font-medium text-sm transition-colors ${
-                statusFilter === '대여중'
+                statusFilterCode === 'rental'
                   ? 'bg-blue-600 text-white'
                   : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
               }`}
             >
-              대여중 ({assets.filter(a => a.status === '대여중').length})
+              대여중 ({statusCountMap.rental})
             </button>
             <button
-              onClick={() => setStatusFilter('예약')}
+              onClick={() => handleStatusChange('reserved')}
               className={`px-4 py-2 rounded-lg font-medium text-sm transition-colors ${
-                statusFilter === '예약' || statusFilter === '예약됨'
+                statusFilterCode === 'reserved'
                   ? 'bg-purple-600 text-white'
                   : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
               }`}
             >
-              예약 ({assets.filter(a => a.status === '예약' || a.status === '예약됨').length})
+              예약 ({statusCountMap.reserved})
             </button>
             <button
-              onClick={() => setStatusFilter('가용')}
+              onClick={() => handleStatusChange('available')}
               className={`px-4 py-2 rounded-lg font-medium text-sm transition-colors ${
-                statusFilter === '가용'
+                statusFilterCode === 'available'
                   ? 'bg-green-600 text-white'
                   : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
               }`}
             >
-              가용 ({assets.filter(a => a.status === '가용').length})
+              가용 ({statusCountMap.available})
             </button>
             <button
-              onClick={() => setStatusFilter('정비중')}
+              onClick={() => handleStatusChange('maintenance')}
               className={`px-4 py-2 rounded-lg font-medium text-sm transition-colors ${
-                statusFilter === '정비중'
+                statusFilterCode === 'maintenance'
                   ? 'bg-orange-600 text-white'
                   : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
               }`}
             >
-              정비중 ({assets.filter(a => a.status === '정비중').length})
+              정비중 ({statusCountMap.maintenance})
             </button>
           </div>
 
-          {/* 차종 필터 & 등록 버튼 */}
+          {/* 페이지 크기 & 등록 버튼 */}
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-semibold text-gray-700">차종:</span>
+            <div className="flex items-center gap-3">
+              <span className="text-sm font-semibold text-gray-700">페이지 크기:</span>
               <select
-                value={modelFilter}
-                onChange={(e) => setModelFilter(e.target.value)}
+                value={pageSize}
+                onChange={(e) => handlePageSizeChange(Number(e.target.value))}
                 className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm"
               >
-                <option value="all">전체</option>
-                {uniqueModels.map(model => (
-                  <option key={model} value={model}>{model}</option>
+                {!PAGE_SIZE_OPTIONS.includes(pageSize) && (
+                  <option value={pageSize}>{pageSize}개</option>
+                )}
+                {PAGE_SIZE_OPTIONS.map((sizeOption) => (
+                  <option key={sizeOption} value={sizeOption}>
+                    {sizeOption}개
+                  </option>
                 ))}
               </select>
               <span className="text-xs text-gray-500">
-                ({filteredAssets.length}대 표시 중)
+                {totalCount !== null
+                  ? `총 ${totalCount}대`
+                  : `${assets.length}대 표시 중`}
               </span>
             </div>
             
@@ -507,16 +886,24 @@ export default function Assets() {
         {/* 자산 테이블 */}
         <PageStateBoundary
           isLoading={isAssetsLoading}
-          error={assetsError}
-          isEmpty={!isAssetsLoading && !assetsError && (isAssetsApiEmpty || filteredAssets.length === 0)}
-          errorDescription="차량 자산 목록을 불러오는 중 문제가 발생했습니다."
+          error={isOutOfRangeError ? null : assetsError}
+          isEmpty={isAssetsEmpty}
+          errorDescription={
+            assetsErrorStatus === 400
+              ? '필터 값이 올바르지 않습니다. 필터를 초기화하고 다시 시도해 주세요.'
+              : '차량 자산 목록을 불러오는 중 문제가 발생했습니다.'
+          }
           emptyTitle="조건에 맞는 차량이 없습니다"
-          emptyDescription="검색어 또는 필터를 조정해 다시 확인해 주세요."
+          emptyDescription={
+            shouldShowOutOfRangeEmpty
+              ? '요청한 페이지 범위를 벗어났습니다. 첫 페이지에서 다시 확인해 주세요.'
+              : '검색어 또는 필터를 조정해 다시 확인해 주세요.'
+          }
           onRetry={handleAssetsRetry}
-          errorActionLabel={getPageErrorActionLabel(assetsErrorKind)}
+          errorActionLabel={assetsErrorStatus === 400 ? '필터 초기화' : getPageErrorActionLabel(assetsErrorKind)}
           onErrorAction={handleAssetsErrorAction}
-          emptyActionLabel="필터 초기화"
-          onEmptyAction={resetAssetFilters}
+          emptyActionLabel={shouldShowOutOfRangeEmpty ? '첫 페이지로 이동' : '필터 초기화'}
+          onEmptyAction={shouldShowOutOfRangeEmpty ? () => handlePageChange(1) : resetAssetFilters}
           className="min-h-[280px]"
         >
           <div className="bg-white rounded-xl shadow-sm overflow-hidden">
@@ -533,7 +920,7 @@ export default function Assets() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
-                  {filteredAssets.map((asset) => (
+                  {assets.map((asset) => (
                     <tr key={asset.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => handleDetailModalOpen(asset)}>
                       <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                         {asset.vehicleNumber}
@@ -571,6 +958,33 @@ export default function Assets() {
                   ))}
                 </tbody>
               </table>
+            </div>
+            <div className="flex items-center justify-between border-t border-gray-200 px-6 py-4">
+              <p className="text-sm text-gray-600">
+                {totalCount !== null
+                  ? `총 ${totalCount}대 · ${page} / ${totalPages ?? page} 페이지`
+                  : `현재 페이지 ${page} · ${assets.length}대`}
+              </p>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => handlePageChange(page - 1)}
+                  disabled={!hasPrevPage || isAssetsLoading}
+                  className="inline-flex items-center gap-1 rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                  이전
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handlePageChange(page + 1)}
+                  disabled={!hasNextPage || isAssetsLoading}
+                  className="inline-flex items-center gap-1 rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  다음
+                  <ChevronRight className="h-4 w-4" />
+                </button>
+              </div>
             </div>
           </div>
         </PageStateBoundary>
@@ -658,7 +1072,9 @@ export default function Assets() {
                           accept="image/*,application/pdf"
                           onChange={(e) => {
                             const file = e.target.files?.[0];
-                            if (file) setUploadedFiles({ ...uploadedFiles, insurance: file });
+                            if (file) {
+                              setUploadedFiles((prev) => ({ ...prev, insurance: file }));
+                            }
                           }}
                           className="hidden"
                         />
@@ -786,11 +1202,9 @@ export default function Assets() {
         {selectedAsset && (
           <VehicleDetailModal
             asset={selectedAsset}
+            reservationHistory={[]}
             isOpen={showDetailModal}
-            onClose={() => {
-              setShowDetailModal(false);
-              setShowInsuranceUpload(false);
-            }}
+            onClose={handleDetailModalClose}
             newInsuranceExpiry={newInsuranceExpiry}
             setNewInsuranceExpiry={setNewInsuranceExpiry}
             newNextInspection={newNextInspection}
