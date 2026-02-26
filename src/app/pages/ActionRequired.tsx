@@ -1,6 +1,6 @@
 import { Layout } from '../components/Layout';
 import { useSearchParams, useNavigate } from 'react-router';
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Search, X, ArrowUp, ArrowDown, Clock, User, CheckCircle2, Loader2, AlertTriangle } from 'lucide-react';
 import { PageStateBoundary } from '../components/PageStateBoundary';
 import {
@@ -10,6 +10,7 @@ import {
   isPayloadEmpty,
   usePageEndpointState,
 } from '../hooks/usePageEndpointState';
+import { usePaymentStatusSync } from '../hooks/usePaymentStatusSync';
 import { useAuth } from '../context/AuthContext';
 import { ApiError } from '../../services/api';
 import {
@@ -18,6 +19,7 @@ import {
   patchActionRequiredMemo,
   patchActionRequiredStatus,
 } from '../../services/actionRequired';
+import { paymentStatusToLabel, toCanonicalPaymentStatus } from '../utils/paymentStatusSync';
 import type { MemoLog } from '../data/mockData';
 
 type ActionStatusCode = 'pending' | 'in-progress' | 'resolved';
@@ -32,15 +34,22 @@ interface ActionItem {
   status: string;
   statusCode: ActionStatusCode;
   assignee: string;
+  reservationId?: string;
+  paymentId?: string;
   description?: string;
   memos?: MemoLog[];
   paymentInfo?: {
+    paymentId?: string;
+    reservationId?: string;
     amount: number;
     overdueDays: number;
     lateFee: number;
     totalAmount: number;
     dueDate: string;
     paymentType: string;
+    status?: string;
+    statusLabel?: string;
+    updatedAt?: string;
   };
 }
 
@@ -328,23 +337,42 @@ function toPaymentInfo(source: Record<string, unknown>): ActionItem['paymentInfo
       ? source.payment
       : source;
 
+  const paymentId = pickString(paymentSource, ['paymentId', 'id']) ?? pickString(source, ['paymentId']);
+  const reservationId = pickString(paymentSource, ['reservationId', 'rentalId']) ?? pickString(source, ['reservationId', 'rentalId']);
   const amount = toNumberValue(paymentSource.amount);
   const dueDate = pickString(paymentSource, ['dueDate', 'paymentDueDate']);
   const overdueDays = toNumberValue(paymentSource.overdueDays) ?? 0;
   const lateFee = toNumberValue(paymentSource.lateFee) ?? 0;
   const totalAmount = toNumberValue(paymentSource.totalAmount) ?? (amount ?? 0) + lateFee;
+  const rawStatus = pickString(paymentSource, ['status', 'paymentStatus']);
+  const normalizedStatus = rawStatus ? toCanonicalPaymentStatus(rawStatus) : null;
+  const statusLabel = normalizedStatus ? paymentStatusToLabel(normalizedStatus) : null;
+  const updatedAt = pickString(paymentSource, ['updatedAt', 'statusUpdatedAt', 'paidAt', 'createdAt']);
 
-  if (amount === null && dueDate === null && overdueDays === 0 && lateFee === 0) {
+  if (
+    amount === null
+    && dueDate === null
+    && overdueDays === 0
+    && lateFee === 0
+    && !statusLabel
+    && !paymentId
+    && !reservationId
+  ) {
     return undefined;
   }
 
   return {
+    paymentId: paymentId ?? undefined,
+    reservationId: reservationId ?? undefined,
     amount: amount ?? 0,
     overdueDays,
     lateFee,
     totalAmount,
     dueDate: dueDate ?? '-',
     paymentType: pickString(paymentSource, ['paymentType', 'type']) ?? '-',
+    status: normalizedStatus ?? undefined,
+    statusLabel: statusLabel ?? undefined,
+    updatedAt: updatedAt ?? undefined,
   };
 }
 
@@ -355,6 +383,8 @@ function toActionItem(row: unknown, index: number, fallbackId?: string): ActionI
 
   const id = pickString(row, ['id', 'actionId', 'actionItemId', 'paymentId']) ?? fallbackId ?? `action-${index + 1}`;
   const paymentInfo = toPaymentInfo(row);
+  const reservationId = pickString(row, ['reservationId', 'rentalId']) ?? paymentInfo?.reservationId;
+  const paymentId = pickString(row, ['paymentId']) ?? paymentInfo?.paymentId;
   const type = pickString(row, ['type', 'category', 'issueType', 'issue', 'title']) ?? (paymentInfo ? '미납/결제 문제' : null);
   const vehicleNumber = pickString(row, ['vehicleNumber', 'plateNumber', 'vehicleNo', 'plate']);
 
@@ -388,6 +418,8 @@ function toActionItem(row: unknown, index: number, fallbackId?: string): ActionI
     status: normalizeStatusLabel(statusRawValue),
     statusCode: normalizeStatusCode(statusRawValue),
     assignee: pickString(row, ['assignee', 'assigneeName', 'owner', 'assignedTo']) ?? '-',
+    reservationId: reservationId ?? undefined,
+    paymentId: paymentId ?? undefined,
     description: pickString(row, ['description', 'detail']),
     memos: memos.length > 0 ? memos : undefined,
     paymentInfo,
@@ -526,6 +558,31 @@ export default function ActionRequired() {
     '차량이상',
     '보험 만료 임박',
   ];
+
+  const paymentSyncTargets = useMemo(() => (
+    sourceActionItems
+      .filter((item) => item.type === '미납/결제 문제' || Boolean(item.paymentInfo))
+      .map((item) => ({
+        reservationId: item.reservationId ?? item.paymentInfo?.reservationId ?? null,
+        paymentId: item.paymentId ?? item.paymentInfo?.paymentId ?? null,
+        fallbackStatus: item.paymentInfo?.status ?? null,
+        fallbackUpdatedAt: item.paymentInfo?.updatedAt ?? null,
+      }))
+      .filter((target) => Boolean(target.reservationId || target.paymentId))
+  ), [sourceActionItems]);
+
+  const {
+    byReservationId: syncedPaymentByReservationId,
+    byPaymentId: syncedPaymentByPaymentId,
+    isSyncing: isPaymentSyncing,
+    error: paymentSyncError,
+    usingLastKnown: isPaymentSyncUsingLastKnown,
+    retry: retryPaymentSync,
+  } = usePaymentStatusSync({
+    targets: paymentSyncTargets,
+    enabled: sourceActionItems.length > 0,
+    pollIntervalMs: 20_000,
+  });
 
   const {
     isLoading: isItemsLoading,
@@ -681,7 +738,70 @@ export default function ActionRequired() {
     ),
   ).sort((left, right) => left.localeCompare(right, 'ko'));
 
-  const allItems: ActionItem[] = sourceActionItems;
+  const allItems: ActionItem[] = useMemo(() => (
+    sourceActionItems.map((item) => {
+      const paymentSnapshot = (
+        (item.paymentId ? syncedPaymentByPaymentId[item.paymentId] : undefined)
+        ?? (item.reservationId ? syncedPaymentByReservationId[item.reservationId] : undefined)
+      );
+
+      if (!paymentSnapshot) {
+        return item;
+      }
+
+      if (!item.paymentInfo && item.type !== '미납/결제 문제') {
+        return item;
+      }
+
+      return {
+        ...item,
+        reservationId: item.reservationId ?? paymentSnapshot.reservationId ?? undefined,
+        paymentId: item.paymentId ?? paymentSnapshot.paymentId ?? undefined,
+        paymentInfo: {
+          amount: item.paymentInfo?.amount ?? 0,
+          overdueDays: item.paymentInfo?.overdueDays ?? 0,
+          lateFee: item.paymentInfo?.lateFee ?? 0,
+          totalAmount: item.paymentInfo?.totalAmount ?? 0,
+          dueDate: item.paymentInfo?.dueDate ?? '-',
+          paymentType: item.paymentInfo?.paymentType ?? '-',
+          paymentId: item.paymentInfo?.paymentId ?? paymentSnapshot.paymentId ?? undefined,
+          reservationId: item.paymentInfo?.reservationId ?? paymentSnapshot.reservationId ?? undefined,
+          status: paymentSnapshot.status,
+          statusLabel: paymentSnapshot.statusLabel,
+          updatedAt: paymentSnapshot.updatedAt ?? item.paymentInfo?.updatedAt ?? undefined,
+        },
+      };
+    })
+  ), [sourceActionItems, syncedPaymentByPaymentId, syncedPaymentByReservationId]);
+
+  useEffect(() => {
+    setSelectedItem((previousItem) => {
+      if (!previousItem) {
+        return previousItem;
+      }
+
+      const nextItem = allItems.find((item) => item.id === previousItem.id);
+      if (!nextItem || !nextItem.paymentInfo) {
+        return previousItem;
+      }
+
+      const previousStatus = previousItem.paymentInfo?.status ?? null;
+      const nextStatus = nextItem.paymentInfo.status ?? null;
+      if (previousStatus === nextStatus) {
+        return previousItem;
+      }
+
+      return {
+        ...previousItem,
+        reservationId: previousItem.reservationId ?? nextItem.reservationId,
+        paymentId: previousItem.paymentId ?? nextItem.paymentId,
+        paymentInfo: {
+          ...(previousItem.paymentInfo ?? {}),
+          ...nextItem.paymentInfo,
+        },
+      };
+    });
+  }, [allItems]);
 
   const toggleFilter = (filter: string) => {
     setSelectedFilters((prev) =>
@@ -713,6 +833,28 @@ export default function ActionRequired() {
       default:
         return 'bg-gray-100 text-gray-700';
     }
+  };
+
+  const getPaymentStatusBadgeColor = (paymentStatusLabel: string | undefined): string => {
+    if (!paymentStatusLabel) {
+      return 'bg-gray-100 text-gray-600';
+    }
+    if (paymentStatusLabel === '미납') {
+      return 'bg-red-100 text-red-700';
+    }
+    if (paymentStatusLabel === '부분납부') {
+      return 'bg-amber-100 text-amber-700';
+    }
+    if (paymentStatusLabel === '완료') {
+      return 'bg-green-100 text-green-700';
+    }
+    if (paymentStatusLabel === '대기') {
+      return 'bg-blue-100 text-blue-700';
+    }
+    if (paymentStatusLabel === '결제정보 없음') {
+      return 'bg-gray-100 text-gray-700';
+    }
+    return 'bg-gray-100 text-gray-700';
   };
 
   const handleSort = (field: SortField) => {
@@ -1117,6 +1259,33 @@ export default function ActionRequired() {
               </button>
             </div>
           </div>
+
+          {(paymentSyncError || isPaymentSyncing) && (
+            <div className={`flex items-center justify-between gap-3 rounded-lg border px-3 py-2 text-xs ${
+              paymentSyncError
+                ? 'border-amber-200 bg-amber-50 text-amber-700'
+                : 'border-blue-200 bg-blue-50 text-blue-700'
+            }`}>
+              <span>
+                {paymentSyncError
+                  ? (
+                    isPaymentSyncUsingLastKnown
+                      ? '결제 상태 동기화에 실패해 마지막 정상 상태를 표시 중입니다.'
+                      : paymentSyncError
+                  )
+                  : '결제 상태를 동기화하는 중입니다.'}
+              </span>
+              {paymentSyncError && (
+                <button
+                  type="button"
+                  onClick={retryPaymentSync}
+                  className="rounded-md border border-amber-300 bg-white px-2 py-1 font-semibold text-amber-700 hover:bg-amber-100"
+                >
+                  다시 시도
+                </button>
+              )}
+            </div>
+          )}
         </div>
 
         <PageStateBoundary
@@ -1159,6 +1328,11 @@ export default function ActionRequired() {
                         미납금액
                       </th>
                     )}
+                    {isUnpaidFilterActive && (
+                      <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                        결제상태
+                      </th>
+                    )}
                     <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider cursor-pointer" onClick={() => handleSort('severity')}>
                       심각도
                       {sortField === 'severity' && (sortDirection === 'asc' ? <ArrowUp className="inline-block ml-1 w-3 h-3" /> : <ArrowDown className="inline-block ml-1 w-3 h-3" />)}
@@ -1194,6 +1368,17 @@ export default function ActionRequired() {
                           {item.paymentInfo ? (
                             <span className="font-bold text-red-600">
                               {item.paymentInfo.totalAmount.toLocaleString()}원
+                            </span>
+                          ) : (
+                            <span className="text-gray-400">-</span>
+                          )}
+                        </td>
+                      )}
+                      {isUnpaidFilterActive && (
+                        <td className="px-6 py-4 whitespace-nowrap text-sm">
+                          {item.paymentInfo?.statusLabel ? (
+                            <span className={`px-2 py-1 rounded-full text-xs font-semibold ${getPaymentStatusBadgeColor(item.paymentInfo.statusLabel)}`}>
+                              {item.paymentInfo.statusLabel}
                             </span>
                           ) : (
                             <span className="text-gray-400">-</span>
@@ -1324,6 +1509,12 @@ export default function ActionRequired() {
                     <label className="text-sm font-semibold text-gray-600 mb-3 block">결제 정보</label>
                     <div className="bg-red-50 rounded-lg p-4 space-y-2">
                       <div className="flex justify-between items-center">
+                        <span className="text-sm text-gray-700">결제 상태</span>
+                        <span className={`px-2 py-1 rounded-full text-xs font-semibold ${getPaymentStatusBadgeColor(selectedItem.paymentInfo.statusLabel)}`}>
+                          {selectedItem.paymentInfo.statusLabel ?? '-'}
+                        </span>
+                      </div>
+                      <div className="flex justify-between items-center">
                         <span className="text-sm text-gray-700">결제 유형</span>
                         <span className="text-sm font-semibold text-gray-900">{selectedItem.paymentInfo.paymentType}</span>
                       </div>
@@ -1343,6 +1534,11 @@ export default function ActionRequired() {
                         <span className="text-base font-bold text-gray-900">총 청구금액</span>
                         <span className="text-lg font-bold text-red-600">{selectedItem.paymentInfo.totalAmount.toLocaleString()}원</span>
                       </div>
+                      {selectedItem.paymentInfo.updatedAt && (
+                        <div className="pt-1 text-right text-xs text-gray-500">
+                          최근 반영: {new Date(selectedItem.paymentInfo.updatedAt).toLocaleString('ko-KR')}
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}

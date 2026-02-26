@@ -10,8 +10,9 @@ import {
   isPayloadEmpty,
   usePageEndpointState,
 } from '../hooks/usePageEndpointState';
+import { usePaymentStatusSync } from '../hooks/usePaymentStatusSync';
 import { vehicleAssets, reservations, actionItems, getTodayStats } from '../data/mockData';
-import { mockPayments, getUnpaidPayments } from '../utils/paymentUtils';
+import { isUnpaidPaymentStatus, toCanonicalPaymentStatus } from '../utils/paymentStatusSync';
 import { getHomeSummaryDashboard } from '../../services/dashboard';
 
 export default function Home() {
@@ -39,6 +40,41 @@ export default function Home() {
   const handleHomeErrorAction = useCallback(() => {
     handlePageErrorAction(homeErrorKind, navigate);
   }, [homeErrorKind, navigate]);
+
+  const paymentSyncTargets = useMemo(() => (
+    reservations.map((reservation) => ({
+      reservationId: reservation.id,
+      fallbackStatus: reservation.paymentStatus,
+    }))
+  ), []);
+
+  const {
+    byReservationId: syncedPaymentByReservationId,
+    isSyncing: isPaymentSyncing,
+    error: paymentSyncError,
+    usingLastKnown: isPaymentSyncUsingLastKnown,
+    retry: retryPaymentSync,
+  } = usePaymentStatusSync({
+    targets: paymentSyncTargets,
+    enabled: paymentSyncTargets.length > 0,
+    pollIntervalMs: 20_000,
+  });
+
+  const unpaidFromPayments = useMemo(() => (
+    paymentSyncTargets.reduce((count, target) => {
+      if (!target.reservationId) {
+        return count;
+      }
+      const syncedPaymentStatus = syncedPaymentByReservationId[target.reservationId];
+      if (syncedPaymentStatus) {
+        return isUnpaidPaymentStatus(syncedPaymentStatus.status) ? count + 1 : count;
+      }
+      if (!target.fallbackStatus) {
+        return count;
+      }
+      return isUnpaidPaymentStatus(toCanonicalPaymentStatus(target.fallbackStatus)) ? count + 1 : count;
+    }, 0)
+  ), [paymentSyncTargets, syncedPaymentByReservationId]);
   
   // 오늘 할 일 통계
   const todayStats = getTodayStats();
@@ -54,9 +90,8 @@ export default function Home() {
     const maintenanceCount = actionItems.filter(item => item.category === '정기점검').length;
     const insuranceCount = actionItems.filter(item => item.category === '보험 만료 임박').length;
     
-    // 미납/결제 문제는 actionItems와 paymentUtils 합산
+    // 미납/결제 문제는 actionItems + 결제 상태 동기화 결과를 합산
     const unpaidFromActionItems = actionItems.filter(item => item.category === '미납/결제 문제').length;
-    const unpaidFromPayments = getUnpaidPayments(mockPayments).length;
     const totalUnpaidCount = unpaidFromActionItems + unpaidFromPayments;
     
     return [
@@ -69,7 +104,7 @@ export default function Home() {
       { category: '도난 의심', count: theftCount },
       { category: '단말 OFF', count: terminalOffCount },
     ];
-  }, []);
+  }, [unpaidFromPayments]);
   
   // 홈 화면용 상태이상 카드
   const actionItemsForHome = useMemo(() => {
@@ -258,6 +293,32 @@ export default function Home() {
         className="m-6 min-h-[320px]"
       >
         <div className="p-6 space-y-5">
+        {(paymentSyncError || isPaymentSyncing) && (
+          <div className={`flex items-center justify-between gap-3 rounded-lg border px-3 py-2 text-xs ${
+            paymentSyncError
+              ? 'border-amber-200 bg-amber-50 text-amber-700'
+              : 'border-blue-200 bg-blue-50 text-blue-700'
+          }`}>
+            <span>
+              {paymentSyncError
+                ? (
+                  isPaymentSyncUsingLastKnown
+                    ? '결제 상태 동기화에 실패해 마지막 정상 상태를 표시 중입니다.'
+                    : paymentSyncError
+                )
+                : '결제 상태를 동기화하는 중입니다.'}
+            </span>
+            {paymentSyncError && (
+              <button
+                type="button"
+                onClick={retryPaymentSync}
+                className="rounded-md border border-amber-300 bg-white px-2 py-1 font-semibold text-amber-700 hover:bg-amber-100"
+              >
+                다시 시도
+              </button>
+            )}
+          </div>
+        )}
         {/* 오늘 할 일 & 상태이상 */}
         <div className="bg-white rounded-xl shadow-sm p-5">
           <h2 className="text-lg font-bold text-[#1e2939] mb-3">오늘 할 일</h2>
