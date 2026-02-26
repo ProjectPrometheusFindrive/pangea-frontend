@@ -1,6 +1,6 @@
 # Prompt Library v1
 
-- Version: v1.2.22
+- Version: v1.2.23
 - Date: 2026-02-26
 - Owner: Pangea Frontend Team
 - Tags: prompt-library,workflow,branch-policy,history-policy,commit-policy,pr-automation,jira-traceability,end-prompt-protocol,worktree-cleanup,jira-status-sync,jira-comment-sync,ac-evidence,mock-removal
@@ -81,6 +81,7 @@ End Prompt:
 - 로그인/보호 라우트 티켓(BK-031 계열)은 `prompt_history`에 `returnUrl` 복귀 흐름, 로그인 `401/429/NETWORK_ERROR` 분기, `401 -> /auth/refresh 1회 -> 원요청 재시도` 순서를 반드시 기록한다.
 - 인증 UX 정리 티켓(BK-032/SCRUM-35 계열)은 수동 로그아웃 토스트, 만료 모달+`returnUrl` 복구, `401` 연쇄 1회 종료, storage 토큰 정리 근거를 반드시 기록한다.
 - ActionRequired 조회 연동 티켓(BK-062/SCRUM-48 계열)은 목록 쿼리(page/size/status/priority/assignee), 상세 조회(404 fallback), 필터 변경 race 방지 근거를 반드시 기록한다.
+- ActionRequired 쓰기 연동 티켓(BK-063/SCRUM-49 계열)은 상태 변경/해결 완료/메모 저장 API 연동 근거, saving 중복 제출 방지, 실패 시 낙관적 업데이트 롤백, `400/403/409/5xx+network` 분기와 Retry 제공 근거, 상태 변경 후 필터 이탈 처리 근거를 반드시 기록한다.
 - 코드 변경이 포함된 Jira 티켓은 `Validation` 섹션에 최소 1개의 실행 명령 결과(`build` 또는 `test`)를 기록한다.
 - 저장/수정 흐름 버그 티켓은 `Changes Summary` 또는 `Diffs & Files`에 성공/실패 분기 처리 근거(성공 시 동작, 실패 시 동작)를 모두 기록한다.
 - `Notes`에는 차기 권장 태스크만 기록하며 즉시 반영은 금지한다.
@@ -149,8 +150,9 @@ cp docs/prompt_history/_TEMPLATE.md docs/prompt_history/$(date +%Y%m%d)_your-tas
 - Production push triggers auto tag (`vX.Y.Z`)
 
 ## Version History
-- v1.2.21 (2026-02-26, SCRUM-40): Add prompt_history evidence rule for BK-044 assets mock removal (mock import/flag removal + API single-source + no fallback evidence).
+- v1.2.23 (2026-02-26, SCRUM-49): Add prompt_history evidence rule for BK-063 ActionRequired write integration (status/resolve/memo API, optimistic rollback, duplicate-submit guard, 400/403/409/5xx+network+Retry branches, filter drift handling).
 - v1.2.22 (2026-02-26, SCRUM-43): Add prompt_history evidence rule for BK-052 reservations read integration (`page/size/status/from/to` sync, list/detail race-safe fetch, `from>to` validation, 400/401/403/404/5xx branches).
+- v1.2.21 (2026-02-26, SCRUM-40): Add prompt_history evidence rule for BK-044 assets mock removal (mock import/flag removal + API single-source + no fallback evidence).
 - v1.2.20 (2026-02-26, SCRUM-39): Add prompt_history evidence rule for BK-043 assets write integration (create/patch/history + dirty/saving + 400/403/409(form preservation)/5xx branches).
 - v1.2.19 (2026-02-26, SCRUM-48): Add prompt_history evidence rule for ActionRequired query integration tickets (list query params/detail 404 fallback/filter race handling).
 - v1.2.18 (2026-02-26, SCRUM-34): Add prompt_history evidence rule for login/protected-route tickets (returnUrl restore, login 401/429/network branches, single refresh-retry order).
