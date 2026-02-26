@@ -23,8 +23,8 @@ import {
   isPayloadEmpty,
   usePageEndpointState,
 } from '../hooks/usePageEndpointState';
-import type { Reservation } from '../data/mockData';
 import type { VehicleAsset } from '../types/assets';
+import type { Reservation } from '../types/reservations';
 import { ApiError } from '../../services/api';
 import {
   createReservation,
