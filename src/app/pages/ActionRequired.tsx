@@ -10,9 +10,17 @@ import {
   isPayloadEmpty,
   usePageEndpointState,
 } from '../hooks/usePageEndpointState';
+import { useAuth } from '../context/AuthContext';
 import { ApiError } from '../../services/api';
-import { getActionRequiredDetail, getActionRequiredList } from '../../services/actionRequired';
+import {
+  getActionRequiredDetail,
+  getActionRequiredList,
+  patchActionRequiredMemo,
+  patchActionRequiredStatus,
+} from '../../services/actionRequired';
 import type { MemoLog } from '../data/mockData';
+
+type ActionStatusCode = 'pending' | 'in-progress' | 'resolved';
 
 interface ActionItem {
   id: string;
@@ -22,6 +30,7 @@ interface ActionItem {
   date: string;
   severity: 'High' | 'Medium' | 'Low';
   status: string;
+  statusCode: ActionStatusCode;
   assignee: string;
   description?: string;
   memos?: MemoLog[];
@@ -39,9 +48,16 @@ type SortField = 'type' | 'vehicleNumber' | 'customerName' | 'date' | 'severity'
 type SortDirection = 'asc' | 'desc' | null;
 type ActionStatusFilter = 'all' | 'pending' | 'in-progress' | 'resolved';
 type ActionPriorityFilter = 'all' | 'high' | 'medium' | 'low';
+type ActionWriteKind = 'status' | 'memo' | 'resolve';
 
 const STATUS_OPTIONS = ['대기중', '진행중', '완료'] as const;
 const LIST_COLLECTION_KEYS = ['items', 'rows', 'list', 'actionRequired', 'actionItems'];
+
+interface ActionWriteErrorState {
+  kind: ActionWriteKind;
+  message: string;
+  retryable: boolean;
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
@@ -127,15 +143,153 @@ function normalizeStatusLabel(rawValue: string | null): string {
   return rawValue;
 }
 
-function normalizeMemoStatus(rawValue: string | null): MemoLog['status'] {
-  const normalizedLabel = normalizeStatusLabel(rawValue);
-  if (normalizedLabel.includes('완료')) {
+function normalizeStatusCode(rawValue: string | null): ActionStatusCode {
+  if (!rawValue) {
+    return 'pending';
+  }
+
+  if (rawValue.includes('완료')) {
     return 'resolved';
   }
-  if (normalizedLabel.includes('진행')) {
+  if (rawValue.includes('진행')) {
+    return 'in-progress';
+  }
+  if (rawValue.includes('대기') || rawValue.includes('연체')) {
+    return 'pending';
+  }
+
+  const normalized = rawValue.toLowerCase().replace(/_/g, '-').replace(/\s+/g, '');
+  if (normalized === 'resolved' || normalized === 'done' || normalized === 'closed') {
+    return 'resolved';
+  }
+  if (normalized === 'in-progress' || normalized === 'inprogress' || normalized === 'processing') {
+    return 'in-progress';
+  }
+  if (normalized === 'pending' || normalized === 'open') {
+    return 'pending';
+  }
+
+  return 'pending';
+}
+
+function toStatusLabel(statusCode: ActionStatusCode): string {
+  if (statusCode === 'resolved') {
+    return '완료';
+  }
+  if (statusCode === 'in-progress') {
+    return '진행중';
+  }
+  return '대기중';
+}
+
+function toStatusPatchValue(statusCode: ActionStatusCode): string {
+  return statusCode;
+}
+
+function normalizeMemoStatus(rawValue: string | null): MemoLog['status'] {
+  const normalizedStatusCode = normalizeStatusCode(rawValue);
+  if (normalizedStatusCode === 'resolved') {
+    return 'resolved';
+  }
+  if (normalizedStatusCode === 'in-progress') {
     return 'in-progress';
   }
   return 'pending';
+}
+
+function toActionWriteError(kind: ActionWriteKind, error: unknown): ActionWriteErrorState {
+  if (error instanceof ApiError) {
+    if (error.status === 400) {
+      if (kind === 'memo') {
+        return {
+          kind,
+          message: '메모 형식이 올바르지 않거나 허용 길이를 초과했습니다. 입력값을 확인해 주세요.',
+          retryable: false,
+        };
+      }
+      return {
+        kind,
+        message: '허용되지 않은 상태 값입니다. 상태 값을 다시 선택해 주세요.',
+        retryable: false,
+      };
+    }
+
+    if (error.status === 401) {
+      return {
+        kind,
+        message: '세션이 만료되었습니다. 다시 로그인한 뒤 시도해 주세요.',
+        retryable: false,
+      };
+    }
+
+    if (error.status === 403) {
+      return {
+        kind,
+        message: '권한이 없어 요청을 처리할 수 없습니다.',
+        retryable: false,
+      };
+    }
+
+    if (error.status === 404) {
+      return {
+        kind,
+        message: '대상 항목을 찾을 수 없습니다. 목록을 새로고침한 뒤 다시 시도해 주세요.',
+        retryable: false,
+      };
+    }
+
+    if (error.status === 409) {
+      return {
+        kind,
+        message: '다른 사용자가 먼저 수정했습니다. 최신 데이터로 다시 시도해 주세요.',
+        retryable: false,
+      };
+    }
+
+    if (error.status !== undefined && error.status >= 500) {
+      return {
+        kind,
+        message: '서버 오류가 발생했습니다. 다시 시도해 주세요.',
+        retryable: true,
+      };
+    }
+
+    if (error.code === 'NETWORK_ERROR' || error.code === 'TIMEOUT') {
+      return {
+        kind,
+        message: '네트워크 오류가 발생했습니다. 연결 상태를 확인한 뒤 다시 시도해 주세요.',
+        retryable: true,
+      };
+    }
+
+    if (error.code === 'ABORTED') {
+      return {
+        kind,
+        message: '요청이 중단되었습니다. 다시 시도해 주세요.',
+        retryable: true,
+      };
+    }
+
+    return {
+      kind,
+      message: error.message || '요청 처리 중 오류가 발생했습니다.',
+      retryable: false,
+    };
+  }
+
+  if (error instanceof Error && error.message) {
+    return {
+      kind,
+      message: error.message,
+      retryable: false,
+    };
+  }
+
+  return {
+    kind,
+    message: '요청 처리 중 오류가 발생했습니다.',
+    retryable: false,
+  };
 }
 
 function toMemoLogs(value: unknown): MemoLog[] {
@@ -222,6 +376,8 @@ function toActionItem(row: unknown, index: number, fallbackId?: string): ActionI
     });
   }
 
+  const statusRawValue = pickString(row, ['status', 'statusLabel']);
+
   return {
     id,
     type,
@@ -229,7 +385,8 @@ function toActionItem(row: unknown, index: number, fallbackId?: string): ActionI
     customerName: pickString(row, ['customerName', 'customer', 'customerDisplayName']) ?? '-',
     date: pickString(row, ['date', 'dueDate', 'occurredAt', 'createdAt']) ?? '-',
     severity: normalizeSeverity(pickString(row, ['severity', 'priority'])),
-    status: normalizeStatusLabel(pickString(row, ['statusLabel', 'status'])),
+    status: normalizeStatusLabel(statusRawValue),
+    statusCode: normalizeStatusCode(statusRawValue),
     assignee: pickString(row, ['assignee', 'assigneeName', 'owner', 'assignedTo']) ?? '-',
     description: pickString(row, ['description', 'detail']),
     memos: memos.length > 0 ? memos : undefined,
@@ -326,6 +483,7 @@ function toActionItemDetail(payload: unknown, fallbackItem: ActionItem): ActionI
 export default function ActionRequired() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
+  const { user } = useAuth();
 
   const [selectedFilters, setSelectedFilters] = useState<string[]>([]);
   const [statusFilter, setStatusFilter] = useState<ActionStatusFilter>('all');
@@ -340,9 +498,13 @@ export default function ActionRequired() {
   const [sortDirection, setSortDirection] = useState<SortDirection>(null);
   const [currentMemo, setCurrentMemo] = useState('');
   const [currentStatus, setCurrentStatus] = useState('');
-  const [resolvedItemIds, setResolvedItemIds] = useState<Set<string>>(new Set());
   const [sourceActionItems, setSourceActionItems] = useState<ActionItem[]>([]);
   const [totalItems, setTotalItems] = useState(0);
+  const [writeError, setWriteError] = useState<ActionWriteErrorState | null>(null);
+  const [writeNotice, setWriteNotice] = useState<string | null>(null);
+  const [isStatusSaving, setIsStatusSaving] = useState(false);
+  const [isMemoSaving, setIsMemoSaving] = useState(false);
+  const [isResolveSaving, setIsResolveSaving] = useState(false);
 
   const [isDetailLoading, setIsDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
@@ -350,6 +512,9 @@ export default function ActionRequired() {
 
   const detailRequestSequenceRef = useRef(0);
   const detailControllerRef = useRef<AbortController | null>(null);
+  const retryActionRef = useRef<(() => Promise<void>) | null>(null);
+
+  const isWriteSaving = isStatusSaving || isMemoSaving || isResolveSaving;
 
   const filterChips = [
     '사고 접수',
@@ -429,6 +594,23 @@ export default function ActionRequired() {
     handlePageErrorAction(itemsErrorKind, navigate);
   }, [itemsErrorKind, navigate]);
 
+  const clearWriteFeedback = useCallback(() => {
+    setWriteError(null);
+    setWriteNotice(null);
+    retryActionRef.current = null;
+  }, []);
+
+  const handleWriteRetry = useCallback(() => {
+    if (isWriteSaving) {
+      return;
+    }
+    const retryAction = retryActionRef.current;
+    if (!retryAction) {
+      return;
+    }
+    void retryAction();
+  }, [isWriteSaving]);
+
   const hydrateActionDetail = useCallback(async (actionId: string, fallbackItem: ActionItem) => {
     const requestSequence = detailRequestSequenceRef.current + 1;
     detailRequestSequenceRef.current = requestSequence;
@@ -473,10 +655,14 @@ export default function ActionRequired() {
     setSelectedItem(item);
     setCurrentMemo('');
     setCurrentStatus('');
+    clearWriteFeedback();
     void hydrateActionDetail(item.id, item);
-  }, [hydrateActionDetail]);
+  }, [clearWriteFeedback, hydrateActionDetail]);
 
   const handleCloseDetail = useCallback(() => {
+    if (isWriteSaving) {
+      return;
+    }
     detailControllerRef.current?.abort();
     setSelectedItem(null);
     setCurrentMemo('');
@@ -484,7 +670,8 @@ export default function ActionRequired() {
     setIsDetailLoading(false);
     setDetailError(null);
     setIsDetailNotFound(false);
-  }, []);
+    clearWriteFeedback();
+  }, [clearWriteFeedback, isWriteSaving]);
 
   const assigneeOptions = Array.from(
     new Set(
@@ -494,7 +681,7 @@ export default function ActionRequired() {
     ),
   ).sort((left, right) => left.localeCompare(right, 'ko'));
 
-  const allItems: ActionItem[] = sourceActionItems.filter((item) => !resolvedItemIds.has(item.id));
+  const allItems: ActionItem[] = sourceActionItems;
 
   const toggleFilter = (filter: string) => {
     setSelectedFilters((prev) =>
@@ -549,38 +736,261 @@ export default function ActionRequired() {
     return 0;
   });
 
-  const handleMemoAdd = () => {
-    if (selectedItem && currentMemo.trim()) {
-      const statusLabel = currentStatus || selectedItem.status;
-      const memoStatus = normalizeMemoStatus(statusLabel);
-
-      const newMemo: MemoLog = {
-        id: Date.now().toString(),
-        content: currentMemo.trim(),
-        timestamp: new Date().toISOString(),
-        author: '김민수',
-        status: memoStatus,
-        statusLabel: statusLabel,
+  const applyOptimisticActionPatch = (
+    actionId: string,
+    patch: Partial<ActionItem>,
+    shouldRemoveFromList: boolean,
+  ) => {
+    setSelectedItem((prev) => {
+      if (!prev || prev.id !== actionId) {
+        return prev;
+      }
+      return {
+        ...prev,
+        ...patch,
       };
+    });
 
-      setSelectedItem({
-        ...selectedItem,
-        status: currentStatus || selectedItem.status,
-        memos: [...(selectedItem.memos || []), newMemo],
-      });
-      setCurrentMemo('');
-      setCurrentStatus('');
+    setSourceActionItems((prev) => {
+      if (shouldRemoveFromList) {
+        return prev.filter((item) => item.id !== actionId);
+      }
+      return prev.map((item) => (item.id === actionId ? { ...item, ...patch } : item));
+    });
+
+    if (shouldRemoveFromList) {
+      setTotalItems((prev) => Math.max(0, prev - 1));
     }
   };
 
-  const handleResolveIssue = () => {
-    if (!selectedItem) return;
-
-    if (confirm(`"${selectedItem.type}" 이슈를 해결 완료 처리하시겠습니까?\n\n해결된 항목은 목록에서 제거됩니다.`)) {
-      setResolvedItemIds((prev) => new Set([...prev, selectedItem.id]));
-      setSelectedItem(null);
-      alert('✅ 이슈가 해결 완료되었습니다.\n목록에서 제거되었습니다.');
+  async function runStatusUpdate(
+    actionId: string,
+    nextStatusCode: ActionStatusCode,
+    kind: 'status' | 'resolve',
+  ): Promise<void> {
+    if (isWriteSaving) {
+      return;
     }
+
+    const targetItem = selectedItem?.id === actionId
+      ? selectedItem
+      : sourceActionItems.find((item) => item.id === actionId);
+    if (!targetItem) {
+      return;
+    }
+
+    const previousSourceActionItems = sourceActionItems;
+    const previousSelectedItem = targetItem;
+    const previousTotalItems = totalItems;
+    const previousCurrentStatus = currentStatus;
+
+    clearWriteFeedback();
+
+    const nextStatusLabel = toStatusLabel(nextStatusCode);
+    const shouldRemoveFromList = statusFilter !== 'all' && statusFilter !== nextStatusCode;
+
+    applyOptimisticActionPatch(
+      actionId,
+      {
+        status: nextStatusLabel,
+        statusCode: nextStatusCode,
+      },
+      shouldRemoveFromList,
+    );
+    setCurrentStatus(nextStatusLabel);
+
+    if (kind === 'resolve') {
+      setIsResolveSaving(true);
+    } else {
+      setIsStatusSaving(true);
+    }
+
+    try {
+      await patchActionRequiredStatus(actionId, { status: toStatusPatchValue(nextStatusCode) });
+      setCurrentStatus('');
+      setWriteNotice(
+        shouldRemoveFromList
+          ? '상태 변경으로 현재 필터 결과에서 제외되었습니다.'
+          : kind === 'resolve'
+            ? '이슈를 해결 완료로 저장했습니다.'
+            : '상태를 저장했습니다.',
+      );
+      retryActionRef.current = null;
+
+      const fallbackItem: ActionItem = {
+        ...targetItem,
+        status: nextStatusLabel,
+        statusCode: nextStatusCode,
+      };
+      void hydrateActionItems();
+      void hydrateActionDetail(actionId, fallbackItem);
+    } catch (error) {
+      setSourceActionItems(previousSourceActionItems);
+      setSelectedItem(previousSelectedItem);
+      setTotalItems(previousTotalItems);
+      setCurrentStatus(previousCurrentStatus);
+
+      const mappedError = toActionWriteError(kind, error);
+      setWriteError(mappedError);
+
+      if (mappedError.retryable) {
+        retryActionRef.current = () => runStatusUpdate(actionId, nextStatusCode, kind);
+      } else {
+        retryActionRef.current = null;
+      }
+
+      if (error instanceof ApiError && (error.status === 404 || error.status === 409)) {
+        void hydrateActionItems();
+        void hydrateActionDetail(actionId, previousSelectedItem);
+      }
+    } finally {
+      if (kind === 'resolve') {
+        setIsResolveSaving(false);
+      } else {
+        setIsStatusSaving(false);
+      }
+    }
+  }
+
+  async function runMemoWrite(
+    actionId: string,
+    memoContent: string,
+    nextStatusCode: ActionStatusCode,
+  ): Promise<void> {
+    if (isWriteSaving) {
+      return;
+    }
+
+    const targetItem = selectedItem?.id === actionId
+      ? selectedItem
+      : sourceActionItems.find((item) => item.id === actionId);
+    if (!targetItem) {
+      return;
+    }
+
+    const trimmedMemo = memoContent.trim();
+    if (!trimmedMemo) {
+      return;
+    }
+
+    const previousSourceActionItems = sourceActionItems;
+    const previousSelectedItem = targetItem;
+    const previousTotalItems = totalItems;
+    const previousCurrentStatus = currentStatus;
+    const previousCurrentMemo = currentMemo;
+
+    clearWriteFeedback();
+
+    const nextStatusLabel = toStatusLabel(nextStatusCode);
+    const shouldRemoveFromList = statusFilter !== 'all' && statusFilter !== nextStatusCode;
+    const createdMemo: MemoLog = {
+      id: `memo-${Date.now()}`,
+      content: trimmedMemo,
+      timestamp: new Date().toISOString(),
+      author: user?.name ?? user?.userId ?? '-',
+      status: normalizeMemoStatus(nextStatusLabel),
+      statusLabel: nextStatusLabel,
+    };
+
+    applyOptimisticActionPatch(
+      actionId,
+      {
+        status: nextStatusLabel,
+        statusCode: nextStatusCode,
+        memos: [...(targetItem.memos ?? []), createdMemo],
+      },
+      shouldRemoveFromList,
+    );
+    setCurrentStatus(nextStatusLabel);
+
+    setIsMemoSaving(true);
+    try {
+      if (targetItem.statusCode !== nextStatusCode) {
+        await patchActionRequiredStatus(actionId, { status: toStatusPatchValue(nextStatusCode) });
+      }
+      await patchActionRequiredMemo(actionId, { memo: trimmedMemo });
+
+      setCurrentMemo('');
+      setCurrentStatus('');
+      setWriteNotice(
+        shouldRemoveFromList
+          ? '메모와 상태가 저장되어 현재 필터 결과에서 제외되었습니다.'
+          : '메모를 저장했습니다.',
+      );
+      retryActionRef.current = null;
+
+      const fallbackItem: ActionItem = {
+        ...targetItem,
+        status: nextStatusLabel,
+        statusCode: nextStatusCode,
+        memos: [...(targetItem.memos ?? []), createdMemo],
+      };
+      void hydrateActionItems();
+      void hydrateActionDetail(actionId, fallbackItem);
+    } catch (error) {
+      setSourceActionItems(previousSourceActionItems);
+      setSelectedItem(previousSelectedItem);
+      setTotalItems(previousTotalItems);
+      setCurrentStatus(previousCurrentStatus);
+      setCurrentMemo(previousCurrentMemo);
+
+      const mappedError = toActionWriteError('memo', error);
+      setWriteError(mappedError);
+
+      if (mappedError.retryable) {
+        retryActionRef.current = () => runMemoWrite(actionId, memoContent, nextStatusCode);
+      } else {
+        retryActionRef.current = null;
+      }
+
+      if (error instanceof ApiError && (error.status === 404 || error.status === 409)) {
+        void hydrateActionItems();
+        void hydrateActionDetail(actionId, previousSelectedItem);
+      }
+    } finally {
+      setIsMemoSaving(false);
+    }
+  }
+
+  const handleStatusSave = () => {
+    if (!selectedItem) {
+      return;
+    }
+    const nextStatusCode = normalizeStatusCode(currentStatus || selectedItem.status);
+    if (nextStatusCode === selectedItem.statusCode) {
+      setWriteError(null);
+      setWriteNotice('변경된 상태가 없습니다.');
+      retryActionRef.current = null;
+      return;
+    }
+    void runStatusUpdate(selectedItem.id, nextStatusCode, 'status');
+  };
+
+  const handleMemoAdd = () => {
+    if (!selectedItem) {
+      return;
+    }
+    const memoContent = currentMemo.trim();
+    if (!memoContent) {
+      return;
+    }
+    const nextStatusCode = normalizeStatusCode(currentStatus || selectedItem.status);
+    void runMemoWrite(selectedItem.id, memoContent, nextStatusCode);
+  };
+
+  const handleResolveIssue = () => {
+    if (!selectedItem || isWriteSaving) {
+      return;
+    }
+
+    if (typeof window !== 'undefined') {
+      const confirmed = window.confirm(`"${selectedItem.type}" 이슈를 해결 완료 처리하시겠습니까?`);
+      if (!confirmed) {
+        return;
+      }
+    }
+
+    void runStatusUpdate(selectedItem.id, 'resolved', 'resolve');
   };
 
   return (
@@ -683,11 +1093,6 @@ export default function ActionRequired() {
               현재 페이지 <span className="font-bold text-blue-600">{sortedItems.length}</span>건 표시
               {' · '}
               서버 집계 <span className="font-bold text-blue-600">{totalItems}</span>건
-              {resolvedItemIds.size > 0 && (
-                <span className="ml-2 text-green-600">
-                  (해결 완료: {resolvedItemIds.size}건)
-                </span>
-              )}
             </div>
 
             <div className="flex items-center gap-2">
@@ -823,7 +1228,11 @@ export default function ActionRequired() {
             <div className="p-6">
               <div className="flex items-center justify-between mb-6">
                 <h2 className="text-lg font-bold text-[#1e2939]">상세 정보</h2>
-                <button onClick={handleCloseDetail} className="p-2 hover:bg-gray-100 rounded-lg">
+                <button
+                  onClick={handleCloseDetail}
+                  disabled={isWriteSaving}
+                  className="p-2 hover:bg-gray-100 rounded-lg disabled:cursor-not-allowed disabled:opacity-50"
+                >
                   <X className="w-5 h-5" />
                 </button>
               </div>
@@ -843,6 +1252,33 @@ export default function ActionRequired() {
                 }`}>
                   <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
                   <span>{detailError}</span>
+                </div>
+              )}
+
+              {writeNotice && (
+                <div className="mb-4 rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-700">
+                  {writeNotice}
+                </div>
+              )}
+
+              {writeError && (
+                <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                  <div className="flex items-start gap-2">
+                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                    <div className="space-y-2">
+                      <p>{writeError.message}</p>
+                      {writeError.retryable && (
+                        <button
+                          type="button"
+                          onClick={handleWriteRetry}
+                          disabled={isWriteSaving}
+                          className="rounded-md border border-red-300 bg-white px-3 py-1 text-xs font-semibold text-red-700 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          다시 시도
+                        </button>
+                      )}
+                    </div>
+                  </div>
                 </div>
               )}
 
@@ -918,6 +1354,7 @@ export default function ActionRequired() {
                       className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                       value={currentStatus || selectedItem.status}
                       onChange={(e) => setCurrentStatus(e.target.value)}
+                      disabled={isWriteSaving}
                     >
                       {!STATUS_OPTIONS.includes(selectedItem.status as typeof STATUS_OPTIONS[number]) && (
                         <option value={selectedItem.status}>{selectedItem.status}</option>
@@ -928,6 +1365,21 @@ export default function ActionRequired() {
                         </option>
                       ))}
                     </select>
+                    <button
+                      type="button"
+                      onClick={handleStatusSave}
+                      disabled={isWriteSaving}
+                      className="px-3 py-2 text-sm font-semibold rounded-lg border border-blue-300 text-blue-700 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {isStatusSaving ? (
+                        <span className="inline-flex items-center gap-1">
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          저장중
+                        </span>
+                      ) : (
+                        '상태 저장'
+                      )}
+                    </button>
                   </div>
                 </div>
 
@@ -939,13 +1391,21 @@ export default function ActionRequired() {
                     placeholder="처리 내용을 입력하세요..."
                     value={currentMemo}
                     onChange={(e) => setCurrentMemo(e.target.value)}
+                    disabled={isWriteSaving}
                   />
                   <button
                     className="mt-2 w-full px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium disabled:bg-gray-300 disabled:cursor-not-allowed"
                     onClick={handleMemoAdd}
-                    disabled={!currentMemo.trim()}
+                    disabled={!currentMemo.trim() || isWriteSaving}
                   >
-                    메모 저장
+                    {isMemoSaving ? (
+                      <span className="inline-flex items-center justify-center gap-1">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        저장중
+                      </span>
+                    ) : (
+                      '메모 저장'
+                    )}
                   </button>
                 </div>
 
@@ -1003,11 +1463,21 @@ export default function ActionRequired() {
 
                   {selectedItem.status !== '완료' && (
                     <button
-                      className="w-full px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium flex items-center justify-center gap-2"
+                      className="w-full px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium flex items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-50"
                       onClick={handleResolveIssue}
+                      disabled={isWriteSaving}
                     >
-                      <CheckCircle2 className="w-4 h-4" />
-                      이슈 해결 완료
+                      {isResolveSaving ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          해결 처리 중
+                        </>
+                      ) : (
+                        <>
+                          <CheckCircle2 className="w-4 h-4" />
+                          이슈 해결 완료
+                        </>
+                      )}
                     </button>
                   )}
                 </div>
