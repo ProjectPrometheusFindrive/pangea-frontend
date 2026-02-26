@@ -1,9 +1,9 @@
 # Prompt Library v1
 
-- Version: v1.2.27
+- Version: v1.2.28
 - Date: 2026-02-26
 - Owner: Pangea Frontend Team
-- Tags: prompt-library,workflow,branch-policy,history-policy,commit-policy,pr-automation,jira-traceability,end-prompt-protocol,worktree-cleanup,jira-status-sync,jira-comment-sync,ac-evidence,mock-removal,reservations-write,reservations-mock-removal,ocr-flow,settings-api
+- Tags: prompt-library,workflow,branch-policy,history-policy,commit-policy,pr-automation,jira-traceability,end-prompt-protocol,worktree-cleanup,jira-status-sync,jira-comment-sync,ac-evidence,mock-removal,reservations-write,reservations-mock-removal,ocr-flow,settings-api,payment-status-sync
 
 ## Context
 - 초기 세팅 작업에서 프롬프트 템플릿, 브랜치 정책, 문서화 절차를 반복 가능하게 표준화할 필요가 있음.
@@ -86,6 +86,7 @@ End Prompt:
 - 인증 UX 정리 티켓(BK-032/SCRUM-35 계열)은 수동 로그아웃 토스트, 만료 모달+`returnUrl` 복구, `401` 연쇄 1회 종료, storage 토큰 정리 근거를 반드시 기록한다.
 - ActionRequired 조회 연동 티켓(BK-062/SCRUM-48 계열)은 목록 쿼리(page/size/status/priority/assignee), 상세 조회(404 fallback), 필터 변경 race 방지 근거를 반드시 기록한다.
 - ActionRequired 쓰기 연동 티켓(BK-063/SCRUM-49 계열)은 상태 변경/해결 완료/메모 저장 API 연동 근거, saving 중복 제출 방지, 실패 시 낙관적 업데이트 롤백, `400/403/409/5xx+network` 분기와 Retry 제공 근거, 상태 변경 후 필터 이탈 처리 근거를 반드시 기록한다.
+- 결제 상태 연동 통합 티켓(BK-064/SCRUM-50 계열)은 결제 상태 canonical 매핑/우선순위(다중 결제/부분환불/out-of-order timestamp) 근거, Reservations/Home/Action 화면 동기화 지점, `401/403/404/5xx+network` 분기와 last-known fallback + 재시도 UX 근거를 반드시 기록한다.
 - 코드 변경이 포함된 Jira 티켓은 `Validation` 섹션에 최소 1개의 실행 명령 결과(`build` 또는 `test`)를 기록한다.
 - 저장/수정 흐름 버그 티켓은 `Changes Summary` 또는 `Diffs & Files`에 성공/실패 분기 처리 근거(성공 시 동작, 실패 시 동작)를 모두 기록한다.
 - `Notes`에는 차기 권장 태스크만 기록하며 즉시 반영은 금지한다.
@@ -155,6 +156,8 @@ cp docs/prompt_history/_TEMPLATE.md docs/prompt_history/$(date +%Y%m%d)_your-tas
 
 ## Version History
 - v1.2.27 (2026-02-26, SCRUM-57): Add prompt_history evidence rule for BK-075 settings API integration (company/geofences/members wiring, dirty/partial-save/schemaVersion, RBAC read-only, 400/403/409/5xx+retry, beforeunload guard).
+- v1.2.27 (2026-02-26, SCRUM-50): Add prompt_history evidence rule for BK-064 payment status sync integration (canonical mapping/priority + reservations-home-action sync + 401/403/404/5xx fallback+retry evidence).
+- v1.2.28 (2026-02-26, SCRUM-57): Add prompt_history evidence rule for BK-075 settings API integration (company/geofences/members wiring, dirty/partial-save/schemaVersion, RBAC read-only, 400/403/409/5xx+retry, beforeunload guard).
 - v1.2.26 (2026-02-26, SCRUM-64): Add prompt_history evidence rule for BK-085 OCR flow integration (upload/sign + extract/job polling + partial/reupload/fallback/error branches).
 - v1.2.25 (2026-02-26, SCRUM-45): Add prompt_history evidence rule for BK-054 reservations mock removal (mock import/fixture removal + v2 reservations single-source + no fallback evidence).
 - v1.2.24 (2026-02-26, SCRUM-49): Add prompt_history evidence rule for BK-063 ActionRequired write integration (status/resolve/memo API, optimistic rollback, duplicate-submit guard, 400/403/409/5xx+network+Retry branches, filter drift handling).
