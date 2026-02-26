@@ -11,6 +11,7 @@ import Login from './pages/Login';
 import Reservations from './pages/Reservations';
 import Revenue from './pages/Revenue';
 import Settings from './pages/Settings';
+import SupportCenter from './pages/SupportCenter';
 
 function RequireAuthenticatedRoute() {
   return createElement(RequireAuth);
@@ -62,6 +63,10 @@ export const router = createBrowserRouter([
           {
             path: '/settings',
             Component: Settings,
+          },
+          {
+            path: '/support-center',
+            Component: SupportCenter,
           },
         ],
       },

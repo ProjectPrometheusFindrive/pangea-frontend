@@ -1,9 +1,9 @@
 # Prompt Library v1
 
-- Version: v1.2.31
+- Version: v1.2.32
 - Date: 2026-02-27
 - Owner: Pangea Frontend Team
-- Tags: prompt-library,workflow,branch-policy,history-policy,commit-policy,pr-automation,jira-traceability,end-prompt-protocol,worktree-cleanup,jira-status-sync,jira-comment-sync,ac-evidence,mock-removal,reservations-write,reservations-mock-removal,ocr-flow,revenue-api,settings-api,payment-status-sync,home-api,home-summary,action-payment-mock-removal
+- Tags: prompt-library,workflow,branch-policy,history-policy,commit-policy,pr-automation,jira-traceability,end-prompt-protocol,worktree-cleanup,jira-status-sync,jira-comment-sync,ac-evidence,mock-removal,reservations-write,reservations-mock-removal,ocr-flow,revenue-api,settings-api,payment-status-sync,home-api,home-summary,action-payment-mock-removal,support-center
 
 ## Context
 - 초기 세팅 작업에서 프롬프트 템플릿, 브랜치 정책, 문서화 절차를 반복 가능하게 표준화할 필요가 있음.
@@ -80,6 +80,7 @@ End Prompt:
 - Revenue API 연동 티켓(BK-074/SCRUM-56 계열)은 `prompt_history`에 `/api/v2/revenue/summary(from,to,granularity)` 및 `/api/v2/revenue/trend(from,to)` 파라미터 동기화, 기간/단위 변경 시 loading 갱신, empty-state, `400/401/403/5xx+network` 분기와 Retry/이전 스냅샷 복원 근거를 함께 기록한다.
 - Home API 연동 티켓(BK-073/SCRUM-55 계열)은 `prompt_history`에 `/api/v2/home/summary(from,to,tenantId)` 파라미터 동기화, 기간 필터 변경 재조회, `loading/empty/401/403/5xx+network` 분기, race-safe 요청 처리와 재조회 실패 시 이전 스냅샷 유지 근거, null-safe 기본값 렌더 및 Home 런타임 mock 경로 제거 근거를 함께 기록한다.
 - Settings API 연동 티켓(BK-075/SCRUM-57 계열)은 `prompt_history`에 company/geofences/members API 연결 근거, 회사 정보 dirty-check/부분 업데이트(schemaVersion 포함)/저장 상태 분기, 권한 기반 읽기전용 처리, `400 필드 오류·403 권한·409 충돌 재로딩·5xx+network 재시도`, 저장/미저장 상태 이탈 경고(beforeunload) 근거를 함께 기록한다.
+- 고객센터 UI/연동 티켓(BK-087/SCRUM-66 계열)은 `prompt_history`에 `/api/v2/support/categories`, `/api/v2/support/tickets`, `/api/v2/support/tickets/{ticketId}` 연동 근거, 카테고리 loading/empty/직접입력 분기, 문의 submitting/중복 제출 방지/성공 ticketId 복구, `400/401/403/5xx+network` 분기와 Retry/권한 액션, 첨부파일 용량 제한 정책 반영 근거를 함께 기록한다.
 - Reservations mock 제거 티켓(BK-054/SCRUM-45 계열)은 `prompt_history`에 Reservations 프로덕션 경로의 mock import/fixture 제거 근거, v2 reservations endpoint 단일 호출 경로, API 실패 시 mock fallback 미사용 근거를 함께 기록한다.
 - Assets mock 제거 티켓(BK-044/SCRUM-40 계열)은 `prompt_history`에 Assets 프로덕션 경로의 mock import/flag 제거 근거, v2 assets endpoint 단일 호출 경로, 오류 시 mock fallback 미사용 근거를 함께 기록한다.
 - 공통 상태 UI 티켓(loading/error/empty)은 `Validation`에 `Retry 재호출`, `401/403/5xx 분기`, `skeleton/empty CTA` 확인 근거를 함께 기록한다.
@@ -158,8 +159,9 @@ cp docs/prompt_history/_TEMPLATE.md docs/prompt_history/$(date +%Y%m%d)_your-tas
 - Production push triggers auto tag (`vX.Y.Z`)
 
 ## Version History
-- v1.2.30 (2026-02-27, SCRUM-52): Add prompt_history evidence rule for BK-065 Action/Payment mock removal (mock dependency removal + payments status/detail endpoints-only + retry/error/stale-response evidence).
+- v1.2.32 (2026-02-27, SCRUM-66): Add prompt_history evidence rule for BK-087 support-center integration (categories/create/detail endpoints, loading-empty-manual-category flow, submit dedupe/receipt restore, 400/401/403/5xx+retry, attachment size policy evidence).
 - v1.2.31 (2026-02-27, SCRUM-55): Add prompt_history evidence rule for BK-073 home API integration (`/api/v2/home/summary` param sync, filter requery, loading/error/empty + 401/403/5xx branches, race-safe + snapshot retention, mock path removal evidence).
+- v1.2.30 (2026-02-27, SCRUM-52): Add prompt_history evidence rule for BK-065 Action/Payment mock removal (mock dependency removal + payments status/detail endpoints-only + retry/error/stale-response evidence).
 - v1.2.29 (2026-02-27, SCRUM-56): Add prompt_history evidence rule for BK-074 revenue API integration (summary/trend param sync, loading/error/empty, 400/401/403/5xx+network retry and previous snapshot restoration evidence).
 - v1.2.28 (2026-02-26, SCRUM-57): Add prompt_history evidence rule for BK-075 settings API integration (company/geofences/members wiring, dirty/partial-save/schemaVersion, RBAC read-only, 400/403/409/5xx+retry, beforeunload guard).
 - v1.2.27 (2026-02-26, SCRUM-50): Add prompt_history evidence rule for BK-064 payment status sync integration (canonical mapping/priority + reservations-home-action sync + 401/403/404/5xx fallback+retry evidence).
