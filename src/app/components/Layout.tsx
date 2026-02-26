@@ -1,5 +1,5 @@
 import { Link, useLocation, useNavigate } from 'react-router';
-import { Home, AlertCircle, Car, Calendar, Settings, Bell, Menu, TrendingUp, X, AlertTriangle, Shield, FileText, Signal, DollarSign, AlertOctagon, Wrench, Clock, Sparkles, LogOut, User, Building2, Trash2, ChevronDown, Zap } from 'lucide-react';
+import { Home, AlertCircle, Car, Calendar, Settings, Bell, Menu, TrendingUp, X, AlertTriangle, Shield, FileText, Signal, DollarSign, AlertOctagon, Wrench, Clock, Sparkles, LogOut, User, Building2, Trash2, ChevronDown, Zap, LifeBuoy } from 'lucide-react';
 import { ReactNode, useState, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useAuthorization } from '../context/AuthorizationContext';
@@ -248,6 +248,7 @@ export function Layout({ children, title }: LayoutProps) {
     { path: '/assets', label: '차량 자산', icon: Car, permission: ROUTE_PERMISSIONS.assets },
     { path: '/reservations', label: '대여 예약', icon: Calendar, permission: ROUTE_PERMISSIONS.reservations },
     { path: '/revenue', label: '매출 요약', icon: TrendingUp, permission: ROUTE_PERMISSIONS.revenue },
+    { path: '/support-center', label: '고객센터', icon: LifeBuoy, permission: ROUTE_PERMISSIONS.actionRequired },
     { path: '/device-installation', label: '단말 장착/관리', icon: Zap, permission: ROUTE_PERMISSIONS.deviceInstallation },
     { path: '/settings', label: '설정', icon: Settings, permission: ROUTE_PERMISSIONS.settings },
   ];

@@ -22,9 +22,17 @@ import {
   patchActionRequiredStatus,
 } from '../../services/actionRequired';
 import { paymentStatusToLabel, toCanonicalPaymentStatus } from '../utils/paymentStatusSync';
-import type { MemoLog } from '../data/mockData';
 
 type ActionStatusCode = 'pending' | 'in-progress' | 'resolved';
+
+interface MemoLog {
+  id: string;
+  content: string;
+  timestamp: string;
+  author: string;
+  status: ActionStatusCode;
+  statusLabel: string;
+}
 
 interface ActionItem {
   id: string;

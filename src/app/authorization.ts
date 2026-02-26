@@ -299,6 +299,9 @@ export function resolveRoutePermissionForPath(pathname: string): AppRoutePermiss
   if (pathname.startsWith('/action-required')) {
     return ROUTE_PERMISSIONS.actionRequired;
   }
+  if (pathname.startsWith('/support-center')) {
+    return ROUTE_PERMISSIONS.actionRequired;
+  }
   if (pathname.startsWith('/assets')) {
     return ROUTE_PERMISSIONS.assets;
   }
