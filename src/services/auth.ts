@@ -31,7 +31,7 @@ export interface AuthLogoutData {
 export interface AuthRefreshData {
   token: string;
   expiresIn: number;
-  user?: AuthUser;
+  user?: AuthUser | null;
 }
 
 export function toViewRole(role: string | null | undefined): AuthViewRole {
@@ -57,17 +57,17 @@ export function getMe(): Promise<AuthUser> {
   });
 }
 
-export function postLogout(): Promise<AuthLogoutData> {
-  return apiClient.requestData<AuthLogoutData>({
-    path: '/api/v2/auth/logout',
-    method: 'POST',
-  });
-}
-
 export function postRefresh(): Promise<AuthRefreshData> {
   return apiClient.requestData<AuthRefreshData>({
     path: '/api/v2/auth/refresh',
     method: 'POST',
-    skipAuth: true,
+    skipAuthRefresh: true,
+  });
+}
+
+export function postLogout(): Promise<AuthLogoutData> {
+  return apiClient.requestData<AuthLogoutData>({
+    path: '/api/v2/auth/logout',
+    method: 'POST',
   });
 }

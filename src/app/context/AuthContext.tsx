@@ -7,6 +7,7 @@ import {
   postRefresh,
   toViewRole,
   type AuthLoginPayload,
+  type AuthRefreshData,
   type AuthUser,
   type AuthViewRole,
 } from '../../services/auth';
@@ -168,17 +169,12 @@ function isAuthSession(value: unknown): value is AuthSession {
   );
 }
 
-function readStoredSession(): AuthSession | null {
-  if (typeof window === 'undefined') {
+function parseStoredSession(rawValue: string | null): AuthSession | null {
+  if (!rawValue) {
     return null;
   }
 
   try {
-    const rawValue = window.localStorage.getItem(AUTH_SESSION_KEY);
-    if (!rawValue) {
-      return null;
-    }
-
     const parsedValue: unknown = JSON.parse(rawValue);
     if (!isAuthSession(parsedValue)) {
       removeStorageItem(window.localStorage, AUTH_SESSION_KEY);
@@ -195,6 +191,19 @@ function readStoredSession(): AuthSession | null {
   } catch {
     return null;
   }
+}
+
+function readStoredSession(): AuthSession | null {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  const session = parseStoredSession(window.localStorage.getItem(AUTH_SESSION_KEY));
+  if (!session) {
+    clearStoredSession();
+  }
+
+  return session;
 }
 
 function writeStoredSession(session: AuthSession): void {
@@ -236,6 +245,17 @@ function calculateExpiresAt(expiresInSeconds: number): number {
     return Date.now() + 60 * 60 * 1000;
   }
   return Date.now() + expiresInSeconds * 1000;
+}
+
+function toSessionFromTokenResponse(
+  payload: Pick<AuthRefreshData, 'token' | 'expiresIn'> & Partial<Pick<AuthRefreshData, 'user'>>,
+  fallbackUser: AuthUser | null,
+): AuthSession {
+  return {
+    token: payload.token,
+    expiresAt: calculateExpiresAt(payload.expiresIn),
+    user: payload.user ?? fallbackUser,
+  };
 }
 
 function toRequestPath(path: string): string {
@@ -306,12 +326,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           ? refreshData.token
           : storedSession.token;
 
-        const refreshedSession: AuthSession = {
-          token: nextToken,
-          expiresAt: calculateExpiresAt(refreshData.expiresIn),
-          user: refreshData.user ?? storedSession.user,
-        };
-
+        const refreshedSession = toSessionFromTokenResponse(
+          {
+            ...refreshData,
+            token: nextToken,
+          },
+          storedSession.user,
+        );
         applySession(refreshedSession);
         return refreshedSession;
       } catch {
@@ -382,11 +403,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     try {
       const loginData = await postLogin(payload);
-      const initialSession: AuthSession = {
-        token: loginData.token,
-        expiresAt: calculateExpiresAt(loginData.expiresIn),
-        user: loginData.user ?? null,
-      };
+      const initialSession = toSessionFromTokenResponse(loginData, null);
 
       sessionExpiredHandledRef.current = false;
       setIsSessionExpiredModalOpen(false);
@@ -503,6 +520,39 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     void refreshSession();
   }, [refreshSession]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return undefined;
+    }
+
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key !== AUTH_SESSION_KEY) {
+        return;
+      }
+
+      const nextSession = parseStoredSession(event.newValue);
+      if (!nextSession) {
+        clearSession();
+        sessionExpiredHandledRef.current = false;
+        setIsSessionExpiredModalOpen(false);
+        setError(null);
+        setIsLoading(false);
+        return;
+      }
+
+      sessionExpiredHandledRef.current = false;
+      setIsSessionExpiredModalOpen(false);
+      applySession(nextSession);
+      setError(null);
+      setIsLoading(false);
+    };
+
+    window.addEventListener('storage', handleStorage);
+    return () => {
+      window.removeEventListener('storage', handleStorage);
+    };
+  }, [applySession, clearSession]);
 
   const viewRole = useMemo<AuthViewRole | null>(() => {
     if (!user) {
