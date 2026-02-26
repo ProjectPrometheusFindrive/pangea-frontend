@@ -1,558 +1,699 @@
-import { Layout } from '../components/Layout';
-import { useState, useEffect, useCallback } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
-import { TrendingUp, DollarSign, CreditCard, Wallet, Car, Users, Calendar, ArrowUp, ArrowDown, AlertCircle } from 'lucide-react';
-import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { AlertCircle, ArrowDown, ArrowUp, DollarSign, RefreshCw, RotateCcw, TrendingUp } from 'lucide-react';
+import { Bar, BarChart, CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+
+import { ApiError } from '../../services/api';
+import {
+  getRevenueSummary,
+  getRevenueTrend,
+  type RevenueGranularity,
+  type RevenueSummaryBucket,
+  type RevenueSummaryResponse,
+  type RevenueTrendResponse,
+} from '../../services/revenue';
+import { Layout } from '../components/Layout';
 import { PageStateBoundary } from '../components/PageStateBoundary';
 import {
   getPageErrorActionLabel,
   handlePageErrorAction,
-  isPayloadEmpty,
-  usePageEndpointState,
+  type PageErrorKind,
 } from '../hooks/usePageEndpointState';
-import { getUnpaidStatsByPeriod } from '../utils/paymentUtils';
-import { vehicleAssets } from '../data/mockData';
-import { getRevenueSummaryDashboard } from '../../services/dashboard';
 
-type Period = 'weekly' | 'monthly' | 'yearly';
+type PeriodPreset = 'last7Days' | 'last30Days' | 'last365Days';
+
+interface RevenueFilters {
+  preset: PeriodPreset;
+  granularity: RevenueGranularity;
+}
+
+interface RevenueSnapshot {
+  summary: RevenueSummaryResponse;
+  trend: RevenueTrendResponse;
+  filters: RevenueFilters;
+}
+
+interface RevenuePageError {
+  kind: PageErrorKind;
+  message: string;
+}
+
+const PERIOD_OPTIONS: Array<{ value: PeriodPreset; label: string; days: number }> = [
+  { value: 'last7Days', label: '최근 7일', days: 7 },
+  { value: 'last30Days', label: '최근 30일', days: 30 },
+  { value: 'last365Days', label: '최근 1년', days: 365 },
+];
+
+const PERIOD_DAYS_BY_PRESET: Record<PeriodPreset, number> = {
+  last7Days: 7,
+  last30Days: 30,
+  last365Days: 365,
+};
+
+const GRANULARITY_OPTIONS: Array<{ value: RevenueGranularity; label: string }> = [
+  { value: 'day', label: '일별' },
+  { value: 'week', label: '주별' },
+  { value: 'month', label: '월별' },
+];
+
+const EMPTY_TOTALS = {
+  grossRevenue: 0,
+  refundAmount: 0,
+  netRevenue: 0,
+  paidCount: 0,
+  refundCount: 0,
+  currency: 'KRW',
+};
+
+function toIsoDate(value: Date): string {
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, '0');
+  const day = String(value.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function resolveDateRange(preset: PeriodPreset): { from: string; to: string } {
+  const days = PERIOD_DAYS_BY_PRESET[preset];
+  const toDate = new Date();
+  toDate.setHours(0, 0, 0, 0);
+
+  const fromDate = new Date(toDate);
+  fromDate.setDate(fromDate.getDate() - (days - 1));
+
+  return {
+    from: toIsoDate(fromDate),
+    to: toIsoDate(toDate),
+  };
+}
+
+function normalizeCurrencyCode(currency: string): string {
+  const normalized = currency.trim().toUpperCase();
+  return normalized.length === 3 ? normalized : 'KRW';
+}
+
+function formatCurrency(value: number, currency: string): string {
+  const normalizedCurrency = normalizeCurrencyCode(currency);
+  try {
+    return new Intl.NumberFormat('ko-KR', {
+      style: 'currency',
+      currency: normalizedCurrency,
+      maximumFractionDigits: 0,
+    }).format(value);
+  } catch {
+    return new Intl.NumberFormat('ko-KR', {
+      maximumFractionDigits: 0,
+    }).format(value);
+  }
+}
+
+function formatAxisCurrency(value: number): string {
+  if (!Number.isFinite(value)) {
+    return '0';
+  }
+
+  const absValue = Math.abs(value);
+  if (absValue >= 100_000_000) {
+    return `${(value / 100_000_000).toFixed(1)}억`;
+  }
+
+  if (absValue >= 10_000) {
+    return `${Math.round(value / 10_000).toLocaleString()}만`;
+  }
+
+  return Math.round(value).toLocaleString();
+}
+
+function formatTrendDateLabel(value: string): string {
+  if (value.length >= 10) {
+    return `${value.slice(5, 7)}/${value.slice(8, 10)}`;
+  }
+  return value;
+}
+
+function calculateGrowthRate(buckets: RevenueSummaryBucket[]): number {
+  if (buckets.length < 2) {
+    return 0;
+  }
+
+  const midpoint = Math.floor(buckets.length / 2);
+  const previousTotal = buckets.slice(0, midpoint).reduce((sum, bucket) => sum + bucket.netRevenue, 0);
+  const currentTotal = buckets.slice(midpoint).reduce((sum, bucket) => sum + bucket.netRevenue, 0);
+
+  if (previousTotal === 0) {
+    return currentTotal > 0 ? 100 : 0;
+  }
+
+  return Math.round(((currentTotal - previousTotal) / previousTotal) * 100);
+}
+
+function isSnapshotEmpty(snapshot: RevenueSnapshot): boolean {
+  const hasSummaryData = snapshot.summary.buckets.some((bucket) => (
+    bucket.grossRevenue !== 0
+    || bucket.refundAmount !== 0
+    || bucket.netRevenue !== 0
+    || bucket.paidCount > 0
+    || bucket.refundCount > 0
+  ));
+
+  if (hasSummaryData) {
+    return false;
+  }
+
+  return !snapshot.trend.items.some((item) => (
+    item.grossRevenue !== 0
+    || item.refundAmount !== 0
+    || item.netRevenue !== 0
+    || item.paidCount > 0
+    || item.refundCount > 0
+  ));
+}
+
+function toPageErrorState(error: unknown): RevenuePageError {
+  if (error instanceof ApiError) {
+    const errorCode = typeof error.code === 'string' ? error.code : '';
+
+    if (error.status === 400) {
+      return {
+        kind: 'unknown',
+        message: error.message
+          ? `조회 조건 오류: ${error.message}`
+          : '조회 기간/단위를 확인해 주세요.',
+      };
+    }
+
+    if (error.status === 401 || errorCode === 'UNAUTHORIZED') {
+      return {
+        kind: 'unauthorized',
+        message: '세션이 만료되었습니다. 로그인 후 다시 시도해 주세요.',
+      };
+    }
+
+    if (error.status === 403 || errorCode === 'FORBIDDEN') {
+      return {
+        kind: 'forbidden',
+        message: '매출 데이터 조회 권한이 없습니다. 관리자에게 권한을 요청해 주세요.',
+      };
+    }
+
+    if (
+      (typeof error.status === 'number' && error.status >= 500)
+      || errorCode === 'TIMEOUT'
+      || errorCode === 'NETWORK_ERROR'
+      || errorCode === 'SERVER_ERROR'
+      || errorCode === 'ABORTED'
+    ) {
+      return {
+        kind: 'retryable',
+        message: '일시적인 오류가 발생했습니다. 재시도해 주세요.',
+      };
+    }
+
+    return {
+      kind: 'unknown',
+      message: error.message || '요청을 처리하는 중 오류가 발생했습니다.',
+    };
+  }
+
+  if (error instanceof Error && error.message) {
+    return {
+      kind: 'unknown',
+      message: error.message,
+    };
+  }
+
+  return {
+    kind: 'unknown',
+    message: '요청을 처리하는 중 오류가 발생했습니다.',
+  };
+}
 
 export default function Revenue() {
-  const [selectedPeriod, setSelectedPeriod] = useState<Period>('monthly');
   const navigate = useNavigate();
-  const {
-    isLoading: isRevenueLoading,
-    error: revenueError,
-    errorKind: revenueErrorKind,
-    isEmpty: isRevenueApiEmpty,
-    run: hydrateRevenueSummary,
-  } = usePageEndpointState<unknown>({
-    request: (signal) => getRevenueSummaryDashboard({ signal }),
-    isEmpty: (payload) => isPayloadEmpty(payload, ['summary', 'stats', 'items', 'cards']),
-  });
+  const [selectedPreset, setSelectedPreset] = useState<PeriodPreset>('last30Days');
+  const [selectedGranularity, setSelectedGranularity] = useState<RevenueGranularity>('week');
 
-  useEffect(() => {
-    void hydrateRevenueSummary();
+  const [snapshot, setSnapshot] = useState<RevenueSnapshot | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [blockingError, setBlockingError] = useState<string | null>(null);
+  const [blockingErrorKind, setBlockingErrorKind] = useState<PageErrorKind | null>(null);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
+  const [refreshErrorKind, setRefreshErrorKind] = useState<PageErrorKind | null>(null);
+  const [isEmpty, setIsEmpty] = useState(false);
+
+  const mountedRef = useRef(true);
+  const requestSequenceRef = useRef(0);
+  const controllerRef = useRef<AbortController | null>(null);
+  const snapshotRef = useRef<RevenueSnapshot | null>(null);
+  const skipNextAutoHydrateRef = useRef(false);
+
+  useEffect(() => () => {
+    mountedRef.current = false;
+    controllerRef.current?.abort();
   }, []);
 
-  const handleRevenueRetry = useCallback(() => {
-    void hydrateRevenueSummary();
-  }, [hydrateRevenueSummary]);
+  const hydrateRevenue = useCallback(async (filters: RevenueFilters) => {
+    const requestSequence = requestSequenceRef.current + 1;
+    requestSequenceRef.current = requestSequence;
 
-  const handleRevenueErrorAction = useCallback(() => {
-    handlePageErrorAction(revenueErrorKind, navigate);
-  }, [navigate, revenueErrorKind]);
+    controllerRef.current?.abort();
+    const controller = new AbortController();
+    controllerRef.current = controller;
 
-  // 기간별 미납금 계산
-  const unpaidStats = getUnpaidStatsByPeriod();
-  const getUnpaidByPeriod = () => {
-    switch (selectedPeriod) {
-      case 'weekly':
-        return unpaidStats.weekly;
-      case 'monthly':
-        return unpaidStats.monthly;
-      case 'yearly':
-        return unpaidStats.yearly;
+    const hasSnapshot = snapshotRef.current !== null;
+    if (hasSnapshot) {
+      setIsRefreshing(true);
+    } else {
+      setIsLoading(true);
     }
-  };
-  const currentUnpaid = getUnpaidByPeriod();
 
-  // 주간 매출 데이터 (최근 7일)
-  const weeklyData = [
-    { date: '2/13 (월)', revenue: 2800000, rentals: 12, avgPrice: 233000 },
-    { date: '2/14 (화)', revenue: 3200000, rentals: 14, avgPrice: 228000 },
-    { date: '2/15 (수)', revenue: 2500000, rentals: 10, avgPrice: 250000 },
-    { date: '2/16 (목)', revenue: 3800000, rentals: 16, avgPrice: 237000 },
-    { date: '2/17 (금)', revenue: 4200000, rentals: 18, avgPrice: 233000 },
-    { date: '2/18 (토)', revenue: 5100000, rentals: 22, avgPrice: 231000 },
-    { date: '2/19 (일)', revenue: 4800000, rentals: 20, avgPrice: 240000 },
-  ];
+    setBlockingError(null);
+    setBlockingErrorKind(null);
+    setRefreshError(null);
+    setRefreshErrorKind(null);
 
-  // 지난주 매출 데이터 (비교용)
-  const lastWeekData = [
-    { date: '2/6 (월)', revenue: 2600000, rentals: 11, avgPrice: 236000 },
-    { date: '2/7 (화)', revenue: 2900000, rentals: 13, avgPrice: 223000 },
-    { date: '2/8 (수)', revenue: 2400000, rentals: 10, avgPrice: 240000 },
-    { date: '2/9 (목)', revenue: 3500000, rentals: 15, avgPrice: 233000 },
-    { date: '2/10 (금)', revenue: 3900000, rentals: 17, avgPrice: 229000 },
-    { date: '2/11 (토)', revenue: 4700000, rentals: 20, avgPrice: 235000 },
-    { date: '2/12 (일)', revenue: 4500000, rentals: 19, avgPrice: 236000 },
-  ];
+    const { from, to } = resolveDateRange(filters.preset);
 
-  // 월간 매출 데이터 (최근 6개월)
-  const monthlyData = [
-    { month: '9월', revenue: 45000000, rentals: 180, avgPrice: 250000 },
-    { month: '10월', revenue: 52000000, rentals: 210, avgPrice: 247000 },
-    { month: '11월', revenue: 48000000, rentals: 195, avgPrice: 246000 },
-    { month: '12월', revenue: 58000000, rentals: 230, avgPrice: 252000 },
-    { month: '1월', revenue: 62000000, rentals: 250, avgPrice: 248000 },
-    { month: '2월', revenue: 68000000, rentals: 280, avgPrice: 242000 },
-  ];
+    try {
+      const [summary, trend] = await Promise.all([
+        getRevenueSummary({
+          from,
+          to,
+          granularity: filters.granularity,
+          signal: controller.signal,
+        }),
+        getRevenueTrend({
+          from,
+          to,
+          signal: controller.signal,
+        }),
+      ]);
 
-  // 지난 6개월 매출 데이터 (비교용)
-  const lastSixMonthsData = [
-    { month: '3월', revenue: 42000000, rentals: 170, avgPrice: 247000 },
-    { month: '4월', revenue: 46000000, rentals: 185, avgPrice: 248000 },
-    { month: '5월', revenue: 44000000, rentals: 178, avgPrice: 247000 },
-    { month: '6월', revenue: 50000000, rentals: 200, avgPrice: 250000 },
-    { month: '7월', revenue: 48000000, rentals: 195, avgPrice: 246000 },
-    { month: '8월', revenue: 43000000, rentals: 175, avgPrice: 245000 },
-  ];
+      if (
+        !mountedRef.current
+        || requestSequenceRef.current !== requestSequence
+        || controller.signal.aborted
+      ) {
+        return;
+      }
 
-  // 연간 매출 데이터 (최근 3년)
-  const yearlyData = [
-    { year: '2023', revenue: 520000000, rentals: 2100, avgPrice: 247000 },
-    { year: '2024', revenue: 680000000, rentals: 2750, avgPrice: 247000 },
-    { year: '2025', revenue: 850000000, rentals: 3400, avgPrice: 250000 },
-  ];
+      const nextSnapshot: RevenueSnapshot = {
+        summary,
+        trend,
+        filters,
+      };
 
-  // 지난 3년 매출 데이터 (비교용)
-  const lastThreeYearsData = [
-    { year: '2020', revenue: 380000000, rentals: 1550, avgPrice: 245000 },
-    { year: '2021', revenue: 450000000, rentals: 1820, avgPrice: 247000 },
-    { year: '2022', revenue: 490000000, rentals: 1980, avgPrice: 247000 },
-  ];
+      snapshotRef.current = nextSnapshot;
+      setSnapshot(nextSnapshot);
+      setIsEmpty(isSnapshotEmpty(nextSnapshot));
+    } catch (requestError) {
+      if (
+        !mountedRef.current
+        || requestSequenceRef.current !== requestSequence
+        || controller.signal.aborted
+      ) {
+        return;
+      }
 
-  // 결제 방법별 데이터
-  const paymentMethodData = [
-    { name: '카드', value: 45, amount: 30600000 },
-    { name: '현금', value: 28, amount: 19040000 },
-    { name: '계좌이체', value: 27, amount: 18360000 },
-  ];
+      const pageError = toPageErrorState(requestError);
+      const previousSnapshot = snapshotRef.current;
 
-  // 차량별 매출 데이터
-  const vehicleRevenueData = [
-    { model: '그랜저', revenue: 12800000, rentals: 48, utilization: 92 },
-    { model: '쏘나타', revenue: 10500000, rentals: 52, utilization: 88 },
-    { model: 'K5', revenue: 9200000, rentals: 45, utilization: 85 },
-    { model: '팰리세이드', revenue: 11600000, rentals: 42, utilization: 90 },
-    { model: '투싼', revenue: 8900000, rentals: 50, utilization: 87 },
-    { model: 'K8', revenue: 10200000, rentals: 38, utilization: 84 },
-    { model: '아반떼', revenue: 7800000, rentals: 55, utilization: 82 },
-    { model: '쏘렌토', revenue: 9000000, rentals: 40, utilization: 86 },
-  ].sort((a, b) => b.revenue - a.revenue);
+      if (previousSnapshot) {
+        setRefreshError(pageError.message);
+        setRefreshErrorKind(pageError.kind);
 
-  const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
+        if (
+          previousSnapshot.filters.preset !== filters.preset
+          || previousSnapshot.filters.granularity !== filters.granularity
+        ) {
+          skipNextAutoHydrateRef.current = true;
+          setSelectedPreset(previousSnapshot.filters.preset);
+          setSelectedGranularity(previousSnapshot.filters.granularity);
+        }
+      } else {
+        setBlockingError(pageError.message);
+        setBlockingErrorKind(pageError.kind);
+        setIsEmpty(false);
+      }
+    } finally {
+      if (!mountedRef.current || requestSequenceRef.current !== requestSequence) {
+        return;
+      }
 
-  const getCurrentData = () => {
-    switch (selectedPeriod) {
-      case 'weekly':
-        return weeklyData;
-      case 'monthly':
-        return monthlyData;
-      case 'yearly':
-        return yearlyData;
+      setIsLoading(false);
+      setIsRefreshing(false);
     }
-  };
+  }, []);
 
-  const getTotalRevenue = () => {
-    const data = getCurrentData();
-    return data.reduce((sum, item) => sum + item.revenue, 0);
-  };
-
-  const getTotalRentals = () => {
-    const data = getCurrentData();
-    return data.reduce((sum, item) => sum + item.rentals, 0);
-  };
-
-  const getAveragePrice = () => {
-    const data = getCurrentData();
-    const totalRevenue = data.reduce((sum, item) => sum + item.revenue, 0);
-    const totalRentals = data.reduce((sum, item) => sum + item.rentals, 0);
-    return Math.round(totalRevenue / totalRentals);
-  };
-
-  const getGrowthRate = () => {
-    // 현재 기간 총 매출
-    const currentData = getCurrentData();
-    const currentTotal = currentData.reduce((sum, item) => sum + item.revenue, 0);
-    
-    // 이전 기간 총 매출
-    let previousData;
-    switch (selectedPeriod) {
-      case 'weekly':
-        previousData = lastWeekData;
-        break;
-      case 'monthly':
-        previousData = lastSixMonthsData;
-        break;
-      case 'yearly':
-        previousData = lastThreeYearsData;
-        break;
+  useEffect(() => {
+    if (skipNextAutoHydrateRef.current) {
+      skipNextAutoHydrateRef.current = false;
+      return;
     }
-    const previousTotal = previousData.reduce((sum: number, item: any) => sum + item.revenue, 0);
-    
-    // 성장률 계산
-    if (previousTotal === 0) return 0;
-    return Math.round(((currentTotal - previousTotal) / previousTotal) * 100);
-  };
 
-  const formatCurrency = (amount: number) => {
-    return `${(amount / 10000).toLocaleString()}만원`;
-  };
+    void hydrateRevenue({
+      preset: selectedPreset,
+      granularity: selectedGranularity,
+    });
+  }, [hydrateRevenue, selectedGranularity, selectedPreset]);
 
-  const formatNumber = (num: number) => {
-    return num.toLocaleString();
-  };
+  const handleRetry = useCallback(() => {
+    void hydrateRevenue({
+      preset: selectedPreset,
+      granularity: selectedGranularity,
+    });
+  }, [hydrateRevenue, selectedGranularity, selectedPreset]);
 
-  const getPeriodLabel = () => {
-    switch (selectedPeriod) {
-      case 'weekly':
-        return '주간';
-      case 'monthly':
-        return '월간';
-      case 'yearly':
-        return '연간';
-    }
-  };
+  const handleBlockingErrorAction = useCallback(() => {
+    handlePageErrorAction(blockingErrorKind, navigate);
+  }, [blockingErrorKind, navigate]);
 
-  const getComparisonLabel = () => {
-    switch (selectedPeriod) {
-      case 'weekly':
-        return '지난주 대비';
-      case 'monthly':
-        return '전 기간 대비';
-      case 'yearly':
-        return '전 기간 대비';
-    }
-  };
+  const handleRefreshErrorAction = useCallback(() => {
+    handlePageErrorAction(refreshErrorKind, navigate);
+  }, [navigate, refreshErrorKind]);
 
-  const getXAxisKey = () => {
-    switch (selectedPeriod) {
-      case 'weekly':
-        return 'date';
-      case 'monthly':
-        return 'month';
-      case 'yearly':
-        return 'year';
-    }
-  };
+  const summaryTotals = snapshot?.summary.totals ?? EMPTY_TOTALS;
+  const summaryBuckets = snapshot?.summary.buckets ?? [];
+  const trendItems = snapshot?.trend.items ?? [];
+  const growthRate = useMemo(() => calculateGrowthRate(summaryBuckets), [summaryBuckets]);
 
-  // 활성 차량 수 계산 (대여중 + 예약 + 가용 = 정비중 제외)
-  const getActiveVehicles = () => {
-    return vehicleAssets.filter(v => v.status !== '정비중').length;
-  };
+  const selectedPeriodLabel = useMemo(
+    () => PERIOD_OPTIONS.find((option) => option.value === selectedPreset)?.label ?? '',
+    [selectedPreset],
+  );
 
-  // 평균 가동률 계산
-  const getAverageUtilization = () => {
-    const totalUtilization = vehicleRevenueData.reduce((sum, v) => sum + v.utilization, 0);
-    return Math.round(totalUtilization / vehicleRevenueData.length);
-  };
+  const selectedGranularityLabel = useMemo(
+    () => GRANULARITY_OPTIONS.find((option) => option.value === selectedGranularity)?.label ?? '',
+    [selectedGranularity],
+  );
+
+  const summaryChartData = useMemo(
+    () => summaryBuckets.map((bucket) => ({
+      label: bucket.label,
+      grossRevenue: bucket.grossRevenue,
+      refundAmount: bucket.refundAmount,
+      netRevenue: bucket.netRevenue,
+    })),
+    [summaryBuckets],
+  );
+
+  const trendChartData = useMemo(
+    () => trendItems.map((item) => ({
+      label: formatTrendDateLabel(item.date),
+      netRevenue: item.netRevenue,
+      grossRevenue: item.grossRevenue,
+      refundAmount: item.refundAmount,
+    })),
+    [trendItems],
+  );
+
+  const refreshErrorActionLabel = getPageErrorActionLabel(refreshErrorKind);
 
   return (
     <Layout title="매출 요약">
       <PageStateBoundary
-        isLoading={isRevenueLoading}
-        error={revenueError}
-        isEmpty={isRevenueApiEmpty}
-        errorDescription="매출 요약 데이터를 불러오는 중 문제가 발생했습니다."
-        emptyTitle="표시할 매출 요약 데이터가 없습니다"
-        emptyDescription="기간을 바꾸거나 잠시 후 다시 확인해 주세요."
-        onRetry={handleRevenueRetry}
-        errorActionLabel={getPageErrorActionLabel(revenueErrorKind)}
-        onErrorAction={handleRevenueErrorAction}
-        emptyActionLabel="다시 불러오기"
-        onEmptyAction={handleRevenueRetry}
+        isLoading={isLoading}
+        error={blockingError}
+        isEmpty={isEmpty}
+        errorDescription="매출 데이터를 불러오는 중 문제가 발생했습니다."
+        emptyTitle="조회 기간에 매출 데이터가 없습니다"
+        emptyDescription="기간 또는 집계 단위를 변경해 다시 조회해 주세요."
+        onRetry={handleRetry}
+        errorActionLabel={getPageErrorActionLabel(blockingErrorKind)}
+        onErrorAction={handleBlockingErrorAction}
+        emptyActionLabel="다시 조회"
+        onEmptyAction={handleRetry}
         className="m-4 min-h-[320px]"
       >
-        <div className="p-4 h-full overflow-auto">
-        {/* 기간 선택 */}
-        <div className="flex items-center gap-2 mb-4">
-          <span className="text-sm font-semibold text-gray-600">기간:</span>
-          <div className="flex gap-1.5">
-            <button
-              onClick={() => setSelectedPeriod('weekly')}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                selectedPeriod === 'weekly'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-              }`}
-            >
-              주간
-            </button>
-            <button
-              onClick={() => setSelectedPeriod('monthly')}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                selectedPeriod === 'monthly'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-              }`}
-            >
-              월간
-            </button>
-            <button
-              onClick={() => setSelectedPeriod('yearly')}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                selectedPeriod === 'yearly'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-              }`}
-            >
-              연간
-            </button>
-          </div>
-        </div>
-
-        {/* 주요 지표 카드 */}
-        <div className="grid grid-cols-5 gap-4 mb-4">
-          {/* 총 매출 */}
-          <div className="bg-white rounded-xl p-5 shadow-sm">
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-sm font-semibold text-gray-600">총 매출</span>
-              <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
-                <DollarSign className="w-5 h-5 text-blue-600" />
-              </div>
-            </div>
-            <div className="text-2xl font-bold text-gray-900 mb-1">
-              {formatCurrency(getTotalRevenue())}
-            </div>
-            <div className="flex items-center gap-1">
-              {getGrowthRate() >= 0 ? (
-                <>
-                  <ArrowUp className="w-4 h-4 text-green-600" />
-                  <span className="text-sm font-medium text-green-600">
-                    {getGrowthRate()}%
-                  </span>
-                </>
-              ) : (
-                <>
-                  <ArrowDown className="w-4 h-4 text-red-600" />
-                  <span className="text-sm font-medium text-red-600">
-                    {Math.abs(getGrowthRate())}%
-                  </span>
-                </>
-              )}
-              <span className="text-sm text-gray-500">{getComparisonLabel()}</span>
-            </div>
-          </div>
-
-          {/* 총 대여 건수 */}
-          <div className="bg-white rounded-xl p-5 shadow-sm">
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-sm font-semibold text-gray-600">총 대여 건수</span>
-              <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center">
-                <Calendar className="w-5 h-5 text-green-600" />
-              </div>
-            </div>
-            <div className="text-2xl font-bold text-gray-900 mb-1">
-              {formatNumber(getTotalRentals())}건
-            </div>
-            <div className="text-sm text-gray-500">
-              {getPeriodLabel()} 누적
-            </div>
-          </div>
-
-          {/* 평균 대여 금액 */}
-          <div className="bg-white rounded-xl p-5 shadow-sm">
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-sm font-semibold text-gray-600">평균 대여 금액</span>
-              <div className="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center">
-                <TrendingUp className="w-5 h-5 text-purple-600" />
-              </div>
-            </div>
-            <div className="text-2xl font-bold text-gray-900 mb-1">
-              {formatCurrency(getAveragePrice())}
-            </div>
-            <div className="text-sm text-gray-500">
-              건당 평균
-            </div>
-          </div>
-
-          {/* 미납금 */}
-          <div 
-            className="bg-white rounded-xl p-5 shadow-sm border-2 border-red-200 cursor-pointer hover:shadow-md transition-shadow"
-            onClick={() => navigate('/action-required?filter=미납/결제 문제')}
-          >
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-sm font-semibold text-gray-600">미납금</span>
-              <div className="w-10 h-10 bg-red-100 rounded-lg flex items-center justify-center">
-                <AlertCircle className="w-5 h-5 text-red-600" />
-              </div>
-            </div>
-            <div className="text-2xl font-bold text-red-600 mb-1">
-              {formatCurrency(currentUnpaid.amount)}
-            </div>
-            <div className="text-sm text-red-600 font-medium">
-              {currentUnpaid.count}건 연체 중
-            </div>
-          </div>
-
-          {/* 활성 차량 */}
-          <div className="bg-white rounded-xl p-5 shadow-sm">
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-sm font-semibold text-gray-600">활성 차량</span>
-              <div className="w-10 h-10 bg-orange-100 rounded-lg flex items-center justify-center">
-                <Car className="w-5 h-5 text-orange-600" />
-              </div>
-            </div>
-            <div className="text-2xl font-bold text-gray-900 mb-1">
-              {getActiveVehicles()}대
-            </div>
-            <div className="text-sm text-gray-500">
-              평균 가동률 {getAverageUtilization()}%
-            </div>
-          </div>
-        </div>
-
-        {/* 차트 영역 */}
-        <div className="grid grid-cols-3 gap-4 mb-4">
-          {/* 매출 추이 차트 */}
-          <div className="col-span-2 bg-white rounded-xl p-5 shadow-sm">
-            <h3 className="text-base font-bold text-gray-900 mb-4">
-              {getPeriodLabel()} 매출 추이
-            </h3>
-            <ResponsiveContainer width="100%" height={280}>
-              <BarChart data={getCurrentData()}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                <XAxis 
-                  dataKey={getXAxisKey()} 
-                  tick={{ fontSize: 12 }}
-                  stroke="#9ca3af"
-                />
-                <YAxis 
-                  tick={{ fontSize: 12 }}
-                  stroke="#9ca3af"
-                  tickFormatter={(value) => `${(value / 10000).toLocaleString()}만`}
-                />
-                <Tooltip 
-                  formatter={(value: number) => formatCurrency(value)}
-                  contentStyle={{ 
-                    backgroundColor: 'white', 
-                    border: '1px solid #e5e7eb',
-                    borderRadius: '8px',
-                    fontSize: '12px'
-                  }}
-                />
-                <Bar dataKey="revenue" fill="#3b82f6" radius={[8, 8, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-
-          {/* 결제 방법별 분포 */}
-          <div className="bg-white rounded-xl p-5 shadow-sm">
-            <h3 className="text-base font-bold text-gray-900 mb-4">결제 방법별 분포</h3>
-            <ResponsiveContainer width="100%" height={200}>
-              <PieChart>
-                <Pie
-                  data={paymentMethodData}
-                  cx="50%"
-                  cy="50%"
-                  labelLine={false}
-                  label={({ percent }) => `${(percent * 100).toFixed(0)}%`}
-                  outerRadius={70}
-                  fill="#8884d8"
-                  dataKey="value"
+        <div className="h-full space-y-4 overflow-auto p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-white p-4 shadow-sm">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-sm font-semibold text-gray-600">조회 기간</span>
+              {PERIOD_OPTIONS.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => setSelectedPreset(option.value)}
+                  className={`rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+                    selectedPreset === option.value
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
                 >
-                  {paymentMethodData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                  ))}
-                </Pie>
-                <Tooltip 
-                  formatter={(value: number, name: string, props: any) => [
-                    formatCurrency(props.payload.amount),
-                    `${value}%`
-                  ]}
-                  contentStyle={{ 
-                    backgroundColor: 'white', 
-                    border: '1px solid #e5e7eb',
-                    borderRadius: '8px',
-                    fontSize: '12px'
-                  }}
-                />
-              </PieChart>
-            </ResponsiveContainer>
-            <div className="mt-4 space-y-2">
-              {paymentMethodData.map((method, index) => (
-                <div key={method.name} className="flex items-center justify-between text-sm">
-                  <div className="flex items-center gap-2">
-                    <div 
-                      className="w-3 h-3 rounded-full" 
-                      style={{ backgroundColor: COLORS[index % COLORS.length] }}
-                    />
-                    <span className="text-gray-700">{method.name}</span>
-                  </div>
-                  <span className="font-semibold text-gray-900">
-                    {formatCurrency(method.amount)}
-                  </span>
-                </div>
+                  {option.label}
+                </button>
               ))}
             </div>
-          </div>
-        </div>
 
-        {/* 차량별 매출 순위 */}
-        <div className="bg-white rounded-xl p-5 shadow-sm">
-          <h3 className="text-base font-bold text-gray-900 mb-4">차량별 매출 현황</h3>
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-gray-200">
-                  <th className="text-left py-3 px-4 text-sm font-semibold text-gray-600">순위</th>
-                  <th className="text-left py-3 px-4 text-sm font-semibold text-gray-600">차종</th>
-                  <th className="text-right py-3 px-4 text-sm font-semibold text-gray-600">매출</th>
-                  <th className="text-right py-3 px-4 text-sm font-semibold text-gray-600">대여 건수</th>
-                  <th className="text-right py-3 px-4 text-sm font-semibold text-gray-600">가동률</th>
-                  <th className="text-left py-3 px-4 text-sm font-semibold text-gray-600">매출 비중</th>
-                </tr>
-              </thead>
-              <tbody>
-                {vehicleRevenueData.map((vehicle, index) => {
-                  const totalRevenue = vehicleRevenueData.reduce((sum, v) => sum + v.revenue, 0);
-                  const percentage = ((vehicle.revenue / totalRevenue) * 100).toFixed(1);
-                  
-                  return (
-                    <tr key={vehicle.model} className="border-b border-gray-100 hover:bg-gray-50">
-                      <td className="py-3 px-4">
-                        <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm ${
-                          index === 0 ? 'bg-yellow-100 text-yellow-700' :
-                          index === 1 ? 'bg-gray-100 text-gray-700' :
-                          index === 2 ? 'bg-orange-100 text-orange-700' :
-                          'bg-gray-50 text-gray-600'
-                        }`}>
-                          {index + 1}
-                        </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-sm font-semibold text-gray-600">집계 단위</span>
+              {GRANULARITY_OPTIONS.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => setSelectedGranularity(option.value)}
+                  className={`rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+                    selectedGranularity === option.value
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                >
+                  {option.label}
+                </button>
+              ))}
+              <button
+                type="button"
+                onClick={handleRetry}
+                className="inline-flex items-center gap-1 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-100"
+              >
+                <RotateCcw className="h-4 w-4" />
+                재조회
+              </button>
+            </div>
+          </div>
+
+          {snapshot && (
+            <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-gray-500">
+              <span>
+                {snapshot.summary.period.from} ~ {snapshot.summary.period.to}
+                {' · '}
+                {selectedPeriodLabel}
+                {' · '}
+                {selectedGranularityLabel}
+              </span>
+              <span>{snapshot.summary.period.timezone}</span>
+            </div>
+          )}
+
+          {isRefreshing && (
+            <div className="flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-sm text-blue-700">
+              <RefreshCw className="h-4 w-4 animate-spin" />
+              선택한 조건으로 데이터를 다시 불러오는 중입니다.
+            </div>
+          )}
+
+          {refreshError && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
+              <div className="flex items-start gap-2">
+                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" />
+                <div className="flex-1">
+                  <p className="text-sm font-medium text-amber-900">{refreshError}</p>
+                  <p className="mt-1 text-xs text-amber-700">이전 조회 결과를 유지했습니다.</p>
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleRetry}
+                      className="rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-amber-700"
+                    >
+                      재시도
+                    </button>
+                    {refreshErrorActionLabel && (
+                      <button
+                        type="button"
+                        onClick={handleRefreshErrorAction}
+                        className="rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-semibold text-amber-900 transition-colors hover:bg-amber-100"
+                      >
+                        {refreshErrorActionLabel}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
+            <div className="rounded-xl bg-white p-5 shadow-sm">
+              <div className="mb-3 flex items-center justify-between">
+                <span className="text-sm font-semibold text-gray-600">순매출</span>
+                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-100">
+                  <DollarSign className="h-5 w-5 text-blue-600" />
+                </div>
+              </div>
+              <div className="mb-1 text-xl font-bold text-gray-900">
+                {formatCurrency(summaryTotals.netRevenue, summaryTotals.currency)}
+              </div>
+              <div className="flex items-center gap-1 text-sm">
+                {growthRate >= 0 ? (
+                  <ArrowUp className="h-4 w-4 text-green-600" />
+                ) : (
+                  <ArrowDown className="h-4 w-4 text-red-600" />
+                )}
+                <span className={growthRate >= 0 ? 'font-medium text-green-600' : 'font-medium text-red-600'}>
+                  {Math.abs(growthRate)}%
+                </span>
+                <span className="text-gray-500">구간 전반 대비</span>
+              </div>
+            </div>
+
+            <div className="rounded-xl bg-white p-5 shadow-sm">
+              <div className="mb-3 flex items-center justify-between">
+                <span className="text-sm font-semibold text-gray-600">총 결제 금액</span>
+                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-indigo-100">
+                  <TrendingUp className="h-5 w-5 text-indigo-600" />
+                </div>
+              </div>
+              <div className="text-xl font-bold text-gray-900">
+                {formatCurrency(summaryTotals.grossRevenue, summaryTotals.currency)}
+              </div>
+            </div>
+
+            <div className="rounded-xl bg-white p-5 shadow-sm">
+              <div className="mb-3 flex items-center justify-between">
+                <span className="text-sm font-semibold text-gray-600">환불 금액</span>
+                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-red-100">
+                  <AlertCircle className="h-5 w-5 text-red-600" />
+                </div>
+              </div>
+              <div className="text-xl font-bold text-red-600">
+                {formatCurrency(summaryTotals.refundAmount, summaryTotals.currency)}
+              </div>
+            </div>
+
+            <div className="rounded-xl bg-white p-5 shadow-sm">
+              <div className="mb-3 flex items-center justify-between">
+                <span className="text-sm font-semibold text-gray-600">결제 건수</span>
+                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-100">
+                  <DollarSign className="h-5 w-5 text-emerald-600" />
+                </div>
+              </div>
+              <div className="text-xl font-bold text-gray-900">
+                {summaryTotals.paidCount.toLocaleString()}건
+              </div>
+            </div>
+
+            <div className="rounded-xl bg-white p-5 shadow-sm">
+              <div className="mb-3 flex items-center justify-between">
+                <span className="text-sm font-semibold text-gray-600">환불 건수</span>
+                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-amber-100">
+                  <AlertCircle className="h-5 w-5 text-amber-600" />
+                </div>
+              </div>
+              <div className="text-xl font-bold text-gray-900">
+                {summaryTotals.refundCount.toLocaleString()}건
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+            <div className="rounded-xl bg-white p-5 shadow-sm xl:col-span-2">
+              <h3 className="mb-4 text-base font-bold text-gray-900">집계 버킷 매출</h3>
+              <ResponsiveContainer width="100%" height={280}>
+                <BarChart data={summaryChartData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                  <XAxis dataKey="label" tick={{ fontSize: 11 }} stroke="#9ca3af" />
+                  <YAxis tick={{ fontSize: 11 }} stroke="#9ca3af" tickFormatter={formatAxisCurrency} />
+                  <Tooltip
+                    formatter={(value: number, name: string) => [
+                      formatCurrency(value, summaryTotals.currency),
+                      name,
+                    ]}
+                    contentStyle={{
+                      backgroundColor: 'white',
+                      border: '1px solid #e5e7eb',
+                      borderRadius: '8px',
+                      fontSize: '12px',
+                    }}
+                  />
+                  <Legend />
+                  <Bar name="순매출" dataKey="netRevenue" fill="#3b82f6" radius={[6, 6, 0, 0]} />
+                  <Bar name="환불액" dataKey="refundAmount" fill="#f97316" radius={[6, 6, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+
+            <div className="rounded-xl bg-white p-5 shadow-sm">
+              <h3 className="mb-4 text-base font-bold text-gray-900">일별 순매출 추이</h3>
+              <ResponsiveContainer width="100%" height={280}>
+                <LineChart data={trendChartData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                  <XAxis dataKey="label" tick={{ fontSize: 11 }} stroke="#9ca3af" />
+                  <YAxis tick={{ fontSize: 11 }} stroke="#9ca3af" tickFormatter={formatAxisCurrency} />
+                  <Tooltip
+                    formatter={(value: number) => [formatCurrency(value, summaryTotals.currency), '순매출']}
+                    contentStyle={{
+                      backgroundColor: 'white',
+                      border: '1px solid #e5e7eb',
+                      borderRadius: '8px',
+                      fontSize: '12px',
+                    }}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="netRevenue"
+                    stroke="#2563eb"
+                    strokeWidth={2}
+                    dot={false}
+                    activeDot={{ r: 4 }}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+
+          <div className="rounded-xl bg-white p-5 shadow-sm">
+            <h3 className="mb-4 text-base font-bold text-gray-900">버킷별 상세</h3>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[820px]">
+                <thead>
+                  <tr className="border-b border-gray-200">
+                    <th className="px-3 py-2 text-left text-sm font-semibold text-gray-600">기간</th>
+                    <th className="px-3 py-2 text-right text-sm font-semibold text-gray-600">결제 건수</th>
+                    <th className="px-3 py-2 text-right text-sm font-semibold text-gray-600">환불 건수</th>
+                    <th className="px-3 py-2 text-right text-sm font-semibold text-gray-600">총 결제 금액</th>
+                    <th className="px-3 py-2 text-right text-sm font-semibold text-gray-600">환불 금액</th>
+                    <th className="px-3 py-2 text-right text-sm font-semibold text-gray-600">순매출</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {summaryBuckets.map((bucket) => (
+                    <tr key={`${bucket.startDate}-${bucket.endDate}`} className="border-b border-gray-100">
+                      <td className="px-3 py-2 text-sm text-gray-700">{bucket.label}</td>
+                      <td className="px-3 py-2 text-right text-sm text-gray-700">{bucket.paidCount.toLocaleString()}건</td>
+                      <td className="px-3 py-2 text-right text-sm text-gray-700">{bucket.refundCount.toLocaleString()}건</td>
+                      <td className="px-3 py-2 text-right text-sm font-medium text-gray-900">
+                        {formatCurrency(bucket.grossRevenue, summaryTotals.currency)}
                       </td>
-                      <td className="py-3 px-4">
-                        <div className="flex items-center gap-2">
-                          <Car className="w-4 h-4 text-gray-400" />
-                          <span className="font-medium text-gray-900">{vehicle.model}</span>
-                        </div>
+                      <td className="px-3 py-2 text-right text-sm font-medium text-red-600">
+                        {formatCurrency(bucket.refundAmount, summaryTotals.currency)}
                       </td>
-                      <td className="py-3 px-4 text-right font-semibold text-gray-900">
-                        {formatCurrency(vehicle.revenue)}
-                      </td>
-                      <td className="py-3 px-4 text-right text-gray-700">
-                        {formatNumber(vehicle.rentals)}건
-                      </td>
-                      <td className="py-3 px-4 text-right">
-                        <span className={`inline-block px-2 py-1 rounded text-xs font-medium ${
-                          vehicle.utilization >= 90 ? 'bg-green-100 text-green-700' :
-                          vehicle.utilization >= 85 ? 'bg-blue-100 text-blue-700' :
-                          'bg-gray-100 text-gray-700'
-                        }`}>
-                          {vehicle.utilization}%
-                        </span>
-                      </td>
-                      <td className="py-3 px-4">
-                        <div className="flex items-center gap-2">
-                          <div className="flex-1 bg-gray-200 rounded-full h-2">
-                            <div 
-                              className="bg-blue-600 h-2 rounded-full transition-all duration-300"
-                              style={{ width: `${percentage}%` }}
-                            />
-                          </div>
-                          <span className="text-sm font-medium text-gray-700 w-12 text-right">
-                            {percentage}%
-                          </span>
-                        </div>
+                      <td className="px-3 py-2 text-right text-sm font-semibold text-blue-700">
+                        {formatCurrency(bucket.netRevenue, summaryTotals.currency)}
                       </td>
                     </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                  ))}
+                  {summaryBuckets.length === 0 && (
+                    <tr>
+                      <td colSpan={6} className="px-3 py-10 text-center text-sm text-gray-500">
+                        표시할 버킷 데이터가 없습니다.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
-      </div>
       </PageStateBoundary>
     </Layout>
   );
