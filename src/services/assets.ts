@@ -11,6 +11,34 @@ export interface GetAssetsListParams extends AssetsRequestOptions {
   q?: string;
 }
 
+export interface CreateAssetPayload {
+  vin: string;
+  plate: string;
+  vehicleNumber?: string;
+  category?: string;
+  color?: string;
+  model?: string;
+  year?: number;
+}
+
+export interface PatchAssetPayload {
+  version: number;
+  plate?: string;
+  vehicleNumber?: string;
+  category?: string;
+  color?: string;
+  model?: string;
+  year?: number;
+  status?: string;
+  contractStatus?: string;
+  memo?: string;
+}
+
+export interface GetAssetHistoryParams extends AssetsRequestOptions {
+  page?: number;
+  pageSize?: number;
+}
+
 export function getAssetsList({
   page,
   size,
@@ -36,5 +64,42 @@ export function getAssetDetail(assetId: string, options: AssetsRequestOptions = 
     path: `/api/v2/assets/${encodeURIComponent(assetId)}`,
     method: 'GET',
     signal: options.signal,
+  });
+}
+
+export function createAsset(payload: CreateAssetPayload, options: AssetsRequestOptions = {}): Promise<unknown> {
+  return apiClient.requestData<unknown>({
+    path: '/api/v2/assets',
+    method: 'POST',
+    body: payload,
+    signal: options.signal,
+  });
+}
+
+export function patchAsset(
+  assetId: string,
+  payload: PatchAssetPayload,
+  options: AssetsRequestOptions = {},
+): Promise<unknown> {
+  return apiClient.requestData<unknown>({
+    path: `/api/v2/assets/${encodeURIComponent(assetId)}`,
+    method: 'PATCH',
+    body: payload,
+    signal: options.signal,
+  });
+}
+
+export function getAssetHistory(
+  assetId: string,
+  { page, pageSize, signal }: GetAssetHistoryParams = {},
+): Promise<unknown> {
+  return apiClient.requestData<unknown>({
+    path: `/api/v2/assets/${encodeURIComponent(assetId)}/history`,
+    method: 'GET',
+    query: {
+      page,
+      pageSize,
+    },
+    signal,
   });
 }
