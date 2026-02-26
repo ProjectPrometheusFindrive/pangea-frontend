@@ -1,11 +1,13 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { ApiError, setApiAccessTokenProvider } from '../../services/api';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { ApiError, setApiAccessTokenProvider, setApiUnauthorizedHandler } from '../../services/api';
 import {
   getMe,
   postLogin,
+  postRefresh,
   postLogout,
   toViewRole,
   type AuthLoginPayload,
+  type AuthRefreshData,
   type AuthUser,
   type AuthViewRole,
 } from '../../services/auth';
@@ -69,24 +71,18 @@ function isAuthSession(value: unknown): value is AuthSession {
   );
 }
 
-function readStoredSession(): AuthSession | null {
-  if (typeof window === 'undefined') {
+function parseStoredSession(rawValue: string | null): AuthSession | null {
+  if (!rawValue) {
     return null;
   }
 
   try {
-    const rawValue = window.localStorage.getItem(AUTH_SESSION_KEY);
-    if (!rawValue) {
-      return null;
-    }
-
     const parsedValue: unknown = JSON.parse(rawValue);
     if (!isAuthSession(parsedValue)) {
       return null;
     }
 
     if (parsedValue.expiresAt <= Date.now()) {
-      window.localStorage.removeItem(AUTH_SESSION_KEY);
       return null;
     }
 
@@ -94,6 +90,19 @@ function readStoredSession(): AuthSession | null {
   } catch {
     return null;
   }
+}
+
+function readStoredSession(): AuthSession | null {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  const session = parseStoredSession(window.localStorage.getItem(AUTH_SESSION_KEY));
+  if (!session) {
+    clearStoredSession();
+  }
+
+  return session;
 }
 
 function writeStoredSession(session: AuthSession): void {
@@ -137,12 +146,24 @@ function calculateExpiresAt(expiresInSeconds: number): number {
   return Date.now() + expiresInSeconds * 1000;
 }
 
+function toSessionFromTokenResponse(
+  payload: Pick<AuthRefreshData, 'token' | 'expiresIn'> & Partial<Pick<AuthRefreshData, 'user'>>,
+  fallbackUser: AuthUser | null,
+): AuthSession {
+  return {
+    token: payload.token,
+    expiresAt: calculateExpiresAt(payload.expiresIn),
+    user: payload.user ?? fallbackUser,
+  };
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<AuthStatus>('checking');
   const [user, setUser] = useState<AuthUser | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const refreshPromiseRef = useRef<Promise<boolean> | null>(null);
 
   const applySession = useCallback((session: AuthSession) => {
     setToken(session.token);
@@ -159,6 +180,50 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setStatus('unauthenticated');
     setApiAccessTokenProvider(undefined);
   }, []);
+
+  const executeTokenRefresh = useCallback(async (): Promise<boolean> => {
+    const storedSession = readStoredSession();
+
+    if (!storedSession) {
+      clearSession();
+      return false;
+    }
+
+    try {
+      const refreshData = await postRefresh();
+      if (!refreshData?.token) {
+        throw new Error('토큰 갱신 응답이 올바르지 않습니다.');
+      }
+
+      const refreshedSession = toSessionFromTokenResponse(refreshData, storedSession.user);
+      applySession(refreshedSession);
+
+      try {
+        const nextUser = await getMe();
+        applySession({
+          ...refreshedSession,
+          user: nextUser,
+        });
+      } catch {
+        // /me 실패 시 refresh 응답의 user(또는 기존 user)를 유지한다.
+      }
+
+      return true;
+    } catch (refreshError) {
+      clearSession();
+      setError(toErrorMessage(refreshError, '세션이 만료되어 로그아웃되었습니다.'));
+      return false;
+    }
+  }, [applySession, clearSession]);
+
+  const refreshAccessToken = useCallback(async (): Promise<boolean> => {
+    if (!refreshPromiseRef.current) {
+      refreshPromiseRef.current = executeTokenRefresh().finally(() => {
+        refreshPromiseRef.current = null;
+      });
+    }
+    return refreshPromiseRef.current;
+  }, [executeTokenRefresh]);
 
   const refreshSession = useCallback(async () => {
     const storedSession = readStoredSession();
@@ -197,11 +262,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     try {
       const loginData = await postLogin(payload);
-      const initialSession: AuthSession = {
-        token: loginData.token,
-        expiresAt: calculateExpiresAt(loginData.expiresIn),
-        user: loginData.user ?? null,
-      };
+      const initialSession = toSessionFromTokenResponse(loginData, null);
 
       applySession(initialSession);
 
@@ -242,8 +303,44 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [clearSession, token]);
 
   useEffect(() => {
+    setApiUnauthorizedHandler(refreshAccessToken);
+    return () => {
+      setApiUnauthorizedHandler(undefined);
+    };
+  }, [refreshAccessToken]);
+
+  useEffect(() => {
     void refreshSession();
   }, [refreshSession]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return undefined;
+    }
+
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key !== AUTH_SESSION_KEY) {
+        return;
+      }
+
+      const nextSession = parseStoredSession(event.newValue);
+      if (!nextSession) {
+        clearSession();
+        setError(null);
+        setIsLoading(false);
+        return;
+      }
+
+      applySession(nextSession);
+      setError(null);
+      setIsLoading(false);
+    };
+
+    window.addEventListener('storage', handleStorage);
+    return () => {
+      window.removeEventListener('storage', handleStorage);
+    };
+  }, [applySession, clearSession]);
 
   const viewRole = useMemo<AuthViewRole | null>(() => {
     if (!user) {

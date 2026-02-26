@@ -166,9 +166,8 @@ export function Layout({ children, title }: LayoutProps) {
 
   const handleLogout = async () => {
     await logout();
-    alert('로그아웃되었습니다');
     setShowAccountMenu(false);
-    navigate('/');
+    navigate('/login', { replace: true });
   };
 
   const handleOpenSettings = () => {

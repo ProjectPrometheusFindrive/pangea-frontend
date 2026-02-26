@@ -1,5 +1,5 @@
 import { ApiClient, type ApiClientOptions } from './client';
-import type { AccessTokenProvider } from './types';
+import type { AccessTokenProvider, ApiUnauthorizedHandler } from './types';
 
 const DEFAULT_API_BASE_URL = 'https://api.pangea.local';
 const DEFAULT_API_TIMEOUT_MS = 10_000;
@@ -25,10 +25,15 @@ export function setApiAccessTokenProvider(provider?: AccessTokenProvider): void 
   apiClient.setAccessTokenProvider(provider);
 }
 
+export function setApiUnauthorizedHandler(handler?: ApiUnauthorizedHandler): void {
+  apiClient.setUnauthorizedHandler(handler);
+}
+
 export { ApiClient, type ApiClientOptions, type RequestOptions } from './client';
 export { ApiError, type ApiErrorCode } from './errors';
 export type {
   AccessTokenProvider,
+  ApiUnauthorizedHandler,
   ApiEnvelope,
   ApiErrorEnvelope,
   ApiErrorField,

@@ -1,6 +1,7 @@
 import { buildApiErrorFromResponse, buildNetworkError, isApiErrorEnvelope, isApiSuccessEnvelope } from './errors';
 import type {
   AccessTokenProvider,
+  ApiUnauthorizedHandler,
   ApiRequestConfig,
   ApiRequestContext,
   ApiRequestInterceptor,
@@ -18,6 +19,7 @@ export interface ApiClientOptions {
   defaultHeaders?: Record<string, string>;
   fetchImpl?: FetchLike;
   accessTokenProvider?: AccessTokenProvider;
+  unauthorizedHandler?: ApiUnauthorizedHandler;
 }
 
 export type RequestOptions = Omit<ApiRequestConfig, 'path' | 'method' | 'body'>;
@@ -158,6 +160,7 @@ export class ApiClient {
   private readonly defaultHeaders: Record<string, string>;
   private readonly fetchImpl: FetchLike;
   private accessTokenProvider: AccessTokenProvider;
+  private unauthorizedHandler?: ApiUnauthorizedHandler;
   private readonly requestInterceptors: ApiRequestInterceptor[] = [];
   private readonly responseInterceptors: ApiResponseInterceptor[] = [];
 
@@ -170,6 +173,7 @@ export class ApiClient {
     };
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.accessTokenProvider = options.accessTokenProvider ?? (() => null);
+    this.unauthorizedHandler = options.unauthorizedHandler;
 
     this.useRequestInterceptor(async (context) => {
       if (context.config.skipAuth) {
@@ -211,6 +215,10 @@ export class ApiClient {
     this.accessTokenProvider = provider ?? (() => null);
   }
 
+  setUnauthorizedHandler(handler?: ApiUnauthorizedHandler): void {
+    this.unauthorizedHandler = handler;
+  }
+
   useRequestInterceptor(interceptor: ApiRequestInterceptor): () => void {
     this.requestInterceptors.push(interceptor);
     return () => {
@@ -232,6 +240,13 @@ export class ApiClient {
   }
 
   async request<TResponse = unknown>(config: ApiRequestConfig): Promise<TResponse> {
+    return this.requestInternal<TResponse>(config, false);
+  }
+
+  private async requestInternal<TResponse = unknown>(
+    config: ApiRequestConfig,
+    didRetryAfterUnauthorized: boolean,
+  ): Promise<TResponse> {
     const requestContext = await this.buildRequestContext(config);
     const interceptedRequest = await this.applyRequestInterceptors(requestContext);
     const timeoutMs = toNumber(interceptedRequest.config.timeoutMs) ?? this.timeoutMs;
@@ -261,6 +276,23 @@ export class ApiClient {
     responseContext = await this.applyResponseInterceptors(responseContext);
 
     if (!responseContext.response.ok || isApiErrorEnvelope(responseContext.body)) {
+      const shouldAttemptRefresh = (
+        !didRetryAfterUnauthorized
+        && !interceptedRequest.config.skipAuth
+        && !interceptedRequest.config.skipAuthRefresh
+        && responseContext.response.status === 401
+      );
+
+      if (shouldAttemptRefresh) {
+        const refreshSucceeded = await this.tryRefreshAuthorization();
+        if (refreshSucceeded) {
+          return this.requestInternal<TResponse>({
+            ...config,
+            skipAuthRefresh: true,
+          }, true);
+        }
+      }
+
       throw buildApiErrorFromResponse(
         responseContext.response.status,
         responseContext.body,
@@ -269,6 +301,19 @@ export class ApiClient {
     }
 
     return responseContext.body as TResponse;
+  }
+
+  private async tryRefreshAuthorization(): Promise<boolean> {
+    if (!this.unauthorizedHandler) {
+      return false;
+    }
+
+    try {
+      const result = await this.unauthorizedHandler();
+      return Boolean(result);
+    } catch {
+      return false;
+    }
   }
 
   async requestData<TData = unknown>(config: ApiRequestConfig): Promise<TData> {

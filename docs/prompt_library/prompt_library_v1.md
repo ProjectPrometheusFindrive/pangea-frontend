@@ -1,6 +1,6 @@
 # Prompt Library v1
 
-- Version: v1.2.15
+- Version: v1.2.16
 - Date: 2026-02-26
 - Owner: Pangea Frontend Team
 - Tags: prompt-library,workflow,branch-policy,history-policy,commit-policy,pr-automation,jira-traceability,end-prompt-protocol,worktree-cleanup,jira-status-sync,jira-comment-sync,ac-evidence
@@ -73,6 +73,7 @@ End Prompt:
 - `Changes Summary`에는 실제 반영 결과를 범위별로 기술하고, `Diffs & Files`에는 주요 수정 파일을 명시한다.
 - 코드 변경이 포함된 Jira 티켓은 AC 항목별 구현 근거(파일/함수 기준)를 `Changes Summary` 또는 `Diffs & Files`에 반드시 남긴다.
 - 인증 컨텍스트 교체 티켓(BK-021/BK-031 계열)은 `prompt_history`에 세션 저장 키, API 토큰 provider 연동 방식, role 매핑 규칙을 반드시 기록한다.
+- 로그인/보호 라우트 티켓(BK-031 계열)은 `prompt_history`에 `returnUrl` 복귀 흐름, 로그인 `401/429/NETWORK_ERROR` 분기, `401 -> /auth/refresh 1회 -> 원요청 재시도` 순서를 반드시 기록한다.
 - 코드 변경이 포함된 Jira 티켓은 `Validation` 섹션에 최소 1개의 실행 명령 결과(`build` 또는 `test`)를 기록한다.
 - 저장/수정 흐름 버그 티켓은 `Changes Summary` 또는 `Diffs & Files`에 성공/실패 분기 처리 근거(성공 시 동작, 실패 시 동작)를 모두 기록한다.
 - `Notes`에는 차기 권장 태스크만 기록하며 즉시 반영은 금지한다.
@@ -141,6 +142,7 @@ cp docs/prompt_history/_TEMPLATE.md docs/prompt_history/$(date +%Y%m%d)_your-tas
 - Production push triggers auto tag (`vX.Y.Z`)
 
 ## Version History
+- v1.2.16 (2026-02-26, SCRUM-34): Add prompt_history evidence rule for BK-031 tickets (returnUrl flow, login error branches, single refresh-retry order).
 - v1.2.15 (2026-02-26, NO-JIRA): Add rule to annotate BK items with mapped SCRUM IDs and Jira browse links when updating local parallel-group planning docs.
 - v1.2.14 (2026-02-26, SCRUM-30): Add prompt_history capture rule for auth-context migration tickets (session key, token provider wiring, role mapping evidence).
 - v1.2.13 (2026-02-26, NO-JIRA): Add canonical BE repo naming rule (`Project_Prometheus_BE`) and disallow legacy-prefixed BE repo path in docs metadata.

@@ -28,6 +28,12 @@ export interface AuthLogoutData {
   message: string;
 }
 
+export interface AuthRefreshData {
+  token: string;
+  expiresIn: number;
+  user?: AuthUser | null;
+}
+
 export function toViewRole(role: string | null | undefined): AuthViewRole {
   if (role === 'installer') {
     return 'device-installer';
@@ -48,6 +54,14 @@ export function getMe(): Promise<AuthUser> {
   return apiClient.requestData<AuthUser>({
     path: '/api/v2/auth/me',
     method: 'GET',
+  });
+}
+
+export function postRefresh(): Promise<AuthRefreshData> {
+  return apiClient.requestData<AuthRefreshData>({
+    path: '/api/v2/auth/refresh',
+    method: 'POST',
+    skipAuthRefresh: true,
   });
 }
 

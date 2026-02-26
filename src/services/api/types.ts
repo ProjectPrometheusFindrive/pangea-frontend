@@ -41,6 +41,7 @@ export interface ApiRequestConfig {
   body?: unknown;
   signal?: AbortSignal;
   skipAuth?: boolean;
+  skipAuthRefresh?: boolean;
   timeoutMs?: number;
   responseType?: 'json' | 'text' | 'raw';
 }
@@ -64,5 +65,6 @@ export type ApiResponseInterceptor =
   (context: ApiResponseContext) => Promise<ApiResponseContext> | ApiResponseContext;
 
 export type AccessTokenProvider = () => string | null | Promise<string | null>;
+export type ApiUnauthorizedHandler = () => Promise<boolean> | boolean;
 
 export type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
