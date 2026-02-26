@@ -15,6 +15,44 @@ export interface GetReservationsListParams extends ReservationsRequestOptions {
 
 export interface GetReservationDetailOptions extends ReservationsRequestOptions {}
 
+export interface CreateReservationPayload {
+  reservationId: string;
+  vin: string;
+  startAt: string;
+  endAt: string;
+  contractStatus?: string;
+  assetId?: string;
+  plate?: string;
+  vehicleNumber?: string;
+  status?: string;
+  customerName?: string;
+  memo?: string;
+}
+
+export interface ReturnReservationPayload {
+  returnedAt?: string;
+  memo?: string;
+  odometer?: number;
+}
+
+export interface AccidentReportPayload {
+  accidentDate: string;
+  accidentHour: string;
+  accidentMinute: string;
+  accidentSecond: string;
+  accidentDateTime: string;
+  accidentDisplayTime: string;
+  blackboxFileName: string;
+  blackboxGcsObjectName?: string;
+  handlerName?: string;
+  recordedAt?: string;
+}
+
+export interface ReportReservationAccidentPayload {
+  accidentReport: AccidentReportPayload;
+  memo?: string;
+}
+
 function toContractStatus(statusValue?: string): string | undefined {
   if (!statusValue) {
     return undefined;
@@ -72,6 +110,44 @@ export function getReservationDetail(
   return apiClient.requestData<unknown>({
     path: `/api/v2/reservations/${encodeURIComponent(reservationId)}`,
     method: 'GET',
+    signal: options.signal,
+  });
+}
+
+export function createReservation(
+  payload: CreateReservationPayload,
+  options: ReservationsRequestOptions = {},
+): Promise<unknown> {
+  return apiClient.requestData<unknown>({
+    path: '/api/v2/reservations',
+    method: 'POST',
+    body: payload,
+    signal: options.signal,
+  });
+}
+
+export function returnReservation(
+  reservationId: string,
+  payload: ReturnReservationPayload,
+  options: ReservationsRequestOptions = {},
+): Promise<unknown> {
+  return apiClient.requestData<unknown>({
+    path: `/api/v2/reservations/${encodeURIComponent(reservationId)}/return`,
+    method: 'POST',
+    body: payload,
+    signal: options.signal,
+  });
+}
+
+export function reportReservationAccident(
+  reservationId: string,
+  payload: ReportReservationAccidentPayload,
+  options: ReservationsRequestOptions = {},
+): Promise<unknown> {
+  return apiClient.requestData<unknown>({
+    path: `/api/v2/reservations/${encodeURIComponent(reservationId)}/accident`,
+    method: 'POST',
+    body: payload,
     signal: options.signal,
   });
 }
