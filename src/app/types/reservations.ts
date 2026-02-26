@@ -1,0 +1,16 @@
+export interface Reservation {
+  id: string;
+  vehicleNumber: string;
+  customer: string;
+  startDate: number;
+  endDate: number;
+  type: 'reservation' | 'rental' | 'return';
+  issues?: string[];
+  phone: string;
+  paymentMethod: '카드' | '현금' | '계좌이체';
+  amount: string;
+  deposit: string;
+  paymentStatus: '대기' | '완료' | '미납' | '부분납부';
+  startDateFull?: string;
+  endDateFull?: string;
+}
