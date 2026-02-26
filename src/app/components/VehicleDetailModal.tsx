@@ -47,6 +47,7 @@ interface VehicleDetailModalProps {
   conflictNotice: string | null;
   isSaving: boolean;
   isDirty: boolean;
+  canEdit: boolean;
   onEditFieldChange: (field: keyof AssetEditForm, value: string) => void;
   handleSave: () => void;
   getStatusColor: (status: string) => string;
@@ -83,6 +84,7 @@ export function VehicleDetailModal({
   conflictNotice,
   isSaving,
   isDirty,
+  canEdit,
   onEditFieldChange,
   handleSave,
   getStatusColor,
@@ -250,6 +252,12 @@ export function VehicleDetailModal({
                   )}
                 </div>
 
+                {!canEdit && (
+                  <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
+                    현재 계정은 자산 정보를 수정할 수 없습니다.
+                  </div>
+                )}
+
                 {conflictNotice && (
                   <div className="mb-4 rounded-lg border border-orange-200 bg-orange-50 px-3 py-2 text-sm text-orange-700">
                     <p>{conflictNotice}</p>
@@ -276,7 +284,8 @@ export function VehicleDetailModal({
                       type="text"
                       value={editForm.plate}
                       onChange={(event) => onEditFieldChange('plate', event.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      disabled={!canEdit || isSaving}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-500"
                     />
                     {fieldErrors.plate && (
                       <p className="mt-1 text-xs text-red-600">{fieldErrors.plate}</p>
@@ -289,7 +298,8 @@ export function VehicleDetailModal({
                       type="text"
                       value={editForm.model}
                       onChange={(event) => onEditFieldChange('model', event.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      disabled={!canEdit || isSaving}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-500"
                     />
                     {fieldErrors.model && (
                       <p className="mt-1 text-xs text-red-600">{fieldErrors.model}</p>
@@ -303,7 +313,8 @@ export function VehicleDetailModal({
                       inputMode="numeric"
                       value={editForm.year}
                       onChange={(event) => onEditFieldChange('year', event.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      disabled={!canEdit || isSaving}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-500"
                     />
                     {fieldErrors.year && (
                       <p className="mt-1 text-xs text-red-600">{fieldErrors.year}</p>
@@ -315,7 +326,8 @@ export function VehicleDetailModal({
                     <select
                       value={editForm.status}
                       onChange={(event) => onEditFieldChange('status', event.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      disabled={!canEdit || isSaving}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-500"
                     >
                       {ASSET_STATUS_OPTIONS.map((statusOption) => (
                         <option key={statusOption} value={statusOption}>
@@ -334,7 +346,8 @@ export function VehicleDetailModal({
                       value={editForm.memo}
                       onChange={(event) => onEditFieldChange('memo', event.target.value)}
                       rows={3}
-                      className="w-full resize-none px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      disabled={!canEdit || isSaving}
+                      className="w-full resize-none px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-500"
                     />
                     {fieldErrors.memo && (
                       <p className="mt-1 text-xs text-red-600">{fieldErrors.memo}</p>
@@ -779,12 +792,12 @@ export function VehicleDetailModal({
             </button>
             <button
               onClick={handleSave}
-              disabled={isSaving}
+              disabled={!canEdit || isSaving}
               className="flex-1 px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium disabled:cursor-not-allowed disabled:opacity-60"
             >
               <span className="inline-flex items-center gap-2">
                 {isSaving && <Loader2 className="h-4 w-4 animate-spin" />}
-                {isSaving ? '저장 중...' : '저장'}
+                {isSaving ? '저장 중...' : canEdit ? '저장' : '수정 권한 없음'}
               </span>
             </button>
           </div>

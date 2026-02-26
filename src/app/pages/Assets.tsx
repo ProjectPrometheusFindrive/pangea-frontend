@@ -24,6 +24,8 @@ import {
   usePageEndpointState,
 } from '../hooks/usePageEndpointState';
 import { useAuth } from '../context/AuthContext';
+import { useAuthorization } from '../context/AuthorizationContext';
+import { ACTION_PERMISSIONS } from '../authorization';
 import type { VehicleAsset } from '../types/assets';
 import { ApiError } from '../../services/api';
 import {
@@ -886,6 +888,8 @@ export default function Assets() {
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { canPerformAction } = useAuthorization();
+  const canWriteAssets = canPerformAction(ACTION_PERMISSIONS.assetsWrite);
 
   const page = toPositiveInteger(searchParams.get('page'), DEFAULT_PAGE);
   const pageSize = toPositiveInteger(searchParams.get('size'), DEFAULT_PAGE_SIZE);
@@ -1099,9 +1103,13 @@ export default function Assets() {
   }, [isCreateDirty, isCreateSaving, isDetailDirty, isDetailSaving, showDetailModal, showModal]);
 
   const openCreateModal = useCallback(() => {
+    if (!canWriteAssets) {
+      toast.error('차량 자산 등록 권한이 없습니다.');
+      return;
+    }
     resetCreateModalState();
     setShowModal(true);
-  }, [resetCreateModalState]);
+  }, [canWriteAssets, resetCreateModalState]);
 
   const closeCreateModal = useCallback((): boolean => {
     if (isCreateSaving) {
@@ -1552,6 +1560,11 @@ export default function Assets() {
   }, [abortOcrProcessing, ocrAppliedValues]);
 
   const handleStartOcrExtraction = useCallback(async () => {
+    if (!canWriteAssets) {
+      setCreateSaveError('차량 자산 등록 권한이 없습니다. 관리자에게 권한을 요청해 주세요.');
+      return;
+    }
+
     if (isCreateSaving || uploadStep === 'processing') {
       return;
     }
@@ -1731,6 +1744,7 @@ export default function Assets() {
     setCreateSaveError(null);
     toast.success(`OCR 추출 완료: ${suggestions.length}개 제안값을 확인해 주세요.`);
   }, [
+    canWriteAssets,
     createForm,
     isCreateSaving,
     ocrAppliedValues,
@@ -1749,6 +1763,11 @@ export default function Assets() {
   }, [abortOcrProcessing]);
 
   const handleCreateSave = useCallback(async () => {
+    if (!canWriteAssets) {
+      setCreateSaveError('차량 자산 등록 권한이 없습니다. 관리자에게 권한을 요청해 주세요.');
+      return;
+    }
+
     if (isCreateSaving) {
       return;
     }
@@ -1806,9 +1825,14 @@ export default function Assets() {
     } finally {
       setIsCreateSaving(false);
     }
-  }, [createForm, hydrateAssets, isCreateSaving, resetCreateModalState, updateAssetsSearchParams]);
+  }, [canWriteAssets, createForm, hydrateAssets, isCreateSaving, resetCreateModalState, updateAssetsSearchParams]);
 
   const handleDetailSave = useCallback(async () => {
+    if (!canWriteAssets) {
+      setDetailSaveError('차량 자산 수정 권한이 없습니다. 관리자에게 권한을 요청해 주세요.');
+      return;
+    }
+
     if (!selectedAsset || isDetailSaving) {
       return;
     }
@@ -1933,6 +1957,7 @@ export default function Assets() {
       setIsDetailSaving(false);
     }
   }, [
+    canWriteAssets,
     detailForm,
     hydrateAssetDetail,
     hydrateAssetHistory,
@@ -2069,7 +2094,8 @@ export default function Assets() {
             
             <button
               onClick={openCreateModal}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium flex items-center gap-2"
+              disabled={!canWriteAssets}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium flex items-center gap-2 disabled:cursor-not-allowed disabled:opacity-60"
             >
               <Plus className="w-4 h-4" />
               차량 자산 등록
@@ -2322,7 +2348,7 @@ export default function Assets() {
                         onClick={() => {
                           void handleStartOcrExtraction();
                         }}
-                        disabled={!uploadedFiles.vehicleRegistration || isCreateSaving}
+                        disabled={!canWriteAssets || !uploadedFiles.vehicleRegistration || isCreateSaving}
                         className="w-full px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         OCR 추출 시작
@@ -2365,7 +2391,7 @@ export default function Assets() {
                           onClick={() => {
                             void handleStartOcrExtraction();
                           }}
-                          disabled={!uploadedFiles.vehicleRegistration || isCreateSaving}
+                          disabled={!canWriteAssets || !uploadedFiles.vehicleRegistration || isCreateSaving}
                           className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-60"
                         >
                           OCR 다시 실행
@@ -2482,7 +2508,7 @@ export default function Assets() {
                     <div className="pt-4">
                       <button
                         onClick={handleCreateSave}
-                        disabled={isCreateSaving}
+                        disabled={!canWriteAssets || isCreateSaving}
                         className="w-full px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         <span className="inline-flex items-center gap-2">
@@ -2515,6 +2541,7 @@ export default function Assets() {
             conflictNotice={detailConflictNotice}
             isSaving={isDetailSaving}
             isDirty={isDetailDirty}
+            canEdit={canWriteAssets}
             onEditFieldChange={handleDetailFieldChange}
             handleSave={handleDetailSave}
             getStatusColor={getStatusColor}

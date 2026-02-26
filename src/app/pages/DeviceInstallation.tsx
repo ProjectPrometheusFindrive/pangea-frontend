@@ -9,6 +9,8 @@ import {
   usePageEndpointState,
 } from '../hooks/usePageEndpointState';
 import { useAuth } from '../context/AuthContext';
+import { useAuthorization } from '../context/AuthorizationContext';
+import { ACTION_PERMISSIONS } from '../authorization';
 import { ApiError } from '../../services/api';
 import {
   cancelDeviceInstallation,
@@ -170,6 +172,8 @@ function readFileAsDataUrl(file: File): Promise<string> {
 export default function DeviceInstallation() {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { canPerformAction } = useAuthorization();
+  const canWriteDeviceInstallation = canPerformAction(ACTION_PERMISSIONS.deviceInstallationWrite);
 
   const [installations, setInstallations] = useState<DeviceInstallationItem[]>([]);
   const [totalCount, setTotalCount] = useState(0);
@@ -315,6 +319,12 @@ export default function DeviceInstallation() {
   }, [installationPhotoPreview, serialPhotoPreview]);
 
   const handleCreateInstallation = useCallback(async () => {
+    if (!canWriteDeviceInstallation) {
+      setActionError('단말 장착 신청 권한이 없습니다.');
+      setActionMessage(null);
+      return;
+    }
+
     setActionError(null);
     setActionMessage(null);
 
@@ -381,6 +391,7 @@ export default function DeviceInstallation() {
       setIsSubmitting(false);
     }
   }, [
+    canWriteDeviceInstallation,
     deviceSerial,
     installationPhotoFile,
     refreshAll,
@@ -392,6 +403,12 @@ export default function DeviceInstallation() {
   ]);
 
   const handleCancelInstallation = useCallback(async (installationId: string) => {
+    if (!canWriteDeviceInstallation) {
+      setActionError('단말 장착 취소 권한이 없습니다.');
+      setActionMessage(null);
+      return;
+    }
+
     setActionError(null);
     setActionMessage(null);
     setCancellingInstallationId(installationId);
@@ -414,7 +431,7 @@ export default function DeviceInstallation() {
     } finally {
       setCancellingInstallationId(null);
     }
-  }, [refreshAll]);
+  }, [canWriteDeviceInstallation, refreshAll]);
 
   const totalPages = useMemo(() => Math.max(1, Math.ceil(totalCount / PAGE_SIZE)), [totalCount]);
 
@@ -451,6 +468,12 @@ export default function DeviceInstallation() {
             </div>
           )}
 
+          {!canWriteDeviceInstallation && (
+            <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
+              현재 계정은 단말 장착 신청/취소 작업을 수행할 수 없습니다.
+            </div>
+          )}
+
           {pageNotice && (
             <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-700">
               {pageNotice}
@@ -467,6 +490,7 @@ export default function DeviceInstallation() {
                 placeholder="KMH..."
                 value={vin}
                 onChange={(event) => setVin(event.target.value.toUpperCase())}
+                disabled={!canWriteDeviceInstallation || isSubmitting}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
               />
             </div>
@@ -480,6 +504,7 @@ export default function DeviceInstallation() {
                 placeholder="DEV-2024-XXX"
                 value={deviceSerial}
                 onChange={(e) => setDeviceSerial(e.target.value.toUpperCase())}
+                disabled={!canWriteDeviceInstallation || isSubmitting}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm"
               />
             </div>
@@ -492,6 +517,7 @@ export default function DeviceInstallation() {
                 type="datetime-local"
                 value={scheduledAt}
                 onChange={(event) => setScheduledAt(event.target.value)}
+                disabled={!canWriteDeviceInstallation || isSubmitting}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
               />
             </div>
@@ -516,6 +542,7 @@ export default function DeviceInstallation() {
                   }}
                   id="photo-upload"
                   className="hidden"
+                  disabled={!canWriteDeviceInstallation || isSubmitting}
                 />
                 <label
                   htmlFor="photo-upload"
@@ -578,6 +605,7 @@ export default function DeviceInstallation() {
                   }}
                   id="serial-photo-upload"
                   className="hidden"
+                  disabled={!canWriteDeviceInstallation || isSubmitting}
                 />
                 <label
                   htmlFor="serial-photo-upload"
@@ -625,7 +653,7 @@ export default function DeviceInstallation() {
                 onClick={() => {
                   void handleCreateInstallation();
                 }}
-                disabled={isSubmitting || !vin || !scheduledAt || !deviceSerial || !installationPhotoFile || !serialPhotoFile}
+                disabled={!canWriteDeviceInstallation || isSubmitting || !vin || !scheduledAt || !deviceSerial || !installationPhotoFile || !serialPhotoFile}
                 className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-bold text-sm disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
               >
                 {isSubmitting ? (
@@ -766,7 +794,7 @@ export default function DeviceInstallation() {
                             onClick={() => {
                               void handleCancelInstallation(installation.id);
                             }}
-                            disabled={cancellingInstallationId === installation.id}
+                            disabled={!canWriteDeviceInstallation || cancellingInstallationId === installation.id}
                             className="rounded-md border border-red-200 px-2 py-1 text-xs text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
                           >
                             {cancellingInstallationId === installation.id ? '취소 중...' : '취소'}

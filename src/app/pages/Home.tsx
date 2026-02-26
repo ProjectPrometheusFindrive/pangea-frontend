@@ -20,11 +20,14 @@ import {
   Wrench,
 } from 'lucide-react';
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts';
+import { toast } from 'sonner';
 
 import { ApiError } from '../../services/api';
 import { getHomeSummary, type HomeSummaryResponse } from '../../services/home';
+import { ROUTE_PERMISSIONS, type AppRoutePermission } from '../authorization';
 import { Layout } from '../components/Layout';
 import { PageStateBoundary } from '../components/PageStateBoundary';
+import { useAuthorization } from '../context/AuthorizationContext';
 import { useAuth } from '../context/AuthContext';
 import {
   getPageErrorActionLabel,
@@ -282,6 +285,7 @@ function toRecentChangeLabel(type: string): string {
 export default function Home() {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { canAccessRoute } = useAuthorization();
   const [showPremiumModal, setShowPremiumModal] = useState(false);
   const [selectedPreset, setSelectedPreset] = useState<PeriodPreset>('last30Days');
 
@@ -431,6 +435,15 @@ export default function Home() {
     handlePageErrorAction(refreshErrorKind, navigate);
   }, [navigate, refreshErrorKind]);
 
+  const navigateWithRoutePermission = useCallback((path: string, routePermission: AppRoutePermission) => {
+    if (!canAccessRoute(routePermission)) {
+      toast.error('접근 권한이 없어 이동할 수 없습니다.');
+      navigate('/forbidden');
+      return;
+    }
+    navigate(path);
+  }, [canAccessRoute, navigate]);
+
   const summary = snapshot?.summary;
   const contractStatusCounts = summary?.statusCounts.contractStatus ?? {};
   const managementStageCounts = summary?.statusCounts.managementStage ?? {};
@@ -455,24 +468,36 @@ export default function Home() {
   };
 
   const handleTaskClick = useCallback((filter: string) => {
-    navigate(`/reservations?filter=${encodeURIComponent(filter)}`);
-  }, [navigate]);
+    navigateWithRoutePermission(
+      `/reservations?filter=${encodeURIComponent(filter)}`,
+      ROUTE_PERMISSIONS.reservations,
+    );
+  }, [navigateWithRoutePermission]);
 
   const handleIssueClick = useCallback((filter: string) => {
-    navigate(`/action-required?filter=${encodeURIComponent(filter)}`);
-  }, [navigate]);
+    navigateWithRoutePermission(
+      `/action-required?filter=${encodeURIComponent(filter)}`,
+      ROUTE_PERMISSIONS.actionRequired,
+    );
+  }, [navigateWithRoutePermission]);
 
   const handleAssetClick = useCallback((status: string) => {
     if (!status) {
-      navigate('/assets');
+      navigateWithRoutePermission('/assets', ROUTE_PERMISSIONS.assets);
       return;
     }
-    navigate(`/assets?status=${encodeURIComponent(status)}`);
-  }, [navigate]);
+    navigateWithRoutePermission(
+      `/assets?status=${encodeURIComponent(status)}`,
+      ROUTE_PERMISSIONS.assets,
+    );
+  }, [navigateWithRoutePermission]);
 
   const handleContractClick = useCallback((status: string) => {
-    navigate(`/reservations?filter=${encodeURIComponent(status)}`);
-  }, [navigate]);
+    navigateWithRoutePermission(
+      `/reservations?filter=${encodeURIComponent(status)}`,
+      ROUTE_PERMISSIONS.reservations,
+    );
+  }, [navigateWithRoutePermission]);
 
   const todayStats = useMemo(() => {
     const reservationCount = sumByKeys(contractStatusCounts, ['예약중', '예약']);
