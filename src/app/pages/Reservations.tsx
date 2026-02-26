@@ -1,11 +1,21 @@
 import { Layout } from '../components/Layout';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useSearchParams, useNavigate } from 'react-router';
-import { ChevronLeft, ChevronRight, Plus, ArrowRight, Car, Calendar, AlertCircle, DollarSign, AlertTriangle, Loader2, X } from 'lucide-react';
-import { AccidentReportModal } from '../components/AccidentReportModal';
-import { NewContractModal } from '../components/NewContractModal';
+import { ChevronLeft, ChevronRight, Plus, Car, Calendar, AlertCircle, DollarSign, AlertTriangle, Loader2, X } from 'lucide-react';
+import { toast } from 'sonner';
+import {
+  AccidentReportModal,
+  type AccidentReportField,
+  type AccidentReportFormValues,
+  type AccidentReportSubmitFeedback,
+} from '../components/AccidentReportModal';
+import {
+  NewContractModal,
+  type NewContractField,
+  type NewContractFormValues,
+  type NewContractSubmitFeedback,
+} from '../components/NewContractModal';
 import { PageStateBoundary } from '../components/PageStateBoundary';
-import type { AccidentReport } from '../utils/issueUtils';
 import {
   getCollectionFromPayload,
   getPageErrorActionLabel,
@@ -16,7 +26,13 @@ import {
 import type { Reservation } from '../data/mockData';
 import type { VehicleAsset } from '../types/assets';
 import { ApiError } from '../../services/api';
-import { getReservationDetail, getReservationsList } from '../../services/reservations';
+import {
+  createReservation,
+  getReservationDetail,
+  getReservationsList,
+  reportReservationAccident,
+  returnReservation,
+} from '../../services/reservations';
 
 // 드래그 선택 타입 정의
 type DragSelection = {
@@ -31,6 +47,154 @@ const DEFAULT_PAGE = 1;
 const DEFAULT_PAGE_SIZE = 20;
 const PAGE_SIZE_OPTIONS = [20, 50, 100];
 const TOTAL_COUNT_KEYS = ['total', 'totalCount', 'count', 'size', 'itemsCount', 'totalElements'];
+const RETRY_TOAST_MESSAGE = '일시적인 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.';
+
+type FieldErrorMap<TField extends string> = Partial<Record<TField, string>>;
+
+function pad2(value: number): string {
+  return String(value).padStart(2, '0');
+}
+
+function toIsoDateTimeFromDateAndTime(dateValue: string, timeValue: string): string | null {
+  const parsed = new Date(`${dateValue}T${timeValue}`);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+  return parsed.toISOString();
+}
+
+function toAccidentDisplayTime(value: Date): string {
+  return `${value.getFullYear()}.${pad2(value.getMonth() + 1)}.${pad2(value.getDate())} ${pad2(value.getHours())}:${pad2(value.getMinutes())}:${pad2(value.getSeconds())}`;
+}
+
+function sanitizeFileName(value: string): string {
+  const normalized = value.trim().replace(/\s+/g, '_').replace(/[^A-Za-z0-9._-]+/g, '_');
+  return normalized.replace(/^\.+/, '') || 'file';
+}
+
+function toCurrencyDisplayFromInput(value: string): string {
+  const numericText = value.replace(/[^\d.-]/g, '');
+  const numericValue = Number(numericText);
+  if (Number.isFinite(numericValue)) {
+    return `${numericValue.toLocaleString('ko-KR')}원`;
+  }
+  return toCurrencyValue(value);
+}
+
+function toErrorFieldEntries(error: ApiError): Array<{ name: string; reason: string }> {
+  const entries: Array<{ name: string; reason: string }> = [];
+
+  if (Array.isArray(error.fields)) {
+    for (const fieldEntry of error.fields) {
+      if (!isRecord(fieldEntry)) {
+        continue;
+      }
+
+      const name = toStringValue(fieldEntry.name) ?? toStringValue(fieldEntry.field);
+      const reason = toStringValue(fieldEntry.reason) ?? toStringValue(fieldEntry.message);
+      if (!name || !reason) {
+        continue;
+      }
+      entries.push({ name, reason });
+    }
+  }
+
+  const payloadError = isRecord(error.payload) && isRecord(error.payload.error)
+    ? error.payload.error
+    : null;
+
+  if (payloadError && Array.isArray(payloadError.details)) {
+    for (const detailEntry of payloadError.details) {
+      if (!isRecord(detailEntry)) {
+        continue;
+      }
+
+      const name = toStringValue(detailEntry.name)
+        ?? toStringValue(detailEntry.field)
+        ?? toStringValue(detailEntry.path)
+        ?? toStringValue(detailEntry.loc);
+      const reason = toStringValue(detailEntry.reason)
+        ?? toStringValue(detailEntry.message)
+        ?? toStringValue(detailEntry.detail)
+        ?? toStringValue(detailEntry.error);
+
+      if (!name || !reason) {
+        continue;
+      }
+
+      entries.push({ name, reason });
+    }
+  }
+
+  return entries;
+}
+
+function mapFieldErrors<TField extends string>(
+  entries: Array<{ name: string; reason: string }>,
+  fieldMap: Record<string, TField>,
+): FieldErrorMap<TField> {
+  const mapped: FieldErrorMap<TField> = {};
+
+  for (const { name, reason } of entries) {
+    const targetField = fieldMap[name];
+    if (!targetField) {
+      continue;
+    }
+    if (!mapped[targetField]) {
+      mapped[targetField] = reason;
+    }
+  }
+
+  return mapped;
+}
+
+function toCreateFieldErrors(error: ApiError): FieldErrorMap<NewContractField> {
+  return mapFieldErrors<NewContractField>(toErrorFieldEntries(error), {
+    reservationId: 'selectedVehicle',
+    vin: 'selectedVehicle',
+    vehicleNumber: 'selectedVehicle',
+    plate: 'selectedVehicle',
+    startAt: 'startDate',
+    endAt: 'endDate',
+    customerName: 'customerName',
+  });
+}
+
+function toAccidentFieldErrors(error: ApiError): FieldErrorMap<AccidentReportField> {
+  const mapped = mapFieldErrors<AccidentReportField>(toErrorFieldEntries(error), {
+    blackboxFileName: 'blackboxFile',
+    blackboxGcsObjectName: 'blackboxFile',
+    handlerName: 'assignee',
+    memo: 'description',
+  });
+
+  const errorMessage = (error.message || '').toLowerCase();
+  if (!mapped.blackboxFile && errorMessage.includes('blackbox')) {
+    mapped.blackboxFile = error.message;
+  }
+
+  return mapped;
+}
+
+function isRetryableMutationError(error: ApiError): boolean {
+  if (error.status !== undefined && error.status >= 500) {
+    return true;
+  }
+  return (
+    error.code === 'NETWORK_ERROR'
+    || error.code === 'TIMEOUT'
+    || error.code === 'ABORTED'
+    || error.code === 'SERVER_ERROR'
+  );
+}
+
+function withIssueLabel(issues: string[] | undefined, label: string): string[] {
+  const nextIssues = Array.isArray(issues) ? [...issues] : [];
+  if (!nextIssues.includes(label)) {
+    nextIssues.push(label);
+  }
+  return nextIssues;
+}
 
 function formatDateAsYmd(date: Date): string {
   const year = date.getFullYear();
@@ -290,6 +454,11 @@ function toReservationRow(row: unknown, index: number): Reservation | null {
 
   const startDateLabel = normalizeDateParam(toStringValue(startSource)) ?? toDateLabelFromOffset(startDateOffset);
   const endDateLabel = normalizeDateParam(toStringValue(endSource)) ?? toDateLabelFromOffset(endDateOffset);
+  const issues = normalizeIssues(row.issues);
+  const accidentReported = row.accidentReported === true || toStringValue(row.accidentReported)?.toLowerCase() === 'true';
+  if (accidentReported && !issues.includes('사고 접수')) {
+    issues.unshift('사고 접수');
+  }
 
   return {
     id: reservationId,
@@ -300,7 +469,7 @@ function toReservationRow(row: unknown, index: number): Reservation | null {
     type: normalizeReservationType(
       toStringValue(row.type) ?? toStringValue(row.contractStatus) ?? toStringValue(row.status),
     ),
-    issues: normalizeIssues(row.issues),
+    issues,
     phone: toStringValue(row.phone) ?? toStringValue(row.customerPhone) ?? '-',
     paymentMethod: normalizePaymentMethod(toStringValue(row.paymentMethod) ?? toStringValue(row.paymentType)),
     amount: toCurrencyValue(row.amount),
@@ -470,6 +639,8 @@ export default function Reservations() {
   const [isDetailLoading, setIsDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [isDetailNotFound, setIsDetailNotFound] = useState(false);
+  const [isReturnSubmitting, setIsReturnSubmitting] = useState(false);
+  const [returnSubmitError, setReturnSubmitError] = useState<string | null>(null);
 
   // 동적 날짜 로딩을 위한 상태
   const [totalDaysToShow, setTotalDaysToShow] = useState(42); // 초기 6주
@@ -884,54 +1055,324 @@ export default function Reservations() {
     }
   };
 
-  const handleReservationClick = (reservation: Reservation) => {
+  const openReservationDetail = useCallback((reservation: Reservation) => {
     setSelectedReservation(reservation);
     const asset = vehicleAssets.find((entry) => entry.vehicleNumber === reservation.vehicleNumber);
     setSelectedVehicleAsset(asset ?? createFallbackVehicleAsset(reservation));
-    setActiveTab('reservation'); // 탭 초기화
+    setActiveTab('reservation');
     void hydrateReservationDetail(reservation.id, reservation);
-  };
+  }, [hydrateReservationDetail, vehicleAssets]);
 
-  const handleReturnClick = () => {
-    setShowReturnConfirm(true);
-  };
+  const handleReservationClick = useCallback((reservation: Reservation) => {
+    openReservationDetail(reservation);
+  }, [openReservationDetail]);
 
-  const handleConfirmReturn = () => {
-    if (selectedReservation) {
-      // 예약 데이터 업데이트
-      setReservationsData(prev => 
-        prev.map(res => 
-          res.id === selectedReservation.id 
-            ? { ...res, type: 'return' as const }
-            : res
-        )
-      );
-      
-      // 선택된 예약 업데이트
-      setSelectedReservation({
-        ...selectedReservation,
-        type: 'return'
-      });
-      
-      setShowReturnConfirm(false);
-      
-      // 성공 메시지
-      setTimeout(() => {
-        alert('차량이 반납 처리되었습니다.');
-      }, 100);
+  const handleCreateReservation = useCallback(async (
+    formValues: NewContractFormValues,
+  ): Promise<NewContractSubmitFeedback | null> => {
+    const selectedAsset = vehicleAssets.find((asset) => asset.vehicleNumber === formValues.selectedVehicle);
+    const vin = selectedAsset?.vin?.trim();
+    if (!selectedAsset || !vin || vin === '-') {
+      return {
+        formError: '선택한 차량의 VIN 정보가 없어 계약을 등록할 수 없습니다.',
+        fieldErrors: {
+          selectedVehicle: 'VIN 정보가 있는 차량을 선택해 주세요.',
+        },
+      };
     }
-  };
 
-  const handleAccidentReport = (report: Omit<AccidentReport, 'id'>) => {
-    // TODO: DB에 사고 데이터 저장
-    console.log('사고 등록:', report);
-    
-    // 성공 메시지
-    alert(`사고가 등록되었습니다.\n차량번호: ${report.vehicleNumber}\n유형: ${report.accidentType}\n담당자: ${report.assignee}`);
-    
-    // 조치 필요 항목 페이지로 이동
-    navigate('/action-required?filter=사고 접수');
-  };
+    const startAt = toIsoDateTimeFromDateAndTime(formValues.startDate, formValues.startTime);
+    const endAt = toIsoDateTimeFromDateAndTime(formValues.endDate, formValues.endTime);
+    if (!startAt || !endAt) {
+      return {
+        formError: '대여 시작/종료 일시가 올바르지 않습니다.',
+        fieldErrors: {
+          startDate: '유효한 날짜/시간을 입력해 주세요.',
+          endDate: '유효한 날짜/시간을 입력해 주세요.',
+        },
+      };
+    }
+
+    if (new Date(endAt).getTime() < new Date(startAt).getTime()) {
+      return {
+        formError: '반납 일시는 픽업 일시보다 빠를 수 없습니다.',
+        fieldErrors: {
+          endDate: '반납 일시를 다시 확인해 주세요.',
+        },
+      };
+    }
+
+    const reservationId = `R-${Date.now()}-${Math.floor(Math.random() * 1000).toString().padStart(3, '0')}`;
+    const startDateOffset = toDateOffset(startAt) ?? 0;
+    const endDateOffset = toDateOffset(endAt) ?? startDateOffset;
+    const fallbackReservation: Reservation = {
+      id: reservationId,
+      vehicleNumber: formValues.selectedVehicle,
+      customer: formValues.customerName.trim(),
+      startDate: Math.min(startDateOffset, endDateOffset),
+      endDate: Math.max(startDateOffset, endDateOffset),
+      type: 'reservation',
+      issues: [],
+      phone: formValues.customerPhone.trim(),
+      paymentMethod: formValues.paymentMethod,
+      amount: toCurrencyDisplayFromInput(formValues.amount),
+      deposit: toCurrencyDisplayFromInput(formValues.deposit),
+      paymentStatus: formValues.paymentStatus,
+      startDateFull: formValues.startDate,
+      endDateFull: formValues.endDate,
+    };
+
+    try {
+      const payload = await createReservation({
+        reservationId,
+        vin,
+        startAt,
+        endAt,
+        contractStatus: '예약중',
+        vehicleNumber: formValues.selectedVehicle,
+        plate: formValues.selectedVehicle,
+        customerName: formValues.customerName.trim(),
+        memo: [
+          `phone=${formValues.customerPhone.trim()}`,
+          `pickup=${formValues.pickupLocation.trim()}`,
+          `return=${formValues.returnLocation.trim()}`,
+          `paymentMethod=${formValues.paymentMethod}`,
+          `paymentStatus=${formValues.paymentStatus}`,
+        ].join(', '),
+      });
+
+      const createdReservation = toReservationDetail(payload, fallbackReservation);
+      const responseId = isRecord(payload)
+        ? toStringValue(payload.id) ?? toStringValue(payload.reservationId) ?? toStringValue(payload.rentalId)
+        : null;
+      const nextReservation: Reservation = responseId
+        ? { ...createdReservation, id: responseId }
+        : createdReservation;
+
+      setShowModal(false);
+      setDragSelection(null);
+      openReservationDetail(nextReservation);
+      await hydrateReservationsData();
+      toast.success(`예약이 등록되었습니다. 예약번호: ${nextReservation.id}`);
+      return null;
+    } catch (error) {
+      if (error instanceof ApiError) {
+        if (error.status === 400) {
+          return {
+            formError: error.message || '입력값을 확인해 주세요.',
+            fieldErrors: toCreateFieldErrors(error),
+          };
+        }
+        if (error.status === 403) {
+          return {
+            formError: '예약 생성 권한이 없습니다. 관리자에게 권한을 요청해 주세요.',
+          };
+        }
+        if (error.status === 409) {
+          return {
+            formError: error.message || '동일한 예약이 이미 존재합니다. 입력값을 확인해 주세요.',
+          };
+        }
+        if (isRetryableMutationError(error)) {
+          toast.error(RETRY_TOAST_MESSAGE);
+          return {
+            formError: RETRY_TOAST_MESSAGE,
+          };
+        }
+
+        return {
+          formError: error.message || '예약 생성에 실패했습니다.',
+        };
+      }
+
+      toast.error(RETRY_TOAST_MESSAGE);
+      return {
+        formError: '예약 생성에 실패했습니다. 잠시 후 다시 시도해 주세요.',
+      };
+    }
+  }, [hydrateReservationsData, openReservationDetail, vehicleAssets]);
+
+  const handleReturnClick = useCallback(() => {
+    setReturnSubmitError(null);
+    setShowReturnConfirm(true);
+  }, []);
+
+  const handleConfirmReturn = useCallback(async () => {
+    if (!selectedReservation || isReturnSubmitting) {
+      return;
+    }
+
+    if (selectedReservation.type === 'return') {
+      setReturnSubmitError('이미 반납 처리된 예약입니다.');
+      return;
+    }
+
+    setIsReturnSubmitting(true);
+    setReturnSubmitError(null);
+
+    try {
+      const payload = await returnReservation(selectedReservation.id, {
+        returnedAt: new Date().toISOString(),
+      });
+      const fallbackReservation: Reservation = {
+        ...selectedReservation,
+        type: 'return',
+      };
+      const updatedReservation = toReservationDetail(payload, fallbackReservation);
+
+      setReservationsData((prev) => prev.map((reservation) => (
+        reservation.id === updatedReservation.id ? updatedReservation : reservation
+      )));
+      setSelectedReservation(updatedReservation);
+      const matchedAsset = vehicleAssets.find((asset) => asset.vehicleNumber === updatedReservation.vehicleNumber);
+      if (matchedAsset) {
+        setSelectedVehicleAsset({
+          ...matchedAsset,
+          status: toVehicleStatusFromReservation(updatedReservation.type),
+        });
+      } else {
+        setSelectedVehicleAsset(createFallbackVehicleAsset(updatedReservation));
+      }
+
+      setShowReturnConfirm(false);
+      await hydrateReservationsData();
+      void hydrateReservationDetail(updatedReservation.id, updatedReservation);
+      toast.success('차량이 반납 처리되었습니다.');
+    } catch (error) {
+      if (error instanceof ApiError) {
+        if (error.status === 400) {
+          setReturnSubmitError(error.message || '반납 요청값을 확인해 주세요.');
+          return;
+        }
+        if (error.status === 403) {
+          setReturnSubmitError('차량 반납 처리 권한이 없습니다. 관리자에게 권한을 요청해 주세요.');
+          return;
+        }
+        if (error.status === 409) {
+          setReturnSubmitError(error.message || '상태 전이 충돌이 발생했습니다. 최신 상태를 확인해 주세요.');
+          void hydrateReservationsData();
+          void hydrateReservationDetail(selectedReservation.id, selectedReservation);
+          return;
+        }
+        if (isRetryableMutationError(error)) {
+          setReturnSubmitError(RETRY_TOAST_MESSAGE);
+          toast.error(RETRY_TOAST_MESSAGE);
+          return;
+        }
+
+        setReturnSubmitError(error.message || '반납 처리 중 오류가 발생했습니다.');
+        return;
+      }
+
+      setReturnSubmitError('반납 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.');
+      toast.error(RETRY_TOAST_MESSAGE);
+    } finally {
+      setIsReturnSubmitting(false);
+    }
+  }, [hydrateReservationDetail, hydrateReservationsData, isReturnSubmitting, selectedReservation, vehicleAssets]);
+
+  const handleAccidentReport = useCallback(async (
+    report: AccidentReportFormValues,
+  ): Promise<AccidentReportSubmitFeedback | null> => {
+    if (!selectedReservation) {
+      return {
+        formError: '선택된 예약 정보가 없습니다. 다시 시도해 주세요.',
+      };
+    }
+
+    const now = new Date();
+    const accidentDate = formatDateAsYmd(now);
+    const accidentHour = pad2(now.getHours());
+    const accidentMinute = pad2(now.getMinutes());
+    const accidentSecond = pad2(now.getSeconds());
+    const accidentDateTime = now.toISOString();
+    const accidentDisplayTime = toAccidentDisplayTime(now);
+    const blackboxFileName = sanitizeFileName(report.blackboxFile.name);
+    const blackboxGcsObjectName = `rentals/${selectedReservation.id}/blackbox/${blackboxFileName}`;
+
+    try {
+      const payload = await reportReservationAccident(selectedReservation.id, {
+        accidentReport: {
+          accidentDate,
+          accidentHour,
+          accidentMinute,
+          accidentSecond,
+          accidentDateTime,
+          accidentDisplayTime,
+          blackboxFileName,
+          blackboxGcsObjectName,
+          handlerName: report.assignee,
+          recordedAt: accidentDateTime,
+        },
+        memo: report.description,
+      });
+
+      const fallbackReservation: Reservation = {
+        ...selectedReservation,
+        issues: withIssueLabel(selectedReservation.issues, '사고 접수'),
+      };
+      const updatedReservation = toReservationDetail(payload, fallbackReservation);
+      const nextReservation: Reservation = {
+        ...updatedReservation,
+        issues: withIssueLabel(updatedReservation.issues, '사고 접수'),
+      };
+
+      setReservationsData((prev) => prev.map((reservation) => (
+        reservation.id === nextReservation.id ? nextReservation : reservation
+      )));
+      setSelectedReservation(nextReservation);
+      const matchedAsset = vehicleAssets.find((asset) => asset.vehicleNumber === nextReservation.vehicleNumber);
+      if (matchedAsset) {
+        setSelectedVehicleAsset({
+          ...matchedAsset,
+          issues: withIssueLabel(matchedAsset.issues, '사고 접수'),
+        });
+      } else {
+        setSelectedVehicleAsset(createFallbackVehicleAsset(nextReservation));
+      }
+
+      setShowAccidentModal(false);
+      await hydrateReservationsData();
+      void hydrateReservationDetail(nextReservation.id, nextReservation);
+      toast.success('사고가 등록되었습니다.');
+      navigate('/action-required?filter=사고 접수');
+      return null;
+    } catch (error) {
+      if (error instanceof ApiError) {
+        if (error.status === 400) {
+          return {
+            formError: error.message || '입력값을 확인해 주세요.',
+            fieldErrors: toAccidentFieldErrors(error),
+          };
+        }
+        if (error.status === 403) {
+          return {
+            formError: '사고 등록 권한이 없습니다. 관리자에게 권한을 요청해 주세요.',
+          };
+        }
+        if (error.status === 409) {
+          return {
+            formError: error.message || '상태 전이 충돌이 발생했습니다. 최신 상태를 확인한 뒤 다시 시도해 주세요.',
+          };
+        }
+        if (isRetryableMutationError(error)) {
+          toast.error(RETRY_TOAST_MESSAGE);
+          return {
+            formError: RETRY_TOAST_MESSAGE,
+          };
+        }
+
+        return {
+          formError: error.message || '사고 등록 중 오류가 발생했습니다.',
+        };
+      }
+
+      toast.error(RETRY_TOAST_MESSAGE);
+      return {
+        formError: '사고 등록에 실패했습니다. 잠시 후 다시 시도해 주세요.',
+      };
+    }
+  }, [hydrateReservationDetail, hydrateReservationsData, navigate, selectedReservation, vehicleAssets]);
 
   return (
     <Layout title="대여 예약">
@@ -1649,6 +2090,7 @@ export default function Reservations() {
           vehicles={vehicles}
           vehicleAssets={vehicleAssets}
           dragSelection={dragSelection}
+          onSubmit={handleCreateReservation}
         />
 
         {/* 반납 확인 모달 */}
@@ -1659,12 +2101,23 @@ export default function Reservations() {
                 <div className="flex items-center justify-between mb-6">
                   <h2 className="text-xl font-bold text-[#1e2939]">차량 반납 확인</h2>
                   <button
-                    onClick={() => setShowReturnConfirm(false)}
+                    onClick={() => {
+                      setShowReturnConfirm(false);
+                      setReturnSubmitError(null);
+                    }}
                     className="p-2 hover:bg-gray-100 rounded-lg"
+                    disabled={isReturnSubmitting}
                   >
                     <X className="w-5 h-5" />
                   </button>
                 </div>
+
+                {returnSubmitError && (
+                  <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 flex items-start gap-2">
+                    <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+                    <span>{returnSubmitError}</span>
+                  </div>
+                )}
 
                 <p className="text-sm text-gray-700 mb-4">
                   {selectedReservation?.customer}님의 차량({selectedReservation?.vehicleNumber})을(를) 반납 처리하시겠습니까?
@@ -1673,13 +2126,19 @@ export default function Reservations() {
                 <div className="flex gap-3">
                   <button
                     onClick={handleConfirmReturn}
-                    className="flex-1 px-4 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium"
+                    className="flex-1 px-4 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium flex items-center justify-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
+                    disabled={isReturnSubmitting}
                   >
-                    확인
+                    {isReturnSubmitting && <Loader2 className="h-4 w-4 animate-spin" />}
+                    {isReturnSubmitting ? '처리 중...' : '확인'}
                   </button>
                   <button
-                    onClick={() => setShowReturnConfirm(false)}
+                    onClick={() => {
+                      setShowReturnConfirm(false);
+                      setReturnSubmitError(null);
+                    }}
                     className="flex-1 px-4 py-3 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 font-medium"
+                    disabled={isReturnSubmitting}
                   >
                     취소
                   </button>
@@ -1693,6 +2152,7 @@ export default function Reservations() {
         {showAccidentModal && selectedReservation && (
           <AccidentReportModal
             isOpen={showAccidentModal}
+            reservationId={selectedReservation.id}
             vehicleNumber={selectedReservation.vehicleNumber}
             customerName={selectedReservation.customer}
             onClose={() => setShowAccidentModal(false)}
