@@ -1,7 +1,7 @@
 import { Layout } from '../components/Layout';
 import { useSearchParams, useNavigate } from 'react-router';
-import { useState, useEffect, useCallback } from 'react';
-import { Search, X, ArrowUp, ArrowDown, Clock, User, CheckCircle2 } from 'lucide-react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { Search, X, ArrowUp, ArrowDown, Clock, User, CheckCircle2, Loader2, AlertTriangle } from 'lucide-react';
 import { PageStateBoundary } from '../components/PageStateBoundary';
 import {
   getCollectionFromPayload,
@@ -10,16 +10,9 @@ import {
   isPayloadEmpty,
   usePageEndpointState,
 } from '../hooks/usePageEndpointState';
-import { 
-  mockPayments, 
-  getUnpaidPayments, 
-  calculateOverdueDays, 
-  calculateLateFee, 
-  getPaymentSeverity,
-  type Payment,
-} from '../utils/paymentUtils';
-import { actionItems as mockActionItems, type MemoLog, type ActionItem as BaseActionItem } from '../data/mockData';
-import { getActionRequiredDashboard } from '../../services/dashboard';
+import { ApiError } from '../../services/api';
+import { getActionRequiredDetail, getActionRequiredList } from '../../services/actionRequired';
+import type { MemoLog } from '../data/mockData';
 
 interface ActionItem {
   id: string;
@@ -30,6 +23,7 @@ interface ActionItem {
   severity: 'High' | 'Medium' | 'Low';
   status: string;
   assignee: string;
+  description?: string;
   memos?: MemoLog[];
   paymentInfo?: {
     amount: number;
@@ -43,6 +37,11 @@ interface ActionItem {
 
 type SortField = 'type' | 'vehicleNumber' | 'customerName' | 'date' | 'severity' | 'status' | 'assignee';
 type SortDirection = 'asc' | 'desc' | null;
+type ActionStatusFilter = 'all' | 'pending' | 'in-progress' | 'resolved';
+type ActionPriorityFilter = 'all' | 'high' | 'medium' | 'low';
+
+const STATUS_OPTIONS = ['대기중', '진행중', '완료'] as const;
+const LIST_COLLECTION_KEYS = ['items', 'rows', 'list', 'actionRequired', 'actionItems'];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
@@ -72,142 +71,269 @@ function toNumberValue(value: unknown): number | null {
   return null;
 }
 
-function normalizeActionPriority(priorityValue: string | null): BaseActionItem['priority'] {
-  if (priorityValue === 'high' || priorityValue === 'medium' || priorityValue === 'low') {
-    return priorityValue;
+function pickString(source: Record<string, unknown>, keys: string[]): string | null {
+  for (const key of keys) {
+    const candidate = toStringValue(source[key]);
+    if (candidate) {
+      return candidate;
+    }
   }
-  if (priorityValue === 'High') {
-    return 'high';
-  }
-  if (priorityValue === 'Medium') {
-    return 'medium';
-  }
-  return 'low';
+  return null;
 }
 
-function normalizeActionStatus(statusValue: string | null): BaseActionItem['status'] {
-  if (statusValue === 'pending' || statusValue === 'in-progress' || statusValue === 'resolved') {
-    return statusValue;
+function normalizeSeverity(rawValue: string | null): ActionItem['severity'] {
+  if (!rawValue) {
+    return 'Low';
   }
-  if (statusValue === '대기중') {
-    return 'pending';
+
+  const normalized = rawValue.toLowerCase().replace(/_/g, '-');
+  if (normalized === 'high' || normalized === '상') {
+    return 'High';
   }
-  if (statusValue === '진행중') {
-    return 'in-progress';
+  if (normalized === 'medium' || normalized === 'mid' || normalized === '중') {
+    return 'Medium';
   }
-  if (statusValue === '완료') {
+  return 'Low';
+}
+
+function normalizeStatusLabel(rawValue: string | null): string {
+  if (!rawValue) {
+    return '대기중';
+  }
+  if (rawValue.includes('연체')) {
+    return rawValue;
+  }
+
+  const normalized = rawValue.toLowerCase().replace(/_/g, '-');
+  if (normalized === 'pending' || normalized === 'open') {
+    return '대기중';
+  }
+  if (normalized === 'in-progress' || normalized === 'in progress' || normalized === 'processing') {
+    return '진행중';
+  }
+  if (normalized === 'resolved' || normalized === 'done' || normalized === 'closed') {
+    return '완료';
+  }
+  if (rawValue === '대기' || rawValue === '대기중') {
+    return '대기중';
+  }
+  if (rawValue === '진행중') {
+    return '진행중';
+  }
+  if (rawValue === '완료') {
+    return '완료';
+  }
+
+  return rawValue;
+}
+
+function normalizeMemoStatus(rawValue: string | null): MemoLog['status'] {
+  const normalizedLabel = normalizeStatusLabel(rawValue);
+  if (normalizedLabel.includes('완료')) {
     return 'resolved';
+  }
+  if (normalizedLabel.includes('진행')) {
+    return 'in-progress';
   }
   return 'pending';
 }
 
-function toActionItems(payload: unknown): BaseActionItem[] {
-  const rows = getCollectionFromPayload(payload, ['actionItems', 'items', 'rows', 'list']);
-  if (!rows) {
-    return mockActionItems;
-  }
-
-  if (rows.length === 0) {
+function toMemoLogs(value: unknown): MemoLog[] {
+  if (!Array.isArray(value)) {
     return [];
   }
 
-  const normalizedRows: BaseActionItem[] = rows
-    .map((row, index) => {
-      if (!isRecord(row)) {
+  return value
+    .map((entry, index) => {
+      if (!isRecord(entry)) {
         return null;
       }
 
-      const category = toStringValue(row.category) ?? toStringValue(row.type);
-      const vehicleNumber = toStringValue(row.vehicleNumber) ?? toStringValue(row.plateNumber);
-      if (!category || !vehicleNumber) {
+      const content = pickString(entry, ['content', 'memo', 'note']);
+      if (!content) {
         return null;
       }
 
+      const statusValue = pickString(entry, ['status']);
       return {
-        id: toStringValue(row.id) ?? `AR-${index + 1}`,
-        category,
-        vehicleNumber,
-        customer: toStringValue(row.customer) ?? toStringValue(row.customerName) ?? undefined,
-        issue: toStringValue(row.issue) ?? category,
-        dueDate: toStringValue(row.dueDate) ?? toStringValue(row.date) ?? '1970-01-01',
-        priority: normalizeActionPriority(toStringValue(row.priority)),
-        status: normalizeActionStatus(toStringValue(row.status)),
-        assignee: toStringValue(row.assignee) ?? undefined,
+        id: pickString(entry, ['id', 'memoId']) ?? `memo-${index + 1}`,
+        content,
+        timestamp: pickString(entry, ['timestamp', 'createdAt', 'changedAt', 'updatedAt']) ?? new Date().toISOString(),
+        author: pickString(entry, ['author', 'createdBy', 'changedBy', 'updatedBy']) ?? '-',
+        status: normalizeMemoStatus(statusValue),
+        statusLabel: pickString(entry, ['statusLabel']) ?? normalizeStatusLabel(statusValue),
       };
     })
-    .filter((row): row is BaseActionItem => row !== null);
-
-  return normalizedRows.length > 0 ? normalizedRows : mockActionItems;
+    .filter((entry): entry is MemoLog => entry !== null);
 }
 
-function normalizePaymentType(value: string | null): Payment['type'] {
-  if (value === '예약금' || value === '본결제' || value === '추가정산' || value === '월렌트') {
-    return value;
+function toPaymentInfo(source: Record<string, unknown>): ActionItem['paymentInfo'] | undefined {
+  const paymentSource = isRecord(source.paymentInfo)
+    ? source.paymentInfo
+    : isRecord(source.payment)
+      ? source.payment
+      : source;
+
+  const amount = toNumberValue(paymentSource.amount);
+  const dueDate = pickString(paymentSource, ['dueDate', 'paymentDueDate']);
+  const overdueDays = toNumberValue(paymentSource.overdueDays) ?? 0;
+  const lateFee = toNumberValue(paymentSource.lateFee) ?? 0;
+  const totalAmount = toNumberValue(paymentSource.totalAmount) ?? (amount ?? 0) + lateFee;
+
+  if (amount === null && dueDate === null && overdueDays === 0 && lateFee === 0) {
+    return undefined;
   }
-  return '본결제';
+
+  return {
+    amount: amount ?? 0,
+    overdueDays,
+    lateFee,
+    totalAmount,
+    dueDate: dueDate ?? '-',
+    paymentType: pickString(paymentSource, ['paymentType', 'type']) ?? '-',
+  };
 }
 
-function normalizePaymentStatus(value: string | null): Payment['status'] {
-  if (value === '대기' || value === '완료' || value === '미납' || value === '부분납부') {
-    return value;
+function toActionItem(row: unknown, index: number, fallbackId?: string): ActionItem | null {
+  if (!isRecord(row)) {
+    return null;
   }
-  return '대기';
-}
 
-function normalizePaymentMethod(value: string | null): Payment['method'] {
-  if (value === '카드' || value === '현금' || value === '계좌이체') {
-    return value;
+  const id = pickString(row, ['id', 'actionId', 'actionItemId', 'paymentId']) ?? fallbackId ?? `action-${index + 1}`;
+  const paymentInfo = toPaymentInfo(row);
+  const type = pickString(row, ['type', 'category', 'issueType', 'issue', 'title']) ?? (paymentInfo ? '미납/결제 문제' : null);
+  const vehicleNumber = pickString(row, ['vehicleNumber', 'plateNumber', 'vehicleNo', 'plate']);
+
+  if (!type || !vehicleNumber) {
+    return null;
   }
-  return '카드';
+
+  const memos = toMemoLogs(row.memos ?? row.memoHistory);
+  const latestMemo = pickString(row, ['memo']);
+  if (memos.length === 0 && latestMemo) {
+    const statusValue = pickString(row, ['status', 'statusLabel']);
+    memos.push({
+      id: `memo-inline-${id}`,
+      content: latestMemo,
+      timestamp: pickString(row, ['updatedAt', 'createdAt']) ?? new Date().toISOString(),
+      author: pickString(row, ['updatedBy', 'createdBy']) ?? '-',
+      status: normalizeMemoStatus(statusValue),
+      statusLabel: normalizeStatusLabel(statusValue),
+    });
+  }
+
+  return {
+    id,
+    type,
+    vehicleNumber,
+    customerName: pickString(row, ['customerName', 'customer', 'customerDisplayName']) ?? '-',
+    date: pickString(row, ['date', 'dueDate', 'occurredAt', 'createdAt']) ?? '-',
+    severity: normalizeSeverity(pickString(row, ['severity', 'priority'])),
+    status: normalizeStatusLabel(pickString(row, ['statusLabel', 'status'])),
+    assignee: pickString(row, ['assignee', 'assigneeName', 'owner', 'assignedTo']) ?? '-',
+    description: pickString(row, ['description', 'detail']),
+    memos: memos.length > 0 ? memos : undefined,
+    paymentInfo,
+  };
 }
 
-function toPayments(payload: unknown): Payment[] {
-  const rows = getCollectionFromPayload(payload, ['payments', 'paymentItems', 'receivables']);
+function toTotalCount(payload: unknown, fallback: number): number {
+  if (!isRecord(payload)) {
+    return fallback;
+  }
+
+  const direct = toNumberValue(payload.total)
+    ?? toNumberValue(payload.totalCount)
+    ?? toNumberValue(payload.count)
+    ?? toNumberValue(payload.size);
+  if (direct !== null) {
+    return direct;
+  }
+
+  if (isRecord(payload.meta)) {
+    const metaCount = toNumberValue(payload.meta.total)
+      ?? toNumberValue(payload.meta.totalCount)
+      ?? toNumberValue(payload.meta.count)
+      ?? toNumberValue(payload.meta.size);
+    if (metaCount !== null) {
+      return metaCount;
+    }
+  }
+
+  return fallback;
+}
+
+function toActionItemCollection(payload: unknown): { items: ActionItem[]; total: number } {
+  const rows = getCollectionFromPayload(payload, LIST_COLLECTION_KEYS);
   if (!rows) {
-    return mockPayments;
+    return { items: [], total: toTotalCount(payload, 0) };
   }
 
-  if (rows.length === 0) {
-    return [];
-  }
+  const uniqueIds = new Set<string>();
+  const items: ActionItem[] = [];
 
-  const normalizedRows: Payment[] = rows
-    .map((row, index) => {
-      if (!isRecord(row)) {
-        return null;
-      }
+  rows.forEach((row, index) => {
+    const actionItem = toActionItem(row, index);
+    if (!actionItem) {
+      return;
+    }
+    if (uniqueIds.has(actionItem.id)) {
+      return;
+    }
+    uniqueIds.add(actionItem.id);
+    items.push(actionItem);
+  });
 
-      const vehicleNumber = toStringValue(row.vehicleNumber) ?? toStringValue(row.plateNumber);
-      const customerName = toStringValue(row.customerName) ?? toStringValue(row.customer);
-      const amount = toNumberValue(row.amount);
-      const dueDate = toStringValue(row.dueDate);
-      if (!vehicleNumber || !customerName || amount === null || !dueDate) {
-        return null;
-      }
+  return {
+    items,
+    total: toTotalCount(payload, items.length),
+  };
+}
 
+function toActionItemDetail(payload: unknown, fallbackItem: ActionItem): ActionItem {
+  if (isRecord(payload)) {
+    const detailCandidate = payload.item
+      ?? payload.actionRequired
+      ?? payload.actionItem
+      ?? payload.detail
+      ?? payload.data
+      ?? payload;
+
+    const detailItem = toActionItem(detailCandidate, 0, fallbackItem.id);
+    if (detailItem) {
       return {
-        id: toStringValue(row.id) ?? `PAY-${index + 1}`,
-        reservationId: toStringValue(row.reservationId) ?? '-',
-        vehicleNumber,
-        customerName,
-        type: normalizePaymentType(toStringValue(row.type)),
-        amount,
-        dueDate,
-        paidDate: toStringValue(row.paidDate) ?? undefined,
-        status: normalizePaymentStatus(toStringValue(row.status)),
-        method: normalizePaymentMethod(toStringValue(row.method)),
-        description: toStringValue(row.description) ?? undefined,
+        ...fallbackItem,
+        ...detailItem,
+        paymentInfo: detailItem.paymentInfo ?? fallbackItem.paymentInfo,
+        memos: detailItem.memos ?? fallbackItem.memos,
       };
-    })
-    .filter((row): row is Payment => row !== null);
+    }
+  }
 
-  return normalizedRows.length > 0 ? normalizedRows : mockPayments;
+  const detailItem = toActionItem(payload, 0, fallbackItem.id);
+  if (detailItem) {
+    return {
+      ...fallbackItem,
+      ...detailItem,
+      paymentInfo: detailItem.paymentInfo ?? fallbackItem.paymentInfo,
+      memos: detailItem.memos ?? fallbackItem.memos,
+    };
+  }
+
+  return fallbackItem;
 }
 
 export default function ActionRequired() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
+
   const [selectedFilters, setSelectedFilters] = useState<string[]>([]);
+  const [statusFilter, setStatusFilter] = useState<ActionStatusFilter>('all');
+  const [priorityFilter, setPriorityFilter] = useState<ActionPriorityFilter>('all');
+  const [assigneeFilter, setAssigneeFilter] = useState('all');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+
   const [selectedItem, setSelectedItem] = useState<ActionItem | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [sortField, setSortField] = useState<SortField | null>(null);
@@ -215,16 +341,15 @@ export default function ActionRequired() {
   const [currentMemo, setCurrentMemo] = useState('');
   const [currentStatus, setCurrentStatus] = useState('');
   const [resolvedItemIds, setResolvedItemIds] = useState<Set<string>>(new Set());
-  const [sourceActionItems, setSourceActionItems] = useState<BaseActionItem[]>([]);
-  const [sourcePayments, setSourcePayments] = useState<Payment[]>([]);
+  const [sourceActionItems, setSourceActionItems] = useState<ActionItem[]>([]);
+  const [totalItems, setTotalItems] = useState(0);
 
-  // URL 파라미터에서 필터 읽기
-  useEffect(() => {
-    const filterParam = searchParams.get('filter');
-    if (filterParam && filterChips.includes(filterParam)) {
-      setSelectedFilters([filterParam]);
-    }
-  }, [searchParams]);
+  const [isDetailLoading, setIsDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState<string | null>(null);
+  const [isDetailNotFound, setIsDetailNotFound] = useState(false);
+
+  const detailRequestSequenceRef = useRef(0);
+  const detailControllerRef = useRef<AbortController | null>(null);
 
   const filterChips = [
     '사고 접수',
@@ -244,24 +369,48 @@ export default function ActionRequired() {
     isEmpty: isActionApiEmpty,
     run: hydrateActionItems,
   } = usePageEndpointState<unknown>({
-    request: (signal) => getActionRequiredDashboard({ signal }),
+    request: (signal) => getActionRequiredList({
+      page,
+      size: pageSize,
+      status: statusFilter === 'all' ? undefined : statusFilter,
+      priority: priorityFilter === 'all' ? undefined : priorityFilter,
+      assignee: assigneeFilter === 'all' ? undefined : assigneeFilter,
+      signal,
+    }),
     onSuccess: (payload) => {
-      setSourceActionItems(toActionItems(payload));
-      setSourcePayments(toPayments(payload));
+      const { items, total } = toActionItemCollection(payload);
+      setSourceActionItems(items);
+      setTotalItems(total);
     },
     isEmpty: (payload) => {
-      const actionRows = getCollectionFromPayload(payload, ['actionItems', 'items', 'rows', 'list']);
-      const paymentRows = getCollectionFromPayload(payload, ['payments', 'paymentItems', 'receivables']);
-      if (actionRows || paymentRows) {
-        return (actionRows?.length ?? 0) === 0 && (paymentRows?.length ?? 0) === 0;
+      const rows = getCollectionFromPayload(payload, LIST_COLLECTION_KEYS);
+      if (rows) {
+        return rows.length === 0;
       }
-      return isPayloadEmpty(payload, ['actionItems', 'items', 'rows', 'list']);
+      return isPayloadEmpty(payload, LIST_COLLECTION_KEYS);
     },
   });
 
   useEffect(() => {
     void hydrateActionItems();
+  }, [hydrateActionItems]);
+
+  useEffect(() => () => {
+    detailControllerRef.current?.abort();
   }, []);
+
+  useEffect(() => {
+    const filterParam = searchParams.get('filter');
+    const searchParam = searchParams.get('search');
+
+    if (filterParam && filterChips.includes(filterParam)) {
+      setSelectedFilters([filterParam]);
+    }
+
+    if (searchParam) {
+      setSearchQuery(searchParam);
+    }
+  }, [searchParams]);
 
   const handleActionItemsRetry = useCallback(() => {
     void hydrateActionItems();
@@ -270,76 +419,101 @@ export default function ActionRequired() {
   const resetActionFilters = useCallback(() => {
     setSelectedFilters([]);
     setSearchQuery('');
+    setStatusFilter('all');
+    setPriorityFilter('all');
+    setAssigneeFilter('all');
+    setPage(1);
   }, []);
 
   const handleActionErrorAction = useCallback(() => {
     handlePageErrorAction(itemsErrorKind, navigate);
   }, [itemsErrorKind, navigate]);
 
-  // mockData.ts의 actionItems를 ActionItem 형식으로 변환
-  const convertedActionItems: ActionItem[] = sourceActionItems.map(item => ({
-    id: item.id,
-    type: item.category,
-    vehicleNumber: item.vehicleNumber,
-    customerName: item.customer || '-',
-    date: item.dueDate,
-    severity: item.priority === 'high' ? 'High' : item.priority === 'medium' ? 'Medium' : 'Low',
-    status: item.status === 'pending' ? '대기중' : item.status === 'in-progress' ? '진행중' : '완료',
-    assignee: item.assignee || '-',
-    memos: item.memos,
-  }));
+  const hydrateActionDetail = useCallback(async (actionId: string, fallbackItem: ActionItem) => {
+    const requestSequence = detailRequestSequenceRef.current + 1;
+    detailRequestSequenceRef.current = requestSequence;
 
-  // 미납 데이터를 ActionItem으로 변환
-  const unpaidPayments = getUnpaidPayments(sourcePayments);
-  const unpaidActionItems: ActionItem[] = unpaidPayments.map(payment => {
-    const overdueDays = calculateOverdueDays(payment.dueDate);
-    const lateFee = calculateLateFee(payment.amount, overdueDays);
-    const severity = getPaymentSeverity(payment);
-    
-    return {
-      id: payment.id,
-      type: '미납/결제 문제',
-      vehicleNumber: payment.vehicleNumber,
-      customerName: payment.customerName,
-      date: payment.dueDate,
-      severity: severity,
-      status: `${overdueDays}일 연체`,
-      assignee: '정산팀',
-      paymentInfo: {
-        amount: payment.amount,
-        overdueDays: overdueDays,
-        lateFee: lateFee,
-        totalAmount: payment.amount + lateFee,
-        dueDate: payment.dueDate,
-        paymentType: payment.type,
+    detailControllerRef.current?.abort();
+    const controller = new AbortController();
+    detailControllerRef.current = controller;
+
+    setIsDetailLoading(true);
+    setDetailError(null);
+    setIsDetailNotFound(false);
+
+    try {
+      const payload = await getActionRequiredDetail(actionId, { signal: controller.signal });
+      if (controller.signal.aborted || detailRequestSequenceRef.current !== requestSequence) {
+        return;
       }
-    };
-  });
 
-  // 모든 데이터 합치기
-  const allItems: ActionItem[] = [
-    ...convertedActionItems,
-    ...unpaidActionItems,
-  ].filter(item => !resolvedItemIds.has(item.id)); // 해결된 항목 제외
+      setSelectedItem(toActionItemDetail(payload, fallbackItem));
+    } catch (error) {
+      if (controller.signal.aborted || detailRequestSequenceRef.current !== requestSequence) {
+        return;
+      }
+
+      if (error instanceof ApiError && error.status === 404) {
+        setIsDetailNotFound(true);
+        setDetailError('선택한 항목이 존재하지 않습니다. 목록 데이터를 기준으로 표시합니다.');
+        setSelectedItem(fallbackItem);
+        return;
+      }
+
+      setDetailError(error instanceof Error ? error.message : '상세 정보를 불러오는 중 오류가 발생했습니다.');
+      setSelectedItem(fallbackItem);
+    } finally {
+      if (detailRequestSequenceRef.current === requestSequence) {
+        setIsDetailLoading(false);
+      }
+    }
+  }, []);
+
+  const handleOpenDetail = useCallback((item: ActionItem) => {
+    setSelectedItem(item);
+    setCurrentMemo('');
+    setCurrentStatus('');
+    void hydrateActionDetail(item.id, item);
+  }, [hydrateActionDetail]);
+
+  const handleCloseDetail = useCallback(() => {
+    detailControllerRef.current?.abort();
+    setSelectedItem(null);
+    setCurrentMemo('');
+    setCurrentStatus('');
+    setIsDetailLoading(false);
+    setDetailError(null);
+    setIsDetailNotFound(false);
+  }, []);
+
+  const assigneeOptions = Array.from(
+    new Set(
+      sourceActionItems
+        .map((item) => item.assignee)
+        .filter((assignee) => assignee && assignee !== '-'),
+    ),
+  ).sort((left, right) => left.localeCompare(right, 'ko'));
+
+  const allItems: ActionItem[] = sourceActionItems.filter((item) => !resolvedItemIds.has(item.id));
 
   const toggleFilter = (filter: string) => {
-    setSelectedFilters(prev =>
+    setSelectedFilters((prev) =>
       prev.includes(filter)
-        ? prev.filter(f => f !== filter)
-        : [...prev, filter]
+        ? prev.filter((entry) => entry !== filter)
+        : [...prev, filter],
     );
   };
 
-  const filteredItems = allItems.filter(item => {
+  const filteredItems = allItems.filter((item) => {
     const matchesFilter = selectedFilters.length === 0 || selectedFilters.includes(item.type);
-    const matchesSearch = searchQuery === '' || 
-      item.vehicleNumber?.includes(searchQuery) ||
-      item.customerName?.includes(searchQuery);
+    const matchesSearch = searchQuery === ''
+      || item.vehicleNumber.includes(searchQuery)
+      || item.customerName.includes(searchQuery);
     return matchesFilter && matchesSearch;
   });
 
-  // 미납 필터가 선택되었는지 확인
   const isUnpaidFilterActive = selectedFilters.includes('미납/결제 문제');
+  const totalPages = Math.max(1, Math.ceil((totalItems || 0) / pageSize));
 
   const getSeverityColor = (severity: string) => {
     switch (severity) {
@@ -363,45 +537,37 @@ export default function ActionRequired() {
     }
   };
 
-  const sortedItems = filteredItems.sort((a, b) => {
+  const sortedItems = [...filteredItems].sort((left, right) => {
     if (!sortField) return 0;
-    const aValue = a[sortField];
-    const bValue = b[sortField];
-    if (typeof aValue === 'string' && typeof bValue === 'string') {
+    const leftValue = left[sortField];
+    const rightValue = right[sortField];
+    if (typeof leftValue === 'string' && typeof rightValue === 'string') {
       return sortDirection === 'asc'
-        ? aValue.localeCompare(bValue)
-        : bValue.localeCompare(aValue);
+        ? leftValue.localeCompare(rightValue, 'ko')
+        : rightValue.localeCompare(leftValue, 'ko');
     }
     return 0;
   });
 
   const handleMemoAdd = () => {
-    if (selectedItem && currentMemo) {
+    if (selectedItem && currentMemo.trim()) {
       const statusLabel = currentStatus || selectedItem.status;
-      let statusValue: 'pending' | 'in-progress' | 'resolved' = 'pending';
-      
-      if (statusLabel.includes('진행') || statusLabel.includes('중')) {
-        statusValue = 'in-progress';
-      } else if (statusLabel.includes('완료')) {
-        statusValue = 'resolved';
-      }
-      
+      const memoStatus = normalizeMemoStatus(statusLabel);
+
       const newMemo: MemoLog = {
         id: Date.now().toString(),
-        content: currentMemo,
+        content: currentMemo.trim(),
         timestamp: new Date().toISOString(),
         author: '김민수',
-        status: statusValue,
-        statusLabel: statusLabel
+        status: memoStatus,
+        statusLabel: statusLabel,
       };
-      
-      const updatedItem: ActionItem = {
+
+      setSelectedItem({
         ...selectedItem,
         status: currentStatus || selectedItem.status,
         memos: [...(selectedItem.memos || []), newMemo],
-      };
-      
-      setSelectedItem(updatedItem);
+      });
       setCurrentMemo('');
       setCurrentStatus('');
     }
@@ -409,10 +575,9 @@ export default function ActionRequired() {
 
   const handleResolveIssue = () => {
     if (!selectedItem) return;
-    
+
     if (confirm(`"${selectedItem.type}" 이슈를 해결 완료 처리하시겠습니까?\n\n해결된 항목은 목록에서 제거됩니다.`)) {
-      // 해결된 항목 ID 추가
-      setResolvedItemIds(prev => new Set([...prev, selectedItem.id]));
+      setResolvedItemIds((prev) => new Set([...prev, selectedItem.id]));
       setSelectedItem(null);
       alert('✅ 이슈가 해결 완료되었습니다.\n목록에서 제거되었습니다.');
     }
@@ -421,9 +586,7 @@ export default function ActionRequired() {
   return (
     <Layout title="조치 필요 항목">
       <div className="p-6">
-        {/* 검색 및 필터 */}
         <div className="mb-6 space-y-4">
-          {/* 검색창 */}
           <div className="relative">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
             <input
@@ -435,7 +598,66 @@ export default function ActionRequired() {
             />
           </div>
 
-          {/* 필터 칩 */}
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <select
+              value={statusFilter}
+              onChange={(e) => {
+                setStatusFilter(e.target.value as ActionStatusFilter);
+                setPage(1);
+              }}
+              className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="all">상태 전체</option>
+              <option value="pending">대기</option>
+              <option value="in-progress">진행중</option>
+              <option value="resolved">완료</option>
+            </select>
+
+            <select
+              value={priorityFilter}
+              onChange={(e) => {
+                setPriorityFilter(e.target.value as ActionPriorityFilter);
+                setPage(1);
+              }}
+              className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="all">우선순위 전체</option>
+              <option value="high">High</option>
+              <option value="medium">Medium</option>
+              <option value="low">Low</option>
+            </select>
+
+            <select
+              value={assigneeFilter}
+              onChange={(e) => {
+                setAssigneeFilter(e.target.value);
+                setPage(1);
+              }}
+              className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="all">담당자 전체</option>
+              {assigneeOptions.map((assignee) => (
+                <option key={assignee} value={assignee}>
+                  {assignee}
+                </option>
+              ))}
+            </select>
+
+            <select
+              value={String(pageSize)}
+              onChange={(e) => {
+                const nextSize = Number(e.target.value);
+                setPageSize(Number.isFinite(nextSize) && nextSize > 0 ? nextSize : 20);
+                setPage(1);
+              }}
+              className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="10">10개씩 보기</option>
+              <option value="20">20개씩 보기</option>
+              <option value="50">50개씩 보기</option>
+            </select>
+          </div>
+
           <div className="flex flex-wrap gap-2">
             {filterChips.map((chip) => {
               const isSelected = selectedFilters.includes(chip);
@@ -456,18 +678,42 @@ export default function ActionRequired() {
             })}
           </div>
 
-          {/* 결과 개수 표시 */}
-          <div className="text-sm text-gray-600">
-            총 <span className="font-bold text-blue-600">{sortedItems.length}</span>건의 조치 필요 항목
-            {resolvedItemIds.size > 0 && (
-              <span className="ml-2 text-green-600">
-                (해결 완료: {resolvedItemIds.size}건)
+          <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-gray-600">
+            <div>
+              현재 페이지 <span className="font-bold text-blue-600">{sortedItems.length}</span>건 표시
+              {' · '}
+              서버 집계 <span className="font-bold text-blue-600">{totalItems}</span>건
+              {resolvedItemIds.size > 0 && (
+                <span className="ml-2 text-green-600">
+                  (해결 완료: {resolvedItemIds.size}건)
+                </span>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+                disabled={isItemsLoading || page <= 1}
+                className="px-3 py-1.5 text-sm border border-gray-300 rounded-md disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+              >
+                이전
+              </button>
+              <span className="text-sm text-gray-600">
+                {page} / {totalPages}
               </span>
-            )}
+              <button
+                type="button"
+                onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
+                disabled={isItemsLoading || page >= totalPages}
+                className="px-3 py-1.5 text-sm border border-gray-300 rounded-md disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+              >
+                다음
+              </button>
+            </div>
           </div>
         </div>
 
-        {/* 테이블 */}
         <PageStateBoundary
           isLoading={isItemsLoading}
           error={itemsError}
@@ -525,10 +771,7 @@ export default function ActionRequired() {
                 </thead>
                 <tbody className="divide-y divide-gray-200">
                   {sortedItems.map((item) => (
-                    <tr
-                      key={item.id}
-                      className="hover:bg-gray-50"
-                    >
+                    <tr key={item.id} className="hover:bg-gray-50">
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{item.type}</td>
                       <td
                         className="px-6 py-4 whitespace-nowrap text-sm font-medium text-blue-600 hover:text-blue-800 cursor-pointer hover:underline"
@@ -562,7 +805,7 @@ export default function ActionRequired() {
                       <td className="px-6 py-4 whitespace-nowrap text-sm">
                         <button
                           className="text-blue-600 hover:text-blue-800 font-medium"
-                          onClick={() => setSelectedItem(item)}
+                          onClick={() => handleOpenDetail(item)}
                         >
                           보기
                         </button>
@@ -575,19 +818,33 @@ export default function ActionRequired() {
           </div>
         </PageStateBoundary>
 
-        {/* 상세 패널 (오른쪽 슬라이드) */}
         {selectedItem && (
           <div className="fixed inset-y-0 right-0 w-96 bg-white shadow-2xl z-50 overflow-y-auto">
             <div className="p-6">
               <div className="flex items-center justify-between mb-6">
                 <h2 className="text-lg font-bold text-[#1e2939]">상세 정보</h2>
-                <button
-                  onClick={() => setSelectedItem(null)}
-                  className="p-2 hover:bg-gray-100 rounded-lg"
-                >
+                <button onClick={handleCloseDetail} className="p-2 hover:bg-gray-100 rounded-lg">
                   <X className="w-5 h-5" />
                 </button>
               </div>
+
+              {isDetailLoading && (
+                <div className="mb-4 p-3 rounded-lg bg-blue-50 border border-blue-100 text-blue-700 text-sm flex items-center gap-2">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  상세 데이터를 불러오는 중입니다.
+                </div>
+              )}
+
+              {detailError && (
+                <div className={`mb-4 p-3 rounded-lg text-sm border flex items-start gap-2 ${
+                  isDetailNotFound
+                    ? 'bg-amber-50 border-amber-200 text-amber-700'
+                    : 'bg-red-50 border-red-200 text-red-700'
+                }`}>
+                  <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+                  <span>{detailError}</span>
+                </div>
+              )}
 
               <div className="space-y-4">
                 <div>
@@ -619,7 +876,13 @@ export default function ActionRequired() {
                   </p>
                 </div>
 
-                {/* 미납 결제 정보 표시 */}
+                {selectedItem.description && (
+                  <div>
+                    <label className="text-sm font-semibold text-gray-600">상세 설명</label>
+                    <p className="text-sm text-gray-700 mt-1 whitespace-pre-wrap">{selectedItem.description}</p>
+                  </div>
+                )}
+
                 {selectedItem.paymentInfo && (
                   <div className="border-t border-gray-200 pt-4">
                     <label className="text-sm font-semibold text-gray-600 mb-3 block">결제 정보</label>
@@ -637,7 +900,7 @@ export default function ActionRequired() {
                         <span className="text-sm font-bold text-red-600">{selectedItem.paymentInfo.overdueDays}일</span>
                       </div>
                       <div className="flex justify-between items-center">
-                        <span className="text-sm text-gray-700">연체료 (2%/일)</span>
+                        <span className="text-sm text-gray-700">연체료</span>
                         <span className="text-sm font-semibold text-red-600">{selectedItem.paymentInfo.lateFee.toLocaleString()}원</span>
                       </div>
                       <div className="border-t border-red-200 pt-2 mt-2 flex justify-between items-center">
@@ -656,9 +919,14 @@ export default function ActionRequired() {
                       value={currentStatus || selectedItem.status}
                       onChange={(e) => setCurrentStatus(e.target.value)}
                     >
-                      <option value="대기중">대기중</option>
-                      <option value="진행중">진행중</option>
-                      <option value="완료">완료</option>
+                      {!STATUS_OPTIONS.includes(selectedItem.status as typeof STATUS_OPTIONS[number]) && (
+                        <option value={selectedItem.status}>{selectedItem.status}</option>
+                      )}
+                      {STATUS_OPTIONS.map((statusOption) => (
+                        <option key={statusOption} value={statusOption}>
+                          {statusOption}
+                        </option>
+                      ))}
                     </select>
                   </div>
                 </div>
@@ -681,7 +949,6 @@ export default function ActionRequired() {
                   </button>
                 </div>
 
-                {/* 메모 히스토리 */}
                 {selectedItem.memos && selectedItem.memos.length > 0 && (
                   <div>
                     <label className="text-sm font-semibold text-gray-600 mb-2 block">처리 내역</label>
@@ -704,11 +971,11 @@ export default function ActionRequired() {
                             <User className="w-3 h-3 text-blue-500" />
                             <span className="text-xs font-semibold text-blue-700">{memo.author}</span>
                             <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${
-                              memo.status === 'resolved' 
-                                ? 'bg-green-100 text-green-700' 
+                              memo.status === 'resolved'
+                                ? 'bg-green-100 text-green-700'
                                 : memo.status === 'in-progress'
-                                ? 'bg-blue-100 text-blue-700'
-                                : 'bg-gray-100 text-gray-700'
+                                  ? 'bg-blue-100 text-blue-700'
+                                  : 'bg-gray-100 text-gray-700'
                             }`}>
                               {memo.statusLabel}
                             </span>
@@ -723,16 +990,17 @@ export default function ActionRequired() {
                 <div className="pt-4 space-y-2">
                   <button
                     className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium"
-                    onClick={() => navigate(`/assets?vehicle=${encodeURIComponent(selectedItem.vehicleNumber)}`)}>
+                    onClick={() => navigate(`/assets?vehicle=${encodeURIComponent(selectedItem.vehicleNumber)}`)}
+                  >
                     관련 자산 보기
                   </button>
                   <button
                     className="w-full px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 font-medium"
-                    onClick={() => navigate(`/reservations?search=${encodeURIComponent(selectedItem.customerName)}`)}>
+                    onClick={() => navigate(`/reservations?search=${encodeURIComponent(selectedItem.customerName)}`)}
+                  >
                     관련 예약 보기
                   </button>
-                  
-                  {/* 이슈 해결 완료 버튼 */}
+
                   {selectedItem.status !== '완료' && (
                     <button
                       className="w-full px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium flex items-center justify-center gap-2"
