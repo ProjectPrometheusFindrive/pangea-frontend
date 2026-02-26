@@ -2,7 +2,9 @@ import { Link, useLocation, useNavigate } from 'react-router';
 import { Home, AlertCircle, Car, Calendar, Settings, Bell, Menu, TrendingUp, X, AlertTriangle, Shield, FileText, Signal, DollarSign, AlertOctagon, Wrench, Clock, Sparkles, LogOut, User, Building2, Trash2, ChevronDown, Zap } from 'lucide-react';
 import { ReactNode, useState, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { useAuthorization } from '../context/AuthorizationContext';
 import { useCompany } from '../context/CompanyContext';
+import { resolveRoutePermissionForPath, ROUTE_PERMISSIONS } from '../authorization';
 
 interface LayoutProps {
   children: ReactNode;
@@ -23,7 +25,8 @@ interface Notification {
 export function Layout({ children, title }: LayoutProps) {
   const location = useLocation();
   const navigate = useNavigate();
-  const { viewRole, logout } = useAuth();
+  const { logout } = useAuth();
+  const { canAccessRoute } = useAuthorization();
   const { company, isLoading: isCompanyLoading, isUpdating: isCompanyUpdating, error: companyError, updateCompany } = useCompany();
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
@@ -145,11 +148,20 @@ export function Layout({ children, title }: LayoutProps) {
     };
   }, [showNotifications, showAccountMenu]);
 
+  const navigateWithRouteGuard = (path: string) => {
+    const routePermission = resolveRoutePermissionForPath(path);
+    if (routePermission && !canAccessRoute(routePermission)) {
+      navigate('/forbidden');
+      return;
+    }
+    navigate(path);
+  };
+
   const handleNotificationClick = (notification: Notification) => {
     setNotifications(prev =>
       prev.map(n => n.id === notification.id ? { ...n, isRead: true } : n)
     );
-    navigate(notification.link);
+    navigateWithRouteGuard(notification.link);
     setShowNotifications(false);
   };
 
@@ -231,20 +243,16 @@ export function Layout({ children, title }: LayoutProps) {
   };
 
   const menuItems = [
-    { path: '/', label: '홈', icon: Home, roles: ['rental-business'] },
-    { path: '/action-required', label: '조치 필요 항목', icon: AlertCircle, roles: ['rental-business'] },
-    { path: '/assets', label: '차량 자산', icon: Car, roles: ['rental-business'] },
-    { path: '/reservations', label: '대여 예약', icon: Calendar, roles: ['rental-business'] },
-    { path: '/revenue', label: '매출 요약', icon: TrendingUp, roles: ['rental-business'] },
-    { path: '/device-installation', label: '단말 장착/관리', icon: Zap, roles: ['device-installer'] },
-    { path: '/settings', label: '설정', icon: Settings, roles: ['rental-business'] },
+    { path: '/', label: '홈', icon: Home, permission: ROUTE_PERMISSIONS.home },
+    { path: '/action-required', label: '조치 필요 항목', icon: AlertCircle, permission: ROUTE_PERMISSIONS.actionRequired },
+    { path: '/assets', label: '차량 자산', icon: Car, permission: ROUTE_PERMISSIONS.assets },
+    { path: '/reservations', label: '대여 예약', icon: Calendar, permission: ROUTE_PERMISSIONS.reservations },
+    { path: '/revenue', label: '매출 요약', icon: TrendingUp, permission: ROUTE_PERMISSIONS.revenue },
+    { path: '/device-installation', label: '단말 장착/관리', icon: Zap, permission: ROUTE_PERMISSIONS.deviceInstallation },
+    { path: '/settings', label: '설정', icon: Settings, permission: ROUTE_PERMISSIONS.settings },
   ];
 
-  // 현재 사용자 권한에 따라 메뉴 필터링
-  const effectiveViewRole = viewRole ?? 'rental-business';
-  const filteredMenuItems = menuItems.filter(item => 
-    item.roles.includes(effectiveViewRole)
-  );
+  const filteredMenuItems = menuItems.filter((item) => canAccessRoute(item.permission));
 
   return (
     <div className="flex h-screen bg-[#F7F8FA]">
@@ -382,7 +390,7 @@ export function Layout({ children, title }: LayoutProps) {
                     <div className="px-4 py-3 border-t border-gray-200 bg-gray-50">
                       <button
                         onClick={() => {
-                          navigate('/action-required');
+                          navigateWithRouteGuard('/action-required');
                           setShowNotifications(false);
                         }}
                         className="w-full text-sm text-blue-600 hover:text-blue-700 font-medium"

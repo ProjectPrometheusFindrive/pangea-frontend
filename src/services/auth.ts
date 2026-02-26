@@ -34,11 +34,14 @@ export interface AuthRefreshData {
   user?: AuthUser | null;
 }
 
-export function toViewRole(role: string | null | undefined): AuthViewRole {
+export function toViewRole(role: string | null | undefined): AuthViewRole | null {
   if (role === 'installer') {
     return 'device-installer';
   }
-  return 'rental-business';
+  if (role === 'super_admin' || role === 'admin' || role === 'member') {
+    return 'rental-business';
+  }
+  return null;
 }
 
 export function postLogin(payload: AuthLoginPayload): Promise<AuthLoginData> {

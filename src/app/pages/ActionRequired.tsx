@@ -12,6 +12,8 @@ import {
 } from '../hooks/usePageEndpointState';
 import { usePaymentStatusSync } from '../hooks/usePaymentStatusSync';
 import { useAuth } from '../context/AuthContext';
+import { useAuthorization } from '../context/AuthorizationContext';
+import { ACTION_PERMISSIONS, ROUTE_PERMISSIONS } from '../authorization';
 import { ApiError } from '../../services/api';
 import {
   getActionRequiredDetail,
@@ -516,6 +518,10 @@ export default function ActionRequired() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { canPerformAction, canAccessRoute } = useAuthorization();
+  const canWriteActionRequired = canPerformAction(ACTION_PERMISSIONS.actionRequiredWrite);
+  const canViewAssets = canAccessRoute(ROUTE_PERMISSIONS.assets);
+  const canViewReservations = canAccessRoute(ROUTE_PERMISSIONS.reservations);
 
   const [selectedFilters, setSelectedFilters] = useState<string[]>([]);
   const [statusFilter, setStatusFilter] = useState<ActionStatusFilter>('all');
@@ -910,6 +916,15 @@ export default function ActionRequired() {
     nextStatusCode: ActionStatusCode,
     kind: 'status' | 'resolve',
   ): Promise<void> {
+    if (!canWriteActionRequired) {
+      setWriteError({
+        kind,
+        message: '권한이 없어 상태를 변경할 수 없습니다.',
+        retryable: false,
+      });
+      return;
+    }
+
     if (isWriteSaving) {
       return;
     }
@@ -999,6 +1014,15 @@ export default function ActionRequired() {
     memoContent: string,
     nextStatusCode: ActionStatusCode,
   ): Promise<void> {
+    if (!canWriteActionRequired) {
+      setWriteError({
+        kind: 'memo',
+        message: '권한이 없어 메모를 저장할 수 없습니다.',
+        retryable: false,
+      });
+      return;
+    }
+
     if (isWriteSaving) {
       return;
     }
@@ -1550,7 +1574,7 @@ export default function ActionRequired() {
                       className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                       value={currentStatus || selectedItem.status}
                       onChange={(e) => setCurrentStatus(e.target.value)}
-                      disabled={isWriteSaving}
+                      disabled={!canWriteActionRequired || isWriteSaving}
                     >
                       {!STATUS_OPTIONS.includes(selectedItem.status as typeof STATUS_OPTIONS[number]) && (
                         <option value={selectedItem.status}>{selectedItem.status}</option>
@@ -1561,12 +1585,12 @@ export default function ActionRequired() {
                         </option>
                       ))}
                     </select>
-                    <button
-                      type="button"
-                      onClick={handleStatusSave}
-                      disabled={isWriteSaving}
-                      className="px-3 py-2 text-sm font-semibold rounded-lg border border-blue-300 text-blue-700 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
+                  <button
+                    type="button"
+                    onClick={handleStatusSave}
+                    disabled={!canWriteActionRequired || isWriteSaving}
+                    className="px-3 py-2 text-sm font-semibold rounded-lg border border-blue-300 text-blue-700 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
                       {isStatusSaving ? (
                         <span className="inline-flex items-center gap-1">
                           <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -1587,12 +1611,12 @@ export default function ActionRequired() {
                     placeholder="처리 내용을 입력하세요..."
                     value={currentMemo}
                     onChange={(e) => setCurrentMemo(e.target.value)}
-                    disabled={isWriteSaving}
+                    disabled={!canWriteActionRequired || isWriteSaving}
                   />
                   <button
                     className="mt-2 w-full px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium disabled:bg-gray-300 disabled:cursor-not-allowed"
                     onClick={handleMemoAdd}
-                    disabled={!currentMemo.trim() || isWriteSaving}
+                    disabled={!canWriteActionRequired || !currentMemo.trim() || isWriteSaving}
                   >
                     {isMemoSaving ? (
                       <span className="inline-flex items-center justify-center gap-1">
@@ -1646,13 +1670,27 @@ export default function ActionRequired() {
                 <div className="pt-4 space-y-2">
                   <button
                     className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium"
-                    onClick={() => navigate(`/assets?vehicle=${encodeURIComponent(selectedItem.vehicleNumber)}`)}
+                    onClick={() => {
+                      if (!canViewAssets) {
+                        navigate('/forbidden');
+                        return;
+                      }
+                      navigate(`/assets?vehicle=${encodeURIComponent(selectedItem.vehicleNumber)}`);
+                    }}
+                    disabled={!canViewAssets}
                   >
                     관련 자산 보기
                   </button>
                   <button
                     className="w-full px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 font-medium"
-                    onClick={() => navigate(`/reservations?search=${encodeURIComponent(selectedItem.customerName)}`)}
+                    onClick={() => {
+                      if (!canViewReservations) {
+                        navigate('/forbidden');
+                        return;
+                      }
+                      navigate(`/reservations?search=${encodeURIComponent(selectedItem.customerName)}`);
+                    }}
+                    disabled={!canViewReservations}
                   >
                     관련 예약 보기
                   </button>
@@ -1661,7 +1699,7 @@ export default function ActionRequired() {
                     <button
                       className="w-full px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium flex items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-50"
                       onClick={handleResolveIssue}
-                      disabled={isWriteSaving}
+                      disabled={!canWriteActionRequired || isWriteSaving}
                     >
                       {isResolveSaving ? (
                         <>

@@ -23,8 +23,9 @@ import {
 } from '../hooks/usePageEndpointState';
 import { vehicleAssets, reservations } from '../data/mockData';
 import { ApiError } from '../../services/api';
-import { useAuth } from '../context/AuthContext';
+import { useAuthorization } from '../context/AuthorizationContext';
 import { useCompany } from '../context/CompanyContext';
+import { ACTION_PERMISSIONS } from '../authorization';
 import {
   getSettingsCompany,
   putSettingsCompany,
@@ -297,13 +298,11 @@ function getMemberStatusBadgeColor(status: string): string {
 
 export default function Settings() {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { canPerformAction } = useAuthorization();
   const { refreshCompany } = useCompany();
 
-  const canEditSettings = useMemo(
-    () => user?.role === 'admin' || user?.role === 'super_admin',
-    [user?.role],
-  );
+  const canEditSettings = canPerformAction(ACTION_PERMISSIONS.settingsWrite);
+  const canManageMemberRoles = canPerformAction(ACTION_PERMISSIONS.settingsMembersWrite);
 
   const [activeTab, setActiveTab] = useState<TabType>('bulk');
   const [uploadType, setUploadType] = useState<UploadType>('vehicles');
@@ -988,7 +987,7 @@ export default function Settings() {
   }, []);
 
   const runMemberRoleSave = useCallback(async (memberId: string, role: 'admin' | 'member') => {
-    if (!canEditSettings) {
+    if (!canManageMemberRoles) {
       return;
     }
 
@@ -1050,7 +1049,7 @@ export default function Settings() {
     } finally {
       setSavingMemberId(null);
     }
-  }, [canEditSettings, hydrateMembersOnly]);
+  }, [canManageMemberRoles, hydrateMembersOnly]);
 
   const handleMemberRoleSave = useCallback((memberId: string) => {
     const originalMember = members.find((member) => member.userId === memberId);
@@ -2055,7 +2054,7 @@ export default function Settings() {
 
           {activeTab === 'accounts' && (
             <div className="space-y-4">
-              {!canEditSettings && (
+              {!canManageMemberRoles && (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
                   현재 계정은 멤버 권한을 읽기 전용으로만 볼 수 있습니다.
                 </div>
@@ -2128,7 +2127,7 @@ export default function Settings() {
                         const isRoleDirty = normalizedDraftRole !== normalizedCurrentRole;
                         const isRowSaving = savingMemberId === member.userId;
                         const canEditRowRole = (
-                          canEditSettings
+                          canManageMemberRoles
                           && member.status === 'approved'
                           && (member.role === 'admin' || member.role === 'member')
                         );

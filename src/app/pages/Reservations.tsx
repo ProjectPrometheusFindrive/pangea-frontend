@@ -29,6 +29,8 @@ import {
   toReservationPaymentStatus,
   type PaymentStatusSnapshot,
 } from '../utils/paymentStatusSync';
+import { useAuthorization } from '../context/AuthorizationContext';
+import { ACTION_PERMISSIONS, ROUTE_PERMISSIONS } from '../authorization';
 import type { VehicleAsset } from '../types/assets';
 import type { Reservation } from '../types/reservations';
 import { ApiError } from '../../services/api';
@@ -651,6 +653,10 @@ function toVehicleRows(payload: unknown, reservationRows: Reservation[]): Vehicl
 export default function Reservations() {
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
+  const { canPerformAction, canAccessRoute } = useAuthorization();
+  const canWriteReservations = canPerformAction(ACTION_PERMISSIONS.reservationsWrite);
+  const canViewAssets = canAccessRoute(ROUTE_PERMISSIONS.assets);
+  const canViewActionRequired = canAccessRoute(ROUTE_PERMISSIONS.actionRequired);
   const page = toPositiveInteger(searchParams.get('page'), DEFAULT_PAGE);
   const pageSize = toPositiveInteger(searchParams.get('size') ?? searchParams.get('pageSize'), DEFAULT_PAGE_SIZE);
   const fromDate = normalizeDateParam(searchParams.get('from'));
@@ -1175,6 +1181,12 @@ export default function Reservations() {
   const handleCreateReservation = useCallback(async (
     formValues: NewContractFormValues,
   ): Promise<NewContractSubmitFeedback | null> => {
+    if (!canWriteReservations) {
+      return {
+        formError: '예약 생성 권한이 없습니다. 관리자에게 권한을 요청해 주세요.',
+      };
+    }
+
     const selectedAsset = vehicleAssets.find((asset) => asset.vehicleNumber === formValues.selectedVehicle);
     const vin = selectedAsset?.vin?.trim();
     if (!selectedAsset || !vin || vin === '-') {
@@ -1295,14 +1307,23 @@ export default function Reservations() {
         formError: '예약 생성에 실패했습니다. 잠시 후 다시 시도해 주세요.',
       };
     }
-  }, [hydrateReservationsData, openReservationDetail, vehicleAssets]);
+  }, [canWriteReservations, hydrateReservationsData, openReservationDetail, vehicleAssets]);
 
   const handleReturnClick = useCallback(() => {
+    if (!canWriteReservations) {
+      setReturnSubmitError('차량 반납 처리 권한이 없습니다. 관리자에게 권한을 요청해 주세요.');
+      return;
+    }
     setReturnSubmitError(null);
     setShowReturnConfirm(true);
-  }, []);
+  }, [canWriteReservations]);
 
   const handleConfirmReturn = useCallback(async () => {
+    if (!canWriteReservations) {
+      setReturnSubmitError('차량 반납 처리 권한이 없습니다. 관리자에게 권한을 요청해 주세요.');
+      return;
+    }
+
     if (!selectedReservation || isReturnSubmitting) {
       return;
     }
@@ -1374,11 +1395,17 @@ export default function Reservations() {
     } finally {
       setIsReturnSubmitting(false);
     }
-  }, [hydrateReservationDetail, hydrateReservationsData, isReturnSubmitting, selectedReservation, vehicleAssets]);
+  }, [canWriteReservations, hydrateReservationDetail, hydrateReservationsData, isReturnSubmitting, selectedReservation, vehicleAssets]);
 
   const handleAccidentReport = useCallback(async (
     report: AccidentReportFormValues,
   ): Promise<AccidentReportSubmitFeedback | null> => {
+    if (!canWriteReservations) {
+      return {
+        formError: '사고 등록 권한이 없습니다. 관리자에게 권한을 요청해 주세요.',
+      };
+    }
+
     if (!selectedReservation) {
       return {
         formError: '선택된 예약 정보가 없습니다. 다시 시도해 주세요.',
@@ -1440,7 +1467,9 @@ export default function Reservations() {
       await hydrateReservationsData();
       void hydrateReservationDetail(nextReservation.id, nextReservation);
       toast.success('사고가 등록되었습니다.');
-      navigate('/action-required?filter=사고 접수');
+      if (canViewActionRequired) {
+        navigate('/action-required?filter=사고 접수');
+      }
       return null;
     } catch (error) {
       if (error instanceof ApiError) {
@@ -1477,7 +1506,7 @@ export default function Reservations() {
         formError: '사고 등록에 실패했습니다. 잠시 후 다시 시도해 주세요.',
       };
     }
-  }, [hydrateReservationDetail, hydrateReservationsData, navigate, selectedReservation, vehicleAssets]);
+  }, [canViewActionRequired, canWriteReservations, hydrateReservationDetail, hydrateReservationsData, navigate, selectedReservation, vehicleAssets]);
 
   return (
     <Layout title="대여 예약">
@@ -1559,8 +1588,15 @@ export default function Reservations() {
             </div>
 
             <button
-              onClick={() => setShowModal(true)}
-              className="px-4 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium flex items-center gap-2 text-sm"
+              onClick={() => {
+                if (!canWriteReservations) {
+                  toast.error('예약 생성 권한이 없습니다.');
+                  return;
+                }
+                setShowModal(true);
+              }}
+              disabled={!canWriteReservations}
+              className="px-4 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium flex items-center gap-2 text-sm disabled:cursor-not-allowed disabled:opacity-60"
             >
               <Plus className="w-4 h-4" />
               새 계약 등록
@@ -1834,6 +1870,10 @@ export default function Reservations() {
                                 if (conflicts.length > 0) {
                                   alert(`선택한 기간에 이미 예약이 있습니다.\\n\\n${conflicts.map(c => `${c.customer}: ${c.startDateFull} ~ ${c.endDateFull}`).join('\\n')}`);
                                 } else {
+                                  if (!canWriteReservations) {
+                                    toast.error('예약 생성 권한이 없습니다.');
+                                    return;
+                                  }
                                   setDragSelection({ vehicleNumber: vehicle, startDate, endDate });
                                   setShowModal(true);
                                 }
@@ -2183,23 +2223,35 @@ export default function Reservations() {
               {/* 액션 버튼 */}
               <div className="p-6 border-t border-gray-200 flex gap-3 flex-wrap">
                 <button
-                  onClick={() => navigate(`/assets?search=${encodeURIComponent(selectedReservation.vehicleNumber)}`)}
-                  className="flex-1 min-w-[200px] px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium"
+                  onClick={() => {
+                    if (!canViewAssets) {
+                      navigate('/forbidden');
+                      return;
+                    }
+                    navigate(`/assets?search=${encodeURIComponent(selectedReservation.vehicleNumber)}`);
+                  }}
+                  disabled={!canViewAssets}
+                  className="flex-1 min-w-[200px] px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   차량 자산 상세보기
                 </button>
                 <button
                   onClick={() => setShowAccidentModal(true)}
-                  className="flex-1 min-w-[200px] px-4 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium"
+                  disabled={!canWriteReservations}
+                  className="flex-1 min-w-[200px] px-4 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   사고 등록
                 </button>
                 <button
                   onClick={() => {
-                    // 차량번호로만 검색 (필터는 적용하지 않음)
+                    if (!canViewActionRequired) {
+                      navigate('/forbidden');
+                      return;
+                    }
                     navigate(`/action-required?search=${encodeURIComponent(selectedReservation.vehicleNumber)}`);
                   }}
-                  className="flex-1 min-w-[200px] px-4 py-3 bg-gray-100 text-gray-700 hover:bg-gray-200 rounded-lg font-medium"
+                  disabled={!canViewActionRequired}
+                  className="flex-1 min-w-[200px] px-4 py-3 bg-gray-100 text-gray-700 hover:bg-gray-200 rounded-lg font-medium disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   이 차량의 조치항목 보기
                 </button>
@@ -2220,7 +2272,8 @@ export default function Reservations() {
                 {selectedReservation.type !== 'return' && (
                   <button
                     onClick={handleReturnClick}
-                    className="flex-1 min-w-[200px] px-4 py-3 bg-orange-600 text-white rounded-lg hover:bg-orange-700 font-medium"
+                    disabled={!canWriteReservations}
+                    className="flex-1 min-w-[200px] px-4 py-3 bg-orange-600 text-white rounded-lg hover:bg-orange-700 font-medium disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     차량 반납 처리
                   </button>

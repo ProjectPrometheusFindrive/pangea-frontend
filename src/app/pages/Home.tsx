@@ -3,6 +3,7 @@ import { Clock, Car, FileText, TrendingUp, AlertCircle, Calendar, DollarSign, Lo
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 import { useNavigate } from 'react-router';
 import { useState, useMemo, useEffect, useCallback } from 'react';
+import { toast } from 'sonner';
 import { PageStateBoundary } from '../components/PageStateBoundary';
 import {
   getPageErrorActionLabel,
@@ -11,12 +12,15 @@ import {
   usePageEndpointState,
 } from '../hooks/usePageEndpointState';
 import { usePaymentStatusSync } from '../hooks/usePaymentStatusSync';
+import { useAuthorization } from '../context/AuthorizationContext';
+import { ROUTE_PERMISSIONS, type AppRoutePermission } from '../authorization';
 import { vehicleAssets, reservations, actionItems, getTodayStats } from '../data/mockData';
 import { isUnpaidPaymentStatus, toCanonicalPaymentStatus } from '../utils/paymentStatusSync';
 import { getHomeSummaryDashboard } from '../../services/dashboard';
 
 export default function Home() {
   const navigate = useNavigate();
+  const { canAccessRoute } = useAuthorization();
   const [showPremiumModal, setShowPremiumModal] = useState(false);
   const {
     isLoading: isHomeLoading,
@@ -241,20 +245,29 @@ export default function Home() {
     { label: '사업운영', score: 75, color: 'bg-blue-500' },
   ];
 
+  const navigateWithRoutePermission = useCallback((path: string, routePermission: AppRoutePermission) => {
+    if (!canAccessRoute(routePermission)) {
+      toast.error('접근 권한이 없어 이동할 수 없습니다.');
+      navigate('/forbidden');
+      return;
+    }
+    navigate(path);
+  }, [canAccessRoute, navigate]);
+
   const handleTaskClick = (filter: string) => {
-    navigate(`/reservations?filter=${filter}`);
+    navigateWithRoutePermission(`/reservations?filter=${filter}`, ROUTE_PERMISSIONS.reservations);
   };
 
   const handleIssueClick = (filter: string) => {
-    navigate(`/action-required?filter=${encodeURIComponent(filter)}`);
+    navigateWithRoutePermission(`/action-required?filter=${encodeURIComponent(filter)}`, ROUTE_PERMISSIONS.actionRequired);
   };
 
   const handleAssetClick = (status: string) => {
-    navigate(`/assets?status=${encodeURIComponent(status)}`);
+    navigateWithRoutePermission(`/assets?status=${encodeURIComponent(status)}`, ROUTE_PERMISSIONS.assets);
   };
 
   const handleContractClick = (status: string) => {
-    navigate(`/reservations?filter=${status}`);
+    navigateWithRoutePermission(`/reservations?filter=${status}`, ROUTE_PERMISSIONS.reservations);
   };
 
   // 커스텀 Tooltip 컴포넌트

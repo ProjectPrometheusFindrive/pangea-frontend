@@ -1,9 +1,9 @@
 # Prompt Library v1
 
-- Version: v1.2.29
+- Version: v1.2.30
 - Date: 2026-02-27
 - Owner: Pangea Frontend Team
-- Tags: prompt-library,workflow,branch-policy,history-policy,commit-policy,pr-automation,jira-traceability,end-prompt-protocol,worktree-cleanup,jira-status-sync,jira-comment-sync,ac-evidence,mock-removal,reservations-write,reservations-mock-removal,ocr-flow,revenue-api,settings-api,payment-status-sync
+- Tags: prompt-library,workflow,branch-policy,history-policy,commit-policy,pr-automation,jira-traceability,end-prompt-protocol,worktree-cleanup,jira-status-sync,jira-comment-sync,ac-evidence,mock-removal,reservations-write,reservations-mock-removal,ocr-flow,revenue-api,settings-api,payment-status-sync,rbac-permission-hardening
 
 ## Context
 - 초기 세팅 작업에서 프롬프트 템플릿, 브랜치 정책, 문서화 절차를 반복 가능하게 표준화할 필요가 있음.
@@ -79,6 +79,7 @@ End Prompt:
 - OCR 연동 티켓(BK-085/SCRUM-64 계열)은 `prompt_history`에 `assets/upload -> ocr/extract -> ocr/jobs/{jobId}` 흐름, polling 상태 전환(처리중/복귀), partial prefill 처리, re-upload 시 이전 OCR 제안 폐기, `400/413 파일 오류·5xx/timeout 재시도·수동 입력 fallback` 분기 근거를 함께 기록한다.
 - Revenue API 연동 티켓(BK-074/SCRUM-56 계열)은 `prompt_history`에 `/api/v2/revenue/summary(from,to,granularity)` 및 `/api/v2/revenue/trend(from,to)` 파라미터 동기화, 기간/단위 변경 시 loading 갱신, empty-state, `400/401/403/5xx+network` 분기와 Retry/이전 스냅샷 복원 근거를 함께 기록한다.
 - Settings API 연동 티켓(BK-075/SCRUM-57 계열)은 `prompt_history`에 company/geofences/members API 연결 근거, 회사 정보 dirty-check/부분 업데이트(schemaVersion 포함)/저장 상태 분기, 권한 기반 읽기전용 처리, `400 필드 오류·403 권한·409 충돌 재로딩·5xx+network 재시도`, 저장/미저장 상태 이탈 경고(beforeunload) 근거를 함께 기록한다.
+- 역할 기반 메뉴/권한 하드닝 티켓(BK-076/SCRUM-58 계열)은 `prompt_history`에 `/api/v2/auth/me` + `/api/v2/permissions/me` 권한 소스 통합 근거, 메뉴/라우트/액션 권한 키 일관성, `401/403/5xx` 분기 시 deny-by-default 정책, role 변경/권한 캐시 TTL/테넌트 전환 시 재평가 근거를 함께 기록한다.
 - Reservations mock 제거 티켓(BK-054/SCRUM-45 계열)은 `prompt_history`에 Reservations 프로덕션 경로의 mock import/fixture 제거 근거, v2 reservations endpoint 단일 호출 경로, API 실패 시 mock fallback 미사용 근거를 함께 기록한다.
 - Assets mock 제거 티켓(BK-044/SCRUM-40 계열)은 `prompt_history`에 Assets 프로덕션 경로의 mock import/flag 제거 근거, v2 assets endpoint 단일 호출 경로, 오류 시 mock fallback 미사용 근거를 함께 기록한다.
 - 공통 상태 UI 티켓(loading/error/empty)은 `Validation`에 `Retry 재호출`, `401/403/5xx 분기`, `skeleton/empty CTA` 확인 근거를 함께 기록한다.
@@ -156,6 +157,7 @@ cp docs/prompt_history/_TEMPLATE.md docs/prompt_history/$(date +%Y%m%d)_your-tas
 - Production push triggers auto tag (`vX.Y.Z`)
 
 ## Version History
+- v1.2.30 (2026-02-27, SCRUM-58): Add prompt_history evidence rule for BK-076 role-based menu/route/action hardening (`auth/me` + `permissions/me` source integration, deny-by-default on 401/403/5xx, role/cache/tenant edge-case handling evidence).
 - v1.2.29 (2026-02-27, SCRUM-56): Add prompt_history evidence rule for BK-074 revenue API integration (summary/trend param sync, loading/error/empty, 400/401/403/5xx+network retry and previous snapshot restoration evidence).
 - v1.2.28 (2026-02-26, SCRUM-57): Add prompt_history evidence rule for BK-075 settings API integration (company/geofences/members wiring, dirty/partial-save/schemaVersion, RBAC read-only, 400/403/409/5xx+retry, beforeunload guard).
 - v1.2.27 (2026-02-26, SCRUM-50): Add prompt_history evidence rule for BK-064 payment status sync integration (canonical mapping/priority + reservations-home-action sync + 401/403/404/5xx fallback+retry evidence).
