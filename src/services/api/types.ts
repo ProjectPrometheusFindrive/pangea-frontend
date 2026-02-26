@@ -43,6 +43,9 @@ export interface ApiRequestConfig {
   skipAuth?: boolean;
   timeoutMs?: number;
   responseType?: 'json' | 'text' | 'raw';
+  internal?: {
+    hasRetriedAuth?: boolean;
+  };
 }
 
 export interface ApiRequestContext {
