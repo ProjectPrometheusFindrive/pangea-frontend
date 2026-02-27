@@ -84,7 +84,6 @@ interface SettingsHydrationPayload {
 const DEFAULT_SETTINGS_SCHEMA_VERSION = 'v1';
 const CURRENT_DATA_COUNT_KEYS = ['total', 'totalCount', 'count', 'size', 'itemsCount', 'totalElements'];
 const CURRENT_DATA_PAGE_SIZE = 200;
-const CURRENT_DATA_MAX_PAGES = 50;
 
 const DEFAULT_COMPANY_FORM_STATE: CompanyFormState = {
   name: '',
@@ -329,6 +328,34 @@ function getTotalCountFromPayload(payload: unknown, fallbackValue: number): numb
   }
 
   return fallbackValue;
+}
+
+function getKnownTotalCountFromPayload(payload: unknown): number | null {
+  if (!isRecord(payload)) {
+    return null;
+  }
+
+  for (const key of CURRENT_DATA_COUNT_KEYS) {
+    const numericValue = toNumberValue(payload[key]);
+    if (numericValue !== null) {
+      return numericValue;
+    }
+  }
+
+  if (isRecord(payload.meta)) {
+    for (const key of CURRENT_DATA_COUNT_KEYS) {
+      const numericValue = toNumberValue(payload.meta[key]);
+      if (numericValue !== null) {
+        return numericValue;
+      }
+    }
+  }
+
+  if (isRecord(payload.data)) {
+    return getKnownTotalCountFromPayload(payload.data);
+  }
+
+  return null;
 }
 
 function toCsvCell(value: unknown): string {
@@ -1221,21 +1248,27 @@ export default function Settings() {
       ? ['assets', 'items', 'rows', 'list']
       : ['reservations', 'items', 'rows', 'list'];
 
-    while (page <= CURRENT_DATA_MAX_PAGES) {
+    while (true) {
       const payload = type === 'vehicles'
         ? await getAssetsList({ page, size: CURRENT_DATA_PAGE_SIZE })
         : await getReservationsList({ page, size: CURRENT_DATA_PAGE_SIZE });
       const rows = getCollectionFromPayload(payload, preferredKeys) ?? [];
+      const knownTotalCount = getKnownTotalCountFromPayload(payload);
 
-      if (expectedTotalCount === null) {
-        expectedTotalCount = getTotalCountFromPayload(payload, rows.length);
+      if (knownTotalCount !== null) {
+        expectedTotalCount = expectedTotalCount === null
+          ? knownTotalCount
+          : Math.max(expectedTotalCount, knownTotalCount);
       }
       if (rows.length === 0) {
         break;
       }
 
       allRows.push(...rows);
-      if (allRows.length >= expectedTotalCount || rows.length < CURRENT_DATA_PAGE_SIZE) {
+      if (
+        (expectedTotalCount !== null && allRows.length >= expectedTotalCount)
+        || rows.length < CURRENT_DATA_PAGE_SIZE
+      ) {
         break;
       }
 
