@@ -1,4 +1,4 @@
-import { ApiError, apiClient } from './api';
+import { apiClient } from './api';
 
 export interface ActionRequiredListRequestOptions {
   page?: number;
@@ -52,31 +52,6 @@ export function getActionRequiredDetail(
   });
 }
 
-function toLegacyActionItemStatus(statusValue: string): string {
-  const normalized = statusValue.trim().toLowerCase().replace(/_/g, '-');
-  if (normalized === 'resolved' || normalized === 'done' || normalized === 'closed' || statusValue === '완료') {
-    return 'done';
-  }
-  if (
-    normalized === 'in-progress'
-    || normalized === 'in progress'
-    || normalized === 'inprogress'
-    || normalized === 'processing'
-    || statusValue === '진행중'
-  ) {
-    return 'in_progress';
-  }
-  return 'open';
-}
-
-function isLegacyActionStatusValidationError(error: ApiError): boolean {
-  return (
-    error.status === 400
-    && typeof error.message === 'string'
-    && error.message.includes('open|in_progress|done')
-  );
-}
-
 function requestStatusPatch(
   path: string,
   status: string,
@@ -110,27 +85,7 @@ export async function patchActionRequiredStatus(
   options: ActionRequiredStatusPatchOptions,
 ): Promise<unknown> {
   const encodedActionId = encodeURIComponent(actionId);
-  const primaryPath = `/api/v2/action-required/${encodedActionId}/status`;
-
-  try {
-    return await requestStatusPatch(primaryPath, options.status, options.memo, options.signal);
-  } catch (error) {
-    if (!(error instanceof ApiError)) {
-      throw error;
-    }
-
-    const legacyPath = `/api/v2/action-items/${encodedActionId}/status`;
-    if (error.status === 404 || error.status === 405 || isLegacyActionStatusValidationError(error)) {
-      return requestStatusPatch(
-        legacyPath,
-        toLegacyActionItemStatus(options.status),
-        options.memo,
-        options.signal,
-      );
-    }
-
-    throw error;
-  }
+  return requestStatusPatch(`/api/v2/action-items/${encodedActionId}/status`, options.status, options.memo, options.signal);
 }
 
 export async function patchActionRequiredMemo(
@@ -138,19 +93,5 @@ export async function patchActionRequiredMemo(
   options: ActionRequiredMemoPatchOptions,
 ): Promise<unknown> {
   const encodedActionId = encodeURIComponent(actionId);
-  const primaryPath = `/api/v2/action-required/${encodedActionId}/memo`;
-
-  try {
-    return await requestMemoPatch(primaryPath, 'PATCH', options.memo, options.signal);
-  } catch (error) {
-    if (!(error instanceof ApiError)) {
-      throw error;
-    }
-
-    if (error.status === 404 || error.status === 405) {
-      return requestMemoPatch(`/api/v2/action-items/${encodedActionId}/memos`, 'POST', options.memo, options.signal);
-    }
-
-    throw error;
-  }
+  return requestMemoPatch(`/api/v2/action-items/${encodedActionId}/memos`, 'POST', options.memo, options.signal);
 }

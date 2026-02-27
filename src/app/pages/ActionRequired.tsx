@@ -944,9 +944,7 @@ export default function ActionRequired() {
       return;
     }
 
-    const previousSourceActionItems = sourceActionItems;
     const previousSelectedItem = targetItem;
-    const previousTotalItems = totalItems;
     const previousCurrentStatus = currentStatus;
 
     clearWriteFeedback();
@@ -990,9 +988,6 @@ export default function ActionRequired() {
       void hydrateActionItems();
       void hydrateActionDetail(actionId, fallbackItem);
     } catch (error) {
-      setSourceActionItems(previousSourceActionItems);
-      setSelectedItem(previousSelectedItem);
-      setTotalItems(previousTotalItems);
       setCurrentStatus(previousCurrentStatus);
 
       const mappedError = toActionWriteError(kind, error);
@@ -1004,10 +999,8 @@ export default function ActionRequired() {
         retryActionRef.current = null;
       }
 
-      if (error instanceof ApiError && (error.status === 404 || error.status === 409)) {
-        void hydrateActionItems();
-        void hydrateActionDetail(actionId, previousSelectedItem);
-      }
+      void hydrateActionItems();
+      void hydrateActionDetail(actionId, previousSelectedItem);
     } finally {
       if (kind === 'resolve') {
         setIsResolveSaving(false);
@@ -1047,9 +1040,7 @@ export default function ActionRequired() {
       return;
     }
 
-    const previousSourceActionItems = sourceActionItems;
     const previousSelectedItem = targetItem;
-    const previousTotalItems = totalItems;
     const previousCurrentStatus = currentStatus;
     const previousCurrentMemo = currentMemo;
 
@@ -1102,9 +1093,6 @@ export default function ActionRequired() {
       void hydrateActionItems();
       void hydrateActionDetail(actionId, fallbackItem);
     } catch (error) {
-      setSourceActionItems(previousSourceActionItems);
-      setSelectedItem(previousSelectedItem);
-      setTotalItems(previousTotalItems);
       setCurrentStatus(previousCurrentStatus);
       setCurrentMemo(previousCurrentMemo);
 
@@ -1117,10 +1105,8 @@ export default function ActionRequired() {
         retryActionRef.current = null;
       }
 
-      if (error instanceof ApiError && (error.status === 404 || error.status === 409)) {
-        void hydrateActionItems();
-        void hydrateActionDetail(actionId, previousSelectedItem);
-      }
+      void hydrateActionItems();
+      void hydrateActionDetail(actionId, previousSelectedItem);
     } finally {
       setIsMemoSaving(false);
     }

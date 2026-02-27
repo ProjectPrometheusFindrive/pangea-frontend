@@ -198,14 +198,7 @@ async function requestListFromPath(
 export async function getDeviceInstallationList(
   options: DeviceInstallationListOptions = {},
 ): Promise<DeviceInstallationListResponse> {
-  try {
-    return await requestListFromPath('/api/v2/device-installations', options);
-  } catch (error) {
-    if (error instanceof ApiError && (error.status === 404 || error.status === 405)) {
-      return requestListFromPath('/api/v2/device-installations/tasks', options);
-    }
-    throw error;
-  }
+  return requestListFromPath('/api/v2/device-installations/tasks', options);
 }
 
 export async function createDeviceInstallation(
@@ -245,24 +238,7 @@ export async function getDeviceInstallation(installationId: string): Promise<Dev
 
   const encodedInstallationId = encodeURIComponent(normalizedId);
 
-  try {
-    return await getInstallationFromPath(`/api/v2/device-installations/${encodedInstallationId}`);
-  } catch (error) {
-    if (error instanceof ApiError && (error.status === 404 || error.status === 405)) {
-      return getInstallationFromPath(`/api/v2/device-installations/tasks/${encodedInstallationId}`);
-    }
-    throw error;
-  }
-}
-
-async function cancelFromLegacyPath(installationId: string): Promise<DeviceInstallationItem | null> {
-  const payload = await apiClient.requestData<unknown>({
-    path: `/api/v2/device-installations/${encodeURIComponent(installationId)}/cancel`,
-    method: 'PATCH',
-    body: {},
-  });
-
-  return toInstallation(payload);
+  return getInstallationFromPath(`/api/v2/device-installations/${encodedInstallationId}`);
 }
 
 async function cancelFromStatusPath(installationId: string): Promise<DeviceInstallationItem | null> {
@@ -283,12 +259,5 @@ export async function cancelDeviceInstallation(installationId: string): Promise<
     throw new ApiError('VALIDATION_ERROR', 'installationId is required', { status: 400 });
   }
 
-  try {
-    return await cancelFromLegacyPath(normalizedId);
-  } catch (error) {
-    if (error instanceof ApiError && (error.status === 404 || error.status === 405)) {
-      return cancelFromStatusPath(normalizedId);
-    }
-    throw error;
-  }
+  return cancelFromStatusPath(normalizedId);
 }

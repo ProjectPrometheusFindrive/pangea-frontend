@@ -59,10 +59,29 @@ const RENTAL_WRITE_PERMISSIONS: AppActionPermission[] = [
   ACTION_PERMISSIONS.actionRequiredWrite,
 ];
 
+const PERMISSION_CONTAINER_KEYS = new Set([
+  'permission',
+  'permissions',
+  'scope',
+  'scopes',
+  'authority',
+  'authorities',
+  'route',
+  'routes',
+  'action',
+  'actions',
+]);
+
 function toNormalizedToken(rawToken: string): string {
-  return rawToken
-    .trim()
-    .toLowerCase()
+  const trimmedToken = rawToken.trim().toLowerCase();
+  if (!trimmedToken) {
+    return '';
+  }
+  if (trimmedToken === '*') {
+    return '*';
+  }
+
+  return trimmedToken
     .replace(/[^a-z0-9]+/g, '.')
     .replace(/\.{2,}/g, '.')
     .replace(/^\./, '')
@@ -192,15 +211,26 @@ function addPermissionMatchesFromToken(rawToken: string, target: Set<AppPermissi
   }
 }
 
-function collectPermissionTokens(value: unknown, output: string[] = [], path = ''): string[] {
+function isPermissionContainerKey(normalizedKey: string): boolean {
+  return PERMISSION_CONTAINER_KEYS.has(normalizedKey);
+}
+
+function collectPermissionTokens(
+  value: unknown,
+  output: string[] = [],
+  path = '',
+  permissionScope = false,
+): string[] {
   if (typeof value === 'string') {
-    output.push(value);
+    if (permissionScope) {
+      output.push(value);
+    }
     return output;
   }
 
   if (Array.isArray(value)) {
     for (const item of value) {
-      collectPermissionTokens(item, output, path);
+      collectPermissionTokens(item, output, path, permissionScope);
     }
     return output;
   }
@@ -212,28 +242,31 @@ function collectPermissionTokens(value: unknown, output: string[] = [], path = '
   for (const [key, nestedValue] of Object.entries(value)) {
     const normalizedKey = toNormalizedToken(key);
     const nextPath = path ? `${path}.${normalizedKey}` : normalizedKey;
+    const nextPermissionScope = permissionScope || isPermissionContainerKey(normalizedKey);
 
     if (typeof nestedValue === 'boolean') {
-      if (nestedValue) {
+      if (nestedValue && nextPermissionScope) {
         output.push(nextPath);
       }
       continue;
     }
 
     if (typeof nestedValue === 'number') {
-      if (nestedValue > 0) {
+      if (nestedValue > 0 && nextPermissionScope) {
         output.push(nextPath);
       }
       continue;
     }
 
     if (typeof nestedValue === 'string') {
-      output.push(nextPath);
-      output.push(nestedValue);
+      if (nextPermissionScope) {
+        output.push(nextPath);
+        output.push(nestedValue);
+      }
       continue;
     }
 
-    collectPermissionTokens(nestedValue, output, nextPath);
+    collectPermissionTokens(nestedValue, output, nextPath, nextPermissionScope);
   }
 
   return output;
@@ -279,7 +312,7 @@ export function derivePermissionsFromRole(role: string | null | undefined): Set<
 
 export function derivePermissionsFromApiPayload(payload: unknown): Set<AppPermission> {
   const permissions = new Set<AppPermission>();
-  const permissionTokens = collectPermissionTokens(payload);
+  const permissionTokens = collectPermissionTokens(payload, [], '', Array.isArray(payload));
 
   for (const token of permissionTokens) {
     addPermissionMatchesFromToken(token, permissions);
