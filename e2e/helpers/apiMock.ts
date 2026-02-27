@@ -61,6 +61,7 @@ interface ApiMeta {
 }
 
 const API_V2_ROUTE_PATTERN = /\/api\/v2(?:\/|$|\?)/;
+const API_V2_AUTH_ROUTE_PATTERN = /\/api\/v2\/auth\/.+/;
 const API_MOCK_FAILURE_LISTENER_PAGES = new WeakSet<Page>();
 
 const MOCK_CORS_HEADERS = {
@@ -305,6 +306,63 @@ export async function installApiMocks(page: Page, options: ApiMockOptions = {}):
         error,
       );
       await fulfillError(route, 500, 'MOCK_HANDLER_ERROR', 'mock route handler threw an error');
+    }
+  });
+
+  await page.route(API_V2_AUTH_ROUTE_PATTERN, async (route, request) => {
+    try {
+      const method = request.method().toUpperCase();
+      const path = new URL(request.url()).pathname;
+
+      if (!path.startsWith('/api/v2/auth/')) {
+        await route.continue();
+        return;
+      }
+
+      const customHandler = resolveHandler(options.handlers, method, path);
+      if (customHandler) {
+        await customHandler({
+          route,
+          request,
+          method,
+          path,
+        });
+        return;
+      }
+
+      if (method === 'GET' && path === '/api/v2/auth/me') {
+        await fulfillSuccess(route, user);
+        return;
+      }
+
+      if (method === 'POST' && path === '/api/v2/auth/login') {
+        await fulfillSuccess(route, {
+          token: `e2e-token-${user.userId}`,
+          expiresIn: 3600,
+          user,
+        });
+        return;
+      }
+
+      if (method === 'POST' && path === '/api/v2/auth/refresh') {
+        await fulfillError(route, 401, 'UNAUTHORIZED', 'refresh token expired');
+        return;
+      }
+
+      if (method === 'POST' && path === '/api/v2/auth/logout') {
+        await fulfillSuccess(route, { message: 'ok' });
+        return;
+      }
+
+      await fulfillSuccess(route, {});
+    } catch (error) {
+      console.error(
+        '[e2e][api-auth-route-error]',
+        request.method().toUpperCase(),
+        request.url(),
+        error,
+      );
+      await fulfillError(route, 500, 'MOCK_HANDLER_ERROR', 'auth route handler threw an error');
     }
   });
 }
