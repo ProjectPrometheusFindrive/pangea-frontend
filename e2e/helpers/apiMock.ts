@@ -32,6 +32,10 @@ export type ApiMockHandler = (context: ApiMockContext) => Promise<void> | void;
 interface ApiMockOptions {
   user?: Partial<MockUser>;
   company?: Partial<MockCompany>;
+  auth?: {
+    login?: 'success' | 'unauthorized';
+    me?: 'success' | 'unauthorized';
+  };
   handlers?: Record<string, ApiMockHandler>;
 }
 
@@ -191,6 +195,96 @@ export async function installApiMocks(page: Page, options: ApiMockOptions = {}):
     ...DEFAULT_COMPANY,
     ...options.company,
   } satisfies MockCompany;
+
+  const auth = {
+    login: options.auth?.login ?? 'success',
+    me: options.auth?.me ?? 'success',
+  } as const;
+
+  await page.addInitScript(
+    ({ mockUser, mockAuth }: { mockUser: MockUser; mockAuth: { login: 'success' | 'unauthorized'; me: 'success' | 'unauthorized' } }) => {
+      const buildMeta = () => ({
+        requestId: 'e2e-request-id',
+        timestamp: new Date().toISOString(),
+      });
+
+      const successEnvelope = (data: unknown) => ({
+        success: true,
+        data,
+        meta: buildMeta(),
+      });
+
+      const errorEnvelope = (code: string, message: string) => ({
+        success: false,
+        error: {
+          code,
+          message,
+        },
+        meta: buildMeta(),
+      });
+
+      const jsonResponse = (status: number, body: unknown) => (
+        new Response(JSON.stringify(body), {
+          status,
+          headers: {
+            'Content-Type': 'application/json; charset=utf-8',
+          },
+        })
+      );
+
+      const originalFetch = window.fetch.bind(window);
+      window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+        const requestUrl = (
+          typeof input === 'string'
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url
+        );
+
+        let path = '';
+        try {
+          path = new URL(requestUrl, window.location.origin).pathname;
+        } catch {
+          return originalFetch(input, init);
+        }
+
+        const method = (init?.method ?? (input instanceof Request ? input.method : 'GET')).toUpperCase();
+
+        if (method === 'GET' && path === '/api/v2/auth/me') {
+          if (mockAuth.me === 'unauthorized') {
+            return jsonResponse(401, errorEnvelope('UNAUTHORIZED', 'expired session'));
+          }
+          return jsonResponse(200, successEnvelope(mockUser));
+        }
+
+        if (method === 'POST' && path === '/api/v2/auth/login') {
+          if (mockAuth.login === 'unauthorized') {
+            return jsonResponse(401, errorEnvelope('UNAUTHORIZED', 'invalid credentials'));
+          }
+          return jsonResponse(200, successEnvelope({
+            token: `e2e-token-${mockUser.userId}`,
+            expiresIn: 3600,
+            user: mockUser,
+          }));
+        }
+
+        if (method === 'POST' && path === '/api/v2/auth/refresh') {
+          return jsonResponse(401, errorEnvelope('UNAUTHORIZED', 'refresh token expired'));
+        }
+
+        if (method === 'POST' && path === '/api/v2/auth/logout') {
+          return jsonResponse(200, successEnvelope({ message: 'ok' }));
+        }
+
+        return originalFetch(input, init);
+      };
+    },
+    {
+      mockUser: user,
+      mockAuth: auth,
+    },
+  );
 
   if (!API_MOCK_FAILURE_LISTENER_PAGES.has(page)) {
     page.on('requestfailed', (request) => {

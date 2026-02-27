@@ -1,24 +1,11 @@
 import { expect, test } from '@playwright/test';
-import { buildMockUser, delay, fulfillError, fulfillSuccess, installApiMocks } from './helpers/apiMock';
+import { buildMockUser, delay, fulfillSuccess, installApiMocks } from './helpers/apiMock';
 
 test.describe('BK-091 Login E2E', () => {
   test('로그인 성공 시 loading 이후 자산 화면으로 이동한다', async ({ page }) => {
-    const memberUser = buildMockUser('member');
-
     await installApiMocks(page, {
-      user: memberUser,
+      user: buildMockUser('member'),
       handlers: {
-        'POST /api/v2/auth/login': async ({ route }) => {
-          await delay(250);
-          await fulfillSuccess(route, {
-            token: 'login-token',
-            expiresIn: 3600,
-            user: memberUser,
-          });
-        },
-        'GET /api/v2/auth/me': async ({ route }) => {
-          await fulfillSuccess(route, memberUser);
-        },
         'GET /api/v2/assets': async ({ route }) => {
           await delay(350);
           await fulfillSuccess(route, {
@@ -60,10 +47,8 @@ test.describe('BK-091 Login E2E', () => {
 
   test('로그인 401 오류 시 인증 실패 문구를 표시한다', async ({ page }) => {
     await installApiMocks(page, {
-      handlers: {
-        'POST /api/v2/auth/login': async ({ route }) => {
-          await fulfillError(route, 401, 'UNAUTHORIZED', 'invalid credentials');
-        },
+      auth: {
+        login: 'unauthorized',
       },
     });
 
