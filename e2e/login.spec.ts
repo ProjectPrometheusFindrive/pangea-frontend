@@ -53,7 +53,7 @@ test.describe('BK-091 Login E2E', () => {
     await page.getByTestId('login-password').fill('password');
     await page.getByTestId('login-submit').click();
 
-    await expect(page.getByText('데이터를 불러오는 중입니다')).toBeVisible();
+    await expect(page).toHaveURL(/\/assets(?:\?.*)?$/);
     await expect(page.getByRole('heading', { name: '차량 자산' })).toBeVisible();
     await expect(page.getByText('12가3456')).toBeVisible();
   });

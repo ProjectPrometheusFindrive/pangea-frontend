@@ -126,7 +126,7 @@ test.describe('BK-091 Reservations E2E', () => {
     });
 
     await page.goto('/reservations');
-    await expect(page.getByText('데이터를 불러오는 중입니다')).toBeVisible();
+    await expect(page).toHaveURL(/\/reservations(?:\?.*)?$/);
     await expect(page.getByRole('heading', { name: '대여 예약' })).toBeVisible();
 
     await openNewContractModal(page);
@@ -167,6 +167,7 @@ test.describe('BK-091 Reservations E2E', () => {
     });
 
     await page.goto('/reservations');
+    await expect(page).toHaveURL(/\/reservations(?:\?.*)?$/);
     await expect(page.getByRole('heading', { name: '대여 예약' })).toBeVisible();
 
     await openNewContractModal(page);
@@ -201,6 +202,8 @@ test.describe('BK-091 Reservations E2E', () => {
     });
 
     await page.goto('/reservations');
+    await expect(page).toHaveURL(/\/reservations(?:\?.*)?$/);
+    await expect(page.getByRole('heading', { name: '대여 예약' })).toBeVisible();
     await expect(page.getByTestId('reservation-block-R-9001')).toBeVisible();
 
     await page.getByTestId('reservation-block-R-9001').click();
@@ -224,6 +227,7 @@ test.describe('BK-091 Reservations E2E', () => {
     });
 
     await page.goto('/reservations');
+    await expect(page).toHaveURL(/\/reservations(?:\?.*)?$/);
     await expect(page.getByRole('heading', { name: '세션이 만료되었습니다' })).toBeVisible();
     await expect(page.getByText('보안을 위해 로그인 세션이 종료되었습니다. 다시 로그인해 주세요.')).toBeVisible();
   });

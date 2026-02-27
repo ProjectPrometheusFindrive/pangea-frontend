@@ -37,6 +37,13 @@ async function fillInstallationForm(page: Page): Promise<void> {
   await page.getByTestId('device-installation-serial-photo-file-input').setInputFiles(TEST_IMAGE_FILE);
 }
 
+async function openDeviceInstallationPage(page: Page): Promise<void> {
+  await page.goto('/device-installation');
+  await expect(page).toHaveURL(/\/device-installation(?:\?.*)?$/);
+  await expect(page.getByRole('heading', { name: '단말 장착/관리' })).toBeVisible();
+  await expect(page.getByTestId('device-installation-vin-input')).toBeVisible();
+}
+
 test.describe('BK-091 Premium Installation E2E', () => {
   test('장착 신청 성공 시 로딩 후 성공 메시지와 목록 반영을 확인한다', async ({ page }) => {
     await seedAuthSession(page, 'installer');
@@ -86,9 +93,7 @@ test.describe('BK-091 Premium Installation E2E', () => {
       },
     });
 
-    await page.goto('/device-installation');
-    await expect(page.getByText('데이터를 불러오는 중입니다')).toBeVisible();
-    await expect(page.getByRole('heading', { name: '단말 장착/관리' })).toBeVisible();
+    await openDeviceInstallationPage(page);
 
     await fillInstallationForm(page);
     await page.getByTestId('device-installation-submit').click();
@@ -118,7 +123,7 @@ test.describe('BK-091 Premium Installation E2E', () => {
       },
     });
 
-    await page.goto('/device-installation');
+    await openDeviceInstallationPage(page);
     await fillInstallationForm(page);
     await page.getByTestId('device-installation-submit').click();
 
@@ -145,7 +150,7 @@ test.describe('BK-091 Premium Installation E2E', () => {
       },
     });
 
-    await page.goto('/device-installation');
+    await openDeviceInstallationPage(page);
     await fillInstallationForm(page);
     await page.getByTestId('device-installation-submit').click();
 

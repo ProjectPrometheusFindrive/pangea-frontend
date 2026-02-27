@@ -60,6 +60,13 @@ interface ApiMeta {
   timestamp: string;
 }
 
+const MOCK_CORS_HEADERS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
+  'Access-Control-Allow-Headers': 'Authorization, Content-Type, Accept, Origin, X-Requested-With',
+  'Access-Control-Max-Age': '86400',
+};
+
 function buildMeta(): ApiMeta {
   return {
     requestId: 'e2e-request-id',
@@ -139,6 +146,7 @@ export function errorEnvelope(
 export async function fulfillSuccess(route: Route, data: unknown, status = 200): Promise<void> {
   await route.fulfill({
     status,
+    headers: MOCK_CORS_HEADERS,
     contentType: 'application/json; charset=utf-8',
     body: JSON.stringify(successEnvelope(data)),
   });
@@ -153,6 +161,7 @@ export async function fulfillError(
 ): Promise<void> {
   await route.fulfill({
     status,
+    headers: MOCK_CORS_HEADERS,
     contentType: 'application/json; charset=utf-8',
     body: JSON.stringify(errorEnvelope(code, message, fields)),
   });
@@ -178,6 +187,15 @@ export async function installApiMocks(page: Page, options: ApiMockOptions = {}):
   await page.route('**/api/v2/**', async (route, request) => {
     const method = request.method().toUpperCase();
     const path = new URL(request.url()).pathname;
+
+    if (method === 'OPTIONS') {
+      await route.fulfill({
+        status: 204,
+        headers: MOCK_CORS_HEADERS,
+        body: '',
+      });
+      return;
+    }
 
     const customHandler = resolveHandler(options.handlers, method, path);
     if (customHandler) {

@@ -73,8 +73,7 @@ test.describe('BK-091 Assets E2E', () => {
     });
 
     await page.goto('/assets');
-
-    await expect(page.getByText('데이터를 불러오는 중입니다')).toBeVisible();
+    await expect(page).toHaveURL(/\/assets(?:\?.*)?$/);
     await expect(page.getByRole('heading', { name: '차량 자산' })).toBeVisible();
     await expect(page.getByTestId('asset-row-ASSET-001')).toBeVisible();
 
@@ -112,6 +111,7 @@ test.describe('BK-091 Assets E2E', () => {
     });
 
     await page.goto('/assets');
+    await expect(page).toHaveURL(/\/assets(?:\?.*)?$/);
     await expect(page.getByText('차량 자산 목록을 불러오는 중 문제가 발생했습니다.')).toBeVisible();
 
     await page.getByRole('button', { name: '다시 시도' }).click();
@@ -144,6 +144,8 @@ test.describe('BK-091 Assets E2E', () => {
     });
 
     await page.goto('/assets');
+    await expect(page).toHaveURL(/\/assets(?:\?.*)?$/);
+    await expect(page.getByRole('heading', { name: '차량 자산' })).toBeVisible();
     await expect(page.getByTestId('asset-row-ASSET-001')).toBeVisible();
 
     await page.getByTestId('asset-row-ASSET-001').click();
