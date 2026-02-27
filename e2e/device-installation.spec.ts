@@ -52,7 +52,7 @@ test.describe('BK-091 Premium Installation E2E', () => {
     await installApiMocks(page, {
       user: { role: 'installer', userId: 'installer-001', name: 'E2E Installer' },
       handlers: {
-        'GET /api/v2/device-installations': async ({ route, request }) => {
+        'GET /api/v2/device-installations/tasks': async ({ route, request }) => {
           if (firstListDelay) {
             firstListDelay = false;
             await delay(250);
@@ -105,7 +105,7 @@ test.describe('BK-091 Premium Installation E2E', () => {
     await installApiMocks(page, {
       user: { role: 'installer', userId: 'installer-001', name: 'E2E Installer' },
       handlers: {
-        'GET /api/v2/device-installations': async ({ route }) => {
+        'GET /api/v2/device-installations/tasks': async ({ route }) => {
           await fulfillSuccess(route, {
             items: [],
             total: 0,
@@ -130,7 +130,7 @@ test.describe('BK-091 Premium Installation E2E', () => {
     await installApiMocks(page, {
       user: { role: 'installer', userId: 'installer-001', name: 'E2E Installer' },
       handlers: {
-        'GET /api/v2/device-installations': async ({ route }) => {
+        'GET /api/v2/device-installations/tasks': async ({ route }) => {
           await fulfillSuccess(route, {
             items: [],
             total: 0,

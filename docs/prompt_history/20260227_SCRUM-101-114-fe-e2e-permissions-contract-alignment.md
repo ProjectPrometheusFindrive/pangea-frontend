@@ -14,14 +14,17 @@
 - E2E 기본 API mock 계약을 현재 FE 권한 정책과 정렬했다.
 - `/api/v2/permissions/me` 기본 응답을 `404` 에러에서 role 기반 권한 payload 성공 응답으로 교체했다.
 - role(`member/admin/super_admin/installer`)별 기본 permission 세트를 명시하여 테스트가 role-fallback에 의존하지 않도록 고정했다.
+- Device Installation E2E 스펙의 목록 조회 mock 경로를 `/api/v2/device-installations/tasks`로 정렬해 canonical 경로 변경 이후 발생한 단일 실패를 제거했다.
 
 ## Diffs & Files
 - `e2e/helpers/apiMock.ts`
   - role별 기본 permission 매핑 상수 추가.
   - `buildPermissionPayload()` 헬퍼 추가.
   - `GET /api/v2/permissions/me` 기본 핸들러를 `fulfillSuccess(permissionPayload)`로 전환.
+- `e2e/device-installation.spec.ts`
+  - 목록 조회 핸들러 경로를 `/api/v2/device-installations/tasks`로 변경해 앱 서비스 경로와 테스트 mock 계약을 일치시킴.
 - `docs/prompt_library/prompt_library_v1.md`
-  - 버전 `v1.2.36` 업데이트 및 본 변경의 Version History 추가.
+  - 버전 `v1.2.37` 업데이트 및 본 변경의 Version History/Rules 추가.
 
 ## Validation
 ```bash
