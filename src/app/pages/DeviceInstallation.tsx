@@ -458,7 +458,7 @@ export default function DeviceInstallation() {
 
         <div className="bg-white rounded-lg shadow-sm p-4 mb-4">
           {(actionError || actionMessage) && (
-            <div className={`mb-4 rounded-lg border px-3 py-2 text-sm ${
+            <div data-testid={actionError ? 'device-installation-action-error' : 'device-installation-action-message'} className={`mb-4 rounded-lg border px-3 py-2 text-sm ${
               actionError
                 ? 'border-red-200 bg-red-50 text-red-700'
                 : 'border-green-200 bg-green-50 text-green-700'
@@ -486,6 +486,7 @@ export default function DeviceInstallation() {
                 VIN
               </label>
               <input
+                data-testid="device-installation-vin-input"
                 type="text"
                 placeholder="KMH..."
                 value={vin}
@@ -500,6 +501,7 @@ export default function DeviceInstallation() {
                 단말 시리얼 번호
               </label>
               <input
+                data-testid="device-installation-serial-input"
                 type="text"
                 placeholder="DEV-2024-XXX"
                 value={deviceSerial}
@@ -514,6 +516,7 @@ export default function DeviceInstallation() {
                 예약 일시 <span className="text-red-600">*</span>
               </label>
               <input
+                data-testid="device-installation-scheduled-at-input"
                 type="datetime-local"
                 value={scheduledAt}
                 onChange={(event) => setScheduledAt(event.target.value)}
@@ -528,6 +531,7 @@ export default function DeviceInstallation() {
               </label>
               <div className="relative">
                 <input
+                  data-testid="device-installation-photo-file-input"
                   type="file"
                   accept="image/*"
                   capture="environment"
@@ -591,6 +595,7 @@ export default function DeviceInstallation() {
               </label>
               <div className="relative">
                 <input
+                  data-testid="device-installation-serial-photo-file-input"
                   type="file"
                   accept="image/*"
                   capture="environment"
@@ -653,6 +658,7 @@ export default function DeviceInstallation() {
                 onClick={() => {
                   void handleCreateInstallation();
                 }}
+                data-testid="device-installation-submit"
                 disabled={!canWriteDeviceInstallation || isSubmitting || !vin || !scheduledAt || !deviceSerial || !installationPhotoFile || !serialPhotoFile}
                 className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-bold text-sm disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
               >

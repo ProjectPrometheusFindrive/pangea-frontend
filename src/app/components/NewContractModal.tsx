@@ -318,7 +318,7 @@ export function NewContractModal({
   }`;
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+    <div data-testid="new-contract-modal" className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
       <div className="bg-white rounded-xl w-[600px] max-h-[85vh] flex flex-col">
         <div className="p-6 border-b border-gray-200 shrink-0">
           <div className="flex items-center justify-between mb-4">
@@ -360,7 +360,7 @@ export function NewContractModal({
 
         <div className="flex-1 overflow-y-auto p-6">
           {submitError && (
-            <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 flex items-start gap-2">
+            <div data-testid="new-contract-submit-error" className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 flex items-start gap-2">
               <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
               <span>{submitError}</span>
             </div>
@@ -426,6 +426,7 @@ export function NewContractModal({
                         차량 선택 <span className="text-red-600">*</span>
                       </label>
                       <select
+                        data-testid="new-contract-vehicle-select"
                         value={selectedVehicle}
                         onChange={(event) => {
                           setSelectedVehicle(event.target.value);
@@ -450,6 +451,7 @@ export function NewContractModal({
                           대여 시작일 <span className="text-red-600">*</span>
                         </label>
                         <input
+                          data-testid="new-contract-start-date-input"
                           type="date"
                           value={startDate}
                           onChange={(event) => {
@@ -466,6 +468,7 @@ export function NewContractModal({
                           대여 종료일 <span className="text-red-600">*</span>
                         </label>
                         <input
+                          data-testid="new-contract-end-date-input"
                           type="date"
                           value={endDate}
                           onChange={(event) => {
@@ -485,6 +488,7 @@ export function NewContractModal({
                           픽업 시간 <span className="text-red-600">*</span>
                         </label>
                         <input
+                          data-testid="new-contract-start-time-input"
                           type="time"
                           value={startTime}
                           onChange={(event) => {
@@ -501,6 +505,7 @@ export function NewContractModal({
                           반납 시간 <span className="text-red-600">*</span>
                         </label>
                         <input
+                          data-testid="new-contract-end-time-input"
                           type="time"
                           value={endTime}
                           onChange={(event) => {
@@ -529,6 +534,7 @@ export function NewContractModal({
                         픽업 시간 <span className="text-red-600">*</span>
                       </label>
                       <input
+                        data-testid="new-contract-start-time-input"
                         type="time"
                         value={startTime}
                         onChange={(event) => {
@@ -545,6 +551,7 @@ export function NewContractModal({
                         반납 시간 <span className="text-red-600">*</span>
                       </label>
                       <input
+                        data-testid="new-contract-end-time-input"
                         type="time"
                         value={endTime}
                         onChange={(event) => {
@@ -563,6 +570,7 @@ export function NewContractModal({
               <div className="pt-4">
                 <button
                   onClick={handleStepOneNext}
+                  data-testid="new-contract-step1-next"
                   className="w-full px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium"
                   disabled={isSubmitting}
                 >
@@ -579,6 +587,7 @@ export function NewContractModal({
                   고객명 <span className="text-red-600">*</span>
                 </label>
                 <input
+                  data-testid="new-contract-customer-name-input"
                   type="text"
                   value={customerName}
                   onChange={(event) => {
@@ -597,6 +606,7 @@ export function NewContractModal({
                   연락처 <span className="text-red-600">*</span>
                 </label>
                 <input
+                  data-testid="new-contract-customer-phone-input"
                   type="tel"
                   value={customerPhone}
                   onChange={(event) => {
@@ -615,6 +625,7 @@ export function NewContractModal({
                   주민번호 <span className="text-red-600">*</span>
                 </label>
                 <input
+                  data-testid="new-contract-customer-ssn-input"
                   type="text"
                   value={customerSSN}
                   onChange={(event) => {
@@ -633,6 +644,7 @@ export function NewContractModal({
                   면허번호 <span className="text-red-600">*</span>
                 </label>
                 <input
+                  data-testid="new-contract-customer-license-input"
                   type="text"
                   value={customerLicense}
                   onChange={(event) => {
@@ -651,6 +663,7 @@ export function NewContractModal({
                   주소 <span className="text-red-600">*</span>
                 </label>
                 <input
+                  data-testid="new-contract-customer-address-input"
                   type="text"
                   value={customerAddress}
                   onChange={(event) => {
@@ -673,6 +686,7 @@ export function NewContractModal({
                       대여 장소 <span className="text-red-600">*</span>
                     </label>
                     <input
+                      data-testid="new-contract-pickup-location-input"
                       type="text"
                       value={pickupLocation}
                       onChange={(event) => {
@@ -690,6 +704,7 @@ export function NewContractModal({
                       반납 장소 <span className="text-red-600">*</span>
                     </label>
                     <input
+                      data-testid="new-contract-return-location-input"
                       type="text"
                       value={returnLocation}
                       onChange={(event) => {
@@ -711,6 +726,7 @@ export function NewContractModal({
                     대여 요금 <span className="text-red-600">*</span>
                   </label>
                   <input
+                    data-testid="new-contract-amount-input"
                     type="text"
                     value={amount}
                     onChange={(event) => {
@@ -728,6 +744,7 @@ export function NewContractModal({
                     선금 <span className="text-red-600">*</span>
                   </label>
                   <input
+                    data-testid="new-contract-deposit-input"
                     type="text"
                     value={deposit}
                     onChange={(event) => {
@@ -794,6 +811,7 @@ export function NewContractModal({
                 </button>
                 <button
                   onClick={handleStepTwoNext}
+                  data-testid="new-contract-step2-next"
                   className="flex-1 px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium"
                   disabled={isSubmitting}
                 >
@@ -821,6 +839,7 @@ export function NewContractModal({
                     </span>
                   </div>
                   <input
+                    data-testid="new-contract-license-file-input"
                     type="file"
                     accept="image/*"
                     className="hidden"
@@ -882,6 +901,7 @@ export function NewContractModal({
                 </button>
                 <button
                   onClick={handleSubmit}
+                  data-testid="new-contract-submit"
                   className="flex-1 px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium flex items-center justify-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
                   disabled={isSubmitting}
                 >

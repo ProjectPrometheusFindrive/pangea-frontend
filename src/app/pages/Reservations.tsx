@@ -1595,6 +1595,7 @@ export default function Reservations() {
                 }
                 setShowModal(true);
               }}
+              data-testid="reservation-new-contract-button"
               disabled={!canWriteReservations}
               className="px-4 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium flex items-center gap-2 text-sm disabled:cursor-not-allowed disabled:opacity-60"
             >
@@ -1915,6 +1916,7 @@ export default function Reservations() {
                             <div
                               key={res.id}
                               onClick={() => handleReservationClick(res)}
+                              data-testid={`reservation-block-${res.id}`}
                               className={`absolute top-1.5 h-11 ${getBlockColor(res)} rounded px-2 py-1 text-white text-xs flex flex-col justify-between cursor-pointer hover:opacity-90 transition-opacity pointer-events-auto ${
                                 isHighlighted ? 'ring-4 ring-yellow-400' : ''
                               }`}
@@ -1962,7 +1964,7 @@ export default function Reservations() {
 
         {/* 예약 상세 팝업 */}
         {selectedReservation && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div data-testid="reservation-detail-modal" className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
             <div className="bg-white rounded-xl w-[700px] max-h-[80vh] flex flex-col">
               <div className="p-6 border-b border-gray-200">
                 <div className="flex items-center justify-between">
@@ -2272,6 +2274,7 @@ export default function Reservations() {
                 {selectedReservation.type !== 'return' && (
                   <button
                     onClick={handleReturnClick}
+                    data-testid="reservation-return-button"
                     disabled={!canWriteReservations}
                     className="flex-1 min-w-[200px] px-4 py-3 bg-orange-600 text-white rounded-lg hover:bg-orange-700 font-medium disabled:cursor-not-allowed disabled:opacity-60"
                   >
@@ -2298,7 +2301,7 @@ export default function Reservations() {
 
         {/* 반납 확인 모달 */}
         {showReturnConfirm && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div data-testid="reservation-return-confirm-modal" className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
             <div className="bg-white rounded-xl w-[400px] max-h-[80vh] overflow-y-auto">
               <div className="p-6">
                 <div className="flex items-center justify-between mb-6">
@@ -2316,7 +2319,7 @@ export default function Reservations() {
                 </div>
 
                 {returnSubmitError && (
-                  <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 flex items-start gap-2">
+                  <div data-testid="reservation-return-error" className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 flex items-start gap-2">
                     <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
                     <span>{returnSubmitError}</span>
                   </div>
@@ -2329,6 +2332,7 @@ export default function Reservations() {
                 <div className="flex gap-3">
                   <button
                     onClick={handleConfirmReturn}
+                    data-testid="reservation-return-confirm-button"
                     className="flex-1 px-4 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium flex items-center justify-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
                     disabled={isReturnSubmitting}
                   >

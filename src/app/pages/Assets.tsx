@@ -2141,7 +2141,12 @@ export default function Assets() {
                 </thead>
                 <tbody className="divide-y divide-gray-200">
                   {assets.map((asset) => (
-                    <tr key={asset.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => handleDetailModalOpen(asset)}>
+                    <tr
+                      key={asset.id}
+                      data-testid={`asset-row-${asset.id}`}
+                      className="hover:bg-gray-50 cursor-pointer"
+                      onClick={() => handleDetailModalOpen(asset)}
+                    >
                       <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                         {asset.vehicleNumber}
                       </td>
