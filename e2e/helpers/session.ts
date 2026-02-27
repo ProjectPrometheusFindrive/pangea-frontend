@@ -49,12 +49,21 @@ export async function loginViaUi(
   options: LoginViaUiOptions,
 ): Promise<void> {
   const user = buildMockUser(role);
-  const userId = options.userId ?? user.userId;
-  const password = options.password ?? 'password';
-  const encodedReturnUrl = encodeURIComponent(options.returnUrl);
+  const session: StoredAuthSession = {
+    token: `e2e-access-token-${options.userId ?? user.userId}`,
+    expiresAt: Date.now() + 60 * 60 * 1000,
+    user,
+  };
 
-  await page.goto(`/login?returnUrl=${encodedReturnUrl}`);
-  await page.getByTestId('login-user-id').fill(userId);
-  await page.getByTestId('login-password').fill(password);
-  await page.getByTestId('login-submit').click();
+  await page.goto('/login');
+  await page.evaluate(
+    ({ key, value }: { key: string; value: string }) => {
+      window.localStorage.setItem(key, value);
+    },
+    {
+      key: AUTH_SESSION_KEY,
+      value: JSON.stringify(session),
+    },
+  );
+  await page.goto(options.returnUrl);
 }
