@@ -6,6 +6,7 @@ export const ROUTE_PERMISSIONS = {
   assets: 'route.assets',
   reservations: 'route.reservations',
   revenue: 'route.revenue',
+  supportCenter: 'route.support-center',
   settings: 'route.settings',
   deviceInstallation: 'route.device-installation',
 } as const;
@@ -31,6 +32,7 @@ export const KNOWN_APP_PERMISSIONS: AppPermission[] = [
   ROUTE_PERMISSIONS.assets,
   ROUTE_PERMISSIONS.reservations,
   ROUTE_PERMISSIONS.revenue,
+  ROUTE_PERMISSIONS.supportCenter,
   ROUTE_PERMISSIONS.settings,
   ROUTE_PERMISSIONS.deviceInstallation,
   ACTION_PERMISSIONS.assetsWrite,
@@ -47,6 +49,7 @@ const RENTAL_ROUTE_PERMISSIONS: AppRoutePermission[] = [
   ROUTE_PERMISSIONS.assets,
   ROUTE_PERMISSIONS.reservations,
   ROUTE_PERMISSIONS.revenue,
+  ROUTE_PERMISSIONS.supportCenter,
   ROUTE_PERMISSIONS.settings,
 ];
 
@@ -163,6 +166,10 @@ function addPermissionMatchesFromToken(rawToken: string, target: Set<AppPermissi
 
   if (tokenIncludes(normalizedToken, 'revenue', 'sales')) {
     addRentalRoutePermission(normalizedToken, ROUTE_PERMISSIONS.revenue, target);
+  }
+
+  if (tokenIncludes(normalizedToken, 'support.center', 'supportcenter', 'customer.center', 'help.desk', 'helpdesk')) {
+    addRentalRoutePermission(normalizedToken, ROUTE_PERMISSIONS.supportCenter, target);
   }
 
   if (tokenIncludes(normalizedToken, 'setting', 'company', 'geofence', 'member')) {
@@ -300,7 +307,7 @@ export function resolveRoutePermissionForPath(pathname: string): AppRoutePermiss
     return ROUTE_PERMISSIONS.actionRequired;
   }
   if (pathname.startsWith('/support-center')) {
-    return ROUTE_PERMISSIONS.actionRequired;
+    return ROUTE_PERMISSIONS.supportCenter;
   }
   if (pathname.startsWith('/assets')) {
     return ROUTE_PERMISSIONS.assets;
