@@ -184,7 +184,7 @@ export async function installApiMocks(page: Page, options: ApiMockOptions = {}):
     ...options.company,
   } satisfies MockCompany;
 
-  await page.route('**/api/v2/**', async (route, request) => {
+  await page.context().route('**/api/v2/**', async (route, request) => {
     const method = request.method().toUpperCase();
     const path = new URL(request.url()).pathname;
 
