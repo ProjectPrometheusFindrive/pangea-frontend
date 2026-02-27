@@ -13,8 +13,8 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useSearchParams, useNavigate } from 'react-router';
-import { PremiumBanner } from '../components/PremiumBanner';
 import { PageStateBoundary } from '../components/PageStateBoundary';
+import { PremiumInstallationRequestSection } from '../components/PremiumInstallationRequestSection';
 import { VehicleDetailModal } from '../components/VehicleDetailModal';
 import {
   getCollectionFromPayload,
@@ -1444,7 +1444,17 @@ export default function Assets() {
     && !assetsError
     && (isAssetsApiEmpty || assets.length === 0)
   ) || isOutOfRangeError;
-  const vehiclesWithoutDevice = assets.filter((asset) => !asset.hasDevice).length;
+  const premiumInstallableAssets = useMemo(() => (
+    assets
+      .filter((asset) => !asset.hasDevice)
+      .map((asset) => ({
+        id: asset.id,
+        vehicleNumber: asset.vehicleNumber,
+        model: asset.model,
+        vin: asset.vin,
+        owner: asset.owner,
+      }))
+  ), [assets]);
 
   const handleCreateFieldChange = useCallback((field: keyof CreateFormState, value: string) => {
     setCreateForm((prev) => ({ ...prev, [field]: value }));
@@ -1970,12 +1980,9 @@ export default function Assets() {
   return (
     <Layout title="차량 자산">
       <div className="p-6">
-        {/* 프리미엄 배너 - 단말 미설치 차량 유도 */}
-        <PremiumBanner 
-          vehiclesWithoutDevice={vehiclesWithoutDevice}
-          onCTAClick={() => {
-            alert('프리미엄 문의: 1588-XXXX\n\n단말 일괄 설치 신청이 접수되었습니다.\n담당자가 곧 연락드리겠습니다.');
-          }}
+        <PremiumInstallationRequestSection
+          assets={premiumInstallableAssets}
+          user={user ?? null}
         />
 
         {detailNotice && (
