@@ -211,90 +211,100 @@ export async function installApiMocks(page: Page, options: ApiMockOptions = {}):
   }
 
   await page.route(API_V2_ROUTE_PATTERN, async (route, request) => {
-    const method = request.method().toUpperCase();
-    const path = new URL(request.url()).pathname;
+    try {
+      const method = request.method().toUpperCase();
+      const path = new URL(request.url()).pathname;
 
-    if (!isApiV2Path(path)) {
-      await route.continue();
-      return;
-    }
-
-    if (path.startsWith('/api/v2/auth/')) {
-      console.log(`[e2e][api-route] ${method} ${path}`);
-    }
-
-    if (method === 'OPTIONS') {
-      await route.fulfill({
-        status: 204,
-        headers: MOCK_CORS_HEADERS,
-        body: '',
-      });
-      return;
-    }
-
-    const customHandler = resolveHandler(options.handlers, method, path);
-    if (customHandler) {
-      if (path.startsWith('/api/v2/auth/')) {
-        console.log(`[e2e][api-route-handler] custom ${method} ${path}`);
+      if (!isApiV2Path(path)) {
+        await route.continue();
+        return;
       }
-      await customHandler({
-        route,
-        request,
-        method,
-        path,
-      });
-      return;
-    }
 
-    if (method === 'GET' && path === '/api/v2/company') {
-      await fulfillSuccess(route, company);
-      return;
-    }
+      if (path.startsWith('/api/v2/auth/')) {
+        console.log(`[e2e][api-route] ${method} ${path}`);
+      }
 
-    if (method === 'GET' && path === '/api/v2/auth/me') {
-      console.log('[e2e][api-route-handler] default GET /api/v2/auth/me');
-      await fulfillSuccess(route, user);
-      return;
-    }
+      if (method === 'OPTIONS') {
+        await route.fulfill({
+          status: 204,
+          headers: MOCK_CORS_HEADERS,
+          body: '',
+        });
+        return;
+      }
 
-    if (method === 'POST' && path === '/api/v2/auth/login') {
-      console.log('[e2e][api-route-handler] default POST /api/v2/auth/login');
-      await fulfillSuccess(route, {
-        token: `e2e-token-${user.userId}`,
-        expiresIn: 3600,
-        user,
-      });
-      return;
-    }
+      const customHandler = resolveHandler(options.handlers, method, path);
+      if (customHandler) {
+        if (path.startsWith('/api/v2/auth/')) {
+          console.log(`[e2e][api-route-handler] custom ${method} ${path}`);
+        }
+        await customHandler({
+          route,
+          request,
+          method,
+          path,
+        });
+        return;
+      }
 
-    if (method === 'GET' && path === '/api/v2/permissions/me') {
-      await fulfillError(route, 404, 'NOT_FOUND', 'permissions endpoint is not available');
-      return;
-    }
+      if (method === 'GET' && path === '/api/v2/company') {
+        await fulfillSuccess(route, company);
+        return;
+      }
 
-    if (method === 'POST' && path === '/api/v2/auth/refresh') {
-      console.log('[e2e][api-route-handler] default POST /api/v2/auth/refresh');
-      await fulfillError(route, 401, 'UNAUTHORIZED', 'refresh token expired');
-      return;
-    }
+      if (method === 'GET' && path === '/api/v2/auth/me') {
+        console.log('[e2e][api-route-handler] default GET /api/v2/auth/me');
+        await fulfillSuccess(route, user);
+        return;
+      }
 
-    if (method === 'POST' && path === '/api/v2/auth/logout') {
-      console.log('[e2e][api-route-handler] default POST /api/v2/auth/logout');
-      await fulfillSuccess(route, { message: 'ok' });
-      return;
-    }
+      if (method === 'POST' && path === '/api/v2/auth/login') {
+        console.log('[e2e][api-route-handler] default POST /api/v2/auth/login');
+        await fulfillSuccess(route, {
+          token: `e2e-token-${user.userId}`,
+          expiresIn: 3600,
+          user,
+        });
+        return;
+      }
 
-    if (method === 'GET' && path === '/api/v2/payments/status') {
-      await fulfillError(route, 404, 'NOT_FOUND', 'payment not found');
-      return;
-    }
+      if (method === 'GET' && path === '/api/v2/permissions/me') {
+        await fulfillError(route, 404, 'NOT_FOUND', 'permissions endpoint is not available');
+        return;
+      }
 
-    if (method === 'GET' && path.startsWith('/api/v2/payments/')) {
-      await fulfillError(route, 404, 'NOT_FOUND', 'payment not found');
-      return;
-    }
+      if (method === 'POST' && path === '/api/v2/auth/refresh') {
+        console.log('[e2e][api-route-handler] default POST /api/v2/auth/refresh');
+        await fulfillError(route, 401, 'UNAUTHORIZED', 'refresh token expired');
+        return;
+      }
 
-    console.log(`[e2e][api-route-handler] fallback ${method} ${path}`);
-    await fulfillSuccess(route, {});
+      if (method === 'POST' && path === '/api/v2/auth/logout') {
+        console.log('[e2e][api-route-handler] default POST /api/v2/auth/logout');
+        await fulfillSuccess(route, { message: 'ok' });
+        return;
+      }
+
+      if (method === 'GET' && path === '/api/v2/payments/status') {
+        await fulfillError(route, 404, 'NOT_FOUND', 'payment not found');
+        return;
+      }
+
+      if (method === 'GET' && path.startsWith('/api/v2/payments/')) {
+        await fulfillError(route, 404, 'NOT_FOUND', 'payment not found');
+        return;
+      }
+
+      console.log(`[e2e][api-route-handler] fallback ${method} ${path}`);
+      await fulfillSuccess(route, {});
+    } catch (error) {
+      console.error(
+        '[e2e][api-route-error]',
+        request.method().toUpperCase(),
+        request.url(),
+        error,
+      );
+      await fulfillError(route, 500, 'MOCK_HANDLER_ERROR', 'mock route handler threw an error');
+    }
   });
 }
