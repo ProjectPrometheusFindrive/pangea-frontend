@@ -95,7 +95,7 @@ export function VehicleDetailModal({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+    <div data-testid="asset-detail-modal" className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
       <div className="bg-white rounded-xl w-[700px] max-h-[85vh] flex flex-col">
         {/* 헤더 */}
         <div className="p-6 border-b border-gray-200">
@@ -272,7 +272,7 @@ export function VehicleDetailModal({
                 )}
 
                 {saveError && (
-                  <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                  <div data-testid="asset-detail-save-error" className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
                     {saveError}
                   </div>
                 )}
@@ -281,6 +281,7 @@ export function VehicleDetailModal({
                   <div>
                     <label className="block text-sm font-semibold text-gray-600 mb-2">차량번호</label>
                     <input
+                      data-testid="asset-detail-plate-input"
                       type="text"
                       value={editForm.plate}
                       onChange={(event) => onEditFieldChange('plate', event.target.value)}
@@ -295,6 +296,7 @@ export function VehicleDetailModal({
                   <div>
                     <label className="block text-sm font-semibold text-gray-600 mb-2">차종</label>
                     <input
+                      data-testid="asset-detail-model-input"
                       type="text"
                       value={editForm.model}
                       onChange={(event) => onEditFieldChange('model', event.target.value)}
@@ -309,6 +311,7 @@ export function VehicleDetailModal({
                   <div>
                     <label className="block text-sm font-semibold text-gray-600 mb-2">연식</label>
                     <input
+                      data-testid="asset-detail-year-input"
                       type="text"
                       inputMode="numeric"
                       value={editForm.year}
@@ -324,6 +327,7 @@ export function VehicleDetailModal({
                   <div>
                     <label className="block text-sm font-semibold text-gray-600 mb-2">상태</label>
                     <select
+                      data-testid="asset-detail-status-input"
                       value={editForm.status}
                       onChange={(event) => onEditFieldChange('status', event.target.value)}
                       disabled={!canEdit || isSaving}
@@ -343,6 +347,7 @@ export function VehicleDetailModal({
                   <div>
                     <label className="block text-sm font-semibold text-gray-600 mb-2">메모</label>
                     <textarea
+                      data-testid="asset-detail-memo-input"
                       value={editForm.memo}
                       onChange={(event) => onEditFieldChange('memo', event.target.value)}
                       rows={3}
@@ -792,6 +797,7 @@ export function VehicleDetailModal({
             </button>
             <button
               onClick={handleSave}
+              data-testid="asset-detail-save-button"
               disabled={!canEdit || isSaving}
               className="flex-1 px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium disabled:cursor-not-allowed disabled:opacity-60"
             >

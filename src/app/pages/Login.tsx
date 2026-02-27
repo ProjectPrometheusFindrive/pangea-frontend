@@ -164,6 +164,7 @@ export default function Login() {
             </label>
             <input
               id="userId"
+              data-testid="login-user-id"
               type="text"
               value={userId}
               onChange={(event) => setUserId(event.target.value)}
@@ -179,6 +180,7 @@ export default function Login() {
             </label>
             <input
               id="password"
+              data-testid="login-password"
               type="password"
               value={password}
               onChange={(event) => setPassword(event.target.value)}
@@ -189,13 +191,14 @@ export default function Login() {
           </div>
 
           {errorMessage && (
-            <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            <div data-testid="login-error" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
               {errorMessage}
             </div>
           )}
 
           <button
             type="submit"
+            data-testid="login-submit"
             disabled={isBusy}
             className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
           >
@@ -207,6 +210,7 @@ export default function Login() {
         {uiError?.canRetry && (
           <button
             type="button"
+            data-testid="login-retry"
             onClick={handleRetry}
             disabled={isBusy}
             className="mt-3 inline-flex items-center gap-1 text-sm font-medium text-blue-600 transition hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
