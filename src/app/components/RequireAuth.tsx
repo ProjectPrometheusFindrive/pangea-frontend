@@ -11,6 +11,8 @@ interface RequireAuthProps {
   requiredPermission?: AppRoutePermission;
 }
 
+const ROUTE_FORBIDDEN_REDIRECT_PATH = '/forbidden';
+
 export function RequireAuth({ allowedRoles, requiredPermission }: RequireAuthProps) {
   const location = useLocation();
   const { status, isAuthenticated, viewRole } = useAuth();
@@ -39,12 +41,13 @@ export function RequireAuth({ allowedRoles, requiredPermission }: RequireAuthPro
   }
 
   if (allowedRoles && (!viewRole || !allowedRoles.includes(viewRole))) {
-    return <Navigate to="/forbidden" replace />;
+    return <Navigate to={ROUTE_FORBIDDEN_REDIRECT_PATH} replace />;
   }
 
   const routePermission = requiredPermission ?? resolveRoutePermissionForPath(location.pathname);
   if (routePermission && !canAccessRoute(routePermission)) {
-    return <Navigate to="/forbidden" replace />;
+    // Route-level permission denial policy: always move to /forbidden.
+    return <Navigate to={ROUTE_FORBIDDEN_REDIRECT_PATH} replace />;
   }
 
   return <Outlet />;
