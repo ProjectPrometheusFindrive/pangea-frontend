@@ -224,6 +224,10 @@ export default function DeviceInstallation() {
     }
   }, [page]);
 
+  const isInstallationListEmpty = useCallback((payload: { items: DeviceInstallationItem[]; total: number }) => (
+    payload.total === 0
+  ), []);
+
   const {
     isLoading: isInstallationsLoading,
     error: installationsError,
@@ -233,7 +237,7 @@ export default function DeviceInstallation() {
   } = usePageEndpointState<{ items: DeviceInstallationItem[]; total: number }>({
     request: fetchList,
     onSuccess: handleListSuccess,
-    isEmpty: (payload) => payload.total === 0,
+    isEmpty: isInstallationListEmpty,
   });
 
   const hydrateSummary = useCallback(async () => {

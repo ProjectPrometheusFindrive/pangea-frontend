@@ -842,6 +842,22 @@ export default function Reservations() {
     }
   }, [fromDate, page, pageSize, toDate, viewFilter]);
 
+  const handleReservationsSuccess = useCallback((payload: unknown) => {
+    const reservationRows = toReservationRows(payload);
+    setReservationsData(reservationRows);
+    setVehicleAssets(toVehicleRows(payload, reservationRows));
+    setTotalReservationCount(toTotalCount(payload, reservationRows.length));
+    setPageErrorStatus(null);
+  }, []);
+
+  const isReservationsResponseEmpty = useCallback((payload: unknown) => {
+    const rows = getCollectionFromPayload(payload, ['reservations', 'items', 'rows', 'list']);
+    if (rows) {
+      return rows.length === 0;
+    }
+    return isPayloadEmpty(payload, ['reservations', 'items', 'rows', 'list']);
+  }, []);
+
   const {
     isLoading: isPageLoading,
     error: pageError,
@@ -850,20 +866,8 @@ export default function Reservations() {
     run: hydrateReservationsData,
   } = usePageEndpointState<unknown>({
     request: requestReservations,
-    onSuccess: (payload) => {
-      const reservationRows = toReservationRows(payload);
-      setReservationsData(reservationRows);
-      setVehicleAssets(toVehicleRows(payload, reservationRows));
-      setTotalReservationCount(toTotalCount(payload, reservationRows.length));
-      setPageErrorStatus(null);
-    },
-    isEmpty: (payload) => {
-      const rows = getCollectionFromPayload(payload, ['reservations', 'items', 'rows', 'list']);
-      if (rows) {
-        return rows.length === 0;
-      }
-      return isPayloadEmpty(payload, ['reservations', 'items', 'rows', 'list']);
-    },
+    onSuccess: handleReservationsSuccess,
+    isEmpty: isReservationsResponseEmpty,
   });
 
   useEffect(() => {
