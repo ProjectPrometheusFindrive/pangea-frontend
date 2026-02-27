@@ -23,6 +23,7 @@ export default defineConfig({
     baseURL: E2E_BASE_URL,
     actionTimeout: 15_000,
     navigationTimeout: 30_000,
+    serviceWorkers: 'block',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
     trace: 'on-first-retry',
@@ -38,6 +39,10 @@ export default defineConfig({
   webServer: {
     command: 'npm run dev -- --host 127.0.0.1 --port 4173 --strictPort',
     url: E2E_BASE_URL,
+    env: {
+      ...process.env,
+      VITE_API_BASE_URL: E2E_BASE_URL,
+    },
     reuseExistingServer: !IS_CI,
     timeout: 120_000,
   },

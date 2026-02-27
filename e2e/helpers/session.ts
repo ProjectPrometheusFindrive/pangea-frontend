@@ -55,8 +55,7 @@ export async function loginViaUi(
     user,
   };
 
-  await page.goto('/login');
-  await page.evaluate(
+  await page.addInitScript(
     ({ key, value }: { key: string; value: string }) => {
       window.localStorage.setItem(key, value);
     },
