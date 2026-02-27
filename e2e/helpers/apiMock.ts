@@ -60,6 +60,9 @@ interface ApiMeta {
   timestamp: string;
 }
 
+const API_V2_ROUTE_PATTERN = /\/api\/v2(?:\/|$|\?)/;
+const API_MOCK_FAILURE_LISTENER_PAGES = new WeakSet<Page>();
+
 const MOCK_CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
@@ -76,6 +79,10 @@ function buildMeta(): ApiMeta {
 
 function toMockKey(method: string, path: string): string {
   return `${method.toUpperCase()} ${path}`;
+}
+
+function isApiV2Path(path: string): boolean {
+  return path === '/api/v2' || path.startsWith('/api/v2/');
 }
 
 function resolveHandler(
@@ -184,9 +191,33 @@ export async function installApiMocks(page: Page, options: ApiMockOptions = {}):
     ...options.company,
   } satisfies MockCompany;
 
-  await page.route('**/api/v2/**', async (route, request) => {
+  if (!API_MOCK_FAILURE_LISTENER_PAGES.has(page)) {
+    page.on('requestfailed', (request) => {
+      const url = request.url();
+      let path = url;
+      try {
+        path = new URL(url).pathname;
+      } catch {
+        // URL parsing 실패 시 원본 URL 문자열로 필터링한다.
+      }
+      if (!isApiV2Path(path)) {
+        return;
+      }
+      const reason = request.failure()?.errorText ?? 'unknown';
+      // CI 로그에서 실제 실패 URL을 확인하기 위한 최소 진단 로그.
+      console.log(`[e2e][api-requestfailed] ${request.method().toUpperCase()} ${url} :: ${reason}`);
+    });
+    API_MOCK_FAILURE_LISTENER_PAGES.add(page);
+  }
+
+  await page.route(API_V2_ROUTE_PATTERN, async (route, request) => {
     const method = request.method().toUpperCase();
     const path = new URL(request.url()).pathname;
+
+    if (!isApiV2Path(path)) {
+      await route.continue();
+      return;
+    }
 
     if (method === 'OPTIONS') {
       await route.fulfill({
