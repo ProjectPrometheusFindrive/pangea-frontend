@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { NavigateFunction } from 'react-router';
+import { toast } from 'sonner';
 import { ApiError } from '../../services/api';
 
 const DEFAULT_COLLECTION_KEYS = [
@@ -16,6 +17,7 @@ const DEFAULT_COLLECTION_KEYS = [
 ];
 
 const COUNT_KEYS = ['total', 'totalCount', 'count', 'size', 'itemsCount'];
+const PAGE_FORBIDDEN_REDIRECT_TOAST = '페이지 접근 권한이 없어 홈으로 이동합니다.';
 
 export type PageErrorKind = 'unauthorized' | 'forbidden' | 'retryable' | 'unknown';
 
@@ -140,7 +142,7 @@ function toPageErrorState(error: unknown): PageErrorState {
     if (isForbidden) {
       return {
         kind: 'forbidden',
-        message: '이 화면에 접근할 권한이 없습니다. 관리자에게 권한을 요청해 주세요.',
+        message: '요청한 데이터에 접근할 권한이 없습니다. 홈으로 이동해 주세요.',
       };
     }
 
@@ -175,7 +177,7 @@ export function getPageErrorActionLabel(errorKind: PageErrorKind | null): string
     return '로그인으로 이동';
   }
   if (errorKind === 'forbidden') {
-    return '홈으로 이동';
+    return '홈으로 돌아가기';
   }
   return undefined;
 }
@@ -187,6 +189,9 @@ export function handlePageErrorAction(errorKind: PageErrorKind | null, navigate:
   }
 
   if (errorKind === 'forbidden') {
+    // Page API 403 policy: show guidance toast and return to home.
+    // Route permission denial is handled separately in RequireAuth as /forbidden.
+    toast.error(PAGE_FORBIDDEN_REDIRECT_TOAST);
     navigate('/', { replace: true });
   }
 }
