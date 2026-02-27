@@ -17,15 +17,18 @@ import Papa from 'papaparse';
 import { toast } from 'sonner';
 import { PageStateBoundary } from '../components/PageStateBoundary';
 import {
+  getCollectionFromPayload,
   getPageErrorActionLabel,
   handlePageErrorAction,
   usePageEndpointState,
 } from '../hooks/usePageEndpointState';
-import { vehicleAssets, reservations } from '../data/mockData';
+import { reservations as templateReservations } from '../data/mockData';
 import { ApiError } from '../../services/api';
 import { useAuthorization } from '../context/AuthorizationContext';
 import { useCompany } from '../context/CompanyContext';
 import { ACTION_PERMISSIONS } from '../authorization';
+import { getAssetsList } from '../../services/assets';
+import { getReservationsList } from '../../services/reservations';
 import {
   getSettingsCompany,
   putSettingsCompany,
@@ -43,6 +46,7 @@ import {
 
 type TabType = 'bulk' | 'company' | 'geofence' | 'accounts';
 type UploadType = 'vehicles' | 'reservations' | 'ocr';
+type CurrentDataType = Extract<UploadType, 'vehicles' | 'reservations'>;
 type CompanyField = 'name' | 'businessNumber' | 'phone' | 'email' | 'address';
 type GeofenceField = 'name' | 'lat' | 'lng' | 'radiusMeter';
 type MemberRoleField = 'role';
@@ -78,6 +82,9 @@ interface SettingsHydrationPayload {
 }
 
 const DEFAULT_SETTINGS_SCHEMA_VERSION = 'v1';
+const CURRENT_DATA_COUNT_KEYS = ['total', 'totalCount', 'count', 'size', 'itemsCount', 'totalElements'];
+const CURRENT_DATA_PAGE_SIZE = 200;
+const CURRENT_DATA_MAX_PAGES = 50;
 
 const DEFAULT_COMPANY_FORM_STATE: CompanyFormState = {
   name: '',
@@ -296,6 +303,74 @@ function getMemberStatusBadgeColor(status: string): string {
   }
 }
 
+function getTotalCountFromPayload(payload: unknown, fallbackValue: number): number {
+  if (!isRecord(payload)) {
+    return fallbackValue;
+  }
+
+  for (const key of CURRENT_DATA_COUNT_KEYS) {
+    const numericValue = toNumberValue(payload[key]);
+    if (numericValue !== null) {
+      return numericValue;
+    }
+  }
+
+  if (isRecord(payload.meta)) {
+    for (const key of CURRENT_DATA_COUNT_KEYS) {
+      const numericValue = toNumberValue(payload.meta[key]);
+      if (numericValue !== null) {
+        return numericValue;
+      }
+    }
+  }
+
+  if (isRecord(payload.data)) {
+    return getTotalCountFromPayload(payload.data, fallbackValue);
+  }
+
+  return fallbackValue;
+}
+
+function toCsvCell(value: unknown): string {
+  const normalizedValue = toStringValue(value) ?? '';
+  const escapedValue = normalizedValue.replace(/"/g, '""');
+  return /[",\n\r]/.test(escapedValue) ? `"${escapedValue}"` : escapedValue;
+}
+
+function triggerCsvDownload(filename: string, lines: string[]): void {
+  const BOM = '\uFEFF';
+  const blob = new Blob([BOM + lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+  const link = document.createElement('a');
+  const objectUrl = URL.createObjectURL(blob);
+  link.href = objectUrl;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(objectUrl);
+}
+
+function toReservationTypeLabel(value: unknown): string {
+  const normalizedValue = (toStringValue(value) ?? '').trim().toLowerCase();
+  if (!normalizedValue) {
+    return '';
+  }
+  if (normalizedValue === 'rental' || normalizedValue === '대여' || normalizedValue === '대여중' || normalizedValue === 'in_use') {
+    return '대여중';
+  }
+  if (normalizedValue === 'reservation' || normalizedValue === 'reserved' || normalizedValue === '예약' || normalizedValue === '예약중') {
+    return '예약';
+  }
+  if (
+    normalizedValue === 'return'
+    || normalizedValue === 'returned'
+    || normalizedValue === '반납'
+    || normalizedValue === '반납완료'
+    || normalizedValue === '완료'
+  ) {
+    return '반납완료';
+  }
+  return toStringValue(value) ?? '';
+}
+
 export default function Settings() {
   const navigate = useNavigate();
   const { canPerformAction } = useAuthorization();
@@ -341,6 +416,9 @@ export default function Settings() {
   const [memberSaveSuccess, setMemberSaveSuccess] = useState<string | null>(null);
   const [memberRetryAction, setMemberRetryAction] = useState<(() => void) | null>(null);
   const [savingMemberId, setSavingMemberId] = useState<string | null>(null);
+  const [currentVehicleCount, setCurrentVehicleCount] = useState<number | null>(null);
+  const [currentReservationCount, setCurrentReservationCount] = useState<number | null>(null);
+  const [activeCurrentDownloadType, setActiveCurrentDownloadType] = useState<CurrentDataType | null>(null);
 
   const selectedEditingGeofence = useMemo(
     () => geofences.find((item) => item.id === editingGeofenceId) ?? null,
@@ -357,6 +435,24 @@ export default function Settings() {
   const hydrateGeofencesOnly = useCallback(async () => {
     const geofencesPayload = await listSettingsGeofences();
     setGeofences(Array.isArray(geofencesPayload.items) ? geofencesPayload.items : []);
+  }, []);
+
+  const refreshCurrentDataCounts = useCallback(async () => {
+    try {
+      const [assetsPayload, reservationsPayload] = await Promise.all([
+        getAssetsList({ page: 1, size: 1 }),
+        getReservationsList({ page: 1, size: 1 }),
+      ]);
+
+      const assetRows = getCollectionFromPayload(assetsPayload, ['assets', 'items', 'rows', 'list']) ?? [];
+      const reservationRows = getCollectionFromPayload(reservationsPayload, ['reservations', 'items', 'rows', 'list']) ?? [];
+
+      setCurrentVehicleCount(getTotalCountFromPayload(assetsPayload, assetRows.length));
+      setCurrentReservationCount(getTotalCountFromPayload(reservationsPayload, reservationRows.length));
+    } catch {
+      setCurrentVehicleCount(null);
+      setCurrentReservationCount(null);
+    }
   }, []);
 
   const {
@@ -412,6 +508,10 @@ export default function Settings() {
   useEffect(() => {
     void hydrateSettings();
   }, [hydrateSettings]);
+
+  useEffect(() => {
+    void refreshCurrentDataCounts();
+  }, [refreshCurrentDataCounts]);
 
   const handleSettingsRetry = useCallback(() => {
     void hydrateSettings();
@@ -1099,7 +1199,7 @@ export default function Settings() {
       filename = 'vehicle_template.csv';
     } else {
       csv = '예약ID,차량번호,고객명,시작일,종료일,유형,전화번호,결제방법,금액,선금\n';
-      reservations.slice(0, 10).forEach((reservation) => {
+      templateReservations.slice(0, 10).forEach((reservation) => {
         const reservationType = reservation.type === 'rental'
           ? '대여중'
           : reservation.type === 'reservation'
@@ -1110,45 +1210,116 @@ export default function Settings() {
       filename = 'reservation_template.csv';
     }
 
-    const BOM = '\uFEFF';
-    const blob = new Blob([BOM + csv], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = filename;
-    link.click();
+    triggerCsvDownload(filename, csv.trimEnd().split('\n'));
   };
 
-  // 현재 데이터 다운로드
-  const downloadCurrentData = (type: UploadType) => {
-    let csv = '';
-    let filename = '';
+  const fetchAllCurrentDataRows = useCallback(async (type: CurrentDataType): Promise<{ rows: unknown[]; totalCount: number }> => {
+    const allRows: unknown[] = [];
+    let page = 1;
+    let expectedTotalCount: number | null = null;
+    const preferredKeys = type === 'vehicles'
+      ? ['assets', 'items', 'rows', 'list']
+      : ['reservations', 'items', 'rows', 'list'];
 
-    if (type === 'vehicles') {
-      csv = '차량번호,차종,상태,보험만료일,정기검사일,차대번호,연식,소유자\n';
-      vehicleAssets.slice(0, 10).forEach((vehicle) => {
-        csv += `${vehicle.vehicleNumber},${vehicle.model},${vehicle.status},${vehicle.insuranceExpiry},${vehicle.nextInspection},${vehicle.vin},${vehicle.year},${vehicle.owner}\n`;
-      });
-      filename = 'vehicles_current.csv';
-    } else {
-      csv = '예약ID,차량번호,고객명,시작일,종료일,유형,전화번호,결제방법,금액,보증금\n';
-      reservations.slice(0, 10).forEach((reservation) => {
-        const reservationType = reservation.type === 'rental'
-          ? '대여중'
-          : reservation.type === 'reservation'
-            ? '예약'
-            : '반납완료';
-        csv += `${reservation.id},${reservation.vehicleNumber},${reservation.customer},${reservation.startDateFull},${reservation.endDateFull},${reservationType},${reservation.phone},${reservation.paymentMethod},${reservation.amount},${reservation.deposit}\n`;
-      });
-      filename = 'reservations_current.csv';
+    while (page <= CURRENT_DATA_MAX_PAGES) {
+      const payload = type === 'vehicles'
+        ? await getAssetsList({ page, size: CURRENT_DATA_PAGE_SIZE })
+        : await getReservationsList({ page, size: CURRENT_DATA_PAGE_SIZE });
+      const rows = getCollectionFromPayload(payload, preferredKeys) ?? [];
+
+      if (expectedTotalCount === null) {
+        expectedTotalCount = getTotalCountFromPayload(payload, rows.length);
+      }
+      if (rows.length === 0) {
+        break;
+      }
+
+      allRows.push(...rows);
+      if (allRows.length >= expectedTotalCount || rows.length < CURRENT_DATA_PAGE_SIZE) {
+        break;
+      }
+
+      page += 1;
     }
 
-    const BOM = '\uFEFF';
-    const blob = new Blob([BOM + csv], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = filename;
-    link.click();
-  };
+    return {
+      rows: allRows,
+      totalCount: Math.max(expectedTotalCount ?? allRows.length, allRows.length),
+    };
+  }, []);
+
+  // 현재 데이터 다운로드
+  const downloadCurrentData = useCallback(async (type: CurrentDataType) => {
+    if (activeCurrentDownloadType) {
+      return;
+    }
+
+    setActiveCurrentDownloadType(type);
+    try {
+      const { rows, totalCount } = await fetchAllCurrentDataRows(type);
+
+      if (type === 'vehicles') {
+        setCurrentVehicleCount(totalCount);
+        const lines = [
+          '차량번호,차종,상태,보험만료일,정기검사일,차대번호,연식,소유자',
+          ...rows.map((row) => {
+            const value = isRecord(row) ? row : {};
+            const vehicleNumber = toStringValue(value.vehicleNumber)
+              ?? toStringValue(value.plate)
+              ?? toStringValue(value.plateNumber)
+              ?? '';
+            const model = toStringValue(value.model) ?? toStringValue(value.vehicleModel) ?? '';
+            const status = toStringValue(value.status) ?? toStringValue(value.assetStatus) ?? toStringValue(value.contractStatus) ?? '';
+            const insuranceExpiry = toStringValue(value.insuranceExpiry) ?? toStringValue(value.insuranceExpiryDate) ?? '';
+            const nextInspection = toStringValue(value.nextInspection) ?? toStringValue(value.nextInspectionDate) ?? '';
+            const vin = toStringValue(value.vin) ?? toStringValue(value.chassisNumber) ?? '';
+            const year = toStringValue(value.year) ?? toStringValue(value.modelYear) ?? '';
+            const owner = toStringValue(value.owner) ?? toStringValue(value.ownerName) ?? '';
+            return [vehicleNumber, model, status, insuranceExpiry, nextInspection, vin, year, owner]
+              .map((cell) => toCsvCell(cell))
+              .join(',');
+          }),
+        ];
+
+        triggerCsvDownload('vehicles_current.csv', lines);
+      } else {
+        setCurrentReservationCount(totalCount);
+        const lines = [
+          '예약ID,차량번호,고객명,시작일,종료일,유형,전화번호,결제방법,금액,보증금',
+          ...rows.map((row) => {
+            const value = isRecord(row) ? row : {};
+            const reservationId = toStringValue(value.id) ?? toStringValue(value.reservationId) ?? toStringValue(value.rentalId) ?? '';
+            const vehicleNumber = toStringValue(value.vehicleNumber)
+              ?? toStringValue(value.plate)
+              ?? toStringValue(value.plateNumber)
+              ?? '';
+            const customerName = toStringValue(value.customerName) ?? toStringValue(value.customer) ?? toStringValue(value.userName) ?? '';
+            const startDate = toStringValue(value.startAt) ?? toStringValue(value.startDateFull) ?? toStringValue(value.startDate) ?? toStringValue(value.from) ?? '';
+            const endDate = toStringValue(value.endAt) ?? toStringValue(value.endDateFull) ?? toStringValue(value.endDate) ?? toStringValue(value.to) ?? '';
+            const reservationType = toReservationTypeLabel(value.type ?? value.contractStatus ?? value.status);
+            const phone = toStringValue(value.phone) ?? toStringValue(value.customerPhone) ?? '';
+            const paymentMethod = toStringValue(value.paymentMethod) ?? toStringValue(value.paymentType) ?? '';
+            const amount = toStringValue(value.amount) ?? '';
+            const deposit = toStringValue(value.deposit) ?? '';
+            return [reservationId, vehicleNumber, customerName, startDate, endDate, reservationType, phone, paymentMethod, amount, deposit]
+              .map((cell) => toCsvCell(cell))
+              .join(',');
+          }),
+        ];
+
+        triggerCsvDownload('reservations_current.csv', lines);
+      }
+
+      if (rows.length === 0) {
+        toast.info('다운로드할 현재 데이터가 없습니다. 헤더만 포함된 CSV가 생성되었습니다.');
+      }
+    } catch (error) {
+      toast.error(toErrorMessage(error, '현재 데이터 다운로드에 실패했습니다.'));
+    } finally {
+      setActiveCurrentDownloadType(null);
+      void refreshCurrentDataCounts();
+    }
+  }, [activeCurrentDownloadType, fetchAllCurrentDataRows, refreshCurrentDataCounts]);
 
   // 파일 검증
   const validateVehicleData = (data: any[]): { valid: any[]; errors: string[] } => {
@@ -1617,25 +1788,35 @@ export default function Settings() {
                   <button
                     type="button"
                     onClick={() => downloadCurrentData('vehicles')}
-                    className="rounded-lg border-2 border-gray-200 p-4 text-left transition-all hover:border-blue-300 hover:bg-blue-50"
+                    disabled={activeCurrentDownloadType !== null}
+                    className={`rounded-lg border-2 border-gray-200 p-4 text-left transition-all ${
+                      activeCurrentDownloadType !== null
+                        ? 'cursor-not-allowed opacity-60'
+                        : 'hover:border-blue-300 hover:bg-blue-50'
+                    }`}
                   >
                     <div className="mb-2 flex items-center gap-3">
                       <FileSpreadsheet className="h-6 w-6 text-blue-600" />
                       <div className="font-semibold text-gray-900">차량 자산 데이터</div>
                     </div>
-                    <div className="text-sm text-gray-600">현재 {vehicleAssets.length}대의 차량 정보</div>
+                    <div className="text-sm text-gray-600">현재 {currentVehicleCount ?? '-'}대의 차량 정보</div>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => downloadCurrentData('reservations')}
-                    className="rounded-lg border-2 border-gray-200 p-4 text-left transition-all hover:border-blue-300 hover:bg-blue-50"
+                    disabled={activeCurrentDownloadType !== null}
+                    className={`rounded-lg border-2 border-gray-200 p-4 text-left transition-all ${
+                      activeCurrentDownloadType !== null
+                        ? 'cursor-not-allowed opacity-60'
+                        : 'hover:border-blue-300 hover:bg-blue-50'
+                    }`}
                   >
                     <div className="mb-2 flex items-center gap-3">
                       <FileText className="h-6 w-6 text-green-600" />
                       <div className="font-semibold text-gray-900">대여 예약 데이터</div>
                     </div>
-                    <div className="text-sm text-gray-600">현재 {reservations.length}건의 예약 정보</div>
+                    <div className="text-sm text-gray-600">현재 {currentReservationCount ?? '-'}건의 예약 정보</div>
                   </button>
                 </div>
               </div>
