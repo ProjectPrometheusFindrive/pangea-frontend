@@ -209,6 +209,60 @@ test.describe('BK-091 Reservations E2E', () => {
     await expect(page.getByTestId('reservation-return-error')).toContainText('일시적인 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.');
   });
 
+  test('예약 상세 403 오류 시 접근 불가 안내를 노출한다', async ({ page }) => {
+    await installApiMocks(page, {
+      handlers: {
+        'GET /api/v2/reservations': async ({ route }) => {
+          await fulfillSuccess(route, {
+            reservations: [buildReservationRow()],
+            assets: [buildVehicleAsset()],
+            total: 1,
+            page: 1,
+            pageSize: 20,
+          });
+        },
+        'GET /api/v2/reservations/R-9001': async ({ route }) => {
+          await fulfillError(route, 403, 'TENANT_MISMATCH', 'cross-tenant denied');
+        },
+      },
+    });
+
+    await loginViaUi(page, 'member', { returnUrl: '/reservations' });
+    await expect(page).toHaveURL(/\/reservations(?:\?.*)?$/);
+    await expect(page.getByTestId('reservation-block-R-9001')).toBeVisible();
+
+    await page.getByTestId('reservation-block-R-9001').click();
+    await expect(page.getByTestId('reservation-detail-modal')).toBeVisible();
+    await expect(page.getByText('해당 예약 상세를 조회할 권한이 없습니다. 목록 데이터로 표시합니다.')).toBeVisible();
+  });
+
+  test('예약 상세 404 오류 시 삭제/은닉 안내를 노출한다', async ({ page }) => {
+    await installApiMocks(page, {
+      handlers: {
+        'GET /api/v2/reservations': async ({ route }) => {
+          await fulfillSuccess(route, {
+            reservations: [buildReservationRow()],
+            assets: [buildVehicleAsset()],
+            total: 1,
+            page: 1,
+            pageSize: 20,
+          });
+        },
+        'GET /api/v2/reservations/R-9001': async ({ route }) => {
+          await fulfillError(route, 404, 'NOT_FOUND', 'reservation hidden');
+        },
+      },
+    });
+
+    await loginViaUi(page, 'member', { returnUrl: '/reservations' });
+    await expect(page).toHaveURL(/\/reservations(?:\?.*)?$/);
+    await expect(page.getByTestId('reservation-block-R-9001')).toBeVisible();
+
+    await page.getByTestId('reservation-block-R-9001').click();
+    await expect(page.getByTestId('reservation-detail-modal')).toBeVisible();
+    await expect(page.getByText('선택한 예약이 삭제되었거나 존재하지 않습니다. 목록 데이터로 표시합니다.')).toBeVisible();
+  });
+
   test('예약 조회 401 세션 만료 시 만료 모달을 노출한다', async ({ page }) => {
     await installApiMocks(page, {
       handlers: {
