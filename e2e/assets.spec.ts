@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { delay, fulfillError, fulfillSuccess, installApiMocks } from './helpers/apiMock';
-import { seedAuthSession } from './helpers/session';
+import { loginViaUi } from './helpers/session';
 
 interface AssetFixture {
   id: string;
@@ -38,8 +38,6 @@ function buildAsset(model: string, version: number): AssetFixture {
 
 test.describe('BK-091 Assets E2E', () => {
   test('자산 조회 loading/success 후 상세 저장이 반영된다', async ({ page }) => {
-    await seedAuthSession(page, 'member');
-
     let currentModel = '아반떼';
     let currentVersion = 1;
 
@@ -72,7 +70,7 @@ test.describe('BK-091 Assets E2E', () => {
       },
     });
 
-    await page.goto('/assets');
+    await loginViaUi(page, 'member', { returnUrl: '/assets' });
     await expect(page).toHaveURL(/\/assets(?:\?.*)?$/);
     await expect(page.getByRole('heading', { name: '차량 자산' })).toBeVisible();
     await expect(page.getByTestId('asset-row-ASSET-001')).toBeVisible();
@@ -88,8 +86,6 @@ test.describe('BK-091 Assets E2E', () => {
   });
 
   test('자산 조회 5xx 오류에서 Retry로 복구된다', async ({ page }) => {
-    await seedAuthSession(page, 'member');
-
     let firstRequest = true;
 
     await installApiMocks(page, {
@@ -110,7 +106,7 @@ test.describe('BK-091 Assets E2E', () => {
       },
     });
 
-    await page.goto('/assets');
+    await loginViaUi(page, 'member', { returnUrl: '/assets' });
     await expect(page).toHaveURL(/\/assets(?:\?.*)?$/);
     await expect(page.getByText('차량 자산 목록을 불러오는 중 문제가 발생했습니다.')).toBeVisible();
 
@@ -119,8 +115,6 @@ test.describe('BK-091 Assets E2E', () => {
   });
 
   test('자산 저장 403 오류 시 권한 안내를 표시한다', async ({ page }) => {
-    await seedAuthSession(page, 'member');
-
     await installApiMocks(page, {
       handlers: {
         'GET /api/v2/assets': async ({ route }) => {
@@ -143,7 +137,7 @@ test.describe('BK-091 Assets E2E', () => {
       },
     });
 
-    await page.goto('/assets');
+    await loginViaUi(page, 'member', { returnUrl: '/assets' });
     await expect(page).toHaveURL(/\/assets(?:\?.*)?$/);
     await expect(page.getByRole('heading', { name: '차량 자산' })).toBeVisible();
     await expect(page.getByTestId('asset-row-ASSET-001')).toBeVisible();

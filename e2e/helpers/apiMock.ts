@@ -218,6 +218,15 @@ export async function installApiMocks(page: Page, options: ApiMockOptions = {}):
       return;
     }
 
+    if (method === 'POST' && path === '/api/v2/auth/login') {
+      await fulfillSuccess(route, {
+        token: `e2e-token-${user.userId}`,
+        expiresIn: 3600,
+        user,
+      });
+      return;
+    }
+
     if (method === 'GET' && path === '/api/v2/permissions/me') {
       await fulfillError(route, 404, 'NOT_FOUND', 'permissions endpoint is not available');
       return;

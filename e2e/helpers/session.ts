@@ -36,3 +36,25 @@ export async function seedAuthSession(
     },
   );
 }
+
+interface LoginViaUiOptions {
+  returnUrl: string;
+  userId?: string;
+  password?: string;
+}
+
+export async function loginViaUi(
+  page: Page,
+  role: MockUser['role'],
+  options: LoginViaUiOptions,
+): Promise<void> {
+  const user = buildMockUser(role);
+  const userId = options.userId ?? user.userId;
+  const password = options.password ?? 'password';
+  const encodedReturnUrl = encodeURIComponent(options.returnUrl);
+
+  await page.goto(`/login?returnUrl=${encodedReturnUrl}`);
+  await page.getByTestId('login-user-id').fill(userId);
+  await page.getByTestId('login-password').fill(password);
+  await page.getByTestId('login-submit').click();
+}

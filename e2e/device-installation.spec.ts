@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { delay, fulfillError, fulfillSuccess, installApiMocks } from './helpers/apiMock';
 import { TEST_IMAGE_FILE } from './helpers/files';
-import { seedAuthSession } from './helpers/session';
+import { loginViaUi } from './helpers/session';
 
 interface InstallationRow {
   id: string;
@@ -38,7 +38,7 @@ async function fillInstallationForm(page: Page): Promise<void> {
 }
 
 async function openDeviceInstallationPage(page: Page): Promise<void> {
-  await page.goto('/device-installation');
+  await loginViaUi(page, 'installer', { returnUrl: '/device-installation' });
   await expect(page).toHaveURL(/\/device-installation(?:\?.*)?$/);
   await expect(page.getByRole('heading', { name: '단말 장착/관리' })).toBeVisible();
   await expect(page.getByTestId('device-installation-vin-input')).toBeVisible();
@@ -46,8 +46,6 @@ async function openDeviceInstallationPage(page: Page): Promise<void> {
 
 test.describe('BK-091 Premium Installation E2E', () => {
   test('장착 신청 성공 시 로딩 후 성공 메시지와 목록 반영을 확인한다', async ({ page }) => {
-    await seedAuthSession(page, 'installer');
-
     const installations: InstallationRow[] = [];
     let firstListDelay = true;
 
@@ -104,8 +102,6 @@ test.describe('BK-091 Premium Installation E2E', () => {
   });
 
   test('장착 신청 403 오류 시 권한 안내를 표시한다', async ({ page }) => {
-    await seedAuthSession(page, 'installer');
-
     await installApiMocks(page, {
       user: { role: 'installer', userId: 'installer-001', name: 'E2E Installer' },
       handlers: {
@@ -131,8 +127,6 @@ test.describe('BK-091 Premium Installation E2E', () => {
   });
 
   test('장착 신청 5xx 오류 시 서버 오류 안내를 표시한다', async ({ page }) => {
-    await seedAuthSession(page, 'installer');
-
     await installApiMocks(page, {
       user: { role: 'installer', userId: 'installer-001', name: 'E2E Installer' },
       handlers: {

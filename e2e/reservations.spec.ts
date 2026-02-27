@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { delay, fulfillError, fulfillSuccess, installApiMocks } from './helpers/apiMock';
 import { TEST_IMAGE_FILE } from './helpers/files';
-import { seedAuthSession } from './helpers/session';
+import { loginViaUi } from './helpers/session';
 
 interface ReservationListRow {
   id: string;
@@ -82,8 +82,6 @@ async function submitContract(page: Page): Promise<void> {
 
 test.describe('BK-091 Reservations E2E', () => {
   test('예약 생성 후 반납 전이가 성공한다', async ({ page }) => {
-    await seedAuthSession(page, 'member');
-
     const reservations: ReservationListRow[] = [];
 
     await installApiMocks(page, {
@@ -125,7 +123,7 @@ test.describe('BK-091 Reservations E2E', () => {
       },
     });
 
-    await page.goto('/reservations');
+    await loginViaUi(page, 'member', { returnUrl: '/reservations' });
     await expect(page).toHaveURL(/\/reservations(?:\?.*)?$/);
     await expect(page.getByRole('heading', { name: '대여 예약' })).toBeVisible();
 
@@ -147,8 +145,6 @@ test.describe('BK-091 Reservations E2E', () => {
   });
 
   test('예약 생성 403 오류 시 권한 오류를 노출한다', async ({ page }) => {
-    await seedAuthSession(page, 'member');
-
     await installApiMocks(page, {
       handlers: {
         'GET /api/v2/reservations': async ({ route }) => {
@@ -166,7 +162,7 @@ test.describe('BK-091 Reservations E2E', () => {
       },
     });
 
-    await page.goto('/reservations');
+    await loginViaUi(page, 'member', { returnUrl: '/reservations' });
     await expect(page).toHaveURL(/\/reservations(?:\?.*)?$/);
     await expect(page.getByRole('heading', { name: '대여 예약' })).toBeVisible();
 
@@ -179,8 +175,6 @@ test.describe('BK-091 Reservations E2E', () => {
   });
 
   test('예약 반납 5xx 오류 시 재시도 안내를 노출한다', async ({ page }) => {
-    await seedAuthSession(page, 'member');
-
     await installApiMocks(page, {
       handlers: {
         'GET /api/v2/reservations': async ({ route }) => {
@@ -201,7 +195,7 @@ test.describe('BK-091 Reservations E2E', () => {
       },
     });
 
-    await page.goto('/reservations');
+    await loginViaUi(page, 'member', { returnUrl: '/reservations' });
     await expect(page).toHaveURL(/\/reservations(?:\?.*)?$/);
     await expect(page.getByRole('heading', { name: '대여 예약' })).toBeVisible();
     await expect(page.getByTestId('reservation-block-R-9001')).toBeVisible();
@@ -216,8 +210,6 @@ test.describe('BK-091 Reservations E2E', () => {
   });
 
   test('예약 조회 401 세션 만료 시 만료 모달을 노출한다', async ({ page }) => {
-    await seedAuthSession(page, 'member');
-
     await installApiMocks(page, {
       handlers: {
         'GET /api/v2/reservations': async ({ route }) => {
@@ -226,7 +218,7 @@ test.describe('BK-091 Reservations E2E', () => {
       },
     });
 
-    await page.goto('/reservations');
+    await loginViaUi(page, 'member', { returnUrl: '/reservations' });
     await expect(page).toHaveURL(/\/reservations(?:\?.*)?$/);
     await expect(page.getByRole('heading', { name: '세션이 만료되었습니다' })).toBeVisible();
     await expect(page.getByText('보안을 위해 로그인 세션이 종료되었습니다. 다시 로그인해 주세요.')).toBeVisible();
