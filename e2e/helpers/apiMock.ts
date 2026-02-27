@@ -219,6 +219,10 @@ export async function installApiMocks(page: Page, options: ApiMockOptions = {}):
       return;
     }
 
+    if (path.startsWith('/api/v2/auth/')) {
+      console.log(`[e2e][api-route] ${method} ${path}`);
+    }
+
     if (method === 'OPTIONS') {
       await route.fulfill({
         status: 204,
@@ -230,6 +234,9 @@ export async function installApiMocks(page: Page, options: ApiMockOptions = {}):
 
     const customHandler = resolveHandler(options.handlers, method, path);
     if (customHandler) {
+      if (path.startsWith('/api/v2/auth/')) {
+        console.log(`[e2e][api-route-handler] custom ${method} ${path}`);
+      }
       await customHandler({
         route,
         request,
@@ -245,11 +252,13 @@ export async function installApiMocks(page: Page, options: ApiMockOptions = {}):
     }
 
     if (method === 'GET' && path === '/api/v2/auth/me') {
+      console.log('[e2e][api-route-handler] default GET /api/v2/auth/me');
       await fulfillSuccess(route, user);
       return;
     }
 
     if (method === 'POST' && path === '/api/v2/auth/login') {
+      console.log('[e2e][api-route-handler] default POST /api/v2/auth/login');
       await fulfillSuccess(route, {
         token: `e2e-token-${user.userId}`,
         expiresIn: 3600,
@@ -264,11 +273,13 @@ export async function installApiMocks(page: Page, options: ApiMockOptions = {}):
     }
 
     if (method === 'POST' && path === '/api/v2/auth/refresh') {
+      console.log('[e2e][api-route-handler] default POST /api/v2/auth/refresh');
       await fulfillError(route, 401, 'UNAUTHORIZED', 'refresh token expired');
       return;
     }
 
     if (method === 'POST' && path === '/api/v2/auth/logout') {
+      console.log('[e2e][api-route-handler] default POST /api/v2/auth/logout');
       await fulfillSuccess(route, { message: 'ok' });
       return;
     }
@@ -283,6 +294,7 @@ export async function installApiMocks(page: Page, options: ApiMockOptions = {}):
       return;
     }
 
+    console.log(`[e2e][api-route-handler] fallback ${method} ${path}`);
     await fulfillSuccess(route, {});
   });
 }
