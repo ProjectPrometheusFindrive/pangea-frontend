@@ -59,6 +59,51 @@ const DEFAULT_COMPANY: MockCompany = {
   currency: 'KRW',
 };
 
+const MEMBER_ROUTE_PERMISSIONS = [
+  'route.home',
+  'route.action-required',
+  'route.assets',
+  'route.reservations',
+  'route.revenue',
+  'route.support-center',
+  'route.settings',
+] as const;
+
+const MEMBER_ACTION_PERMISSIONS = [
+  'action.assets.write',
+  'action.reservations.write',
+  'action.action-required.write',
+] as const;
+
+const ROLE_DEFAULT_PERMISSIONS: Record<MockUser['role'], readonly string[]> = {
+  member: [
+    ...MEMBER_ROUTE_PERMISSIONS,
+    ...MEMBER_ACTION_PERMISSIONS,
+  ],
+  admin: [
+    ...MEMBER_ROUTE_PERMISSIONS,
+    ...MEMBER_ACTION_PERMISSIONS,
+    'action.settings.write',
+    'action.settings.members.write',
+  ],
+  super_admin: [
+    ...MEMBER_ROUTE_PERMISSIONS,
+    ...MEMBER_ACTION_PERMISSIONS,
+    'action.settings.write',
+    'action.settings.members.write',
+  ],
+  installer: [
+    'route.device-installation',
+    'action.device-installation.write',
+  ],
+};
+
+function buildPermissionPayload(role: MockUser['role']): { permissions: string[] } {
+  return {
+    permissions: [...(ROLE_DEFAULT_PERMISSIONS[role] ?? ROLE_DEFAULT_PERMISSIONS.member)],
+  };
+}
+
 interface ApiMeta {
   requestId: string;
   timestamp: string;
@@ -364,7 +409,7 @@ export async function installApiMocks(page: Page, options: ApiMockOptions = {}):
       }
 
       if (method === 'GET' && path === '/api/v2/permissions/me') {
-        await fulfillError(route, 404, 'NOT_FOUND', 'permissions endpoint is not available');
+        await fulfillSuccess(route, buildPermissionPayload(user.role));
         return;
       }
 
