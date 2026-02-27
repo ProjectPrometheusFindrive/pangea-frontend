@@ -28,7 +28,7 @@ export function getActionRequiredList(options: ActionRequiredListRequestOptions 
   const { page, size, status, priority, assignee, signal } = options;
 
   return apiClient.requestData<unknown>({
-    path: '/api/v2/action-required',
+    path: '/api/v2/action-items',
     method: 'GET',
     query: {
       page,
@@ -46,7 +46,7 @@ export function getActionRequiredDetail(
   options: ActionRequiredDetailRequestOptions = {},
 ): Promise<unknown> {
   return apiClient.requestData<unknown>({
-    path: `/api/v2/action-required/${encodeURIComponent(actionId)}`,
+    path: `/api/v2/action-items/${encodeURIComponent(actionId)}`,
     method: 'GET',
     signal: options.signal,
   });
