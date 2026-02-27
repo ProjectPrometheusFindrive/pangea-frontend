@@ -1,6 +1,6 @@
 # Prompt Library v1
 
-- Version: v1.2.34
+- Version: v1.2.35
 - Date: 2026-02-27
 - Owner: Pangea Frontend Team
 - Tags: prompt-library,workflow,branch-policy,history-policy,commit-policy,pr-automation,jira-traceability,end-prompt-protocol,worktree-cleanup,jira-status-sync,jira-comment-sync,ac-evidence,mock-removal,reservations-write,reservations-mock-removal,ocr-flow,revenue-api,settings-api,payment-status-sync,home-api,home-summary,action-payment-mock-removal,support-center,rbac-permission-hardening,e2e-test-hardening,playwright-artifact-policy
@@ -161,6 +161,7 @@ cp docs/prompt_history/_TEMPLATE.md docs/prompt_history/$(date +%Y%m%d)_your-tas
 - Production push triggers auto tag (`vX.Y.Z`)
 
 ## Version History
+- v1.2.35 (2026-02-27, SCRUM-101~SCRUM-109/SCRUM-113): Add prompt_history evidence rule for FE follow-up batch fixes (canonical endpoint 정렬: settings/company + action-items + device-installations, permissions 파서 메타데이터 문자열 차단 + `*` 와일드카드 보존, Authorization refresh race-safe, ActionRequired 실패 rollback 재동기화 근거).
 - v1.2.34 (2026-02-27, SCRUM-69): Add prompt_history evidence rule for BK-091 FE E2E hardening (login/assets/reservations/device-installation flows, loading-success + 401/403/5xx branches, retries/timeouts, and failure artifact policy with CI linkage).
 - v1.2.33 (2026-02-27, SCRUM-58): Add prompt_history evidence rule for BK-076 role-based menu/route/action hardening (`/api/v2/auth/me` + `/api/v2/permissions/me` source integration, deny-by-default on 401/403/5xx, role/cache/tenant re-evaluation evidence).
 - v1.2.32 (2026-02-27, SCRUM-66): Add prompt_history evidence rule for BK-087 support-center integration (categories/create/detail endpoints, loading-empty-manual-category flow, submit dedupe/receipt restore, 400/401/403/5xx+retry, attachment size policy evidence).

@@ -21,7 +21,7 @@ export function getReservationsDashboard(options?: DashboardRequestOptions): Pro
 }
 
 export function getActionRequiredDashboard(options?: DashboardRequestOptions): Promise<unknown> {
-  return requestDashboardPayload('/api/v2/action-required', options);
+  return requestDashboardPayload('/api/v2/action-items', options);
 }
 
 export function getHomeSummaryDashboard(options?: DashboardRequestOptions): Promise<unknown> {

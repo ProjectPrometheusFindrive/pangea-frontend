@@ -38,9 +38,9 @@ function isCompany(value: unknown): value is Company {
     typeof value.id === 'string'
     && typeof value.name === 'string'
     && typeof value.businessNumber === 'string'
-    && typeof value.contactName === 'string'
-    && typeof value.contactPhone === 'string'
     && typeof value.address === 'string'
+    && (value.contactName === undefined || typeof value.contactName === 'string')
+    && (value.contactPhone === undefined || typeof value.contactPhone === 'string')
   );
 }
 

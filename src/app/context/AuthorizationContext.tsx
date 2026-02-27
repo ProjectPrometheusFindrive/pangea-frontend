@@ -12,7 +12,6 @@ import { ApiError } from '../../services/api';
 import { getMyPermissions } from '../../services/permissions';
 import {
   derivePermissionsFromApiPayload,
-  derivePermissionsFromRole,
   hasPermission,
   KNOWN_APP_PERMISSIONS,
   permissionSetToArray,
@@ -179,6 +178,8 @@ export function AuthorizationProvider({ children }: { children: ReactNode }) {
   const [source, setSource] = useState<AuthorizationSource | null>(null);
   const [permissionList, setPermissionList] = useState<AppPermission[]>([]);
   const lastFocusRefreshAtRef = useRef(0);
+  const authorizationRequestSequenceRef = useRef(0);
+  const authorizationControllerRef = useRef<AbortController | null>(null);
 
   const permissionSet = useMemo(
     () => new Set<AppPermission>(permissionList),
@@ -194,20 +195,6 @@ export function AuthorizationProvider({ children }: { children: ReactNode }) {
     setStatus('ready');
   }, []);
 
-  const applyRoleFallbackPermissions = useCallback((role: string, userId: string, companyId: string) => {
-    const fallbackPermissions = derivePermissionsFromRole(role);
-    applyResolvedPermissions(fallbackPermissions, 'role-fallback');
-    writeAuthorizationCache({
-      version: 1,
-      userId,
-      companyId,
-      role,
-      source: 'role-fallback',
-      fetchedAt: Date.now(),
-      permissions: permissionSetToArray(fallbackPermissions),
-    });
-  }, [applyResolvedPermissions]);
-
   const refreshAuthorization = useCallback(async (options?: { force?: boolean }) => {
     if (authStatus === 'checking') {
       setStatus('checking');
@@ -215,6 +202,9 @@ export function AuthorizationProvider({ children }: { children: ReactNode }) {
     }
 
     if (!isAuthenticated || !user) {
+      authorizationRequestSequenceRef.current += 1;
+      authorizationControllerRef.current?.abort();
+      authorizationControllerRef.current = null;
       setPermissionList([]);
       setSource(null);
       setStatus('ready');
@@ -226,10 +216,18 @@ export function AuthorizationProvider({ children }: { children: ReactNode }) {
     const normalizedCompanyId = user.companyId.trim();
     const normalizedRole = user.role.trim().toLowerCase();
     if (!normalizedUserId || !normalizedCompanyId || !normalizedRole) {
+      authorizationRequestSequenceRef.current += 1;
+      authorizationControllerRef.current?.abort();
+      authorizationControllerRef.current = null;
       applyResolvedPermissions(new Set<AppPermission>(), 'deny-by-default');
       removeAuthorizationCache();
       return;
     }
+
+    const requestSequence = authorizationRequestSequenceRef.current + 1;
+    authorizationRequestSequenceRef.current = requestSequence;
+    authorizationControllerRef.current?.abort();
+    authorizationControllerRef.current = null;
 
     if (!options?.force) {
       const cachedPermissions = readAuthorizationCache(
@@ -244,14 +242,27 @@ export function AuthorizationProvider({ children }: { children: ReactNode }) {
     }
 
     setStatus('checking');
+    const controller = new AbortController();
+    authorizationControllerRef.current = controller;
+
+    const isStaleRequest = (): boolean => (
+      controller.signal.aborted
+      || authorizationRequestSequenceRef.current !== requestSequence
+      || authorizationControllerRef.current !== controller
+    );
 
     try {
-      const permissionsPayload = await getMyPermissions();
+      const permissionsPayload = await getMyPermissions({ signal: controller.signal });
+      if (isStaleRequest()) {
+        return;
+      }
+
       const parsedPermissions = derivePermissionsFromApiPayload(permissionsPayload);
       const hasPermissionShape = hasExplicitPermissionShape(permissionsPayload);
 
       if (parsedPermissions.size === 0 && !hasPermissionShape) {
-        applyRoleFallbackPermissions(normalizedRole, normalizedUserId, normalizedCompanyId);
+        applyResolvedPermissions(new Set<AppPermission>(), 'deny-by-default');
+        removeAuthorizationCache();
         return;
       }
 
@@ -266,6 +277,14 @@ export function AuthorizationProvider({ children }: { children: ReactNode }) {
         permissions: permissionSetToArray(parsedPermissions),
       });
     } catch (error) {
+      if (isStaleRequest()) {
+        return;
+      }
+
+      if (error instanceof ApiError && error.code === 'ABORTED') {
+        return;
+      }
+
       if (error instanceof ApiError) {
         if (error.status === 401) {
           setStatus('checking');
@@ -280,7 +299,8 @@ export function AuthorizationProvider({ children }: { children: ReactNode }) {
         }
 
         if (error.status === 404 || error.status === 405) {
-          applyRoleFallbackPermissions(normalizedRole, normalizedUserId, normalizedCompanyId);
+          applyResolvedPermissions(new Set<AppPermission>(), 'deny-by-default');
+          removeAuthorizationCache();
           return;
         }
 
@@ -294,16 +314,27 @@ export function AuthorizationProvider({ children }: { children: ReactNode }) {
         }
       }
 
-      applyRoleFallbackPermissions(normalizedRole, normalizedUserId, normalizedCompanyId);
+      applyResolvedPermissions(new Set<AppPermission>(), 'deny-by-default');
+      removeAuthorizationCache();
+    } finally {
+      if (authorizationControllerRef.current === controller) {
+        authorizationControllerRef.current = null;
+      }
     }
   }, [
     applyResolvedPermissions,
-    applyRoleFallbackPermissions,
     authStatus,
     isAuthenticated,
     refreshSession,
     user,
   ]);
+
+  useEffect(() => {
+    return () => {
+      authorizationControllerRef.current?.abort();
+      authorizationControllerRef.current = null;
+    };
+  }, []);
 
   useEffect(() => {
     if (authStatus === 'checking') {
@@ -403,4 +434,3 @@ export function useAuthorization(): AuthorizationContextType {
   }
   return context;
 }
-
