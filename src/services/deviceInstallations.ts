@@ -224,6 +224,37 @@ export async function createDeviceInstallation(
   return installation;
 }
 
+async function getInstallationFromPath(path: string): Promise<DeviceInstallationItem> {
+  const payload = await apiClient.requestData<unknown>({
+    path,
+    method: 'GET',
+  });
+
+  const installation = toInstallation(payload);
+  if (!installation) {
+    throw new ApiError('API_ERROR', 'Unexpected detail response payload');
+  }
+  return installation;
+}
+
+export async function getDeviceInstallation(installationId: string): Promise<DeviceInstallationItem> {
+  const normalizedId = installationId.trim();
+  if (!normalizedId) {
+    throw new ApiError('VALIDATION_ERROR', 'installationId is required', { status: 400 });
+  }
+
+  const encodedInstallationId = encodeURIComponent(normalizedId);
+
+  try {
+    return await getInstallationFromPath(`/api/v2/device-installations/${encodedInstallationId}`);
+  } catch (error) {
+    if (error instanceof ApiError && (error.status === 404 || error.status === 405)) {
+      return getInstallationFromPath(`/api/v2/device-installations/tasks/${encodedInstallationId}`);
+    }
+    throw error;
+  }
+}
+
 async function cancelFromLegacyPath(installationId: string): Promise<DeviceInstallationItem | null> {
   const payload = await apiClient.requestData<unknown>({
     path: `/api/v2/device-installations/${encodeURIComponent(installationId)}/cancel`,
