@@ -37,12 +37,8 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: 'npm run dev -- --host 127.0.0.1 --port 4173 --strictPort',
+    command: 'VITE_API_BASE_URL=http://127.0.0.1:4173 npm run dev -- --host 127.0.0.1 --port 4173 --strictPort',
     url: E2E_BASE_URL,
-    env: {
-      ...process.env,
-      VITE_API_BASE_URL: E2E_BASE_URL,
-    },
     reuseExistingServer: !IS_CI,
     timeout: 120_000,
   },
