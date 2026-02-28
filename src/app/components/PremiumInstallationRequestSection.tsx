@@ -445,17 +445,19 @@ export function PremiumInstallationRequestSection({
         pageSize: 1,
         status: 'scheduled',
         vin,
+        companyId: user?.companyId,
       }),
       getDeviceInstallationList({
         page: 1,
         pageSize: 1,
         status: 'in_progress',
         vin,
+        companyId: user?.companyId,
       }),
     ]);
 
     return scheduledInstallations.items[0] ?? inProgressInstallations.items[0] ?? null;
-  }, []);
+  }, [user?.companyId]);
 
   const refreshReceiptById = useCallback(async (
     installationId: string,
