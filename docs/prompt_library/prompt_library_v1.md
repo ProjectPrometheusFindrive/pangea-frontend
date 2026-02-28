@@ -1,9 +1,9 @@
 # Prompt Library v1
 
-- Version: v1.2.38
+- Version: v1.2.39
 - Date: 2026-02-28
 - Owner: Pangea Frontend Team
-- Tags: prompt-library,workflow,branch-policy,history-policy,commit-policy,pr-automation,jira-traceability,end-prompt-protocol,worktree-cleanup,jira-status-sync,jira-comment-sync,ac-evidence,mock-removal,reservations-write,reservations-mock-removal,ocr-flow,revenue-api,settings-api,payment-status-sync,home-api,home-summary,action-payment-mock-removal,support-center,rbac-permission-hardening,e2e-test-hardening,playwright-artifact-policy
+- Tags: prompt-library,workflow,branch-policy,history-policy,commit-policy,pr-automation,jira-traceability,end-prompt-protocol,worktree-cleanup,jira-status-sync,jira-comment-sync,ac-evidence,mock-removal,reservations-write,reservations-mock-removal,ocr-flow,revenue-api,settings-api,payment-status-sync,home-api,home-summary,action-payment-mock-removal,support-center,rbac-permission-hardening,e2e-test-hardening,playwright-artifact-policy,device-installation-tenant-scope
 
 ## Context
 - 초기 세팅 작업에서 프롬프트 템플릿, 브랜치 정책, 문서화 절차를 반복 가능하게 표준화할 필요가 있음.
@@ -86,6 +86,7 @@ End Prompt:
 - FE 권한 계약 정렬 후속 티켓(SCRUM-101~114 후속 계열)은 `prompt_history`에 `/api/v2/permissions/me` 기본 계약(404 미사용, role별 permission payload 제공)과 `deny-by-default` 정책 공존 근거를 함께 기록한다.
 - 권한 캐시 하드닝 후속 티켓(SCRUM-105 후속 계열)은 `prompt_history`에 `Authorization cache` source를 `api`로 제한하고 캐시 키/버전 롤오버로 legacy `role-fallback` 캐시를 무효화한 근거를 함께 기록한다.
 - Device Installation 계약 정렬 후속 티켓(SCRUM-101~114 후속 계열)은 `prompt_history`에 목록 조회 mock 경로가 `/api/v2/device-installations/tasks` canonical 경로와 일치하는지 근거를 함께 기록한다.
+- Device Installation 사전조회 tenant-scope 회귀 티켓(SCRUM-131 계열)은 `prompt_history`에 pre-check list 조회 호출의 `companyId` 전달 근거(super_admin cross-tenant 혼합 방지)와 non-super_admin 동작 유지 근거를 함께 기록한다.
 - Reservations mock 제거 티켓(BK-054/SCRUM-45 계열)은 `prompt_history`에 Reservations 프로덕션 경로의 mock import/fixture 제거 근거, v2 reservations endpoint 단일 호출 경로, API 실패 시 mock fallback 미사용 근거를 함께 기록한다.
 - Assets mock 제거 티켓(BK-044/SCRUM-40 계열)은 `prompt_history`에 Assets 프로덕션 경로의 mock import/flag 제거 근거, v2 assets endpoint 단일 호출 경로, 오류 시 mock fallback 미사용 근거를 함께 기록한다.
 - 공통 상태 UI 티켓(loading/error/empty)은 `Validation`에 `Retry 재호출`, `401/403/5xx 분기`, `skeleton/empty CTA` 확인 근거를 함께 기록한다.
@@ -164,6 +165,7 @@ cp docs/prompt_history/_TEMPLATE.md docs/prompt_history/$(date +%Y%m%d)_SCRUM-12
 - Production push triggers auto tag (`vX.Y.Z`)
 
 ## Version History
+- v1.2.39 (2026-02-28, SCRUM-131): Add prompt_history evidence rule for Device Installation pre-check tenant scope regression (`companyId` 전달로 super_admin cross-tenant 혼합 방지 + non-super_admin 동작 유지 근거).
 - v1.2.38 (2026-02-28, SCRUM-115): Add prompt_history evidence rule for authorization cache source hardening (`role-fallback` source 제거, cache key/version 롤오버로 stale 권한 캐시 무효화).
 - v1.2.37 (2026-02-27, SCRUM-101~SCRUM-114): Add prompt_history evidence rule for Device Installation E2E contract alignment (list mock path `/api/v2/device-installations/tasks` canonical 유지 근거).
 - v1.2.36 (2026-02-27, SCRUM-101~SCRUM-114): Add prompt_history evidence rule for FE E2E permission-contract alignment (`/api/v2/permissions/me` default mock 404 제거, role별 권한 payload 반환으로 deny-by-default 정책과 테스트 계약 정렬).
