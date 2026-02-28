@@ -47,6 +47,12 @@ export interface CreateDeviceInstallationPayload {
   deviceSerial?: string;
   photos?: string[];
   memo?: string;
+  companyId?: string;
+}
+
+export interface CreateDeviceInstallationOptions {
+  companyId?: string;
+  signal?: AbortSignal;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -210,11 +216,20 @@ export async function getDeviceInstallationList(
 
 export async function createDeviceInstallation(
   payload: CreateDeviceInstallationPayload,
+  options: CreateDeviceInstallationOptions = {},
 ): Promise<DeviceInstallationItem> {
+  const companyId = toNonEmptyString(options.companyId)
+    ?? toNonEmptyString(payload.companyId)
+    ?? undefined;
+
   const createdPayload = await apiClient.requestData<unknown>({
     path: '/api/v2/device-installations',
     method: 'POST',
-    body: payload,
+    body: {
+      ...payload,
+      companyId,
+    },
+    signal: options.signal,
   });
 
   const installation = toInstallation(createdPayload);
