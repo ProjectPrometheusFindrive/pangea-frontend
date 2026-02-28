@@ -19,7 +19,7 @@ const DEFAULT_COLLECTION_KEYS = [
 const COUNT_KEYS = ['total', 'totalCount', 'count', 'size', 'itemsCount'];
 const PAGE_FORBIDDEN_REDIRECT_TOAST = '페이지 접근 권한이 없어 홈으로 이동합니다.';
 
-export type PageErrorKind = 'unauthorized' | 'forbidden' | 'retryable' | 'unknown';
+export type PageErrorKind = 'unauthorized' | 'forbidden' | 'not-found' | 'retryable' | 'unknown';
 
 interface PageErrorState {
   kind: PageErrorKind;
@@ -126,6 +126,7 @@ function toPageErrorState(error: unknown): PageErrorState {
     const errorCode = typeof error.code === 'string' ? error.code : '';
     const isUnauthorized = error.status === 401 || errorCode === 'UNAUTHORIZED';
     const isForbidden = error.status === 403 || errorCode === 'FORBIDDEN';
+    const isNotFound = error.status === 404 || errorCode === 'NOT_FOUND';
     const isRetryable = error.status !== undefined && error.status >= 500
       || errorCode === 'TIMEOUT'
       || errorCode === 'NETWORK_ERROR'
@@ -143,6 +144,13 @@ function toPageErrorState(error: unknown): PageErrorState {
       return {
         kind: 'forbidden',
         message: '요청한 데이터에 접근할 권한이 없습니다. 홈으로 이동해 주세요.',
+      };
+    }
+
+    if (isNotFound) {
+      return {
+        kind: 'not-found',
+        message: '요청한 정보를 찾을 수 없습니다. 홈으로 이동해 다시 확인해 주세요.',
       };
     }
 
@@ -176,6 +184,9 @@ export function getPageErrorActionLabel(errorKind: PageErrorKind | null): string
   if (errorKind === 'unauthorized') {
     return '로그인으로 이동';
   }
+  if (errorKind === 'not-found') {
+    return '홈으로 돌아가기';
+  }
   if (errorKind === 'forbidden') {
     return '홈으로 돌아가기';
   }
@@ -185,6 +196,11 @@ export function getPageErrorActionLabel(errorKind: PageErrorKind | null): string
 export function handlePageErrorAction(errorKind: PageErrorKind | null, navigate: NavigateFunction): void {
   if (errorKind === 'unauthorized') {
     navigate('/login', { replace: true });
+    return;
+  }
+
+  if (errorKind === 'not-found') {
+    navigate('/', { replace: true });
     return;
   }
 

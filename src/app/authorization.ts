@@ -1,5 +1,3 @@
-import type { AuthViewRole } from '../services/auth';
-
 export const ROUTE_PERMISSIONS = {
   home: 'route.home',
   actionRequired: 'route.action-required',
@@ -43,22 +41,6 @@ export const KNOWN_APP_PERMISSIONS: AppPermission[] = [
   ACTION_PERMISSIONS.deviceInstallationWrite,
 ];
 
-const RENTAL_ROUTE_PERMISSIONS: AppRoutePermission[] = [
-  ROUTE_PERMISSIONS.home,
-  ROUTE_PERMISSIONS.actionRequired,
-  ROUTE_PERMISSIONS.assets,
-  ROUTE_PERMISSIONS.reservations,
-  ROUTE_PERMISSIONS.revenue,
-  ROUTE_PERMISSIONS.supportCenter,
-  ROUTE_PERMISSIONS.settings,
-];
-
-const RENTAL_WRITE_PERMISSIONS: AppActionPermission[] = [
-  ACTION_PERMISSIONS.assetsWrite,
-  ACTION_PERMISSIONS.reservationsWrite,
-  ACTION_PERMISSIONS.actionRequiredWrite,
-];
-
 const PERMISSION_CONTAINER_KEYS = new Set([
   'permission',
   'permissions',
@@ -72,142 +54,31 @@ const PERMISSION_CONTAINER_KEYS = new Set([
   'actions',
 ]);
 
-function toNormalizedToken(rawToken: string): string {
-  const trimmedToken = rawToken.trim().toLowerCase();
-  if (!trimmedToken) {
-    return '';
-  }
-  if (trimmedToken === '*') {
-    return '*';
-  }
+const KNOWN_PERMISSION_SET = new Set<AppPermission>(KNOWN_APP_PERMISSIONS);
 
-  return trimmedToken
-    .replace(/[^a-z0-9]+/g, '.')
-    .replace(/\.{2,}/g, '.')
-    .replace(/^\./, '')
-    .replace(/\.$/, '');
+function toPermissionToken(rawToken: string): string {
+  return rawToken.trim();
 }
 
-function tokenIncludes(normalizedToken: string, ...keywords: string[]): boolean {
-  return keywords.some((keyword) => normalizedToken.includes(keyword));
-}
-
-function isReadLikeToken(normalizedToken: string): boolean {
-  return tokenIncludes(
-    normalizedToken,
-    'read',
-    'view',
-    'list',
-    'query',
-    'access',
-    'route',
-    'menu',
-    'all',
-    'full',
-  );
-}
-
-function isWriteLikeToken(normalizedToken: string): boolean {
-  return tokenIncludes(
-    normalizedToken,
-    'write',
-    'create',
-    'update',
-    'patch',
-    'delete',
-    'edit',
-    'manage',
-    'assign',
-    'all',
-    'full',
-  );
-}
-
-function addRentalRoutePermission(
-  normalizedToken: string,
-  permission: AppRoutePermission,
-  target: Set<AppPermission>,
-): void {
-  if (isReadLikeToken(normalizedToken) || isWriteLikeToken(normalizedToken)) {
-    target.add(permission);
-  }
+function toContainerKey(rawKey: string): string {
+  return rawKey.trim().toLowerCase();
 }
 
 function addPermissionMatchesFromToken(rawToken: string, target: Set<AppPermission>): void {
-  const normalizedToken = toNormalizedToken(rawToken);
-  if (!normalizedToken) {
+  const token = toPermissionToken(rawToken);
+  if (!token) {
     return;
   }
 
-  if (KNOWN_APP_PERMISSIONS.includes(normalizedToken as AppPermission)) {
-    target.add(normalizedToken as AppPermission);
-    return;
-  }
-
-  if (
-    normalizedToken === '*'
-    || normalizedToken === 'admin'
-    || normalizedToken === 'super.admin'
-    || normalizedToken === 'superadmin'
-    || normalizedToken === 'role.admin'
-    || normalizedToken === 'role.super.admin'
-  ) {
+  if (token === '*') {
     for (const permission of KNOWN_APP_PERMISSIONS) {
       target.add(permission);
     }
     return;
   }
 
-  if (tokenIncludes(normalizedToken, 'home', 'dashboard')) {
-    addRentalRoutePermission(normalizedToken, ROUTE_PERMISSIONS.home, target);
-  }
-
-  if (tokenIncludes(normalizedToken, 'action.required', 'action.item', 'actionrequired', 'actionitems')) {
-    addRentalRoutePermission(normalizedToken, ROUTE_PERMISSIONS.actionRequired, target);
-    if (isWriteLikeToken(normalizedToken)) {
-      target.add(ACTION_PERMISSIONS.actionRequiredWrite);
-    }
-  }
-
-  if (tokenIncludes(normalizedToken, 'asset', 'vehicle')) {
-    addRentalRoutePermission(normalizedToken, ROUTE_PERMISSIONS.assets, target);
-    if (isWriteLikeToken(normalizedToken)) {
-      target.add(ACTION_PERMISSIONS.assetsWrite);
-    }
-  }
-
-  if (tokenIncludes(normalizedToken, 'reservation', 'rental', 'contract')) {
-    addRentalRoutePermission(normalizedToken, ROUTE_PERMISSIONS.reservations, target);
-    if (isWriteLikeToken(normalizedToken)) {
-      target.add(ACTION_PERMISSIONS.reservationsWrite);
-    }
-  }
-
-  if (tokenIncludes(normalizedToken, 'revenue', 'sales')) {
-    addRentalRoutePermission(normalizedToken, ROUTE_PERMISSIONS.revenue, target);
-  }
-
-  if (tokenIncludes(normalizedToken, 'support.center', 'supportcenter', 'customer.center', 'help.desk', 'helpdesk')) {
-    addRentalRoutePermission(normalizedToken, ROUTE_PERMISSIONS.supportCenter, target);
-  }
-
-  if (tokenIncludes(normalizedToken, 'setting', 'company', 'geofence', 'member')) {
-    addRentalRoutePermission(normalizedToken, ROUTE_PERMISSIONS.settings, target);
-    if (isWriteLikeToken(normalizedToken) && !tokenIncludes(normalizedToken, 'member.role', 'members.role')) {
-      target.add(ACTION_PERMISSIONS.settingsWrite);
-    }
-    if (tokenIncludes(normalizedToken, 'member') && isWriteLikeToken(normalizedToken)) {
-      target.add(ACTION_PERMISSIONS.settingsMembersWrite);
-    }
-  }
-
-  if (tokenIncludes(normalizedToken, 'device.installation', 'device', 'installer', 'terminal')) {
-    if (isReadLikeToken(normalizedToken) || isWriteLikeToken(normalizedToken)) {
-      target.add(ROUTE_PERMISSIONS.deviceInstallation);
-    }
-    if (isWriteLikeToken(normalizedToken)) {
-      target.add(ACTION_PERMISSIONS.deviceInstallationWrite);
-    }
+  if (KNOWN_PERMISSION_SET.has(token as AppPermission)) {
+    target.add(token as AppPermission);
   }
 }
 
@@ -218,7 +89,6 @@ function isPermissionContainerKey(normalizedKey: string): boolean {
 function collectPermissionTokens(
   value: unknown,
   output: string[] = [],
-  path = '',
   permissionScope = false,
 ): string[] {
   if (typeof value === 'string') {
@@ -229,8 +99,9 @@ function collectPermissionTokens(
   }
 
   if (Array.isArray(value)) {
+    const nextPermissionScope = permissionScope || value.every((item) => typeof item === 'string');
     for (const item of value) {
-      collectPermissionTokens(item, output, path, permissionScope);
+      collectPermissionTokens(item, output, nextPermissionScope);
     }
     return output;
   }
@@ -240,79 +111,41 @@ function collectPermissionTokens(
   }
 
   for (const [key, nestedValue] of Object.entries(value)) {
-    const normalizedKey = toNormalizedToken(key);
-    const nextPath = path ? `${path}.${normalizedKey}` : normalizedKey;
-    const nextPermissionScope = permissionScope || isPermissionContainerKey(normalizedKey);
+    const nextPermissionScope = permissionScope || isPermissionContainerKey(toContainerKey(key));
+
+    if (!nextPermissionScope) {
+      collectPermissionTokens(nestedValue, output, false);
+      continue;
+    }
 
     if (typeof nestedValue === 'boolean') {
-      if (nestedValue && nextPermissionScope) {
-        output.push(nextPath);
+      if (nestedValue) {
+        output.push(key);
       }
       continue;
     }
 
     if (typeof nestedValue === 'number') {
-      if (nestedValue > 0 && nextPermissionScope) {
-        output.push(nextPath);
+      if (nestedValue > 0) {
+        output.push(key);
       }
       continue;
     }
 
     if (typeof nestedValue === 'string') {
-      if (nextPermissionScope) {
-        output.push(nextPath);
-        output.push(nestedValue);
-      }
+      output.push(nestedValue);
       continue;
     }
 
-    collectPermissionTokens(nestedValue, output, nextPath, nextPermissionScope);
+    collectPermissionTokens(nestedValue, output, true);
   }
 
   return output;
 }
 
-export function resolveViewRole(role: string | null | undefined): AuthViewRole | null {
-  const normalizedRole = (role ?? '').trim().toLowerCase();
-  if (normalizedRole === 'installer') {
-    return 'device-installer';
-  }
-  if (normalizedRole === 'super_admin' || normalizedRole === 'admin' || normalizedRole === 'member') {
-    return 'rental-business';
-  }
-  return null;
-}
-
-export function derivePermissionsFromRole(role: string | null | undefined): Set<AppPermission> {
-  const permissions = new Set<AppPermission>();
-  const normalizedRole = (role ?? '').trim().toLowerCase();
-
-  if (normalizedRole === 'installer') {
-    permissions.add(ROUTE_PERMISSIONS.deviceInstallation);
-    permissions.add(ACTION_PERMISSIONS.deviceInstallationWrite);
-    return permissions;
-  }
-
-  if (normalizedRole === 'super_admin' || normalizedRole === 'admin' || normalizedRole === 'member') {
-    for (const routePermission of RENTAL_ROUTE_PERMISSIONS) {
-      permissions.add(routePermission);
-    }
-    for (const writePermission of RENTAL_WRITE_PERMISSIONS) {
-      permissions.add(writePermission);
-    }
-  }
-
-  if (normalizedRole === 'super_admin' || normalizedRole === 'admin') {
-    permissions.add(ACTION_PERMISSIONS.settingsWrite);
-    permissions.add(ACTION_PERMISSIONS.settingsMembersWrite);
-  }
-
-  return permissions;
-}
-
 export function derivePermissionsFromApiPayload(payload: unknown): Set<AppPermission> {
   const permissions = new Set<AppPermission>();
-  const permissionTokens = collectPermissionTokens(payload, [], '', Array.isArray(payload));
+  const permissionTokens = collectPermissionTokens(payload);
 
   for (const token of permissionTokens) {
     addPermissionMatchesFromToken(token, permissions);

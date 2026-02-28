@@ -465,7 +465,9 @@ export function PremiumInstallationRequestSection({
     setRequestError(null);
 
     try {
-      const latestInstallation = await getDeviceInstallation(installationId);
+      const latestInstallation = await getDeviceInstallation(installationId, {
+        companyId: user?.companyId,
+      });
       syncReceiptFromInstallation(latestInstallation, fallbackReceipt);
     } catch (error) {
       setRequestError(
@@ -478,7 +480,7 @@ export function PremiumInstallationRequestSection({
     } finally {
       setIsStatusRefreshing(false);
     }
-  }, [syncReceiptFromInstallation]);
+  }, [syncReceiptFromInstallation, user?.companyId]);
 
   useEffect(() => {
     const restoredReceipt = initialReceiptRef.current;
@@ -714,7 +716,9 @@ export function PremiumInstallationRequestSection({
 
       let resolvedInstallation = createdInstallation;
       try {
-        resolvedInstallation = await getDeviceInstallation(createdInstallation.id);
+        resolvedInstallation = await getDeviceInstallation(createdInstallation.id, {
+          companyId: user?.companyId,
+        });
       } catch {
         // If detail lookup fails here, keep created payload and allow manual refresh.
       }

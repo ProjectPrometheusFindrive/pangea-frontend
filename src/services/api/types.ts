@@ -13,22 +13,26 @@ export interface ApiErrorField {
 }
 
 export interface ApiErrorPayload {
-  code: string;
+  code?: string;
+  type?: string;
   message: string;
   fields?: ApiErrorField[];
+  details?: ApiErrorField[];
   [key: string]: unknown;
 }
 
 export interface ApiSuccessEnvelope<TData = unknown> {
-  success: true;
+  success?: true;
+  status?: 'success';
   data: TData;
-  meta: ApiMeta;
+  meta?: ApiMeta;
 }
 
 export interface ApiErrorEnvelope {
-  success: false;
+  success?: false;
+  status?: 'error';
   error: ApiErrorPayload;
-  meta: ApiMeta;
+  meta?: ApiMeta;
 }
 
 export type ApiEnvelope<TData = unknown> = ApiSuccessEnvelope<TData> | ApiErrorEnvelope;
