@@ -20,6 +20,7 @@ interface PremiumInstallableAsset {
   model: string;
   vin: string;
   owner?: string;
+  companyId?: string;
 }
 
 type PremiumRequestErrorKind = 'unauthorized' | 'forbidden' | 'retryable' | 'conflict' | 'unknown';
@@ -132,6 +133,7 @@ function toPremiumInstallableAsset(payload: unknown): PremiumInstallableAsset | 
     vin,
     model: toStringValue(detail.model) ?? toStringValue(detail.vehicleModel) ?? '차종 미확인',
     owner: toStringValue(detail.owner) ?? toStringValue(detail.ownerName) ?? undefined,
+    companyId: toStringValue(detail.companyId) ?? undefined,
   };
 }
 
@@ -663,6 +665,12 @@ export function PremiumInstallationRequestSection({
       contactPhone: contactPhone.trim(),
       memo: memo.trim(),
     });
+
+    const isSuperAdmin = (user?.role ?? '').trim().toLowerCase() === 'super_admin';
+    const createCompanyId = isSuperAdmin
+      ? (selectedAsset.companyId?.trim() || user?.companyId?.trim() || undefined)
+      : undefined;
+
     const now = Date.now();
     if (
       fingerprint === lastSubmitFingerprintRef.current
@@ -703,23 +711,28 @@ export function PremiumInstallationRequestSection({
         return;
       }
 
-      const createdInstallation = await createDeviceInstallation({
-        vin: normalizedVin,
-        scheduledAt: scheduledAtIso,
-        installer: user?.name ?? user?.userId ?? undefined,
-        memo: buildRequestMemo({
-          memo,
-          contactPhone,
-          requesterName: user?.name,
-          requesterEmail: user?.email,
-          assetId: selectedAsset.id,
-        }) || undefined,
-      });
+      const createdInstallation = await createDeviceInstallation(
+        {
+          vin: normalizedVin,
+          scheduledAt: scheduledAtIso,
+          installer: user?.name ?? user?.userId ?? undefined,
+          memo: buildRequestMemo({
+            memo,
+            contactPhone,
+            requesterName: user?.name,
+            requesterEmail: user?.email,
+            assetId: selectedAsset.id,
+          }) || undefined,
+        },
+        {
+          companyId: createCompanyId,
+        },
+      );
 
       let resolvedInstallation = createdInstallation;
       try {
         resolvedInstallation = await getDeviceInstallation(createdInstallation.id, {
-          companyId: user?.companyId,
+          companyId: createCompanyId ?? user?.companyId,
         });
       } catch {
         // If detail lookup fails here, keep created payload and allow manual refresh.
@@ -772,6 +785,8 @@ export function PremiumInstallationRequestSection({
     syncReceiptFromInstallation,
     user?.email,
     user?.name,
+    user?.companyId,
+    user?.role,
     user?.userId,
   ]);
 

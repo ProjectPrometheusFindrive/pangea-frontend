@@ -46,6 +46,7 @@ import {
 
 interface Asset extends VehicleAsset {
   id: string;
+  companyId?: string;
   hasDevice: boolean;
   version?: number;
   updatedAt?: string;
@@ -557,6 +558,7 @@ function toAssetRecord(row: unknown, index: number): Asset | null {
       ?? toStringValue(row.assetId)
       ?? toStringValue(row.uuid)
       ?? `A${String(index + 1).padStart(3, '0')}`,
+    companyId: toStringValue(row.companyId) ?? undefined,
     vehicleNumber,
     plate: plateValue,
     model: toStringValue(row.model) ?? toStringValue(row.vehicleModel) ?? '차종 미확인',
@@ -1449,6 +1451,7 @@ export default function Assets() {
       .filter((asset) => !asset.hasDevice)
       .map((asset) => ({
         id: asset.id,
+        companyId: asset.companyId,
         vehicleNumber: asset.vehicleNumber,
         model: asset.model,
         vin: asset.vin,
