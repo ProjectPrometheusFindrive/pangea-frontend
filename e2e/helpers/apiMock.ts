@@ -387,7 +387,7 @@ export async function installApiMocks(page: Page, options: ApiMockOptions = {}):
         return;
       }
 
-      if (method === 'GET' && path === '/api/v2/company') {
+      if (method === 'GET' && path === '/api/v2/settings/company') {
         await fulfillSuccess(route, company);
         return;
       }
@@ -435,8 +435,8 @@ export async function installApiMocks(page: Page, options: ApiMockOptions = {}):
         return;
       }
 
-      console.log(`[e2e][api-route-handler] fallback ${method} ${path}`);
-      await fulfillSuccess(route, {});
+      console.log(`[e2e][api-route-handler] unmocked ${method} ${path}`);
+      await fulfillError(route, 501, 'UNMOCKED_ENDPOINT', `${method} ${path} is not mocked`);
     } catch (error) {
       console.error(
         '[e2e][api-route-error]',
@@ -493,7 +493,7 @@ export async function installApiMocks(page: Page, options: ApiMockOptions = {}):
         return;
       }
 
-      await fulfillSuccess(route, {});
+      await fulfillError(route, 501, 'UNMOCKED_AUTH_ENDPOINT', `${method} ${path} is not mocked`);
     } catch (error) {
       console.error(
         '[e2e][api-auth-route-error]',

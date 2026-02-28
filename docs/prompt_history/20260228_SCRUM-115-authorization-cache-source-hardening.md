@@ -1,12 +1,15 @@
-# SCRUM-105 Authorization Cache Source Hardening
+# SCRUM-115 Authorization Cache Source Hardening
 
 - Date: 2026-02-28 09:45
 - Author: Codex
-- Branch: `fix/SCRUM-105-authorization-cache-hardening`
-- Tags: scrum-105,rbac,authorization,cache,deny-by-default,hardening
+- Branch: `fix/SCRUM-115-authorization-cache-hardening`
+- Jira Key: SCRUM-115
+- Jira Status: Resolved
+- PR URL: N/A (legacy record; PR link unavailable)
+- Tags: scrum-115,rbac,authorization,cache,deny-by-default,hardening
 
 ## Start Context
-- `SCRUM-105` 완료 이후 재리뷰에서 권한 캐시가 legacy `role-fallback` source를 허용해 stale 권한이 TTL 동안 재사용될 수 있는 위험을 확인했다.
+- `SCRUM-115` 재리뷰 하드닝 작업에서 권한 캐시가 legacy `role-fallback` source를 허용해 stale 권한이 TTL 동안 재사용될 수 있는 위험을 확인했다.
 - 목표는 `deny-by-default` 정책과 캐시 계층을 일치시키고, 구버전 캐시를 즉시 무효화하는 것이다.
 
 ## Changes Summary

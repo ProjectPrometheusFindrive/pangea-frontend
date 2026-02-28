@@ -1,7 +1,7 @@
 # Prompt Library v1
 
 - Version: v1.2.38
-- Date: 2026-02-27
+- Date: 2026-02-28
 - Owner: Pangea Frontend Team
 - Tags: prompt-library,workflow,branch-policy,history-policy,commit-policy,pr-automation,jira-traceability,end-prompt-protocol,worktree-cleanup,jira-status-sync,jira-comment-sync,ac-evidence,mock-removal,reservations-write,reservations-mock-removal,ocr-flow,revenue-api,settings-api,payment-status-sync,home-api,home-summary,action-payment-mock-removal,support-center,rbac-permission-hardening,e2e-test-hardening,playwright-artifact-policy
 
@@ -55,7 +55,7 @@ Start Prompt:
 
 End Prompt:
 - Update docs/prompt_library/prompt_library_v1.md version metadata
-- Add docs/prompt_history/{YYYYMMDD}_{task-summary}.md from template
+- Add docs/prompt_history/{YYYYMMDD}_{TICKET-ID}-{task-summary}.md from template
 - Commit step: do not run push/tag/rebase/reset
 - Then run git push and create PR to dev in Korean (UTF-8)
 ```
@@ -120,7 +120,7 @@ End Prompt:
 
 ## Usage
 ```bash
-cp docs/prompt_history/_TEMPLATE.md docs/prompt_history/$(date +%Y%m%d)_your-task.md
+cp docs/prompt_history/_TEMPLATE.md docs/prompt_history/$(date +%Y%m%d)_SCRUM-123-your-task.md
 # 작업 종료 시 prompt_library_v1.md Version/Date/Version History 갱신
 ```
 
@@ -140,7 +140,7 @@ cp docs/prompt_history/_TEMPLATE.md docs/prompt_history/$(date +%Y%m%d)_your-tas
   - 배포 필요 시 (`dev -> production` PR)
 
 ## Commit Message Convention
-- Subject: `Docs: update prompt_library to vX.Y.Z; add {YYYYMMDD}_{summary}.md`
+- Subject: `Docs({TICKET-ID}): update prompt_library to vX.Y.Z; add {YYYYMMDD}_{TICKET-ID}-{summary}.md`
 - Body: `prompt_history`의 `Changes Summary` 상위 3~5개 bullet 요약
 - 커밋 단계 금지: push / tag / rebase / reset
 
@@ -164,7 +164,7 @@ cp docs/prompt_history/_TEMPLATE.md docs/prompt_history/$(date +%Y%m%d)_your-tas
 - Production push triggers auto tag (`vX.Y.Z`)
 
 ## Version History
-- v1.2.38 (2026-02-28, SCRUM-105): Add prompt_history evidence rule for authorization cache source hardening (`role-fallback` source 제거, cache key/version 롤오버로 stale 권한 캐시 무효화).
+- v1.2.38 (2026-02-28, SCRUM-115): Add prompt_history evidence rule for authorization cache source hardening (`role-fallback` source 제거, cache key/version 롤오버로 stale 권한 캐시 무효화).
 - v1.2.37 (2026-02-27, SCRUM-101~SCRUM-114): Add prompt_history evidence rule for Device Installation E2E contract alignment (list mock path `/api/v2/device-installations/tasks` canonical 유지 근거).
 - v1.2.36 (2026-02-27, SCRUM-101~SCRUM-114): Add prompt_history evidence rule for FE E2E permission-contract alignment (`/api/v2/permissions/me` default mock 404 제거, role별 권한 payload 반환으로 deny-by-default 정책과 테스트 계약 정렬).
 - v1.2.35 (2026-02-27, SCRUM-101~SCRUM-109/SCRUM-113): Add prompt_history evidence rule for FE follow-up batch fixes (canonical endpoint 정렬: settings/company + action-items + device-installations, permissions 파서 메타데이터 문자열 차단 + `*` 와일드카드 보존, Authorization refresh race-safe, ActionRequired 실패 rollback 재동기화 근거).
@@ -186,7 +186,7 @@ cp docs/prompt_history/_TEMPLATE.md docs/prompt_history/$(date +%Y%m%d)_your-tas
 - v1.2.19 (2026-02-26, SCRUM-48): Add prompt_history evidence rule for ActionRequired query integration tickets (list query params/detail 404 fallback/filter race handling).
 - v1.2.18 (2026-02-26, SCRUM-34): Add prompt_history evidence rule for login/protected-route tickets (returnUrl restore, login 401/429/network branches, single refresh-retry order).
 - v1.2.17 (2026-02-26, SCRUM-38): Add prompt_history capture rule for BK-042 assets read integration evidence (`page/size/status/q` sync + 400/401/403/404/5xx handling).
-- v1.2.17 (2026-02-26, SCRUM-35): Add prompt_history evidence rule for logout/session-expiry UX tickets (toast/modal/returnUrl/single-run 401 cleanup/storage cleanup).
+- v1.2.17.1 (2026-02-26, SCRUM-35): Add prompt_history evidence rule for logout/session-expiry UX tickets (toast/modal/returnUrl/single-run 401 cleanup/storage cleanup).
 - v1.2.16 (2026-02-26, SCRUM-31): Add prompt_history evidence rule for common loading/error/empty UI tickets (Retry + 401/403/5xx + skeleton/empty CTA checks).
 - v1.2.15 (2026-02-26, NO-JIRA): Add rule to annotate BK items with mapped SCRUM IDs and Jira browse links when updating local parallel-group planning docs.
 - v1.2.14 (2026-02-26, SCRUM-30): Add prompt_history capture rule for auth-context migration tickets (session key, token provider wiring, role mapping evidence).

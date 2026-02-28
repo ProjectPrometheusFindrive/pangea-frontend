@@ -102,20 +102,52 @@ function mapStatusToErrorCode(status: number): ApiErrorCode {
   return 'HTTP_ERROR';
 }
 
+function toApiErrorFields(value: unknown): ApiErrorField[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  const fields = value
+    .map((entry) => {
+      if (!isRecord(entry)) {
+        return null;
+      }
+
+      const name = toNonEmptyString(entry.name) ?? toNonEmptyString(entry.field);
+      const reason = toNonEmptyString(entry.reason) ?? toNonEmptyString(entry.message);
+      if (!name && !reason) {
+        return entry as ApiErrorField;
+      }
+
+      return {
+        ...entry,
+        name: name ?? undefined,
+        reason: reason ?? undefined,
+      } as ApiErrorField;
+    })
+    .filter((entry): entry is ApiErrorField => entry !== null);
+
+  return fields.length > 0 ? fields : undefined;
+}
+
 export function isApiErrorEnvelope(payload: unknown): payload is ApiErrorEnvelope {
   if (!isRecord(payload)) {
     return false;
   }
-  if (payload.success !== false) {
+  const isCanonicalError = payload.status === 'error';
+  const isLegacyError = payload.success === false;
+  if (!isCanonicalError && !isLegacyError) {
     return false;
   }
   if (!isRecord(payload.error)) {
     return false;
   }
   return (
-    typeof payload.error.code === 'string'
-    && typeof payload.error.message === 'string'
-    && isRecord(payload.meta)
+    typeof payload.error.message === 'string'
+    && (
+      typeof payload.error.type === 'string'
+      || typeof payload.error.code === 'string'
+    )
   );
 }
 
@@ -125,7 +157,9 @@ export function isApiSuccessEnvelope<TData = unknown>(
   if (!isRecord(payload)) {
     return false;
   }
-  return payload.success === true && isRecord(payload.meta);
+  const isCanonicalSuccess = payload.status === 'success';
+  const isLegacySuccess = payload.success === true;
+  return (isCanonicalSuccess || isLegacySuccess) && 'data' in payload;
 }
 
 export function buildApiErrorFromResponse(
@@ -134,10 +168,15 @@ export function buildApiErrorFromResponse(
   requestId?: string,
 ): ApiError {
   if (isApiErrorEnvelope(payload)) {
-    return new ApiError(payload.error.code || mapStatusToErrorCode(status), payload.error.message, {
+    const canonicalType = toNonEmptyString(payload.error.type);
+    const legacyCode = toNonEmptyString(payload.error.code);
+    const errorCode = canonicalType || legacyCode || mapStatusToErrorCode(status);
+    const fields = toApiErrorFields(payload.error.details) ?? toApiErrorFields(payload.error.fields);
+
+    return new ApiError(errorCode, payload.error.message, {
       status,
       requestId: getRequestIdFromEnvelope(payload) ?? requestId,
-      fields: Array.isArray(payload.error.fields) ? payload.error.fields : undefined,
+      fields,
       payload,
     });
   }

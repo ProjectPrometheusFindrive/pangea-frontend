@@ -30,6 +30,12 @@ export interface DeviceInstallationListOptions {
   pageSize?: number;
   status?: DeviceInstallationStatus;
   vin?: string;
+  companyId?: string;
+  signal?: AbortSignal;
+}
+
+export interface DeviceInstallationDetailOptions {
+  companyId?: string;
   signal?: AbortSignal;
 }
 
@@ -188,6 +194,7 @@ async function requestListFromPath(
       pageSize,
       status: options.status,
       vin: options.vin,
+      companyId: toNonEmptyString(options.companyId) ?? undefined,
     },
     signal: options.signal,
   });
@@ -217,10 +224,17 @@ export async function createDeviceInstallation(
   return installation;
 }
 
-async function getInstallationFromPath(path: string): Promise<DeviceInstallationItem> {
+async function getInstallationFromPath(
+  path: string,
+  options: DeviceInstallationDetailOptions = {},
+): Promise<DeviceInstallationItem> {
   const payload = await apiClient.requestData<unknown>({
     path,
     method: 'GET',
+    query: {
+      companyId: toNonEmptyString(options.companyId) ?? undefined,
+    },
+    signal: options.signal,
   });
 
   const installation = toInstallation(payload);
@@ -230,7 +244,10 @@ async function getInstallationFromPath(path: string): Promise<DeviceInstallation
   return installation;
 }
 
-export async function getDeviceInstallation(installationId: string): Promise<DeviceInstallationItem> {
+export async function getDeviceInstallation(
+  installationId: string,
+  options: DeviceInstallationDetailOptions = {},
+): Promise<DeviceInstallationItem> {
   const normalizedId = installationId.trim();
   if (!normalizedId) {
     throw new ApiError('VALIDATION_ERROR', 'installationId is required', { status: 400 });
@@ -238,7 +255,7 @@ export async function getDeviceInstallation(installationId: string): Promise<Dev
 
   const encodedInstallationId = encodeURIComponent(normalizedId);
 
-  return getInstallationFromPath(`/api/v2/device-installations/${encodedInstallationId}`);
+  return getInstallationFromPath(`/api/v2/device-installations/${encodedInstallationId}`, options);
 }
 
 async function cancelFromStatusPath(installationId: string): Promise<DeviceInstallationItem | null> {

@@ -78,6 +78,12 @@ interface ActionWriteErrorState {
   retryable: boolean;
 }
 
+interface OptimisticActionSnapshot {
+  selectedItem: ActionItem | null;
+  sourceActionItems: ActionItem[];
+  totalItems: number;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
@@ -671,6 +677,12 @@ export default function ActionRequired() {
     retryActionRef.current = null;
   }, []);
 
+  const restoreOptimisticActionSnapshot = useCallback((snapshot: OptimisticActionSnapshot) => {
+    setSelectedItem(snapshot.selectedItem);
+    setSourceActionItems(snapshot.sourceActionItems);
+    setTotalItems(snapshot.totalItems);
+  }, []);
+
   const handleWriteRetry = useCallback(() => {
     if (isWriteSaving) {
       return;
@@ -946,6 +958,11 @@ export default function ActionRequired() {
 
     const previousSelectedItem = targetItem;
     const previousCurrentStatus = currentStatus;
+    const optimisticSnapshot: OptimisticActionSnapshot = {
+      selectedItem,
+      sourceActionItems,
+      totalItems,
+    };
 
     clearWriteFeedback();
 
@@ -989,6 +1006,7 @@ export default function ActionRequired() {
       void hydrateActionDetail(actionId, fallbackItem);
     } catch (error) {
       setCurrentStatus(previousCurrentStatus);
+      restoreOptimisticActionSnapshot(optimisticSnapshot);
 
       const mappedError = toActionWriteError(kind, error);
       setWriteError(mappedError);
@@ -1043,6 +1061,11 @@ export default function ActionRequired() {
     const previousSelectedItem = targetItem;
     const previousCurrentStatus = currentStatus;
     const previousCurrentMemo = currentMemo;
+    const optimisticSnapshot: OptimisticActionSnapshot = {
+      selectedItem,
+      sourceActionItems,
+      totalItems,
+    };
 
     clearWriteFeedback();
 
@@ -1095,6 +1118,7 @@ export default function ActionRequired() {
     } catch (error) {
       setCurrentStatus(previousCurrentStatus);
       setCurrentMemo(previousCurrentMemo);
+      restoreOptimisticActionSnapshot(optimisticSnapshot);
 
       const mappedError = toActionWriteError('memo', error);
       setWriteError(mappedError);

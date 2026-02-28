@@ -197,6 +197,9 @@ export function AuthorizationProvider({ children }: { children: ReactNode }) {
 
   const refreshAuthorization = useCallback(async (options?: { force?: boolean }) => {
     if (authStatus === 'checking') {
+      authorizationRequestSequenceRef.current += 1;
+      authorizationControllerRef.current?.abort();
+      authorizationControllerRef.current = null;
       setStatus('checking');
       return;
     }
@@ -338,6 +341,9 @@ export function AuthorizationProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (authStatus === 'checking') {
+      authorizationRequestSequenceRef.current += 1;
+      authorizationControllerRef.current?.abort();
+      authorizationControllerRef.current = null;
       setStatus('checking');
       return;
     }
