@@ -24,7 +24,7 @@ export type AppRoutePermission = (typeof ROUTE_PERMISSIONS)[keyof typeof ROUTE_P
 export type AppActionPermission = (typeof ACTION_PERMISSIONS)[keyof typeof ACTION_PERMISSIONS];
 export type AppPermission = AppRoutePermission | AppActionPermission;
 
-export type AuthorizationSource = 'api' | 'role-fallback' | 'deny-by-default';
+export type AuthorizationSource = 'api' | 'deny-by-default';
 
 export const KNOWN_APP_PERMISSIONS: AppPermission[] = [
   ROUTE_PERMISSIONS.home,

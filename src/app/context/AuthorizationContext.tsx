@@ -35,16 +35,16 @@ interface AuthorizationContextType {
 }
 
 interface AuthorizationCachePayload {
-  version: 1;
+  version: 2;
   userId: string;
   companyId: string;
   role: string;
-  source: Extract<AuthorizationSource, 'api' | 'role-fallback'>;
+  source: 'api';
   fetchedAt: number;
   permissions: AppPermission[];
 }
 
-const AUTHORIZATION_CACHE_KEY = 'pangea.authorization.v1';
+const AUTHORIZATION_CACHE_KEY = 'pangea.authorization.v2';
 const AUTHORIZATION_CACHE_TTL_MS = 5 * 60 * 1000;
 const FOCUS_REFRESH_MIN_INTERVAL_MS = 30 * 1000;
 const KNOWN_PERMISSION_SET = new Set<AppPermission>(KNOWN_APP_PERMISSIONS);
@@ -85,13 +85,13 @@ function readAuthorizationCache(
     }
 
     const candidate = parsedValue as Partial<AuthorizationCachePayload>;
-    if (candidate.version !== 1) {
+    if (candidate.version !== 2) {
       return null;
     }
     if (candidate.userId !== userId || candidate.companyId !== companyId || candidate.role !== role) {
       return null;
     }
-    if (candidate.source !== 'api' && candidate.source !== 'role-fallback') {
+    if (candidate.source !== 'api') {
       return null;
     }
     if (typeof candidate.fetchedAt !== 'number' || !Number.isFinite(candidate.fetchedAt)) {
@@ -111,11 +111,11 @@ function readAuthorizationCache(
     ));
 
     return {
-      version: 1,
+      version: 2,
       userId: candidate.userId,
       companyId: candidate.companyId,
       role: candidate.role,
-      source: candidate.source,
+      source: 'api',
       fetchedAt: candidate.fetchedAt,
       permissions: validPermissions,
     };
@@ -268,7 +268,7 @@ export function AuthorizationProvider({ children }: { children: ReactNode }) {
 
       applyResolvedPermissions(parsedPermissions, 'api');
       writeAuthorizationCache({
-        version: 1,
+        version: 2,
         userId: normalizedUserId,
         companyId: normalizedCompanyId,
         role: normalizedRole,
