@@ -4,8 +4,8 @@
 - Author: Codex
 - Branch: `fix/SCRUM-131-superadmin-precheck-companyid`
 - Jira Key: SCRUM-131
-- Jira Status: In Progress
-- PR URL: PENDING
+- Jira Status: Resolved
+- PR URL: https://github.com/ProjectPrometheusFindrive/pangea-frontend/pull/49
 - Tags: scrum-131,device-installation,tenant-scope,super-admin,pre-check
 
 ## Start Context
