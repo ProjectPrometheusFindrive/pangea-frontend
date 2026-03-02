@@ -37,6 +37,7 @@ interface PremiumInstallationReceipt {
   assetId: string;
   assetVehicleNumber: string;
   vin: string;
+  companyId?: string;
   status: DeviceInstallationStatus;
   scheduledAt?: string;
   createdAt?: string;
@@ -191,6 +192,7 @@ function readPremiumInstallationReceipt(): PremiumInstallationReceipt | null {
       assetId,
       assetVehicleNumber,
       vin,
+      companyId: toStringValue(parsedValue.companyId) ?? undefined,
       status: normalizeDeviceInstallationStatus(parsedValue.status),
       scheduledAt: toStringValue(parsedValue.scheduledAt) ?? undefined,
       createdAt: toStringValue(parsedValue.createdAt) ?? undefined,
@@ -425,12 +427,18 @@ export function PremiumInstallationRequestSection({
   const syncReceiptFromInstallation = useCallback((
     installation: DeviceInstallationItem,
     fallbackAsset: PremiumInstallableAsset | PremiumInstallationReceipt,
+    options?: { companyId?: string },
   ) => {
+    const resolvedCompanyId = toStringValue(installation.companyId)
+      ?? toStringValue(options?.companyId)
+      ?? toStringValue(fallbackAsset.companyId)
+      ?? undefined;
     const nextReceipt: PremiumInstallationReceipt = {
       installationId: installation.id,
       assetId: 'id' in fallbackAsset ? fallbackAsset.id : fallbackAsset.assetId,
       assetVehicleNumber: 'vehicleNumber' in fallbackAsset ? fallbackAsset.vehicleNumber : fallbackAsset.assetVehicleNumber,
       vin: installation.vin || ('vin' in fallbackAsset ? fallbackAsset.vin : ''),
+      companyId: resolvedCompanyId,
       status: installation.status,
       scheduledAt: installation.scheduledAt || undefined,
       createdAt: installation.createdAt || undefined,
@@ -440,26 +448,27 @@ export function PremiumInstallationRequestSection({
     persistReceipt(nextReceipt);
   }, [persistReceipt]);
 
-  const findInProgressInstallationByVin = useCallback(async (vin: string) => {
+  const findInProgressInstallationByVin = useCallback(async (vin: string, companyId?: string) => {
+    const resolvedCompanyId = toStringValue(companyId) ?? undefined;
     const [scheduledInstallations, inProgressInstallations] = await Promise.all([
       getDeviceInstallationList({
         page: 1,
         pageSize: 1,
         status: 'scheduled',
         vin,
-        companyId: user?.companyId,
+        companyId: resolvedCompanyId,
       }),
       getDeviceInstallationList({
         page: 1,
         pageSize: 1,
         status: 'in_progress',
         vin,
-        companyId: user?.companyId,
+        companyId: resolvedCompanyId,
       }),
     ]);
 
     return scheduledInstallations.items[0] ?? inProgressInstallations.items[0] ?? null;
-  }, [user?.companyId]);
+  }, []);
 
   const refreshReceiptById = useCallback(async (
     installationId: string,
@@ -469,10 +478,15 @@ export function PremiumInstallationRequestSection({
     setRequestError(null);
 
     try {
+      const resolvedCompanyId = toStringValue(fallbackReceipt.companyId)
+        ?? toStringValue(user?.companyId)
+        ?? undefined;
       const latestInstallation = await getDeviceInstallation(installationId, {
-        companyId: user?.companyId,
+        companyId: resolvedCompanyId,
       });
-      syncReceiptFromInstallation(latestInstallation, fallbackReceipt);
+      syncReceiptFromInstallation(latestInstallation, fallbackReceipt, {
+        companyId: resolvedCompanyId,
+      });
     } catch (error) {
       setRequestError(
         toPremiumRequestErrorState(
@@ -600,6 +614,7 @@ export function PremiumInstallationRequestSection({
       ...receipt,
       assetVehicleNumber: matchedAsset.vehicleNumber,
       vin: matchedAsset.vin || receipt.vin,
+      companyId: matchedAsset.companyId ?? receipt.companyId,
     };
     persistReceipt(nextReceipt);
   }, [assetMap, persistReceipt, receipt]);
@@ -667,9 +682,9 @@ export function PremiumInstallationRequestSection({
     });
 
     const isSuperAdmin = (user?.role ?? '').trim().toLowerCase() === 'super_admin';
-    const createCompanyId = isSuperAdmin
+    const requestCompanyId = isSuperAdmin
       ? (selectedAsset.companyId?.trim() || user?.companyId?.trim() || undefined)
-      : undefined;
+      : (user?.companyId?.trim() || undefined);
 
     const now = Date.now();
     if (
@@ -695,9 +710,11 @@ export function PremiumInstallationRequestSection({
     setIsSubmitting(true);
 
     try {
-      const existingInstallation = await findInProgressInstallationByVin(normalizedVin);
+      const existingInstallation = await findInProgressInstallationByVin(normalizedVin, requestCompanyId);
       if (existingInstallation) {
-        syncReceiptFromInstallation(existingInstallation, selectedAsset);
+        syncReceiptFromInstallation(existingInstallation, selectedAsset, {
+          companyId: requestCompanyId,
+        });
         setIsFormVisible(false);
         setRequestError({
           kind: 'conflict',
@@ -725,20 +742,22 @@ export function PremiumInstallationRequestSection({
           }) || undefined,
         },
         {
-          companyId: createCompanyId,
+          companyId: requestCompanyId,
         },
       );
 
       let resolvedInstallation = createdInstallation;
       try {
         resolvedInstallation = await getDeviceInstallation(createdInstallation.id, {
-          companyId: createCompanyId ?? user?.companyId,
+          companyId: requestCompanyId ?? user?.companyId,
         });
       } catch {
         // If detail lookup fails here, keep created payload and allow manual refresh.
       }
 
-      syncReceiptFromInstallation(resolvedInstallation, selectedAsset);
+      syncReceiptFromInstallation(resolvedInstallation, selectedAsset, {
+        companyId: requestCompanyId,
+      });
       setMemo('');
       setContactPhone('');
       setIsFormVisible(false);
@@ -758,9 +777,11 @@ export function PremiumInstallationRequestSection({
 
       if (error instanceof ApiError && error.status === 409) {
         try {
-          const existingInstallation = await findInProgressInstallationByVin(normalizedVin);
+          const existingInstallation = await findInProgressInstallationByVin(normalizedVin, requestCompanyId);
           if (existingInstallation) {
-            syncReceiptFromInstallation(existingInstallation, selectedAsset);
+            syncReceiptFromInstallation(existingInstallation, selectedAsset, {
+              companyId: requestCompanyId,
+            });
             setIsFormVisible(false);
           }
         } catch {
