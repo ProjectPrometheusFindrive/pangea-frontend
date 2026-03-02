@@ -11,7 +11,9 @@ import Login from './pages/Login';
 import Reservations from './pages/Reservations';
 import Revenue from './pages/Revenue';
 import Settings from './pages/Settings';
+import SignUp from './pages/SignUp';
 import SupportCenter from './pages/SupportCenter';
+import TermsAgreement from './pages/TermsAgreement';
 
 function RequireAuthenticatedRoute() {
   return createElement(RequireAuth);
@@ -29,6 +31,14 @@ export const router = createBrowserRouter([
   {
     path: '/login',
     Component: Login,
+  },
+  {
+    path: '/terms',
+    Component: TermsAgreement,
+  },
+  {
+    path: '/signup',
+    Component: SignUp,
   },
   {
     path: '/forbidden',
