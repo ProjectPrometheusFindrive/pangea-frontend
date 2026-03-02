@@ -1,11 +1,11 @@
 # SCRUM-134 Api Client Fetch Binding Fix
 
-- Date: 2026-03-02 19:31
+- Date: 2026-03-02 19:34
 - Author: Codex
 - Branch: `fix/SCRUM-134-api-client-fetch-binding`
 - Jira Key: SCRUM-134
-- Jira Status: 진행 중
-- PR URL: PENDING
+- Jira Status: Resolved
+- PR URL: https://github.com/ProjectPrometheusFindrive/pangea-frontend/pull/51
 - Tags: scrum-134,api-client,fetch,binding,login
 
 ## Start Context
@@ -17,6 +17,7 @@
 - `getDefaultFetchImpl()`를 추가해 기본 fetch를 `globalThis.fetch(input, init)` 형태의 래퍼로 호출하도록 변경했다.
 - `ApiClient` 생성자에서 기본값 초기화를 `options.fetchImpl ?? fetch`에서 `options.fetchImpl ?? getDefaultFetchImpl()`로 교체해 unbound fetch assignment를 제거했다.
 - 변경 범위를 `src/services/api/client.ts` 단일 파일로 제한해 로그인 포함 전체 API 요청 경로의 런타임 `TypeError` 가능성을 낮췄다.
+- End Prompt 단계에서 `dev` 대상 PR 생성 후 Jira `Resolved` 전환 및 완료 코멘트 동기화를 수행했다.
 
 ## Diffs & Files
 - `src/services/api/client.ts`
@@ -33,6 +34,8 @@ git worktree add -b fix/SCRUM-134-api-client-fetch-binding /home/jh/code/SCRUM-1
 npm ci
 npm run build
 npx playwright test e2e/login.spec.ts
+git push -u origin fix/SCRUM-134-api-client-fetch-binding
+gh pr create --base dev --head fix/SCRUM-134-api-client-fetch-binding
 ```
 
 ## Validation
