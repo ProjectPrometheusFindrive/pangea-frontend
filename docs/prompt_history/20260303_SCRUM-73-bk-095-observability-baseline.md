@@ -1,11 +1,11 @@
-# SCRUM-73 BK-095 Observability Baseline (FE)
+﻿# SCRUM-73 BK-095 Observability Baseline (FE)
 
 - Date: 2026-03-03 00:27
 - Author: Codex (GPT-5)
 - Branch: feat/SCRUM-73-observability-baseline
 - Jira Key: SCRUM-73
 - Jira Status: In Progress
-- PR URL: PENDING
+- PR URL: https://github.com/ProjectPrometheusFindrive/pangea-frontend/pull/55
 - Tags: scrum-73,bk-095,frontend,observability,trace-id,api-client
 
 ## Start Context
@@ -63,3 +63,4 @@ npm.cmd run build
 ## Notes
 - 로컬 BE CORS 기본값이 `http://localhost:5173`으로 고정되어 있어 `http://127.0.0.1:4173`에서 로그인은 CORS로 실패했다.
 - 다만 네트워크 캡처에서 preflight와 실제 POST 요청 모두 `x-request-id` 전파가 확인되어 FE 측 목표는 충족했다.
+
