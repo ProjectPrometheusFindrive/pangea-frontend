@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
-import { Navigate, useNavigate, useSearchParams } from 'react-router';
+import { Link, Navigate, useNavigate, useSearchParams } from 'react-router';
 import { Loader2, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -206,6 +206,13 @@ export default function Login() {
             로그인
           </button>
         </form>
+
+        <div className="mt-4 border-t border-slate-200 pt-4 text-sm text-slate-600">
+          계정이 없나요?{' '}
+          <Link to="/terms" className="font-semibold text-blue-600 transition hover:text-blue-700">
+            회원가입
+          </Link>
+        </div>
 
         {uiError?.canRetry && (
           <button
