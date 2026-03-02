@@ -64,11 +64,24 @@ function removeAuthorizationCache(): void {
   }
 }
 
+function toNormalizedNonEmptyString(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : null;
+}
+
 function readAuthorizationCache(
   userId: string,
-  companyId: string,
+  companyId: string | null,
   role: string,
 ): AuthorizationCachePayload | null {
+  if (!companyId) {
+    return null;
+  }
+
   if (typeof window === 'undefined') {
     return null;
   }
@@ -215,10 +228,11 @@ export function AuthorizationProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    const normalizedUserId = user.userId.trim();
-    const normalizedCompanyId = user.companyId.trim();
-    const normalizedRole = user.role.trim().toLowerCase();
-    if (!normalizedUserId || !normalizedCompanyId || !normalizedRole) {
+    const normalizedUserId = toNormalizedNonEmptyString(user.userId);
+    const normalizedCompanyId = toNormalizedNonEmptyString(user.companyId);
+    const normalizedRoleValue = toNormalizedNonEmptyString(user.role);
+    const normalizedRole = normalizedRoleValue?.toLowerCase() ?? null;
+    if (!normalizedUserId || !normalizedRole) {
       authorizationRequestSequenceRef.current += 1;
       authorizationControllerRef.current?.abort();
       authorizationControllerRef.current = null;
@@ -270,28 +284,39 @@ export function AuthorizationProvider({ children }: { children: ReactNode }) {
       }
 
       applyResolvedPermissions(parsedPermissions, 'api');
-      writeAuthorizationCache({
-        version: 2,
-        userId: normalizedUserId,
-        companyId: normalizedCompanyId,
-        role: normalizedRole,
-        source: 'api',
-        fetchedAt: Date.now(),
-        permissions: permissionSetToArray(parsedPermissions),
-      });
+      if (normalizedCompanyId) {
+        writeAuthorizationCache({
+          version: 2,
+          userId: normalizedUserId,
+          companyId: normalizedCompanyId,
+          role: normalizedRole,
+          source: 'api',
+          fetchedAt: Date.now(),
+          permissions: permissionSetToArray(parsedPermissions),
+        });
+      } else {
+        removeAuthorizationCache();
+      }
     } catch (error) {
       if (isStaleRequest()) {
         return;
       }
 
       if (error instanceof ApiError && error.code === 'ABORTED') {
+        applyResolvedPermissions(new Set<AppPermission>(), 'deny-by-default');
+        removeAuthorizationCache();
         return;
       }
 
       if (error instanceof ApiError) {
         if (error.status === 401) {
           setStatus('checking');
-          await refreshSession();
+          try {
+            await refreshSession();
+          } catch {
+            applyResolvedPermissions(new Set<AppPermission>(), 'deny-by-default');
+            removeAuthorizationCache();
+          }
           return;
         }
 

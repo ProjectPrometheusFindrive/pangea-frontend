@@ -116,4 +116,61 @@ test.describe('BK-091 Login E2E', () => {
     await expect(page).toHaveURL(/\/forbidden$/);
     await expect(page.getByRole('heading', { name: '접근 권한이 없습니다' })).toBeVisible();
   });
+
+  test('does not get stuck on authorization loading when /auth/me omits companyId', async ({ page }) => {
+    await installApiMocks(page, {
+      handlers: {
+        'GET /api/v2/auth/me': async ({ route }) => {
+          await fulfillSuccess(route, {
+            userId: 'member-001',
+            role: 'member',
+            name: 'E2E Member',
+            email: 'member@pangea.local',
+          });
+        },
+        'GET /api/v2/permissions/me': async ({ route }) => {
+          await fulfillSuccess(route, {
+            permissions: [
+              'route.home',
+              'route.assets',
+            ],
+          });
+        },
+        'GET /api/v2/assets': async ({ route }) => {
+          await fulfillSuccess(route, {
+            items: [
+              {
+                id: 'ASSET-001',
+                vehicleNumber: '12가3456',
+                plate: '12가3456',
+                model: '아반떼',
+                status: '가용',
+                vin: 'KMH12A34560000001',
+                year: '2024',
+                owner: '홍길동',
+                insuranceExpiry: '2026-12-31',
+                nextInspection: '2026-06-30',
+                issues: [],
+                version: 1,
+              },
+            ],
+            total: 1,
+            page: 1,
+            pageSize: 20,
+          });
+        },
+      },
+    });
+
+    await page.goto('/login?returnUrl=%2Fassets');
+    await expect(page.getByTestId('login-user-id')).toBeVisible();
+
+    await page.getByTestId('login-user-id').fill('member-001');
+    await page.getByTestId('login-password').fill('password');
+    await page.getByTestId('login-submit').click();
+
+    await expect(page).toHaveURL(/\/assets(?:\?.*)?$/);
+    await expect(page.locator('table')).toBeVisible();
+    await expect(page.locator('tbody tr')).toHaveCount(1);
+  });
 });
