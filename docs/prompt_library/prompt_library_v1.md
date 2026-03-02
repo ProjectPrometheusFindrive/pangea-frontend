@@ -1,6 +1,6 @@
 ﻿# Prompt Library v1
 
-- Version: v1.2.41
+- Version: v1.2.42
 - Date: 2026-03-02
 - Owner: Pangea Frontend Team
 - Tags: prompt-library,workflow,branch-policy,history-policy,commit-policy,pr-automation,jira-traceability,end-prompt-protocol,worktree-cleanup,jira-status-sync,jira-comment-sync,ac-evidence,mock-removal,reservations-write,reservations-mock-removal,ocr-flow,revenue-api,settings-api,payment-status-sync,home-api,home-summary,action-payment-mock-removal,support-center,rbac-permission-hardening,e2e-test-hardening,playwright-artifact-policy,device-installation-tenant-scope,authorization-loading-guard
@@ -166,6 +166,7 @@ cp docs/prompt_history/_TEMPLATE.md docs/prompt_history/$(date +%Y%m%d)_SCRUM-12
 - Production push triggers auto tag (`vX.Y.Z`)
 
 ## Version History
+- v1.2.42 (2026-03-02, SCRUM-132): Add prompt_history evidence rule for Premium installation tenant consistency hardening (single request companyId across pre-check/create/409-recover/refresh, receipt session companyId persistence, and super_admin cross-tenant regression coverage).
 - v1.2.41 (2026-03-02, SCRUM-147): Add prompt_history evidence guidance for authorization-loading stuck fixes (user metadata normalization guard, checking-to-ready transition safety, and /auth/me companyId-missing regression coverage).
 - v1.2.40 (2026-03-02, SCRUM-145): Add prompt_history evidence rule for legacy-style FE signup flow alignment (?쎄? ?숈쓽 ?④퀎, userId 以묐났?뺤씤, `/api/v2/auth/register` ?곗꽑/fallback ?쒖텧 寃쎈줈 洹쇨굅).
 - v1.2.39 (2026-02-28, SCRUM-131): Add prompt_history evidence rule for Device Installation pre-check tenant scope regression (`companyId` ?꾨떖濡?super_admin cross-tenant ?쇳빀 諛⑹? + non-super_admin ?숈옉 ?좎? 洹쇨굅).
