@@ -40,6 +40,7 @@ export type {
   ApiMeta,
   ApiRequestConfig,
   ApiRequestContext,
+  ApiRequestTrace,
   ApiRequestInterceptor,
   ApiResponseContext,
   ApiResponseInterceptor,

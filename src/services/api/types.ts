@@ -53,16 +53,24 @@ export interface ApiRequestConfig {
   };
 }
 
+export interface ApiRequestTrace {
+  requestId?: string;
+  requestStartedAtMs?: number;
+  responseRequestId?: string;
+}
+
 export interface ApiRequestContext {
   url: string;
   init: RequestInit;
   config: ApiRequestConfig;
+  trace?: ApiRequestTrace;
 }
 
 export interface ApiResponseContext {
   request: ApiRequestContext;
   response: Response;
   body: unknown;
+  trace?: ApiRequestTrace;
 }
 
 export type ApiRequestInterceptor =

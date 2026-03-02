@@ -1,9 +1,11 @@
 import { buildApiErrorFromResponse, buildNetworkError, isApiErrorEnvelope, isApiSuccessEnvelope } from './errors';
+import { emitApiClientEvent } from '../observability';
 import type {
   AccessTokenProvider,
   ApiUnauthorizedHandler,
   ApiRequestConfig,
   ApiRequestContext,
+  ApiRequestTrace,
   ApiRequestInterceptor,
   ApiResponseContext,
   ApiResponseInterceptor,
@@ -36,6 +38,34 @@ function isAbsoluteUrl(value: string): boolean {
 
 function getDefaultFetchImpl(): FetchLike {
   return (input, init) => globalThis.fetch(input, init);
+}
+
+function nowMs(): number {
+  if (typeof performance !== 'undefined' && typeof performance.now === 'function') {
+    return performance.now();
+  }
+  return Date.now();
+}
+
+function createRequestId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function resolvePath(path: string, url: string): string {
+  if (!path) {
+    return url;
+  }
+  try {
+    if (isAbsoluteUrl(path)) {
+      return new URL(path).pathname;
+    }
+    return new URL(url).pathname;
+  } catch {
+    return path;
+  }
 }
 
 function toNumber(value: unknown): number | undefined {
@@ -247,6 +277,22 @@ export class ApiClient {
     return this.requestInternal<TResponse>(config, false);
   }
 
+  private emitObservabilityEvent(kind: 'success' | 'error', context: ApiResponseContext): void {
+    const trace = context.trace ?? {};
+    const startedAt = trace.requestStartedAtMs;
+    const durationMs = typeof startedAt === 'number' ? Math.max(0, nowMs() - startedAt) : undefined;
+    const requestId = trace.responseRequestId || trace.requestId;
+
+    emitApiClientEvent({
+      kind,
+      method: String(context.request.config.method || context.request.init.method || 'GET').toUpperCase(),
+      path: resolvePath(context.request.config.path, context.request.url),
+      status: Number(context.response.status || 0),
+      requestId,
+      durationMs,
+    });
+  }
+
   private async requestInternal<TResponse = unknown>(
     config: ApiRequestConfig,
     didRetryAfterUnauthorized: boolean,
@@ -271,10 +317,15 @@ export class ApiClient {
       signalContext.cleanup();
     }
 
+    const responseRequestId = response.headers.get('x-request-id') ?? undefined;
     let responseContext: ApiResponseContext = {
       request: interceptedRequest,
       response,
       body: responseBody,
+      trace: {
+        ...(interceptedRequest.trace ?? {}),
+        responseRequestId,
+      },
     };
 
     responseContext = await this.applyResponseInterceptors(responseContext);
@@ -297,13 +348,18 @@ export class ApiClient {
         }
       }
 
+      this.emitObservabilityEvent('error', responseContext);
       throw buildApiErrorFromResponse(
         responseContext.response.status,
         responseContext.body,
-        responseContext.response.headers.get('x-request-id') ?? undefined,
+        responseContext.trace?.responseRequestId
+          ?? responseContext.trace?.requestId
+          ?? responseContext.response.headers.get('x-request-id')
+          ?? undefined,
       );
     }
 
+    this.emitObservabilityEvent('success', responseContext);
     return responseContext.body as TResponse;
   }
 
@@ -360,6 +416,9 @@ export class ApiClient {
         headers.set(headerKey, headerValue);
       }
     }
+    if (!headers.has('X-Request-Id')) {
+      headers.set('X-Request-Id', createRequestId());
+    }
 
     let body: BodyInit | undefined;
     if (config.body !== undefined && normalizedMethod !== 'GET' && normalizedMethod !== 'HEAD') {
@@ -373,6 +432,11 @@ export class ApiClient {
       }
     }
 
+    const trace: ApiRequestTrace = {
+      requestId: headers.get('X-Request-Id') ?? undefined,
+      requestStartedAtMs: nowMs(),
+    };
+
     return {
       url: buildUrl(this.baseUrl, config.path, config.query),
       init: {
@@ -384,6 +448,7 @@ export class ApiClient {
         ...config,
         method: normalizedMethod as ApiRequestConfig['method'],
       },
+      trace,
     };
   }
 
