@@ -34,6 +34,10 @@ function isAbsoluteUrl(value: string): boolean {
   return /^https?:\/\//i.test(value);
 }
 
+function getDefaultFetchImpl(): FetchLike {
+  return (input, init) => globalThis.fetch(input, init);
+}
+
 function toNumber(value: unknown): number | undefined {
   const numericValue = Number(value);
   if (!Number.isFinite(numericValue)) {
@@ -171,7 +175,7 @@ export class ApiClient {
       Accept: 'application/json',
       ...options.defaultHeaders,
     };
-    this.fetchImpl = options.fetchImpl ?? fetch;
+    this.fetchImpl = options.fetchImpl ?? getDefaultFetchImpl();
     this.accessTokenProvider = options.accessTokenProvider ?? (() => null);
     this.unauthorizedHandler = options.unauthorizedHandler;
 
