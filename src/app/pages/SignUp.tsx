@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FocusEvent, FormEvent, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { toast } from 'sonner';
 
@@ -255,6 +255,15 @@ export default function SignUp() {
       ...previous,
       [field]: validationErrors[field],
     }));
+  };
+
+  const handlePhoneFocus = (event: FocusEvent<HTMLInputElement>) => {
+    const input = event.currentTarget;
+    window.requestAnimationFrame(() => {
+      if (input.selectionStart === 0 && input.selectionEnd === input.value.length) {
+        input.setSelectionRange(input.value.length, input.value.length);
+      }
+    });
   };
 
   const handleCheckUserId = async () => {
@@ -523,6 +532,7 @@ export default function SignUp() {
                   type="text"
                   value={form.phone}
                   onChange={(event) => handleFieldChange('phone', event.target.value)}
+                  onFocus={handlePhoneFocus}
                   onBlur={() => handleBlur('phone')}
                   className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
                   placeholder="010-0000-0000"
