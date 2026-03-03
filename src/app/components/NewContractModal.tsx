@@ -60,8 +60,22 @@ interface NewContractModalProps {
   onSubmit: (formValues: NewContractFormValues) => Promise<NewContractSubmitFeedback | null>;
 }
 
+function createTodayBaseDate(): Date {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+}
+
+const CALENDAR_BASE_DATE = createTodayBaseDate();
+
 function hasTextValue(value: string): boolean {
   return value.trim().length > 0;
+}
+
+function formatDateAsYmd(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
 export function NewContractModal({
@@ -107,14 +121,13 @@ export function NewContractModal({
     if (dragSelection && isOpen) {
       setSelectedVehicle(dragSelection.vehicleNumber);
 
-      const baseDate = new Date(2025, 1, 17);
-      const start = new Date(baseDate);
+      const start = new Date(CALENDAR_BASE_DATE);
       start.setDate(start.getDate() + dragSelection.startDate);
-      const end = new Date(baseDate);
+      const end = new Date(CALENDAR_BASE_DATE);
       end.setDate(end.getDate() + dragSelection.endDate);
 
-      setStartDate(start.toISOString().split('T')[0]);
-      setEndDate(end.toISOString().split('T')[0]);
+      setStartDate(formatDateAsYmd(start));
+      setEndDate(formatDateAsYmd(end));
     }
   }, [dragSelection, isOpen]);
 

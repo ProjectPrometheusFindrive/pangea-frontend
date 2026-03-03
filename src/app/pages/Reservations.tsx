@@ -50,7 +50,12 @@ type DragSelection = {
 } | null;
 type ViewFilter = 'all' | 'reservation' | 'rental' | 'return' | 'unpaid';
 
-const CALENDAR_BASE_DATE = new Date(2025, 1, 17);
+function createTodayBaseDate(): Date {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+}
+
+const CALENDAR_BASE_DATE = createTodayBaseDate();
 const DEFAULT_PAGE = 1;
 const DEFAULT_PAGE_SIZE = 20;
 const PAGE_SIZE_OPTIONS = [20, 50, 100];
@@ -243,6 +248,12 @@ function formatDateAsYmd(date: Date): string {
   return `${year}-${month}-${day}`;
 }
 
+function toDateFromOffset(offset: number): Date {
+  const date = new Date(CALENDAR_BASE_DATE);
+  date.setDate(CALENDAR_BASE_DATE.getDate() + offset);
+  return date;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
@@ -316,13 +327,12 @@ function toDateOffset(value: unknown): number | null {
     return null;
   }
 
-  return Math.floor((parsedDate.getTime() - CALENDAR_BASE_DATE.getTime()) / (1000 * 60 * 60 * 24));
+  const parsedDayStart = new Date(parsedDate.getFullYear(), parsedDate.getMonth(), parsedDate.getDate());
+  return Math.floor((parsedDayStart.getTime() - CALENDAR_BASE_DATE.getTime()) / (1000 * 60 * 60 * 24));
 }
 
 function toDateLabelFromOffset(offset: number): string {
-  const date = new Date(CALENDAR_BASE_DATE);
-  date.setDate(CALENDAR_BASE_DATE.getDate() + offset);
-  return formatDateAsYmd(date);
+  return formatDateAsYmd(toDateFromOffset(offset));
 }
 
 function toCurrencyValue(value: unknown): string {
@@ -677,7 +687,7 @@ export default function Reservations() {
   const [showAccidentModal, setShowAccidentModal] = useState(false);
   const [reservationsData, setReservationsData] = useState<Reservation[]>([]);
   const [vehicleAssets, setVehicleAssets] = useState<VehicleAsset[]>([]);
-  const [targetDate, setTargetDate] = useState('');
+  const [targetDate, setTargetDate] = useState(() => toDateLabelFromOffset(0));
   const [totalReservationCount, setTotalReservationCount] = useState(0);
   const [pageErrorStatus, setPageErrorStatus] = useState<number | null>(null);
   const [isDetailLoading, setIsDetailLoading] = useState(false);
@@ -877,6 +887,10 @@ export default function Reservations() {
   useEffect(() => () => {
     detailControllerRef.current?.abort();
   }, []);
+
+  useEffect(() => {
+    setTargetDate(toDateLabelFromOffset(currentWeekStart));
+  }, [currentWeekStart]);
 
   useEffect(() => {
     setSelectedReservation((previousReservation) => {
@@ -1111,8 +1125,7 @@ export default function Reservations() {
   });
 
   const getBlockColor = (reservation: Reservation) => {
-    const today = new Date(2025, 1, 20); // 2025-02-20
-    const endDate = new Date(2025, 1, 17 + reservation.endDate);
+    const endDate = toDateFromOffset(reservation.endDate);
     
     // 미납 건
     if (reservation.issues && reservation.issues.includes('미납/결제 문제')) {
@@ -1120,7 +1133,7 @@ export default function Reservations() {
     }
     
     // 반납 (수동 반납 처리 또는 과거 반납 완료) - 회색 통일
-    if (reservation.type === 'return' || endDate < today) {
+    if (reservation.type === 'return' || endDate < CALENDAR_BASE_DATE) {
       return 'bg-gray-400';
     }
     
@@ -1706,8 +1719,8 @@ export default function Reservations() {
                   setTargetDate(e.target.value);
                   if (e.target.value) {
                     const target = new Date(e.target.value);
-                    const base = new Date(2025, 1, 17);
-                    const diffDays = Math.floor((target.getTime() - base.getTime()) / (1000 * 60 * 60 * 24));
+                    const targetDayStart = new Date(target.getFullYear(), target.getMonth(), target.getDate());
+                    const diffDays = Math.floor((targetDayStart.getTime() - CALENDAR_BASE_DATE.getTime()) / (1000 * 60 * 60 * 24));
                     setCurrentWeekStart(diffDays);
                   }
                 }}
@@ -1727,7 +1740,7 @@ export default function Reservations() {
             <div className="flex-1" />
             
             <span className="text-xs text-blue-700 font-semibold">
-              {new Date(2025, 1, 17 + currentWeekStart).toLocaleDateString('ko-KR', { 
+              {toDateFromOffset(currentWeekStart).toLocaleDateString('ko-KR', { 
                 year: 'numeric', 
                 month: 'long', 
                 day: 'numeric' 
@@ -1796,9 +1809,9 @@ export default function Reservations() {
                     차량
                   </div>
                   {dates.map((dayOffset, index) => {
-                    const date = new Date(2025, 1, 17 + dayOffset);
+                    const date = toDateFromOffset(dayOffset);
                     const dayOfWeek = daysOfWeek[date.getDay() === 0 ? 6 : date.getDay() - 1];
-                    const prevDate = index > 0 ? new Date(2025, 1, 17 + dates[index - 1]) : null;
+                    const prevDate = index > 0 ? toDateFromOffset(dates[index - 1]) : null;
                     const showMonth = !prevDate || prevDate.getMonth() !== date.getMonth();
 
                     return (
