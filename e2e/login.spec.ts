@@ -135,13 +135,13 @@ test.describe('BK-091 Login E2E', () => {
             items: [
               {
                 id: 'ASSET-001',
-                vehicleNumber: '12媛3456',
-                plate: '12媛3456',
-                model: '?꾨컲??,
-                status: '媛??,
+                vehicleNumber: '12A3456',
+                plate: '12A3456',
+                model: 'avante',
+                status: 'available',
                 vin: 'KMH12A34560000001',
                 year: '2024',
-                owner: '?띻만??,
+                owner: 'owner-1',
                 insuranceExpiry: '2026-12-31',
                 nextInspection: '2026-06-30',
                 issues: [],
