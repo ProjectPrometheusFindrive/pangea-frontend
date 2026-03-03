@@ -117,6 +117,68 @@ test.describe('BK-091 Login E2E', () => {
     await expect(page.getByRole('heading', { name: '접근 권한이 없습니다' })).toBeVisible();
   });
 
+  test('keeps assets view visible during background auth refresh on focus', async ({ page }) => {
+    let authMeCallCount = 0;
+
+    await installApiMocks(page, {
+      user: buildMockUser('member'),
+      handlers: {
+        'GET /api/v2/auth/me': async ({ route }) => {
+          authMeCallCount += 1;
+          if (authMeCallCount >= 2) {
+            await delay(700);
+          }
+          await fulfillSuccess(route, buildMockUser('member'));
+        },
+        'GET /api/v2/assets': async ({ route }) => {
+          await fulfillSuccess(route, {
+            items: [
+              {
+                id: 'ASSET-001',
+                vehicleNumber: '12媛3456',
+                plate: '12媛3456',
+                model: '?꾨컲??,
+                status: '媛??,
+                vin: 'KMH12A34560000001',
+                year: '2024',
+                owner: '?띻만??,
+                insuranceExpiry: '2026-12-31',
+                nextInspection: '2026-06-30',
+                issues: [],
+                version: 1,
+              },
+            ],
+            total: 1,
+            page: 1,
+            pageSize: 20,
+          });
+        },
+      },
+    });
+
+    await page.goto('/login?returnUrl=%2Fassets');
+    await expect(page.getByTestId('login-user-id')).toBeVisible();
+
+    await page.getByTestId('login-user-id').fill('member-001');
+    await page.getByTestId('login-password').fill('password');
+    await page.getByTestId('login-submit').click();
+
+    await expect(page).toHaveURL(/\/assets(?:\?.*)?$/);
+    await expect(page.locator('table')).toBeVisible();
+
+    const secondAuthMeRequest = page.waitForRequest(
+      (request) => request.method() === 'GET' && request.url().includes('/api/v2/auth/me'),
+    );
+
+    await page.evaluate(() => {
+      window.dispatchEvent(new Event('focus'));
+    });
+
+    await secondAuthMeRequest;
+    await expect(page.locator('table')).toBeVisible();
+    await expect(page.locator('tbody tr')).toHaveCount(1);
+  });
+
   test('does not get stuck on authorization loading when /auth/me omits companyId', async ({ page }) => {
     await installApiMocks(page, {
       handlers: {

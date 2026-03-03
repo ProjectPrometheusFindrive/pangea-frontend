@@ -26,6 +26,7 @@ type AuthorizationStatus = 'checking' | 'ready';
 
 interface AuthorizationContextType {
   status: AuthorizationStatus;
+  isBootstrapping: boolean;
   source: AuthorizationSource | null;
   permissions: ReadonlySet<AppPermission>;
   hasPermission: (permission: AppPermission) => boolean;
@@ -183,11 +184,13 @@ function hasExplicitPermissionShape(payload: unknown): boolean {
 export function AuthorizationProvider({ children }: { children: ReactNode }) {
   const {
     status: authStatus,
+    isBootstrapping: isAuthBootstrapping,
     isAuthenticated,
     user,
     refreshSession,
   } = useAuth();
   const [status, setStatus] = useState<AuthorizationStatus>('checking');
+  const [isBootstrapping, setIsBootstrapping] = useState(true);
   const [source, setSource] = useState<AuthorizationSource | null>(null);
   const [permissionList, setPermissionList] = useState<AppPermission[]>([]);
   const lastFocusRefreshAtRef = useRef(0);
@@ -206,6 +209,7 @@ export function AuthorizationProvider({ children }: { children: ReactNode }) {
     setPermissionList(permissionSetToArray(nextPermissions));
     setSource(nextSource);
     setStatus('ready');
+    setIsBootstrapping(false);
   }, []);
 
   const refreshAuthorization = useCallback(async (options?: { force?: boolean }) => {
@@ -213,7 +217,9 @@ export function AuthorizationProvider({ children }: { children: ReactNode }) {
       authorizationRequestSequenceRef.current += 1;
       authorizationControllerRef.current?.abort();
       authorizationControllerRef.current = null;
-      setStatus('checking');
+      if (isBootstrapping) {
+        setStatus('checking');
+      }
       return;
     }
 
@@ -224,6 +230,7 @@ export function AuthorizationProvider({ children }: { children: ReactNode }) {
       setPermissionList([]);
       setSource(null);
       setStatus('ready');
+      setIsBootstrapping(false);
       removeAuthorizationCache();
       return;
     }
@@ -258,7 +265,9 @@ export function AuthorizationProvider({ children }: { children: ReactNode }) {
       }
     }
 
-    setStatus('checking');
+    if (isBootstrapping) {
+      setStatus('checking');
+    }
     const controller = new AbortController();
     authorizationControllerRef.current = controller;
 
@@ -310,9 +319,11 @@ export function AuthorizationProvider({ children }: { children: ReactNode }) {
 
       if (error instanceof ApiError) {
         if (error.status === 401) {
-          setStatus('checking');
+          if (isBootstrapping) {
+            setStatus('checking');
+          }
           try {
-            await refreshSession();
+            await refreshSession({ silent: !isBootstrapping });
           } catch {
             applyResolvedPermissions(new Set<AppPermission>(), 'deny-by-default');
             removeAuthorizationCache();
@@ -352,6 +363,7 @@ export function AuthorizationProvider({ children }: { children: ReactNode }) {
   }, [
     applyResolvedPermissions,
     authStatus,
+    isBootstrapping,
     isAuthenticated,
     refreshSession,
     user,
@@ -369,7 +381,10 @@ export function AuthorizationProvider({ children }: { children: ReactNode }) {
       authorizationRequestSequenceRef.current += 1;
       authorizationControllerRef.current?.abort();
       authorizationControllerRef.current = null;
-      setStatus('checking');
+      if (isAuthBootstrapping) {
+        setStatus('checking');
+        setIsBootstrapping(true);
+      }
       return;
     }
 
@@ -377,6 +392,7 @@ export function AuthorizationProvider({ children }: { children: ReactNode }) {
       setPermissionList([]);
       setSource(null);
       setStatus('ready');
+      setIsBootstrapping(false);
       removeAuthorizationCache();
       return;
     }
@@ -384,6 +400,7 @@ export function AuthorizationProvider({ children }: { children: ReactNode }) {
     void refreshAuthorization();
   }, [
     authStatus,
+    isAuthBootstrapping,
     isAuthenticated,
     refreshAuthorization,
     user?.companyId,
@@ -402,7 +419,7 @@ export function AuthorizationProvider({ children }: { children: ReactNode }) {
         return;
       }
       lastFocusRefreshAtRef.current = now;
-      void refreshSession();
+      void refreshSession({ silent: true });
     };
 
     const handleVisibilityChange = () => {
@@ -435,6 +452,7 @@ export function AuthorizationProvider({ children }: { children: ReactNode }) {
 
   const contextValue = useMemo<AuthorizationContextType>(() => ({
     status,
+    isBootstrapping,
     source,
     permissions: permissionSet,
     hasPermission: hasPermissionValue,
@@ -445,6 +463,7 @@ export function AuthorizationProvider({ children }: { children: ReactNode }) {
     canAccessRoute,
     canPerformAction,
     hasPermissionValue,
+    isBootstrapping,
     permissionSet,
     refreshAuthorization,
     source,

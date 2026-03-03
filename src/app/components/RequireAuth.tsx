@@ -15,16 +15,16 @@ const ROUTE_FORBIDDEN_REDIRECT_PATH = '/forbidden';
 
 export function RequireAuth({ allowedRoles, requiredPermission }: RequireAuthProps) {
   const location = useLocation();
-  const { status, isAuthenticated, viewRole } = useAuth();
-  const { status: authorizationStatus, canAccessRoute } = useAuthorization();
+  const { isBootstrapping: isAuthBootstrapping, isAuthenticated, viewRole } = useAuth();
+  const { isBootstrapping: isAuthorizationBootstrapping, canAccessRoute } = useAuthorization();
 
-  if (status === 'checking' || (isAuthenticated && authorizationStatus === 'checking')) {
+  if (isAuthBootstrapping || (isAuthenticated && isAuthorizationBootstrapping)) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-50 px-4">
         <PageFallback
           variant="loading"
           title={
-            status === 'checking'
+            isAuthBootstrapping
               ? '인증 상태를 확인하는 중입니다'
               : '권한 상태를 확인하는 중입니다'
           }
