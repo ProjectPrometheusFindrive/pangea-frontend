@@ -4,8 +4,8 @@
 - Author: Codex (GPT-5)
 - Branch: fix/SCRUM-162-auth-authorization-silent-refresh
 - Jira Key: SCRUM-162
-- Jira Status: In Progress
-- PR URL: PENDING
+- Jira Status: Resolved
+- PR URL: https://github.com/ProjectPrometheusFindrive/pangea-frontend/pull/68
 - Tags: scrum-162,auth,authorization,silent-refresh,ux,requireauth,e2e
 
 ## Start Context
