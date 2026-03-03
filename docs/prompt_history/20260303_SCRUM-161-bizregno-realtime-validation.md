@@ -5,7 +5,7 @@
 - Branch: fix/SCRUM-161-bizregno-realtime-validation
 - Jira Key: SCRUM-161
 - Jira Status: In Progress
-- PR URL: PENDING
+- PR URL: https://github.com/ProjectPrometheusFindrive/pangea-frontend/pull/67
 - Tags: scrum-161,signup,bizregno,validation,realtime,frontend,pangea-frontend
 
 ## Start Context
