@@ -25,18 +25,18 @@ interface Notification {
 export function Layout({ children, title }: LayoutProps) {
   const location = useLocation();
   const navigate = useNavigate();
-  const { logout } = useAuth();
+  const { logout, user } = useAuth();
   const { canAccessRoute } = useAuthorization();
   const { company, isLoading: isCompanyLoading, isUpdating: isCompanyUpdating, error: companyError, updateCompany } = useCompany();
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [showAccountMenu, setShowAccountMenu] = useState(false);
   const [showAccountSettings, setShowAccountSettings] = useState(false);
-  const [accountName, setAccountName] = useState('김민수');
   const [editName, setEditName] = useState('');
   const [editCompany, setEditCompany] = useState('');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const companyName = company?.name ?? '회사 정보 없음';
+  const accountName = user?.name?.trim() || user?.userId?.trim() || user?.email?.trim() || '사용자';
+  const companyName = company?.name?.trim() || user?.company?.trim() || '회사 정보 없음';
   const [showPremiumBanner, setShowPremiumBanner] = useState(() => {
     const bannerDismissed = sessionStorage.getItem('premiumBannerDismissed');
     return !bannerDismissed;
@@ -189,12 +189,7 @@ export function Layout({ children, title }: LayoutProps) {
   };
 
   const handleSaveSettings = async () => {
-    const trimmedName = editName.trim();
     const trimmedCompany = editCompany.trim();
-
-    if (trimmedName) {
-      setAccountName(trimmedName);
-    }
 
     if (trimmedCompany && trimmedCompany !== companyName) {
       try {
