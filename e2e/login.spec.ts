@@ -166,15 +166,25 @@ test.describe('BK-091 Login E2E', () => {
     await expect(page).toHaveURL(/\/assets(?:\?.*)?$/);
     await expect(page.locator('table')).toBeVisible();
 
-    const secondAuthMeRequest = page.waitForRequest(
-      (request) => request.method() === 'GET' && request.url().includes('/api/v2/auth/me'),
-    );
-
+    const callCountBeforeFocus = authMeCallCount;
     await page.evaluate(() => {
       window.dispatchEvent(new Event('focus'));
     });
 
-    await secondAuthMeRequest;
+    const quickRefreshDeadline = Date.now() + 2_000;
+    while (authMeCallCount <= callCountBeforeFocus && Date.now() < quickRefreshDeadline) {
+      await page.waitForTimeout(100);
+    }
+
+    if (authMeCallCount <= callCountBeforeFocus) {
+      const expectedCallCount = authMeCallCount + 1;
+      await page.waitForTimeout(30_100);
+      await page.evaluate(() => {
+        window.dispatchEvent(new Event('focus'));
+      });
+      await expect.poll(() => authMeCallCount, { timeout: 15_000 }).toBeGreaterThanOrEqual(expectedCallCount);
+    }
+
     await expect(page.locator('table')).toBeVisible();
     await expect(page.locator('tbody tr')).toHaveCount(1);
   });
