@@ -482,54 +482,60 @@ export default function Settings() {
     }
   }, []);
 
+  const requestSettingsHydration = useCallback(async (signal: AbortSignal): Promise<SettingsHydrationPayload> => {
+    const [companyPayload, geofencesPayload, membersPayload] = await Promise.all([
+      getSettingsCompany({ signal }),
+      listSettingsGeofences({ signal }),
+      listSettingsMembers(undefined, { signal }),
+    ]);
+
+    return {
+      company: companyPayload,
+      geofences: Array.isArray(geofencesPayload.items) ? geofencesPayload.items : [],
+      members: Array.isArray(membersPayload.items) ? membersPayload.items : [],
+    };
+  }, []);
+
+  const handleSettingsHydrationSuccess = useCallback((payload: SettingsHydrationPayload) => {
+    const nextCompanyForm = toCompanyForm(payload.company);
+    setCompanyForm(nextCompanyForm);
+    setCompanyBaseline(nextCompanyForm);
+    setCompanyUpdatedAt(toStringValue(payload.company.updatedAt));
+    setCompanySchemaVersion(toStringValue(payload.company.schemaVersion) ?? DEFAULT_SETTINGS_SCHEMA_VERSION);
+    setCompanyFieldErrors({});
+    setCompanySaveError(null);
+    setCompanySaveSuccess(null);
+    setCompanyRetryAction(null);
+
+    setGeofences(payload.geofences);
+    setIsGeofenceEditorOpen(false);
+    setGeofenceEditorMode('create');
+    setEditingGeofenceId(null);
+    setGeofenceForm(DEFAULT_GEOFENCE_FORM_STATE);
+    setGeofenceFieldErrors({});
+    setGeofenceSaveError(null);
+    setGeofenceSaveSuccess(null);
+    setGeofenceRetryAction(null);
+
+    setMembers(payload.members);
+    setMemberRoleDrafts({});
+    setMemberFieldErrors({});
+    setMemberSaveError(null);
+    setMemberSaveSuccess(null);
+    setMemberRetryAction(null);
+  }, []);
+
+  const isSettingsHydrationEmpty = useCallback(() => false, []);
+
   const {
     isLoading: isSettingsLoading,
     error: settingsError,
     errorKind: settingsErrorKind,
     run: hydrateSettings,
   } = usePageEndpointState<SettingsHydrationPayload>({
-    request: async (signal) => {
-      const [companyPayload, geofencesPayload, membersPayload] = await Promise.all([
-        getSettingsCompany({ signal }),
-        listSettingsGeofences({ signal }),
-        listSettingsMembers(undefined, { signal }),
-      ]);
-
-      return {
-        company: companyPayload,
-        geofences: Array.isArray(geofencesPayload.items) ? geofencesPayload.items : [],
-        members: Array.isArray(membersPayload.items) ? membersPayload.items : [],
-      };
-    },
-    onSuccess: (payload) => {
-      const nextCompanyForm = toCompanyForm(payload.company);
-      setCompanyForm(nextCompanyForm);
-      setCompanyBaseline(nextCompanyForm);
-      setCompanyUpdatedAt(toStringValue(payload.company.updatedAt));
-      setCompanySchemaVersion(toStringValue(payload.company.schemaVersion) ?? DEFAULT_SETTINGS_SCHEMA_VERSION);
-      setCompanyFieldErrors({});
-      setCompanySaveError(null);
-      setCompanySaveSuccess(null);
-      setCompanyRetryAction(null);
-
-      setGeofences(payload.geofences);
-      setIsGeofenceEditorOpen(false);
-      setGeofenceEditorMode('create');
-      setEditingGeofenceId(null);
-      setGeofenceForm(DEFAULT_GEOFENCE_FORM_STATE);
-      setGeofenceFieldErrors({});
-      setGeofenceSaveError(null);
-      setGeofenceSaveSuccess(null);
-      setGeofenceRetryAction(null);
-
-      setMembers(payload.members);
-      setMemberRoleDrafts({});
-      setMemberFieldErrors({});
-      setMemberSaveError(null);
-      setMemberSaveSuccess(null);
-      setMemberRetryAction(null);
-    },
-    isEmpty: () => false,
+    request: requestSettingsHydration,
+    onSuccess: handleSettingsHydrationSuccess,
+    isEmpty: isSettingsHydrationEmpty,
   });
 
   useEffect(() => {
