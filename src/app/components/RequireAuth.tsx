@@ -16,9 +16,17 @@ const ROUTE_FORBIDDEN_REDIRECT_PATH = '/forbidden';
 export function RequireAuth({ allowedRoles, requiredPermission }: RequireAuthProps) {
   const location = useLocation();
   const { isBootstrapping: isAuthBootstrapping, isAuthenticated, viewRole } = useAuth();
-  const { isBootstrapping: isAuthorizationBootstrapping, canAccessRoute } = useAuthorization();
+  const {
+    isBootstrapping: isAuthorizationBootstrapping,
+    source: authorizationSource,
+    canAccessRoute,
+  } = useAuthorization();
+  const isAuthorizationResolving = isAuthenticated && (
+    isAuthorizationBootstrapping
+    || authorizationSource === null
+  );
 
-  if (isAuthBootstrapping || (isAuthenticated && isAuthorizationBootstrapping)) {
+  if (isAuthBootstrapping || isAuthorizationResolving) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-50 px-4">
         <PageFallback
