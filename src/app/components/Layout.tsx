@@ -1,6 +1,14 @@
 import { Link, useLocation, useNavigate } from 'react-router';
-import { Home, AlertCircle, Car, Calendar, Settings, Bell, Menu, TrendingUp, X, AlertTriangle, Shield, FileText, Signal, DollarSign, AlertOctagon, Wrench, Clock, Sparkles, LogOut, User, Building2, Trash2, ChevronDown, Zap, LifeBuoy } from 'lucide-react';
-import { ReactNode, useState, useEffect, useRef } from 'react';
+import { Home, AlertCircle, Car, Calendar, Settings, Bell, Menu, TrendingUp, X, AlertTriangle, Shield, Signal, DollarSign, AlertOctagon, Wrench, Clock, Sparkles, LogOut, User, Building2, Trash2, ChevronDown, Zap, LifeBuoy, Loader2, type LucideIcon } from 'lucide-react';
+import { ReactNode, useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { ApiError } from '../../services/api';
+import {
+  getNotifications,
+  getNotificationSummary,
+  markNotificationAsRead,
+  markAllNotificationsAsRead,
+  type NotificationItem,
+} from '../../services/notifications';
 import { useAuth } from '../context/AuthContext';
 import { useAuthorization } from '../context/AuthorizationContext';
 import { useCompany } from '../context/CompanyContext';
@@ -11,28 +19,110 @@ interface LayoutProps {
   title?: string;
 }
 
-interface Notification {
-  id: string;
-  type: 'urgent' | 'warning' | 'info';
-  icon: any;
-  title: string;
-  message: string;
-  time: string;
-  isRead: boolean;
-  link: string;
+function toRelativeTimeLabel(value: string): string {
+  const parsedDate = new Date(value);
+  if (Number.isNaN(parsedDate.getTime())) {
+    return value;
+  }
+
+  const diffMs = Date.now() - parsedDate.getTime();
+  if (diffMs < 60_000) {
+    return '방금 전';
+  }
+  if (diffMs < 3_600_000) {
+    return `${Math.floor(diffMs / 60_000)}분 전`;
+  }
+  if (diffMs < 86_400_000) {
+    return `${Math.floor(diffMs / 3_600_000)}시간 전`;
+  }
+  return parsedDate.toLocaleDateString('ko-KR');
+}
+
+function toNotificationErrorMessage(error: unknown): string {
+  if (error instanceof ApiError) {
+    if (error.status === 401) {
+      return '세션이 만료되었습니다. 다시 로그인해 주세요.';
+    }
+    if (error.status === 403) {
+      return '알림 조회 권한이 없습니다.';
+    }
+    if (error.status === 404) {
+      return '알림 API가 아직 준비되지 않았습니다.';
+    }
+    if (error.status === 405) {
+      return '알림 API 메서드가 일치하지 않습니다.';
+    }
+
+    const errorCode = typeof error.code === 'string' ? error.code : '';
+    if (
+      (typeof error.status === 'number' && error.status >= 500)
+      || errorCode === 'NETWORK_ERROR'
+      || errorCode === 'SERVER_ERROR'
+      || errorCode === 'TIMEOUT'
+      || errorCode === 'ABORTED'
+    ) {
+      return '알림 서버에 일시적인 문제가 있습니다. 잠시 후 다시 시도해 주세요.';
+    }
+
+    if (error.message) {
+      return error.message;
+    }
+  }
+
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+
+  return '알림을 불러오지 못했습니다. 다시 시도해 주세요.';
+}
+
+function getNotificationIcon(notification: NotificationItem): LucideIcon {
+  const content = `${notification.title} ${notification.message}`.toLowerCase();
+
+  if (content.includes('사고')) {
+    return AlertTriangle;
+  }
+  if (content.includes('도난')) {
+    return AlertOctagon;
+  }
+  if (content.includes('지연') || content.includes('연체') || content.includes('초과')) {
+    return Clock;
+  }
+  if (content.includes('보험')) {
+    return Shield;
+  }
+  if (content.includes('단말') || content.includes('gps')) {
+    return Signal;
+  }
+  if (content.includes('결제') || content.includes('미납')) {
+    return DollarSign;
+  }
+  if (content.includes('점검') || content.includes('정비')) {
+    return Wrench;
+  }
+  if (content.includes('대여') || content.includes('예약')) {
+    return Calendar;
+  }
+
+  if (notification.level === 'urgent') {
+    return AlertTriangle;
+  }
+  if (notification.level === 'warning') {
+    return AlertCircle;
+  }
+  return Bell;
 }
 
 export function Layout({ children, title }: LayoutProps) {
   const location = useLocation();
   const navigate = useNavigate();
-  const { logout } = useAuth();
+  const { logout, user } = useAuth();
   const { canAccessRoute } = useAuthorization();
   const { company, isLoading: isCompanyLoading, isUpdating: isCompanyUpdating, error: companyError, updateCompany } = useCompany();
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [showAccountMenu, setShowAccountMenu] = useState(false);
   const [showAccountSettings, setShowAccountSettings] = useState(false);
-  const [accountName, setAccountName] = useState('김민수');
   const [editName, setEditName] = useState('');
   const [editCompany, setEditCompany] = useState('');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -41,93 +131,72 @@ export function Layout({ children, title }: LayoutProps) {
     const bannerDismissed = sessionStorage.getItem('premiumBannerDismissed');
     return !bannerDismissed;
   });
-  const [notifications, setNotifications] = useState<Notification[]>([
-    {
-      id: '1',
-      type: 'urgent',
-      icon: AlertTriangle,
-      title: '사고 접수',
-      message: '12가3456 차량 사고 발생 - 즉시 확인 필요',
-      time: '5분 전',
-      isRead: false,
-      link: '/action-required?filter=사고 접수'
-    },
-    {
-      id: '2',
-      type: 'urgent',
-      icon: AlertOctagon,
-      title: '도난 의심',
-      message: '88라9999 차량 위치 이상 감지',
-      time: '15분 전',
-      isRead: false,
-      link: '/action-required?filter=도난 의심'
-    },
-    {
-      id: '3',
-      type: 'warning',
-      icon: Clock,
-      title: '반납 지연',
-      message: '45나7890 차량 반납 시간 2시간 초과',
-      time: '1시간 전',
-      isRead: false,
-      link: '/action-required?filter=반납 지연'
-    },
-    {
-      id: '4',
-      type: 'warning',
-      icon: Shield,
-      title: '보험 만료 임박',
-      message: '33다2222 차량 보험 3일 후 만료',
-      time: '2시간 전',
-      isRead: true,
-      link: '/assets'
-    },
-    {
-      id: '5',
-      type: 'warning',
-      icon: Signal,
-      title: '단말 OFF',
-      message: '77나7777 차량 GPS 신호 끊김',
-      time: '3시간 전',
-      isRead: false,
-      link: '/action-required?filter=단말 OFF'
-    },
-    {
-      id: '6',
-      type: 'info',
-      icon: Calendar,
-      title: '오늘 대여 시작',
-      message: '11가1111 차량 오후 2시 대여 예정',
-      time: '4시간 전',
-      isRead: true,
-      link: '/reservations'
-    },
-    {
-      id: '7',
-      type: 'warning',
-      icon: DollarSign,
-      title: '결제 문제',
-      message: '99허9999 고객 카드 결제 실패',
-      time: '5시간 전',
-      isRead: true,
-      link: '/action-required?filter=미납/결제 문제'
-    },
-    {
-      id: '8',
-      type: 'info',
-      icon: Wrench,
-      title: '정기점검 예정',
-      message: '22허8888 차량 내일 점검 예정',
-      time: '6시간 전',
-      isRead: true,
-      link: '/action-required?filter=정기점검'
-    },
-  ]);
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [isNotificationsLoading, setIsNotificationsLoading] = useState(false);
+  const [notificationsError, setNotificationsError] = useState<string | null>(null);
+  const [isNotificationActionPending, setIsNotificationActionPending] = useState(false);
 
   const notificationRef = useRef<HTMLDivElement>(null);
   const accountMenuRef = useRef<HTMLDivElement>(null);
 
-  const unreadCount = notifications.filter(n => !n.isRead).length;
+  const accountName = useMemo(() => {
+    const displayName = user?.name?.trim();
+    if (displayName) {
+      return displayName;
+    }
+    const userId = user?.userId?.trim();
+    if (userId) {
+      return userId;
+    }
+    return '사용자';
+  }, [user?.name, user?.userId]);
+  const accountNameInitial = accountName.charAt(0) || '?';
+
+  const loadNotificationState = useCallback(async (signal?: AbortSignal) => {
+    setIsNotificationsLoading(true);
+    setNotificationsError(null);
+
+    const [listResult, summaryResult] = await Promise.allSettled([
+      getNotifications({ limit: 30, signal }),
+      getNotificationSummary({ signal }),
+    ]);
+
+    if (signal?.aborted) {
+      return;
+    }
+
+    if (listResult.status === 'fulfilled') {
+      setNotifications(listResult.value.items);
+    } else {
+      setNotifications([]);
+    }
+
+    if (summaryResult.status === 'fulfilled') {
+      setUnreadCount(summaryResult.value.unreadCount);
+    } else if (listResult.status === 'fulfilled') {
+      setUnreadCount(listResult.value.unreadCount);
+    } else {
+      setUnreadCount(0);
+    }
+
+    if (listResult.status === 'rejected') {
+      setNotificationsError(toNotificationErrorMessage(listResult.reason));
+    } else {
+      setNotificationsError(null);
+    }
+
+    setIsNotificationsLoading(false);
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void loadNotificationState(controller.signal);
+
+    return () => {
+      controller.abort();
+    };
+  }, [loadNotificationState]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -157,18 +226,69 @@ export function Layout({ children, title }: LayoutProps) {
     navigate(path);
   };
 
-  const handleNotificationClick = (notification: Notification) => {
-    setNotifications(prev =>
-      prev.map(n => n.id === notification.id ? { ...n, isRead: true } : n)
-    );
-    navigateWithRouteGuard(notification.link);
+  const handleNotificationClick = async (notification: NotificationItem) => {
+    const previousUnreadCount = unreadCount;
+    const shouldMarkAsRead = !notification.isRead;
+
+    if (shouldMarkAsRead) {
+      setNotifications((previousNotifications) => (
+        previousNotifications.map((entry) => (
+          entry.id === notification.id ? { ...entry, isRead: true } : entry
+        ))
+      ));
+      setUnreadCount((previousCount) => Math.max(0, previousCount - 1));
+    }
+
+    navigateWithRouteGuard(notification.path);
     setShowNotifications(false);
+
+    if (!shouldMarkAsRead) {
+      return;
+    }
+
+    try {
+      await markNotificationAsRead(notification.id);
+      void loadNotificationState();
+    } catch (error) {
+      setNotifications((previousNotifications) => (
+        previousNotifications.map((entry) => (
+          entry.id === notification.id ? { ...entry, isRead: false } : entry
+        ))
+      ));
+      setUnreadCount(previousUnreadCount);
+      setNotificationsError(toNotificationErrorMessage(error));
+    }
   };
 
-  const handleMarkAllAsRead = () => {
-    setNotifications(prev =>
-      prev.map(n => ({ ...n, isRead: true }))
-    );
+  const handleMarkAllAsRead = async () => {
+    if (unreadCount <= 0 || isNotificationActionPending) {
+      return;
+    }
+
+    const previousNotifications = notifications;
+    const previousUnreadCount = unreadCount;
+
+    setIsNotificationActionPending(true);
+    setNotifications((previousNotificationsState) => (
+      previousNotificationsState.map((entry) => ({ ...entry, isRead: true }))
+    ));
+    setUnreadCount(0);
+
+    try {
+      await markAllNotificationsAsRead();
+      setNotificationsError(null);
+      void loadNotificationState();
+    } catch (error) {
+      setNotifications(previousNotifications);
+      setUnreadCount(previousUnreadCount);
+      setNotificationsError(toNotificationErrorMessage(error));
+    } finally {
+      setIsNotificationActionPending(false);
+    }
+  };
+
+  const handleRetryNotifications = () => {
+    void loadNotificationState();
   };
 
   const handleDismissBanner = () => {
@@ -189,12 +309,7 @@ export function Layout({ children, title }: LayoutProps) {
   };
 
   const handleSaveSettings = async () => {
-    const trimmedName = editName.trim();
     const trimmedCompany = editCompany.trim();
-
-    if (trimmedName) {
-      setAccountName(trimmedName);
-    }
 
     if (trimmedCompany && trimmedCompany !== companyName) {
       try {
@@ -333,34 +448,68 @@ export function Layout({ children, title }: LayoutProps) {
                     </div>
                     {unreadCount > 0 && (
                       <button
-                        onClick={handleMarkAllAsRead}
-                        className="text-xs text-blue-600 hover:text-blue-700 font-medium"
+                        onClick={() => {
+                          void handleMarkAllAsRead();
+                        }}
+                        className="text-xs text-blue-600 hover:text-blue-700 font-medium disabled:opacity-60"
+                        disabled={isNotificationActionPending}
                       >
-                        모두 읽음
+                        {isNotificationActionPending ? '처리 중...' : '모두 읽음'}
                       </button>
                     )}
                   </div>
 
                   <div className="overflow-y-auto flex-1">
-                    {notifications.length === 0 ? (
+                    {isNotificationsLoading ? (
+                      <div className="p-8 text-center">
+                        <Loader2 className="w-8 h-8 text-blue-500 mx-auto mb-3 animate-spin" />
+                        <p className="text-sm text-gray-500">알림을 불러오는 중입니다...</p>
+                      </div>
+                    ) : notificationsError && notifications.length === 0 ? (
+                      <div className="p-6 text-center space-y-3">
+                        <AlertCircle className="w-8 h-8 text-red-400 mx-auto" />
+                        <p className="text-sm text-red-600">{notificationsError}</p>
+                        <button
+                          onClick={handleRetryNotifications}
+                          className="inline-flex items-center rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-100"
+                        >
+                          다시 시도
+                        </button>
+                      </div>
+                    ) : notifications.length === 0 ? (
                       <div className="p-8 text-center">
                         <Bell className="w-12 h-12 text-gray-300 mx-auto mb-3" />
                         <p className="text-sm text-gray-500">알림이 없습니다</p>
                       </div>
                     ) : (
                       <div className="divide-y divide-gray-100">
+                        {notificationsError && (
+                          <div className="mx-3 my-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+                            <div className="flex items-center justify-between gap-2">
+                              <p className="text-xs text-amber-700">{notificationsError}</p>
+                              <button
+                                onClick={handleRetryNotifications}
+                                className="text-xs font-medium text-amber-700 hover:text-amber-800"
+                              >
+                                새로고침
+                              </button>
+                            </div>
+                          </div>
+                        )}
                         {notifications.map((notification) => {
-                          const Icon = notification.icon;
+                          const Icon = getNotificationIcon(notification);
                           return (
                             <div
                               key={notification.id}
-                              onClick={() => handleNotificationClick(notification)}
+                              onClick={() => {
+                                void handleNotificationClick(notification);
+                              }}
                               className={`p-4 cursor-pointer hover:bg-gray-50 transition-colors border-l-4 ${
                                 notification.isRead ? 'opacity-60' : ''
-                              } ${getNotificationColor(notification.type)}`}
+                              } ${getNotificationColor(notification.level)}`}
                             >
                               <div className="flex items-start gap-3">
-                                <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${getIconColor(notification.type)}`}>
+                                <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${getIconColor(notification.level)}`}>
                                   <Icon className="w-5 h-5" />
                                 </div>
                                 <div className="flex-1 min-w-0">
@@ -376,7 +525,7 @@ export function Layout({ children, title }: LayoutProps) {
                                     {notification.message}
                                   </p>
                                   <p className="text-xs text-gray-400">
-                                    {notification.time}
+                                    {toRelativeTimeLabel(notification.createdAt)}
                                   </p>
                                 </div>
                               </div>
@@ -411,7 +560,7 @@ export function Layout({ children, title }: LayoutProps) {
                 className="flex items-center gap-2 px-3 py-2 hover:bg-gray-100 rounded-lg cursor-pointer"
               >
                 <div className="w-8 h-8 bg-[#155dfc] rounded-full flex items-center justify-center">
-                  <span className="text-white text-sm font-semibold">{accountName.charAt(0)}</span>
+                  <span className="text-white text-sm font-semibold">{accountNameInitial}</span>
                 </div>
                 <span className="text-sm text-[#0a0a0a]">{accountName}</span>
                 <ChevronDown className="w-4 h-4 text-gray-500" />
@@ -424,7 +573,7 @@ export function Layout({ children, title }: LayoutProps) {
                   <div className="px-4 py-3 border-b border-gray-200 bg-gray-50">
                     <div className="flex items-center gap-3">
                       <div className="w-12 h-12 bg-[#155dfc] rounded-full flex items-center justify-center">
-                        <span className="text-white text-lg font-semibold">{accountName.charAt(0)}</span>
+                        <span className="text-white text-lg font-semibold">{accountNameInitial}</span>
                       </div>
                       <div className="flex-1 min-w-0">
                         <h4 className="text-sm font-bold text-gray-900 truncate">{accountName}</h4>
@@ -476,7 +625,7 @@ export function Layout({ children, title }: LayoutProps) {
                 {/* 프로필 이미지 */}
                 <div className="flex justify-center">
                   <div className="w-20 h-20 bg-[#155dfc] rounded-full flex items-center justify-center">
-                    <span className="text-white text-2xl font-semibold">{accountName.charAt(0)}</span>
+                    <span className="text-white text-2xl font-semibold">{accountNameInitial}</span>
                   </div>
                 </div>
 
@@ -490,9 +639,11 @@ export function Layout({ children, title }: LayoutProps) {
                     type="text"
                     value={editName}
                     onChange={(e) => setEditName(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-500"
                     placeholder="이름을 입력하세요"
+                    disabled
                   />
+                  <p className="mt-2 text-xs text-gray-500">이름은 로그인 계정 정보와 자동 동기화됩니다.</p>
                 </div>
 
                 {/* 소속 회사 */}
