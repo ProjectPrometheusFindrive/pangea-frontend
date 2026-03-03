@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router';
 import { CheckCircle2, Loader2, Paperclip, RefreshCw, Search, Send } from 'lucide-react';
 
 import { Layout } from '../components/Layout';
-import { PageStateBoundary } from '../components/PageStateBoundary';
 import {
   getPageErrorActionLabel,
   handlePageErrorAction,
@@ -404,6 +403,24 @@ export default function SupportCenter() {
     setSubmitSuccessMessage(`최근 접수 내역(${restoredTicket.id})을 복구했습니다.`);
   }, []);
 
+  const requestSupportCategories = useCallback((signal: AbortSignal) => (
+    getSupportCategories({ signal })
+  ), []);
+
+  const handleSupportCategoriesSuccess = useCallback((payload: SupportCategory[]) => {
+    setCategories(payload);
+    if (payload.length > 0) {
+      setCategory((previousCategory) => {
+        if (previousCategory && payload.some((item) => item.name === previousCategory)) {
+          return previousCategory;
+        }
+        return payload[0].name;
+      });
+    }
+  }, []);
+
+  const isSupportCategoriesEmpty = useCallback((payload: SupportCategory[]) => payload.length === 0, []);
+
   const {
     isLoading: isCategoriesLoading,
     error: categoriesError,
@@ -411,24 +428,20 @@ export default function SupportCenter() {
     isEmpty: categoriesEmpty,
     run: hydrateCategories,
   } = usePageEndpointState<SupportCategory[]>({
-    request: (signal) => getSupportCategories({ signal }),
-    onSuccess: (payload) => {
-      setCategories(payload);
-      if (payload.length > 0) {
-        setCategory((previousCategory) => {
-          if (previousCategory && payload.some((item) => item.name === previousCategory)) {
-            return previousCategory;
-          }
-          return payload[0].name;
-        });
-      }
-    },
-    isEmpty: (payload) => payload.length === 0,
+    request: requestSupportCategories,
+    onSuccess: handleSupportCategoriesSuccess,
+    isEmpty: isSupportCategoriesEmpty,
   });
 
   useEffect(() => {
     void hydrateCategories();
   }, [hydrateCategories]);
+
+  useEffect(() => {
+    if ((categoriesEmpty || categoriesError) && !manualCategoryMode) {
+      setManualCategoryMode(true);
+    }
+  }, [categoriesEmpty, categoriesError, manualCategoryMode]);
 
   const handleCategoryErrorAction = useCallback(() => {
     handlePageErrorAction(categoriesErrorKind, navigate);
@@ -625,8 +638,7 @@ export default function SupportCenter() {
     }
     return getPageErrorActionLabel(lookupError.kind);
   }, [lookupError]);
-
-  const isCategoryEmptyState = categoriesEmpty && !manualCategoryMode;
+  const categoryErrorActionLabel = getPageErrorActionLabel(categoriesErrorKind);
 
   return (
     <Layout title="고객센터">
@@ -638,85 +650,106 @@ export default function SupportCenter() {
           </p>
         </div>
 
-        <PageStateBoundary
-          isLoading={isCategoriesLoading}
-          error={categoriesError}
-          isEmpty={isCategoryEmptyState}
-          errorTitle="문의 카테고리를 불러오지 못했습니다"
-          errorDescription="고객센터 카테고리 조회에 실패했습니다. 다시 시도해 주세요."
-          emptyTitle="사용 가능한 문의 카테고리가 없습니다"
-          emptyDescription="관리자에게 카테고리 설정을 요청하거나 직접 입력 모드로 접수할 수 있습니다."
-          onRetry={() => {
-            void hydrateCategories();
-          }}
-          errorActionLabel={getPageErrorActionLabel(categoriesErrorKind)}
-          onErrorAction={handleCategoryErrorAction}
-          emptyActionLabel="직접 입력 모드"
-          onEmptyAction={() => setManualCategoryMode(true)}
-          className="min-h-[260px]"
-        >
-          <div className="rounded-lg bg-white p-5 shadow-sm">
-            <div className="mb-4 flex items-start justify-between gap-4">
-              <div>
-                <h3 className="text-base font-semibold text-gray-900">문의 등록</h3>
-                <p className="mt-1 text-sm text-gray-500">
-                  첨부파일은 최대 {MAX_ATTACHMENT_COUNT}개, 파일당 {formatBytes(MAX_ATTACHMENT_BYTES)}까지 가능합니다.
-                </p>
-              </div>
-              {categories.length > 0 && (
+        <div className="rounded-lg bg-white p-5 shadow-sm">
+          <div className="mb-4 flex items-start justify-between gap-4">
+            <div>
+              <h3 className="text-base font-semibold text-gray-900">문의 등록</h3>
+              <p className="mt-1 text-sm text-gray-500">
+                첨부파일은 최대 {MAX_ATTACHMENT_COUNT}개, 파일당 {formatBytes(MAX_ATTACHMENT_BYTES)}까지 가능합니다.
+              </p>
+            </div>
+            {categories.length > 0 && (
+              <button
+                type="button"
+                onClick={() => {
+                  setManualCategoryMode((previousMode) => !previousMode);
+                  clearFieldError('category');
+                }}
+                className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+              >
+                {manualCategoryMode ? '목록 선택 모드' : '직접 입력 모드'}
+              </button>
+            )}
+          </div>
+
+          {isCategoriesLoading && (
+            <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-700">
+              카테고리 목록을 불러오는 중입니다. 목록이 없어도 직접 입력으로 문의를 접수할 수 있습니다.
+            </div>
+          )}
+
+          {categoriesError && (
+            <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+              <div>카테고리 목록을 불러오지 못했습니다. 직접 입력으로 문의를 접수할 수 있습니다.</div>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
                 <button
                   type="button"
                   onClick={() => {
-                    setManualCategoryMode((previousMode) => !previousMode);
-                    clearFieldError('category');
+                    void hydrateCategories();
                   }}
-                  className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                  className="inline-flex items-center rounded-md border border-amber-300 bg-white px-2 py-1 text-xs font-medium text-amber-800 hover:bg-amber-100"
                 >
-                  {manualCategoryMode ? '목록 선택 모드' : '직접 입력 모드'}
+                  카테고리 다시 불러오기
                 </button>
-              )}
-            </div>
-
-            {(submitError || submitSuccessMessage) && (
-              <div
-                className={`mb-4 rounded-lg border px-3 py-2 text-sm ${
-                  submitError
-                    ? 'border-red-200 bg-red-50 text-red-700'
-                    : 'border-green-200 bg-green-50 text-green-700'
-                }`}
-              >
-                <div>{submitError?.message ?? submitSuccessMessage}</div>
-                {submitError?.kind === 'retryable' && (
+                {categoryErrorActionLabel && (
                   <button
                     type="button"
-                    onClick={() => {
-                      void submitSupportTicket();
-                    }}
-                    className="mt-2 inline-flex items-center gap-1 rounded-md border border-red-200 bg-white px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-50"
+                    onClick={handleCategoryErrorAction}
+                    className="inline-flex items-center rounded-md border border-amber-300 bg-white px-2 py-1 text-xs font-medium text-amber-800 hover:bg-amber-100"
                   >
-                    <RefreshCw className="h-3 w-3" />
-                    재시도
-                  </button>
-                )}
-                {(submitError?.kind === 'unauthorized' || submitError?.kind === 'forbidden') && (
-                  <button
-                    type="button"
-                    onClick={() => handlePageErrorAction(submitError.kind, navigate)}
-                    className="mt-2 inline-flex items-center gap-1 rounded-md border border-red-200 bg-white px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-50"
-                  >
-                    {submitError.kind === 'unauthorized' ? '로그인으로 이동' : '홈으로 이동'}
+                    {categoryErrorActionLabel}
                   </button>
                 )}
               </div>
-            )}
+            </div>
+          )}
 
-            <form
-              onSubmit={(event) => {
-                event.preventDefault();
-                void submitSupportTicket();
-              }}
-              className="space-y-4"
+          {!categoriesError && categoriesEmpty && (
+            <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+              사용 가능한 문의 카테고리가 없어 직접 입력 모드로 접수할 수 있습니다.
+            </div>
+          )}
+
+          {(submitError || submitSuccessMessage) && (
+            <div
+              className={`mb-4 rounded-lg border px-3 py-2 text-sm ${
+                submitError
+                  ? 'border-red-200 bg-red-50 text-red-700'
+                  : 'border-green-200 bg-green-50 text-green-700'
+              }`}
             >
+              <div>{submitError?.message ?? submitSuccessMessage}</div>
+              {submitError?.kind === 'retryable' && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    void submitSupportTicket();
+                  }}
+                  className="mt-2 inline-flex items-center gap-1 rounded-md border border-red-200 bg-white px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-50"
+                >
+                  <RefreshCw className="h-3 w-3" />
+                  재시도
+                </button>
+              )}
+              {(submitError?.kind === 'unauthorized' || submitError?.kind === 'forbidden') && (
+                <button
+                  type="button"
+                  onClick={() => handlePageErrorAction(submitError.kind, navigate)}
+                  className="mt-2 inline-flex items-center gap-1 rounded-md border border-red-200 bg-white px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-50"
+                >
+                  {submitError.kind === 'unauthorized' ? '로그인으로 이동' : '홈으로 이동'}
+                </button>
+              )}
+            </div>
+          )}
+
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              void submitSupportTicket();
+            }}
+            className="space-y-4"
+          >
               <div>
                 <label htmlFor="support-category" className="mb-1 block text-sm font-semibold text-gray-700">
                   문의 카테고리 <span className="text-red-600">*</span>
@@ -857,28 +890,27 @@ export default function SupportCenter() {
                 )}
               </div>
 
-              <div className="flex justify-end">
-                <button
-                  type="submit"
-                  disabled={isSubmitting}
-                  className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-400"
-                >
-                  {isSubmitting ? (
-                    <>
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      제출 중...
-                    </>
-                  ) : (
-                    <>
-                      <Send className="h-4 w-4" />
-                      문의 제출
-                    </>
-                  )}
-                </button>
-              </div>
-            </form>
-          </div>
-        </PageStateBoundary>
+            <div className="flex justify-end">
+              <button
+                type="submit"
+                disabled={isSubmitting}
+                className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-400"
+              >
+                {isSubmitting ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    제출 중...
+                  </>
+                ) : (
+                  <>
+                    <Send className="h-4 w-4" />
+                    문의 제출
+                  </>
+                )}
+              </button>
+            </div>
+          </form>
+        </div>
 
         <div className="rounded-lg bg-white p-5 shadow-sm">
           <div className="mb-4 flex items-center justify-between">

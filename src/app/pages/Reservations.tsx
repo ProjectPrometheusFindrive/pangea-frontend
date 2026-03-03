@@ -34,6 +34,7 @@ import { ACTION_PERMISSIONS, ROUTE_PERMISSIONS } from '../authorization';
 import type { VehicleAsset } from '../types/assets';
 import type { Reservation } from '../types/reservations';
 import { ApiError } from '../../services/api';
+import { getAssetsList } from '../../services/assets';
 import {
   createReservation,
   getReservationDetail,
@@ -50,14 +51,24 @@ type DragSelection = {
 } | null;
 type ViewFilter = 'all' | 'reservation' | 'rental' | 'return' | 'unpaid';
 
-const CALENDAR_BASE_DATE = new Date(2025, 1, 17);
+function createTodayBaseDate(): Date {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+}
+
+const CALENDAR_BASE_DATE = createTodayBaseDate();
 const DEFAULT_PAGE = 1;
 const DEFAULT_PAGE_SIZE = 20;
+const ASSET_FALLBACK_PAGE_SIZE = 500;
 const PAGE_SIZE_OPTIONS = [20, 50, 100];
 const TOTAL_COUNT_KEYS = ['total', 'totalCount', 'count', 'size', 'itemsCount', 'totalElements'];
 const RETRY_TOAST_MESSAGE = '일시적인 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.';
 
 type FieldErrorMap<TField extends string> = Partial<Record<TField, string>>;
+type ReservationsHydrationPayload = {
+  reservationsPayload: unknown;
+  assetFallbackPayload?: unknown;
+};
 
 function pad2(value: number): string {
   return String(value).padStart(2, '0');
@@ -243,6 +254,12 @@ function formatDateAsYmd(date: Date): string {
   return `${year}-${month}-${day}`;
 }
 
+function toDateFromOffset(offset: number): Date {
+  const date = new Date(CALENDAR_BASE_DATE);
+  date.setDate(CALENDAR_BASE_DATE.getDate() + offset);
+  return date;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
@@ -316,13 +333,12 @@ function toDateOffset(value: unknown): number | null {
     return null;
   }
 
-  return Math.floor((parsedDate.getTime() - CALENDAR_BASE_DATE.getTime()) / (1000 * 60 * 60 * 24));
+  const parsedDayStart = new Date(parsedDate.getFullYear(), parsedDate.getMonth(), parsedDate.getDate());
+  return Math.floor((parsedDayStart.getTime() - CALENDAR_BASE_DATE.getTime()) / (1000 * 60 * 60 * 24));
 }
 
 function toDateLabelFromOffset(offset: number): string {
-  const date = new Date(CALENDAR_BASE_DATE);
-  date.setDate(CALENDAR_BASE_DATE.getDate() + offset);
-  return formatDateAsYmd(date);
+  return formatDateAsYmd(toDateFromOffset(offset));
 }
 
 function toCurrencyValue(value: unknown): string {
@@ -622,7 +638,7 @@ function toVehicleRows(payload: unknown, reservationRows: Reservation[]): Vehicl
         return null;
       }
 
-      const vehicleNumber = toStringValue(row.vehicleNumber) ?? toStringValue(row.plateNumber);
+      const vehicleNumber = toStringValue(row.vehicleNumber) ?? toStringValue(row.plateNumber) ?? toStringValue(row.plate);
       if (!vehicleNumber) {
         return null;
       }
@@ -634,11 +650,11 @@ function toVehicleRows(payload: unknown, reservationRows: Reservation[]): Vehicl
           toStringValue(row.status) ?? toStringValue(row.contractStatus) ?? toStringValue(row.assetStatus),
         ),
         issues: normalizeIssues(row.issues),
-        insuranceExpiry: toStringValue(row.insuranceExpiry) ?? '-',
-        nextInspection: toStringValue(row.nextInspection) ?? '-',
-        vin: toStringValue(row.vin) ?? '-',
-        year: toStringValue(row.year) ?? '-',
-        owner: toStringValue(row.owner) ?? '-',
+        insuranceExpiry: toStringValue(row.insuranceExpiry) ?? toStringValue(row.insuranceExpiryDate) ?? '-',
+        nextInspection: toStringValue(row.nextInspection) ?? toStringValue(row.nextInspectionDate) ?? '-',
+        vin: toStringValue(row.vin) ?? toStringValue(row.chassisNumber) ?? '-',
+        year: toStringValue(row.year) ?? toStringValue(row.modelYear) ?? '-',
+        owner: toStringValue(row.owner) ?? toStringValue(row.ownerName) ?? '-',
       };
     })
     .filter((row): row is VehicleAsset => row !== null);
@@ -677,7 +693,7 @@ export default function Reservations() {
   const [showAccidentModal, setShowAccidentModal] = useState(false);
   const [reservationsData, setReservationsData] = useState<Reservation[]>([]);
   const [vehicleAssets, setVehicleAssets] = useState<VehicleAsset[]>([]);
-  const [targetDate, setTargetDate] = useState('');
+  const [targetDate, setTargetDate] = useState(() => toDateLabelFromOffset(0));
   const [totalReservationCount, setTotalReservationCount] = useState(0);
   const [pageErrorStatus, setPageErrorStatus] = useState<number | null>(null);
   const [isDetailLoading, setIsDetailLoading] = useState(false);
@@ -827,7 +843,7 @@ export default function Reservations() {
     }
 
     try {
-      return await getReservationsList({
+      const reservationsPayload = await getReservationsList({
         page,
         size: pageSize,
         status: toStatusQueryValue(viewFilter),
@@ -836,35 +852,62 @@ export default function Reservations() {
         to: toDate ?? undefined,
         signal,
       });
+
+      const reservationRows = toReservationRows(reservationsPayload);
+      const mappedVehicles = toVehicleRows(reservationsPayload, reservationRows);
+
+      if (reservationRows.length === 0 && mappedVehicles.length === 0 && canViewAssets) {
+        try {
+          const assetFallbackPayload = await getAssetsList({
+            page: 1,
+            size: ASSET_FALLBACK_PAGE_SIZE,
+            signal,
+          });
+
+          return {
+            reservationsPayload,
+            assetFallbackPayload,
+          } satisfies ReservationsHydrationPayload;
+        } catch {
+          return {
+            reservationsPayload,
+          } satisfies ReservationsHydrationPayload;
+        }
+      }
+
+      return {
+        reservationsPayload,
+      } satisfies ReservationsHydrationPayload;
     } catch (error) {
       setPageErrorStatus(error instanceof ApiError ? error.status ?? null : null);
       throw error;
     }
-  }, [fromDate, page, pageSize, toDate, viewFilter]);
+  }, [canViewAssets, fromDate, page, pageSize, toDate, viewFilter]);
 
-  const handleReservationsSuccess = useCallback((payload: unknown) => {
-    const reservationRows = toReservationRows(payload);
+  const handleReservationsSuccess = useCallback((payload: ReservationsHydrationPayload) => {
+    const reservationRows = toReservationRows(payload.reservationsPayload);
+    const vehicleRows = toVehicleRows(payload.assetFallbackPayload ?? payload.reservationsPayload, reservationRows);
+
     setReservationsData(reservationRows);
-    setVehicleAssets(toVehicleRows(payload, reservationRows));
-    setTotalReservationCount(toTotalCount(payload, reservationRows.length));
+    setVehicleAssets(vehicleRows);
+    setTotalReservationCount(toTotalCount(payload.reservationsPayload, reservationRows.length));
     setPageErrorStatus(null);
   }, []);
 
-  const isReservationsResponseEmpty = useCallback((payload: unknown) => {
-    const rows = getCollectionFromPayload(payload, ['reservations', 'items', 'rows', 'list']);
+  const isReservationsResponseEmpty = useCallback((payload: ReservationsHydrationPayload) => {
+    const rows = getCollectionFromPayload(payload.reservationsPayload, ['reservations', 'items', 'rows', 'list']);
     if (rows) {
       return rows.length === 0;
     }
-    return isPayloadEmpty(payload, ['reservations', 'items', 'rows', 'list']);
+    return isPayloadEmpty(payload.reservationsPayload, ['reservations', 'items', 'rows', 'list']);
   }, []);
 
   const {
     isLoading: isPageLoading,
     error: pageError,
     errorKind: pageErrorKind,
-    isEmpty: isReservationsApiEmpty,
     run: hydrateReservationsData,
-  } = usePageEndpointState<unknown>({
+  } = usePageEndpointState<ReservationsHydrationPayload>({
     request: requestReservations,
     onSuccess: handleReservationsSuccess,
     isEmpty: isReservationsResponseEmpty,
@@ -877,6 +920,10 @@ export default function Reservations() {
   useEffect(() => () => {
     detailControllerRef.current?.abort();
   }, []);
+
+  useEffect(() => {
+    setTargetDate(toDateLabelFromOffset(currentWeekStart));
+  }, [currentWeekStart]);
 
   useEffect(() => {
     setSelectedReservation((previousReservation) => {
@@ -1111,8 +1158,7 @@ export default function Reservations() {
   });
 
   const getBlockColor = (reservation: Reservation) => {
-    const today = new Date(2025, 1, 20); // 2025-02-20
-    const endDate = new Date(2025, 1, 17 + reservation.endDate);
+    const endDate = toDateFromOffset(reservation.endDate);
     
     // 미납 건
     if (reservation.issues && reservation.issues.includes('미납/결제 문제')) {
@@ -1120,7 +1166,7 @@ export default function Reservations() {
     }
     
     // 반납 (수동 반납 처리 또는 과거 반납 완료) - 회색 통일
-    if (reservation.type === 'return' || endDate < today) {
+    if (reservation.type === 'return' || endDate < CALENDAR_BASE_DATE) {
       return 'bg-gray-400';
     }
     
@@ -1706,8 +1752,8 @@ export default function Reservations() {
                   setTargetDate(e.target.value);
                   if (e.target.value) {
                     const target = new Date(e.target.value);
-                    const base = new Date(2025, 1, 17);
-                    const diffDays = Math.floor((target.getTime() - base.getTime()) / (1000 * 60 * 60 * 24));
+                    const targetDayStart = new Date(target.getFullYear(), target.getMonth(), target.getDate());
+                    const diffDays = Math.floor((targetDayStart.getTime() - CALENDAR_BASE_DATE.getTime()) / (1000 * 60 * 60 * 24));
                     setCurrentWeekStart(diffDays);
                   }
                 }}
@@ -1727,7 +1773,7 @@ export default function Reservations() {
             <div className="flex-1" />
             
             <span className="text-xs text-blue-700 font-semibold">
-              {new Date(2025, 1, 17 + currentWeekStart).toLocaleDateString('ko-KR', { 
+              {toDateFromOffset(currentWeekStart).toLocaleDateString('ko-KR', { 
                 year: 'numeric', 
                 month: 'long', 
                 day: 'numeric' 
@@ -1777,7 +1823,7 @@ export default function Reservations() {
           <PageStateBoundary
             isLoading={isPageLoading}
             error={pageError}
-            isEmpty={!isPageLoading && !pageError && (isReservationsApiEmpty || filteredVehicles.length === 0)}
+            isEmpty={!isPageLoading && !pageError && filteredVehicles.length === 0}
             errorDescription={pageErrorDescription}
             emptyTitle="조건에 맞는 차량이 없습니다"
             emptyDescription="필터를 완화하거나 차량번호 검색어를 지워 다시 확인해 주세요."
@@ -1796,9 +1842,9 @@ export default function Reservations() {
                     차량
                   </div>
                   {dates.map((dayOffset, index) => {
-                    const date = new Date(2025, 1, 17 + dayOffset);
+                    const date = toDateFromOffset(dayOffset);
                     const dayOfWeek = daysOfWeek[date.getDay() === 0 ? 6 : date.getDay() - 1];
-                    const prevDate = index > 0 ? new Date(2025, 1, 17 + dates[index - 1]) : null;
+                    const prevDate = index > 0 ? toDateFromOffset(dates[index - 1]) : null;
                     const showMonth = !prevDate || prevDate.getMonth() !== date.getMonth();
 
                     return (

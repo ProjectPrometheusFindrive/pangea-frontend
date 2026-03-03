@@ -126,7 +126,7 @@ export function Layout({ children, title }: LayoutProps) {
   const [editName, setEditName] = useState('');
   const [editCompany, setEditCompany] = useState('');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const companyName = company?.name ?? '회사 정보 없음';
+  const companyName = company?.name?.trim() || user?.company?.trim() || '회사 정보 없음';
   const [showPremiumBanner, setShowPremiumBanner] = useState(() => {
     const bannerDismissed = sessionStorage.getItem('premiumBannerDismissed');
     return !bannerDismissed;
@@ -149,8 +149,12 @@ export function Layout({ children, title }: LayoutProps) {
     if (userId) {
       return userId;
     }
+    const email = user?.email?.trim();
+    if (email) {
+      return email;
+    }
     return '사용자';
-  }, [user?.name, user?.userId]);
+  }, [user?.name, user?.userId, user?.email]);
   const accountNameInitial = accountName.charAt(0) || '?';
 
   const loadNotificationState = useCallback(async (signal?: AbortSignal) => {

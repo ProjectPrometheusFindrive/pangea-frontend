@@ -604,6 +604,29 @@ export default function ActionRequired() {
     pollIntervalMs: 20_000,
   });
 
+  const requestActionItems = useCallback((signal: AbortSignal) => getActionRequiredList({
+    page,
+    size: pageSize,
+    status: statusFilter === 'all' ? undefined : statusFilter,
+    priority: priorityFilter === 'all' ? undefined : priorityFilter,
+    assignee: assigneeFilter === 'all' ? undefined : assigneeFilter,
+    signal,
+  }), [assigneeFilter, page, pageSize, priorityFilter, statusFilter]);
+
+  const handleActionItemsSuccess = useCallback((payload: unknown) => {
+    const { items, total } = toActionItemCollection(payload);
+    setSourceActionItems(items);
+    setTotalItems(total);
+  }, []);
+
+  const isActionItemsPayloadEmpty = useCallback((payload: unknown) => {
+    const rows = getCollectionFromPayload(payload, LIST_COLLECTION_KEYS);
+    if (rows) {
+      return rows.length === 0;
+    }
+    return isPayloadEmpty(payload, LIST_COLLECTION_KEYS);
+  }, []);
+
   const {
     isLoading: isItemsLoading,
     error: itemsError,
@@ -611,26 +634,9 @@ export default function ActionRequired() {
     isEmpty: isActionApiEmpty,
     run: hydrateActionItems,
   } = usePageEndpointState<unknown>({
-    request: (signal) => getActionRequiredList({
-      page,
-      size: pageSize,
-      status: statusFilter === 'all' ? undefined : statusFilter,
-      priority: priorityFilter === 'all' ? undefined : priorityFilter,
-      assignee: assigneeFilter === 'all' ? undefined : assigneeFilter,
-      signal,
-    }),
-    onSuccess: (payload) => {
-      const { items, total } = toActionItemCollection(payload);
-      setSourceActionItems(items);
-      setTotalItems(total);
-    },
-    isEmpty: (payload) => {
-      const rows = getCollectionFromPayload(payload, LIST_COLLECTION_KEYS);
-      if (rows) {
-        return rows.length === 0;
-      }
-      return isPayloadEmpty(payload, LIST_COLLECTION_KEYS);
-    },
+    request: requestActionItems,
+    onSuccess: handleActionItemsSuccess,
+    isEmpty: isActionItemsPayloadEmpty,
   });
 
   useEffect(() => {
