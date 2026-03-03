@@ -118,18 +118,9 @@ test.describe('BK-091 Login E2E', () => {
   });
 
   test('keeps assets view visible during background auth refresh on focus', async ({ page }) => {
-    let authMeCallCount = 0;
-
     await installApiMocks(page, {
       user: buildMockUser('member'),
       handlers: {
-        'GET /api/v2/auth/me': async ({ route }) => {
-          authMeCallCount += 1;
-          if (authMeCallCount >= 2) {
-            await delay(700);
-          }
-          await fulfillSuccess(route, buildMockUser('member'));
-        },
         'GET /api/v2/assets': async ({ route }) => {
           await fulfillSuccess(route, {
             items: [
@@ -156,6 +147,39 @@ test.describe('BK-091 Login E2E', () => {
       },
     });
 
+    await page.addInitScript(() => {
+      const originalFetch = window.fetch.bind(window);
+      let authMeFetchCount = 0;
+
+      Object.defineProperty(window, '__e2eGetAuthMeFetchCount', {
+        configurable: true,
+        value: () => authMeFetchCount,
+      });
+
+      window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+        const method = (init?.method ?? (input instanceof Request ? input.method : 'GET')).toUpperCase();
+        const requestUrl = (
+          typeof input === 'string'
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url
+        );
+        const path = new URL(requestUrl, window.location.origin).pathname;
+
+        if (method === 'GET' && path === '/api/v2/auth/me') {
+          authMeFetchCount += 1;
+          if (authMeFetchCount >= 2) {
+            await new Promise((resolve) => {
+              window.setTimeout(resolve, 700);
+            });
+          }
+        }
+
+        return originalFetch(input, init);
+      };
+    });
+
     await page.goto('/login?returnUrl=%2Fassets');
     await expect(page.getByTestId('login-user-id')).toBeVisible();
 
@@ -166,23 +190,34 @@ test.describe('BK-091 Login E2E', () => {
     await expect(page).toHaveURL(/\/assets(?:\?.*)?$/);
     await expect(page.locator('table')).toBeVisible();
 
-    const callCountBeforeFocus = authMeCallCount;
+    const getAuthMeFetchCount = async (): Promise<number> => {
+      return page.evaluate(() => {
+        const getter = (window as typeof window & { __e2eGetAuthMeFetchCount?: () => number }).__e2eGetAuthMeFetchCount;
+        return typeof getter === 'function' ? getter() : 0;
+      });
+    };
+
+    const callCountBeforeFocus = await getAuthMeFetchCount();
     await page.evaluate(() => {
-      window.dispatchEvent(new Event('focus'));
+      document.dispatchEvent(new Event('visibilitychange'));
+      window.dispatchEvent(new FocusEvent('focus'));
     });
 
-    const quickRefreshDeadline = Date.now() + 2_000;
-    while (authMeCallCount <= callCountBeforeFocus && Date.now() < quickRefreshDeadline) {
-      await page.waitForTimeout(100);
+    let didRefreshQuickly = true;
+    try {
+      await expect.poll(getAuthMeFetchCount, { timeout: 2_000 }).toBeGreaterThan(callCountBeforeFocus);
+    } catch {
+      didRefreshQuickly = false;
     }
 
-    if (authMeCallCount <= callCountBeforeFocus) {
-      const expectedCallCount = authMeCallCount + 1;
+    if (!didRefreshQuickly) {
+      const expectedCallCount = (await getAuthMeFetchCount()) + 1;
       await page.waitForTimeout(30_100);
       await page.evaluate(() => {
-        window.dispatchEvent(new Event('focus'));
+        document.dispatchEvent(new Event('visibilitychange'));
+        window.dispatchEvent(new FocusEvent('focus'));
       });
-      await expect.poll(() => authMeCallCount, { timeout: 15_000 }).toBeGreaterThanOrEqual(expectedCallCount);
+      await expect.poll(getAuthMeFetchCount, { timeout: 15_000 }).toBeGreaterThanOrEqual(expectedCallCount);
     }
 
     await expect(page.locator('table')).toBeVisible();
