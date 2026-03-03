@@ -1,5 +1,5 @@
 import { Link, useLocation, useNavigate } from 'react-router';
-import { Home, AlertCircle, Car, Calendar, Settings, Bell, Menu, TrendingUp, X, AlertTriangle, Shield, FileText, Signal, DollarSign, AlertOctagon, Wrench, Clock, Sparkles, LogOut, User, Building2, Trash2, ChevronDown, Zap, LifeBuoy } from 'lucide-react';
+import { Home, AlertCircle, Car, Calendar, Settings, Bell, Menu, TrendingUp, X, Sparkles, LogOut, User, Building2, Trash2, ChevronDown, Zap, LifeBuoy } from 'lucide-react';
 import { ReactNode, useState, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useAuthorization } from '../context/AuthorizationContext';
@@ -41,88 +41,7 @@ export function Layout({ children, title }: LayoutProps) {
     const bannerDismissed = sessionStorage.getItem('premiumBannerDismissed');
     return !bannerDismissed;
   });
-  const [notifications, setNotifications] = useState<Notification[]>([
-    {
-      id: '1',
-      type: 'urgent',
-      icon: AlertTriangle,
-      title: '사고 접수',
-      message: '12가3456 차량 사고 발생 - 즉시 확인 필요',
-      time: '5분 전',
-      isRead: false,
-      link: '/action-required?filter=사고 접수'
-    },
-    {
-      id: '2',
-      type: 'urgent',
-      icon: AlertOctagon,
-      title: '도난 의심',
-      message: '88라9999 차량 위치 이상 감지',
-      time: '15분 전',
-      isRead: false,
-      link: '/action-required?filter=도난 의심'
-    },
-    {
-      id: '3',
-      type: 'warning',
-      icon: Clock,
-      title: '반납 지연',
-      message: '45나7890 차량 반납 시간 2시간 초과',
-      time: '1시간 전',
-      isRead: false,
-      link: '/action-required?filter=반납 지연'
-    },
-    {
-      id: '4',
-      type: 'warning',
-      icon: Shield,
-      title: '보험 만료 임박',
-      message: '33다2222 차량 보험 3일 후 만료',
-      time: '2시간 전',
-      isRead: true,
-      link: '/assets'
-    },
-    {
-      id: '5',
-      type: 'warning',
-      icon: Signal,
-      title: '단말 OFF',
-      message: '77나7777 차량 GPS 신호 끊김',
-      time: '3시간 전',
-      isRead: false,
-      link: '/action-required?filter=단말 OFF'
-    },
-    {
-      id: '6',
-      type: 'info',
-      icon: Calendar,
-      title: '오늘 대여 시작',
-      message: '11가1111 차량 오후 2시 대여 예정',
-      time: '4시간 전',
-      isRead: true,
-      link: '/reservations'
-    },
-    {
-      id: '7',
-      type: 'warning',
-      icon: DollarSign,
-      title: '결제 문제',
-      message: '99허9999 고객 카드 결제 실패',
-      time: '5시간 전',
-      isRead: true,
-      link: '/action-required?filter=미납/결제 문제'
-    },
-    {
-      id: '8',
-      type: 'info',
-      icon: Wrench,
-      title: '정기점검 예정',
-      message: '22허8888 차량 내일 점검 예정',
-      time: '6시간 전',
-      isRead: true,
-      link: '/action-required?filter=정기점검'
-    },
-  ]);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
 
   const notificationRef = useRef<HTMLDivElement>(null);
   const accountMenuRef = useRef<HTMLDivElement>(null);
