@@ -17,6 +17,21 @@ interface ReservationListRow {
   phone: string;
 }
 
+function formatDateOffset(offsetDays: number): string {
+  const date = new Date();
+  date.setHours(0, 0, 0, 0);
+  date.setDate(date.getDate() + offsetDays);
+
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function formatDateTimeOffset(offsetDays: number, time: string): string {
+  return `${formatDateOffset(offsetDays)}T${time}`;
+}
+
 function buildVehicleAsset() {
   return {
     vehicleNumber: '12가3456',
@@ -36,8 +51,8 @@ function buildReservationRow(overrides: Partial<ReservationListRow> = {}): Reser
     id: 'R-9001',
     vehicleNumber: '12가3456',
     customerName: '기존고객',
-    startAt: '2025-02-20T09:00:00.000Z',
-    endAt: '2025-02-22T18:00:00.000Z',
+    startAt: formatDateTimeOffset(1, '09:00:00'),
+    endAt: formatDateTimeOffset(3, '18:00:00'),
     contractStatus: '예약중',
     paymentMethod: '카드',
     paymentStatus: '대기',
@@ -55,8 +70,8 @@ async function openNewContractModal(page: Page): Promise<void> {
 
 async function fillContractStep1(page: Page): Promise<void> {
   await page.getByTestId('new-contract-vehicle-select').selectOption('12가3456');
-  await page.getByTestId('new-contract-start-date-input').fill('2025-02-20');
-  await page.getByTestId('new-contract-end-date-input').fill('2025-02-22');
+  await page.getByTestId('new-contract-start-date-input').fill(formatDateOffset(1));
+  await page.getByTestId('new-contract-end-date-input').fill(formatDateOffset(3));
   await page.getByTestId('new-contract-start-time-input').fill('09:00');
   await page.getByTestId('new-contract-end-time-input').fill('18:00');
   await page.getByTestId('new-contract-step1-next').click();
