@@ -404,6 +404,24 @@ export default function SupportCenter() {
     setSubmitSuccessMessage(`최근 접수 내역(${restoredTicket.id})을 복구했습니다.`);
   }, []);
 
+  const requestSupportCategories = useCallback((signal: AbortSignal) => (
+    getSupportCategories({ signal })
+  ), []);
+
+  const handleSupportCategoriesSuccess = useCallback((payload: SupportCategory[]) => {
+    setCategories(payload);
+    if (payload.length > 0) {
+      setCategory((previousCategory) => {
+        if (previousCategory && payload.some((item) => item.name === previousCategory)) {
+          return previousCategory;
+        }
+        return payload[0].name;
+      });
+    }
+  }, []);
+
+  const isSupportCategoriesEmpty = useCallback((payload: SupportCategory[]) => payload.length === 0, []);
+
   const {
     isLoading: isCategoriesLoading,
     error: categoriesError,
@@ -411,19 +429,9 @@ export default function SupportCenter() {
     isEmpty: categoriesEmpty,
     run: hydrateCategories,
   } = usePageEndpointState<SupportCategory[]>({
-    request: (signal) => getSupportCategories({ signal }),
-    onSuccess: (payload) => {
-      setCategories(payload);
-      if (payload.length > 0) {
-        setCategory((previousCategory) => {
-          if (previousCategory && payload.some((item) => item.name === previousCategory)) {
-            return previousCategory;
-          }
-          return payload[0].name;
-        });
-      }
-    },
-    isEmpty: (payload) => payload.length === 0,
+    request: requestSupportCategories,
+    onSuccess: handleSupportCategoriesSuccess,
+    isEmpty: isSupportCategoriesEmpty,
   });
 
   useEffect(() => {
