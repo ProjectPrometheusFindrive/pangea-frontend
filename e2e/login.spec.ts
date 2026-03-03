@@ -117,6 +117,113 @@ test.describe('BK-091 Login E2E', () => {
     await expect(page.getByRole('heading', { name: '접근 권한이 없습니다' })).toBeVisible();
   });
 
+  test('keeps assets view visible during background auth refresh on focus', async ({ page }) => {
+    await installApiMocks(page, {
+      user: buildMockUser('member'),
+      handlers: {
+        'GET /api/v2/assets': async ({ route }) => {
+          await fulfillSuccess(route, {
+            items: [
+              {
+                id: 'ASSET-001',
+                vehicleNumber: '12A3456',
+                plate: '12A3456',
+                model: 'avante',
+                status: 'available',
+                vin: 'KMH12A34560000001',
+                year: '2024',
+                owner: 'owner-1',
+                insuranceExpiry: '2026-12-31',
+                nextInspection: '2026-06-30',
+                issues: [],
+                version: 1,
+              },
+            ],
+            total: 1,
+            page: 1,
+            pageSize: 20,
+          });
+        },
+      },
+    });
+
+    await page.addInitScript(() => {
+      const originalFetch = window.fetch.bind(window);
+      let authMeFetchCount = 0;
+
+      Object.defineProperty(window, '__e2eGetAuthMeFetchCount', {
+        configurable: true,
+        value: () => authMeFetchCount,
+      });
+
+      window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+        const method = (init?.method ?? (input instanceof Request ? input.method : 'GET')).toUpperCase();
+        const requestUrl = (
+          typeof input === 'string'
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url
+        );
+        const path = new URL(requestUrl, window.location.origin).pathname;
+
+        if (method === 'GET' && path === '/api/v2/auth/me') {
+          authMeFetchCount += 1;
+          if (authMeFetchCount >= 2) {
+            await new Promise((resolve) => {
+              window.setTimeout(resolve, 700);
+            });
+          }
+        }
+
+        return originalFetch(input, init);
+      };
+    });
+
+    await page.goto('/login?returnUrl=%2Fassets');
+    await expect(page.getByTestId('login-user-id')).toBeVisible();
+
+    await page.getByTestId('login-user-id').fill('member-001');
+    await page.getByTestId('login-password').fill('password');
+    await page.getByTestId('login-submit').click();
+
+    await expect(page).toHaveURL(/\/assets(?:\?.*)?$/);
+    await expect(page.locator('table')).toBeVisible();
+
+    const getAuthMeFetchCount = async (): Promise<number> => {
+      return page.evaluate(() => {
+        const getter = (window as typeof window & { __e2eGetAuthMeFetchCount?: () => number }).__e2eGetAuthMeFetchCount;
+        return typeof getter === 'function' ? getter() : 0;
+      });
+    };
+
+    const callCountBeforeFocus = await getAuthMeFetchCount();
+    await page.evaluate(() => {
+      document.dispatchEvent(new Event('visibilitychange'));
+      window.dispatchEvent(new FocusEvent('focus'));
+    });
+
+    let didRefreshQuickly = true;
+    try {
+      await expect.poll(getAuthMeFetchCount, { timeout: 2_000 }).toBeGreaterThan(callCountBeforeFocus);
+    } catch {
+      didRefreshQuickly = false;
+    }
+
+    if (!didRefreshQuickly) {
+      const expectedCallCount = (await getAuthMeFetchCount()) + 1;
+      await page.waitForTimeout(30_100);
+      await page.evaluate(() => {
+        document.dispatchEvent(new Event('visibilitychange'));
+        window.dispatchEvent(new FocusEvent('focus'));
+      });
+      await expect.poll(getAuthMeFetchCount, { timeout: 15_000 }).toBeGreaterThanOrEqual(expectedCallCount);
+    }
+
+    await expect(page.locator('table')).toBeVisible();
+    await expect(page.locator('tbody tr')).toHaveCount(1);
+  });
+
   test('does not get stuck on authorization loading when /auth/me omits companyId', async ({ page }) => {
     await installApiMocks(page, {
       handlers: {

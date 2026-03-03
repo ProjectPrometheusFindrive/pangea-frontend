@@ -19,6 +19,10 @@ interface LogoutOptions {
   redirectToLogin?: boolean;
 }
 
+interface RefreshSessionOptions {
+  silent?: boolean;
+}
+
 interface AuthContextType {
   status: AuthStatus;
   user: AuthUser | null;
@@ -26,9 +30,10 @@ interface AuthContextType {
   token: string | null;
   error: string | null;
   isLoading: boolean;
+  isBootstrapping: boolean;
   isAuthenticated: boolean;
   login: (payload: AuthLoginPayload) => Promise<void>;
-  refreshSession: () => Promise<void>;
+  refreshSession: (options?: RefreshSessionOptions) => Promise<void>;
   logout: (options?: LogoutOptions) => Promise<void>;
 }
 
@@ -275,6 +280,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [token, setToken] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isBootstrapping, setIsBootstrapping] = useState(true);
   const [isSessionExpiredModalOpen, setIsSessionExpiredModalOpen] = useState(false);
   const refreshPromiseRef = useRef<Promise<AuthSession | null> | null>(null);
   const sessionExpiredHandledRef = useRef(false);
@@ -306,6 +312,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     clearSession();
     setError('세션이 만료되었습니다. 다시 로그인해 주세요.');
     setIsLoading(false);
+    setIsBootstrapping(false);
     setIsSessionExpiredModalOpen(true);
   }, [clearSession]);
 
@@ -346,18 +353,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return refreshPromise;
   }, [applySession]);
 
-  const refreshSession = useCallback(async () => {
+  const refreshSession = useCallback(async (options?: RefreshSessionOptions) => {
     const storedSession = readStoredSession();
+    const isSilentRefresh = options?.silent === true;
 
     if (!storedSession) {
       clearSession();
       setIsLoading(false);
+      setIsBootstrapping(false);
       return;
     }
 
     setError(null);
-    setIsLoading(true);
-    setStatus('checking');
+    if (!isSilentRefresh) {
+      setIsLoading(true);
+      setStatus('checking');
+    }
     setToken(storedSession.token);
     setUser(storedSession.user);
     setApiAccessTokenProvider(() => storedSession.token);
@@ -393,6 +404,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     } finally {
       setIsLoading(false);
+      setIsBootstrapping(false);
     }
   }, [applySession, clearSession, handleSessionExpired, refreshAccessToken]);
 
@@ -424,6 +436,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       throw loginError;
     } finally {
       setIsLoading(false);
+      setIsBootstrapping(false);
     }
   }, [applySession, clearSession]);
 
@@ -446,6 +459,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setIsSessionExpiredModalOpen(false);
       clearSession();
       setIsLoading(false);
+      setIsBootstrapping(false);
 
       if (options?.redirectToLogin !== false) {
         redirectToLogin('manual');
@@ -538,6 +552,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setIsSessionExpiredModalOpen(false);
         setError(null);
         setIsLoading(false);
+        setIsBootstrapping(false);
         return;
       }
 
@@ -546,6 +561,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       applySession(nextSession);
       setError(null);
       setIsLoading(false);
+      setIsBootstrapping(false);
     };
 
     window.addEventListener('storage', handleStorage);
@@ -568,11 +584,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     token,
     error,
     isLoading,
+    isBootstrapping,
     isAuthenticated: status === 'authenticated',
     login,
     refreshSession,
     logout,
-  }), [error, isLoading, login, logout, refreshSession, status, token, user, viewRole]);
+  }), [error, isBootstrapping, isLoading, login, logout, refreshSession, status, token, user, viewRole]);
 
   return (
     <AuthContext.Provider value={contextValue}>
