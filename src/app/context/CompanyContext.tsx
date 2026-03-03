@@ -13,17 +13,6 @@ interface CompanyContextType {
 
 const COMPANY_CACHE_KEY = 'pangea.company.v1';
 
-const fallbackCompany: Company = {
-  id: 'company-local',
-  name: '렌터카(주)',
-  businessNumber: '000-00-00000',
-  contactName: '김민수',
-  contactPhone: '010-0000-0000',
-  address: '서울특별시',
-  timezone: 'Asia/Seoul',
-  currency: 'KRW',
-};
-
 const CompanyContext = createContext<CompanyContextType | undefined>(undefined);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -85,7 +74,7 @@ function toErrorMessage(error: unknown, fallbackMessage: string): string {
 }
 
 export function CompanyProvider({ children }: { children: ReactNode }) {
-  const [company, setCompany] = useState<Company | null>(() => readCachedCompany() ?? fallbackCompany);
+  const [company, setCompany] = useState<Company | null>(() => readCachedCompany());
   const [isLoading, setIsLoading] = useState(true);
   const [isUpdating, setIsUpdating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -100,7 +89,7 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
       writeCachedCompany(nextCompany);
     } catch (refreshError) {
       const cachedCompany = readCachedCompany();
-      setCompany(cachedCompany ?? fallbackCompany);
+      setCompany(cachedCompany);
       setError(toErrorMessage(refreshError, '회사 정보를 불러오지 못했습니다.'));
     } finally {
       setIsLoading(false);
