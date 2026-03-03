@@ -234,11 +234,25 @@ export default function SignUp() {
       : field === 'bizRegNo'
         ? normalizeBizRegNoInput(value)
         : value;
+    const nextForm = {
+      ...form,
+      [field]: nextValue,
+    };
 
     setForm((previous) => ({
       ...previous,
       [field]: nextValue,
     }));
+
+    if (field === 'bizRegNo') {
+      setTouched((previous) => ({ ...previous, bizRegNo: true }));
+      const bizRegNoError = validateForm(nextForm).bizRegNo;
+      setErrors((previous) => ({
+        ...previous,
+        bizRegNo: bizRegNoError,
+      }));
+      return;
+    }
 
     if (touched[field]) {
       setErrors((previous) => ({
