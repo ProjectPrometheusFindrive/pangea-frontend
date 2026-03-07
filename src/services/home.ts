@@ -20,6 +20,12 @@ export interface HomeSummaryStatusCounts {
   };
 }
 
+export interface HomeSummaryToday {
+  pickupDueCount: number;
+  returnDueCount: number;
+  overdueCount: number;
+}
+
 export interface HomeRecentChange {
   type: HomeRecentChangeType;
   reservationId: string;
@@ -33,6 +39,7 @@ export interface HomeSummaryResponse {
   to: string;
   kpis: HomeSummaryKpis;
   statusCounts: HomeSummaryStatusCounts;
+  today: HomeSummaryToday;
   recentChanges: HomeRecentChange[];
 }
 
@@ -157,6 +164,22 @@ function normalizeRecentChange(value: unknown): HomeRecentChange | null {
   };
 }
 
+function normalizeToday(value: unknown): HomeSummaryToday {
+  if (!isRecord(value)) {
+    return {
+      pickupDueCount: 0,
+      returnDueCount: 0,
+      overdueCount: 0,
+    };
+  }
+
+  return {
+    pickupDueCount: toInteger(value.pickupDueCount),
+    returnDueCount: toInteger(value.returnDueCount),
+    overdueCount: toInteger(value.overdueCount),
+  };
+}
+
 function normalizeHomeSummary(
   payload: unknown,
   defaults: { from: string; to: string; tenantId: string },
@@ -170,6 +193,7 @@ function normalizeHomeSummary(
     to: toText(source.to, defaults.to),
     kpis: normalizeKpis(source.kpis),
     statusCounts: normalizeStatusCounts(source.statusCounts),
+    today: normalizeToday(source.today),
     recentChanges: recentChangesRaw
       .map(normalizeRecentChange)
       .filter((entry): entry is HomeRecentChange => entry !== null),

@@ -97,6 +97,12 @@ const DEFAULT_KPIS = {
   utilizationRate: 0,
 };
 
+const DEFAULT_TODAY = {
+  pickupDueCount: 0,
+  returnDueCount: 0,
+  overdueCount: 0,
+};
+
 function toIsoDate(value: Date): string {
   const year = value.getFullYear();
   const month = String(value.getMonth() + 1).padStart(2, '0');
@@ -449,6 +455,7 @@ export default function Home() {
   const managementStageCounts = summary?.statusCounts.managementStage ?? {};
   const alerts = summary?.statusCounts.alerts ?? DEFAULT_ALERTS;
   const kpis = summary?.kpis ?? DEFAULT_KPIS;
+  const today = summary?.today ?? DEFAULT_TODAY;
 
   const iconMap: Record<string, React.ComponentType<{ className?: string }>> = {
     Car,
@@ -467,9 +474,26 @@ export default function Home() {
     TrendingUp,
   };
 
-  const handleTaskClick = useCallback((filter: string) => {
+  const handleTaskClick = useCallback((target: 'pickup' | 'return' | 'overdue') => {
+    const todayDate = toIsoDate(new Date());
+    const params = new URLSearchParams();
+
+    if (target === 'pickup') {
+      params.set('status', 'reservation');
+      params.set('from', todayDate);
+      params.set('to', todayDate);
+      params.set('due', 'pickup');
+    } else if (target === 'return') {
+      params.set('status', 'rental');
+      params.set('from', todayDate);
+      params.set('to', todayDate);
+      params.set('due', 'return');
+    } else {
+      params.set('status', 'overdue');
+    }
+
     navigateWithRoutePermission(
-      `/reservations?filter=${encodeURIComponent(filter)}`,
+      `/reservations?${params.toString()}`,
       ROUTE_PERMISSIONS.reservations,
     );
   }, [navigateWithRoutePermission]);
@@ -500,31 +524,27 @@ export default function Home() {
   }, [navigateWithRoutePermission]);
 
   const todayStats = useMemo(() => {
-    const reservationCount = sumByKeys(contractStatusCounts, ['예약중', '예약']);
-    const rentalCount = sumByKeys(contractStatusCounts, ['대여중']) || kpis.activeContracts;
-    const returnCount = sumByKeys(contractStatusCounts, ['반납완료', '완료']) || kpis.completedContracts;
-
     return [
       {
-        label: '예약중',
-        count: reservationCount,
+        label: '오늘 인수 예정',
+        count: today.pickupDueCount,
         icon: 'Calendar',
-        filter: 'reservation',
+        filter: 'pickup' as const,
       },
       {
-        label: '대여중',
-        count: rentalCount,
-        icon: 'Car',
-        filter: 'rental',
-      },
-      {
-        label: '반납완료',
-        count: returnCount,
+        label: '오늘 반납 예정',
+        count: today.returnDueCount,
         icon: 'FileText',
-        filter: 'return',
+        filter: 'return' as const,
+      },
+      {
+        label: '기간 초과 미반납',
+        count: today.overdueCount,
+        icon: 'AlertCircle',
+        filter: 'overdue' as const,
       },
     ];
-  }, [contractStatusCounts, kpis.activeContracts, kpis.completedContracts]);
+  }, [today.overdueCount, today.pickupDueCount, today.returnDueCount]);
 
   const actionItemsForHome = useMemo<HomeStatCard[]>(() => {
     const operatingAssets = sumByKeys(managementStageCounts, ['운영중']);
@@ -780,76 +800,93 @@ export default function Home() {
           )}
 
           <div className="rounded-xl bg-white p-5 shadow-sm">
-            <h2 className="mb-3 text-lg font-bold text-[#1e2939]">기간 핵심 지표</h2>
-
-            <div className="grid grid-cols-[340px_1fr] gap-4">
-              <div className="space-y-3 rounded-xl bg-white p-4 shadow-sm">
-                {todayStats.map((task, index) => {
-                  const Icon = iconMap[task.icon];
-                  return (
-                    <div
-                      key={index}
-                      onClick={() => handleTaskClick(task.filter)}
-                      className="flex cursor-pointer items-center justify-between rounded-lg p-3 transition-colors hover:bg-gray-50"
-                    >
-                      <div className="flex items-center gap-3">
-                        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-50">
-                          <Icon className="h-5 w-5 text-blue-600" />
-                        </div>
-                        <div>
-                          <p className="text-xs text-[#4a5565]">{task.label}</p>
-                          <p className="mt-0.5 text-2xl font-bold text-[#101828]">{task.count.toLocaleString()}</p>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-bold text-[#1e2939]">오늘 할 일</h2>
+                <p className="mt-1 text-xs text-gray-500">오늘 기준 인수, 반납, 미반납 현황입니다.</p>
               </div>
+              <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">
+                실시간 today summary
+              </span>
+            </div>
 
-              <div className="grid grid-cols-4 gap-3">
-                {actionItemsForHome.map((issue, index) => {
-                  const Icon = iconMap[issue.icon];
-
-                  if (issue.isPremium) {
-                    return (
-                      <div
-                        key={index}
-                        onClick={issue.onClick}
-                        className={`${issue.bg} relative cursor-pointer rounded-xl p-3 transition-shadow hover:shadow-md`}
-                      >
-                        <div className="mb-2 flex items-start justify-between">
-                          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-white">
-                            <Icon className={`h-4 w-4 ${issue.color}`} />
-                          </div>
-                          <Lock className="h-3.5 w-3.5 text-gray-500" />
-                        </div>
-                        <p className="mb-0.5 text-2xl font-bold text-[#101828]">{issue.count.toLocaleString()}</p>
-                        <p className="mb-1 text-xs text-[#4a5565]">{issue.label}</p>
-                        <p className="text-[10px] leading-tight text-gray-500">{issue.description}</p>
+            <div className="grid gap-3 md:grid-cols-3">
+              {todayStats.map((task, index) => {
+                const Icon = iconMap[task.icon];
+                return (
+                  <button
+                    key={index}
+                    type="button"
+                    onClick={() => handleTaskClick(task.filter)}
+                    className="rounded-xl border border-gray-200 bg-gradient-to-br from-white to-slate-50 p-4 text-left transition hover:border-blue-200 hover:shadow-sm"
+                  >
+                    <div className="mb-3 flex items-start justify-between">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-50">
+                        <Icon className="h-5 w-5 text-blue-600" />
                       </div>
-                    );
-                  }
+                      <span className="text-xs font-medium text-gray-400">Reservations</span>
+                    </div>
+                    <p className="text-sm font-medium text-[#4a5565]">{task.label}</p>
+                    <p className="mt-2 text-3xl font-bold text-[#101828]">{task.count.toLocaleString()}</p>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
 
+          <div className="rounded-xl bg-white p-5 shadow-sm">
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-bold text-[#1e2939]">기간 핵심 지표</h2>
+                <p className="mt-1 text-xs text-gray-500">
+                  {periodLabel ? `${periodLabel} 기준 운영 핵심 지표` : '조회 기간을 선택해 주세요.'}
+                </p>
+              </div>
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              {actionItemsForHome.map((issue, index) => {
+                const Icon = iconMap[issue.icon];
+
+                if (issue.isPremium) {
                   return (
                     <div
                       key={index}
                       onClick={issue.onClick}
-                      className={`${issue.bg} cursor-pointer rounded-xl p-3 transition-shadow hover:shadow-md`}
+                      className={`${issue.bg} relative cursor-pointer rounded-xl p-3 transition-shadow hover:shadow-md`}
                     >
                       <div className="mb-2 flex items-start justify-between">
                         <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-white">
                           <Icon className={`h-4 w-4 ${issue.color}`} />
                         </div>
+                        <Lock className="h-3.5 w-3.5 text-gray-500" />
                       </div>
-                      <p className="mb-0.5 text-2xl font-bold text-[#101828]">
-                        {issue.count.toLocaleString()}
-                        {issue.unit ?? ''}
-                      </p>
-                      <p className="text-xs text-[#4a5565]">{issue.label}</p>
+                      <p className="mb-0.5 text-2xl font-bold text-[#101828]">{issue.count.toLocaleString()}</p>
+                      <p className="mb-1 text-xs text-[#4a5565]">{issue.label}</p>
+                      <p className="text-[10px] leading-tight text-gray-500">{issue.description}</p>
                     </div>
                   );
-                })}
-              </div>
+                }
+
+                return (
+                  <div
+                    key={index}
+                    onClick={issue.onClick}
+                    className={`${issue.bg} cursor-pointer rounded-xl p-3 transition-shadow hover:shadow-md`}
+                  >
+                    <div className="mb-2 flex items-start justify-between">
+                      <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-white">
+                        <Icon className={`h-4 w-4 ${issue.color}`} />
+                      </div>
+                    </div>
+                    <p className="mb-0.5 text-2xl font-bold text-[#101828]">
+                      {issue.count.toLocaleString()}
+                      {issue.unit ?? ''}
+                    </p>
+                    <p className="text-xs text-[#4a5565]">{issue.label}</p>
+                  </div>
+                );
+              })}
             </div>
           </div>
 
