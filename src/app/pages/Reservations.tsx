@@ -26,6 +26,11 @@ import {
 import { usePaymentStatusSync } from '../hooks/usePaymentStatusSync';
 import { useAuth } from '../context/AuthContext';
 import {
+  buildPaymentSyncTargets,
+  createFallbackVehicleAsset as createReservationFallbackVehicleAsset,
+  mergeVehicleRows,
+} from './reservationsViewModel';
+import {
   isUnpaidPaymentStatus,
   toReservationPaymentStatus,
   type PaymentStatusSnapshot,
@@ -71,7 +76,7 @@ const RETRY_TOAST_MESSAGE = '일시적인 오류가 발생했습니다. 잠시 �
 type FieldErrorMap<TField extends string> = Partial<Record<TField, string>>;
 type ReservationsHydrationPayload = {
   reservationsPayload: unknown;
-  assetFallbackPayload?: unknown;
+  assetPayload?: unknown;
 };
 
 function pad2(value: number): string {
@@ -775,12 +780,10 @@ export default function Reservations() {
   const [dragEnd, setDragEnd] = useState<{ vehicle: string; date: number } | null>(null);
   const [dragSelection, setDragSelection] = useState<DragSelection>(null);
 
-  const paymentSyncTargets = useMemo(() => (
-    reservationsData.map((reservation) => ({
-      reservationId: reservation.id,
-      fallbackStatus: reservation.paymentStatus,
-    }))
-  ), [reservationsData]);
+  const paymentSyncTargets = useMemo(
+    () => buildPaymentSyncTargets(reservationsData),
+    [reservationsData],
+  );
 
   const {
     byReservationId: syncedPaymentByReservationId,
@@ -916,7 +919,7 @@ export default function Reservations() {
     }
 
     try {
-      const reservationsPayload = await getReservationsList({
+      const reservationsRequest = getReservationsList({
         page,
         size: pageSize,
         status: toStatusQueryValue(viewFilter),
@@ -926,31 +929,19 @@ export default function Reservations() {
         due: viewFilter === 'overdue' ? 'overdue' : (dueFilter ?? undefined),
         signal,
       });
+      const assetRequest = canViewAssets
+        ? getAssetsList({
+          page: 1,
+          size: ASSET_FALLBACK_PAGE_SIZE,
+          signal,
+        }).catch(() => undefined)
+        : Promise.resolve(undefined);
 
-      const reservationRows = toReservationRows(reservationsPayload);
-      const mappedVehicles = toVehicleRows(reservationsPayload, reservationRows);
-
-      if (reservationRows.length === 0 && mappedVehicles.length === 0 && canViewAssets) {
-        try {
-          const assetFallbackPayload = await getAssetsList({
-            page: 1,
-            size: ASSET_FALLBACK_PAGE_SIZE,
-            signal,
-          });
-
-          return {
-            reservationsPayload,
-            assetFallbackPayload,
-          } satisfies ReservationsHydrationPayload;
-        } catch {
-          return {
-            reservationsPayload,
-          } satisfies ReservationsHydrationPayload;
-        }
-      }
+      const [reservationsPayload, assetPayload] = await Promise.all([reservationsRequest, assetRequest]);
 
       return {
         reservationsPayload,
+        assetPayload,
       } satisfies ReservationsHydrationPayload;
     } catch (error) {
       setPageErrorStatus(error instanceof ApiError ? error.status ?? null : null);
@@ -960,7 +951,7 @@ export default function Reservations() {
 
   const handleReservationsSuccess = useCallback((payload: ReservationsHydrationPayload) => {
     const reservationRows = toReservationRows(payload.reservationsPayload);
-    const vehicleRows = toVehicleRows(payload.assetFallbackPayload ?? payload.reservationsPayload, reservationRows);
+    const vehicleRows = mergeVehicleRows(payload.assetPayload ?? payload.reservationsPayload, reservationRows);
 
     setReservationsData(reservationRows);
     setVehicleAssets(vehicleRows);
@@ -1084,7 +1075,7 @@ export default function Reservations() {
       const detailedReservation = toReservationDetail(payload, fallbackReservation);
       setSelectedReservation(detailedReservation);
       const matchedAsset = vehicleAssets.find((asset) => asset.vehicleNumber === detailedReservation.vehicleNumber);
-      setSelectedVehicleAsset(matchedAsset ?? createFallbackVehicleAsset(detailedReservation));
+      setSelectedVehicleAsset(matchedAsset ?? createReservationFallbackVehicleAsset(detailedReservation));
     } catch (error) {
       if (controller.signal.aborted || detailRequestSequenceRef.current !== requestSequence) {
         return;
@@ -1101,7 +1092,7 @@ export default function Reservations() {
 
       setSelectedReservation(fallbackReservation);
       const fallbackAsset = vehicleAssets.find((asset) => asset.vehicleNumber === fallbackReservation.vehicleNumber);
-      setSelectedVehicleAsset(fallbackAsset ?? createFallbackVehicleAsset(fallbackReservation));
+      setSelectedVehicleAsset(fallbackAsset ?? createReservationFallbackVehicleAsset(fallbackReservation));
     } finally {
       if (!controller.signal.aborted && detailRequestSequenceRef.current === requestSequence) {
         setIsDetailLoading(false);
@@ -1298,7 +1289,7 @@ export default function Reservations() {
   const openReservationDetail = useCallback((reservation: Reservation) => {
     setSelectedReservation(reservation);
     const asset = vehicleAssets.find((entry) => entry.vehicleNumber === reservation.vehicleNumber);
-    setSelectedVehicleAsset(asset ?? createFallbackVehicleAsset(reservation));
+    setSelectedVehicleAsset(asset ?? createReservationFallbackVehicleAsset(reservation));
     setActiveTab('reservation');
     setShowReturnConfirm(false);
     setIsReturnSubmitting(false);
@@ -1484,7 +1475,7 @@ export default function Reservations() {
           status: toVehicleStatusFromReservation(updatedReservation.type),
         });
       } else {
-        setSelectedVehicleAsset(createFallbackVehicleAsset(updatedReservation));
+        setSelectedVehicleAsset(createReservationFallbackVehicleAsset(updatedReservation));
       }
 
       refreshReservationsAfterMutation('변경은 저장되었지만 목록을 다시 불러오지 못했습니다. 새로고침 후 확인해 주세요.');
@@ -1656,7 +1647,7 @@ export default function Reservations() {
           status: toVehicleStatusFromReservation(updatedReservation.type),
         });
       } else {
-        setSelectedVehicleAsset(createFallbackVehicleAsset(updatedReservation));
+        setSelectedVehicleAsset(createReservationFallbackVehicleAsset(updatedReservation));
       }
 
       setShowReturnConfirm(false);
@@ -1759,7 +1750,7 @@ export default function Reservations() {
           issues: withIssueLabel(matchedAsset.issues, '사고 접수'),
         });
       } else {
-        setSelectedVehicleAsset(createFallbackVehicleAsset(nextReservation));
+        setSelectedVehicleAsset(createReservationFallbackVehicleAsset(nextReservation));
       }
 
       setShowAccidentModal(false);
