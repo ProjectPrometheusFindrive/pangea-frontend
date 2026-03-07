@@ -329,7 +329,8 @@ test.describe('BK-091 Login E2E', () => {
     await seedAuthSession(page);
     await page.goto('/assets');
 
-    await expect(page).toHaveURL(/\/login(?:\?.*)?$/);
+    await expect.poll(() => new URL(page.url()).pathname).toBe('/login');
+    await expect.poll(() => new URL(page.url()).searchParams.get('returnUrl')).toBe('/assets');
     await expect(page.getByTestId('login-user-id')).toBeVisible();
 
     await page.getByTestId('login-user-id').fill('member-001');

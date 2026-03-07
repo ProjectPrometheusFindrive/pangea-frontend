@@ -759,6 +759,7 @@ export function Layout({ children, title }: LayoutProps) {
                   onClick={() => {
                     void handleDeleteAccount();
                   }}
+                  data-testid="account-delete-confirm"
                   className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium disabled:opacity-60"
                   disabled={isDeletingAccount}
                 >
