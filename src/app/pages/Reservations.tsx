@@ -24,6 +24,7 @@ import {
   usePageEndpointState,
 } from '../hooks/usePageEndpointState';
 import { usePaymentStatusSync } from '../hooks/usePaymentStatusSync';
+import { useAuth } from '../context/AuthContext';
 import {
   isUnpaidPaymentStatus,
   toReservationPaymentStatus,
@@ -705,8 +706,11 @@ function toVehicleRows(payload: unknown, reservationRows: Reservation[]): Vehicl
 export default function Reservations() {
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
+  const { user } = useAuth();
   const { canPerformAction, canAccessRoute } = useAuthorization();
   const canWriteReservations = canPerformAction(ACTION_PERMISSIONS.reservationsWrite);
+  const canTransitionReservations = canWriteReservations
+    && ['admin', 'super_admin'].includes((user?.role ?? '').trim().toLowerCase());
   const canViewAssets = canAccessRoute(ROUTE_PERMISSIONS.assets);
   const canViewActionRequired = canAccessRoute(ROUTE_PERMISSIONS.actionRequired);
   const page = toPositiveInteger(searchParams.get('page'), DEFAULT_PAGE);
@@ -1019,6 +1023,8 @@ export default function Reservations() {
     setIsDetailLoading(false);
     setDetailError(null);
     setIsDetailNotFound(false);
+    setShowReturnConfirm(false);
+    setIsReturnSubmitting(false);
     setReturnSubmitError(null);
     setReservationActionError(null);
     setActiveReservationAction(null);
@@ -1262,6 +1268,8 @@ export default function Reservations() {
     const asset = vehicleAssets.find((entry) => entry.vehicleNumber === reservation.vehicleNumber);
     setSelectedVehicleAsset(asset ?? createFallbackVehicleAsset(reservation));
     setActiveTab('reservation');
+    setShowReturnConfirm(false);
+    setIsReturnSubmitting(false);
     setReturnSubmitError(null);
     setReservationActionError(null);
     setActiveReservationAction(null);
@@ -1410,8 +1418,8 @@ export default function Reservations() {
   }, [canWriteReservations, hydrateReservationsData, openReservationDetail, vehicleAssets]);
 
   const handleStartReservation = useCallback(async () => {
-    if (!canWriteReservations) {
-      setReservationActionError('예약 상태 변경 권한이 없습니다. 관리자에게 권한을 요청해 주세요.');
+    if (!canTransitionReservations) {
+      setReservationActionError('대여 시작 처리 권한이 없습니다. 관리자에게 권한을 요청해 주세요.');
       return;
     }
 
@@ -1452,12 +1460,15 @@ export default function Reservations() {
       toast.success('차량 인수 처리가 완료되었습니다.');
     } catch (error) {
       if (error instanceof ApiError) {
+        if (error.status === 400) {
+          setReservationActionError(error.message || '대여 시작 요청값을 확인해 주세요.');
+          return;
+        }
         if (error.status === 403) {
-          setReservationActionError('예약 상태 변경 권한이 없습니다. 관리자에게 권한을 요청해 주세요.');
+          setReservationActionError('대여 시작 처리 권한이 없습니다. 관리자에게 권한을 요청해 주세요.');
           return;
         }
         if (error.status === 404) {
-          setReservationActionError('선택한 예약이 삭제되었거나 존재하지 않습니다.');
           await hydrateReservationsData();
           closeReservationDetail();
           return;
@@ -1485,9 +1496,10 @@ export default function Reservations() {
     }
   }, [
     activeReservationAction,
-    canWriteReservations,
+    canTransitionReservations,
     closeReservationDetail,
     hydrateReservationDetail,
+    hydrateReservationsData,
     refreshReservationsAfterMutation,
     selectedReservation,
     vehicleAssets,
@@ -1583,8 +1595,8 @@ export default function Reservations() {
       return;
     }
 
-    if (selectedReservation.type === 'return') {
-      setReturnSubmitError('이미 반납 처리된 예약입니다.');
+    if (selectedReservation.type !== 'rental') {
+      setReturnSubmitError('대여중 상태에서만 차량 반납 처리가 가능합니다.');
       return;
     }
 
@@ -2477,18 +2489,18 @@ export default function Reservations() {
                 )}
               </div>
 
-	              {/* 액션 버튼 */}
-	              <div className="p-6 border-t border-gray-200 flex gap-3 flex-wrap">
-	                {reservationActionError && (
-	                  <div className="w-full rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 flex items-start gap-2">
-	                    <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
-	                    <span>{reservationActionError}</span>
-	                  </div>
-	                )}
-	                <button
-	                  onClick={() => {
-	                    if (!canViewAssets) {
-	                      navigate('/forbidden');
+              {/* 액션 버튼 */}
+              <div className="p-6 border-t border-gray-200 flex gap-3 flex-wrap">
+                {reservationActionError && (
+                  <div className="w-full rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 flex items-start gap-2">
+                    <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+                    <span>{reservationActionError}</span>
+                  </div>
+                )}
+                <button
+                  onClick={() => {
+                    if (!canViewAssets) {
+                      navigate('/forbidden');
                       return;
                     }
                     navigate(`/assets?search=${encodeURIComponent(selectedReservation.vehicleNumber)}`);
@@ -2518,34 +2530,34 @@ export default function Reservations() {
                 >
                   이 차량의 조치항목 보기
                 </button>
-	                {selectedReservation.type === 'reservation' && (
-	                  <button
-	                    onClick={() => {
-	                      void handleStartReservation();
-	                    }}
-	                    data-testid="reservation-start-button"
-	                    disabled={!canWriteReservations || activeReservationAction !== null}
-	                    className="flex-1 min-w-[200px] px-4 py-3 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 font-medium disabled:cursor-not-allowed disabled:opacity-60"
-	                  >
-	                    {activeReservationAction === 'start' ? '처리 중...' : '차량 인수 처리'}
-	                  </button>
-	                )}
-	                {selectedReservation.type === 'reservation' && (
-	                  <button
-	                    onClick={() => {
-	                      void handleCancelReservation();
-	                    }}
-	                    data-testid="reservation-cancel-button"
-	                    disabled={!canWriteReservations || activeReservationAction !== null}
-	                    className="flex-1 min-w-[200px] px-4 py-3 bg-gray-600 text-white rounded-lg hover:bg-gray-700 font-medium disabled:cursor-not-allowed disabled:opacity-60"
-	                  >
-	                    {activeReservationAction === 'cancel' ? '처리 중...' : '예약 취소'}
-	                  </button>
-	                )}
-	                {selectedReservation.type === 'rental' && (
-	                  <button
-	                    onClick={handleReturnClick}
-	                    data-testid="reservation-return-button"
+                {selectedReservation.type === 'reservation' && canTransitionReservations && (
+                  <button
+                    onClick={() => {
+                      void handleStartReservation();
+                    }}
+                    data-testid="reservation-start-button"
+                    disabled={activeReservationAction !== null}
+                    className="flex-1 min-w-[200px] px-4 py-3 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 font-medium disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {activeReservationAction === 'start' ? '처리 중...' : '차량 인수 처리'}
+                  </button>
+                )}
+                {selectedReservation.type === 'reservation' && (
+                  <button
+                    onClick={() => {
+                      void handleCancelReservation();
+                    }}
+                    data-testid="reservation-cancel-button"
+                    disabled={!canWriteReservations || activeReservationAction !== null}
+                    className="flex-1 min-w-[200px] px-4 py-3 bg-gray-600 text-white rounded-lg hover:bg-gray-700 font-medium disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {activeReservationAction === 'cancel' ? '처리 중...' : '예약 취소'}
+                  </button>
+                )}
+                {selectedReservation.type === 'rental' && (
+                  <button
+                    onClick={handleReturnClick}
+                    data-testid="reservation-return-button"
                     disabled={!canWriteReservations}
                     className="flex-1 min-w-[200px] px-4 py-3 bg-orange-600 text-white rounded-lg hover:bg-orange-700 font-medium disabled:cursor-not-allowed disabled:opacity-60"
                   >

@@ -30,16 +30,16 @@ export interface CreateReservationPayload {
   memo?: string;
 }
 
-export interface TransitionReservationPayload {
-  to: string;
-  reason?: string;
-  expectedVersion?: number;
-}
-
 export interface ReturnReservationPayload {
   returnedAt?: string;
   memo?: string;
   odometer?: number;
+}
+
+export interface TransitionReservationPayload {
+  to: '예약중' | '대여중' | '완료';
+  reason?: string;
+  expectedVersion?: number;
 }
 
 export interface CancelReservationPayload {
