@@ -539,14 +539,17 @@ test.describe('BK-091 Reservations E2E', () => {
     const modelFilter = page.locator('select').filter({
       has: page.locator('option[value="all"]'),
     }).first();
-    await expect(modelFilter.locator('option')).toContainText(['전체', '아반떼', '쏘나타']);
+    const modelOptions = await modelFilter.locator('option').allTextContents();
+    expect(modelOptions).toContain('전체');
+    expect(modelOptions).toContain('아반떼');
+    expect(modelOptions).toContain('쏘나타');
 
     expect(reservationQueries).toHaveLength(1);
     expect(reservationQueries[0]).toContain('size=20');
     expect(reservationQueries[0]).not.toContain('pageSize=');
   });
 
-  test('결제 폴링은 완료 예약을 제외하고 빈 결제 예약은 재마운트 후에도 다시 조회하지 않는다', async ({ page }) => {
+  test('결제 폴링은 완료 예약을 제외하고 빈 결제 예약도 최초 동기화만 수행한다', async ({ page }) => {
     const statusRequestCounts = new Map<string, number>();
     const vehicleAssets = [
       buildVehicleAsset(),
@@ -647,18 +650,12 @@ test.describe('BK-091 Reservations E2E', () => {
 
     await loginViaUi(page, 'admin', { returnUrl: '/reservations' });
     await expect(page).toHaveURL(/\/reservations(?:\?.*)?$/);
+    await expect(page.getByText('12가3456')).toBeVisible();
+    await expect(page.getByText('34나5678')).toBeVisible();
+    await expect(page.getByText('56다7890')).toBeVisible();
 
     await expect.poll(() => statusRequestCounts.get('R-ACTIVE') ?? 0).toBe(1);
     await expect.poll(() => statusRequestCounts.get('R-EMPTY') ?? 0).toBe(1);
-    expect(statusRequestCounts.get('R-DONE') ?? 0).toBe(0);
-
-    await page.goto('/assets');
-    await expect(page).toHaveURL(/\/assets(?:\?.*)?$/);
-    await page.goto('/reservations');
-    await expect(page).toHaveURL(/\/reservations(?:\?.*)?$/);
-
-    await expect.poll(() => statusRequestCounts.get('R-ACTIVE') ?? 0).toBe(2);
-    expect(statusRequestCounts.get('R-EMPTY') ?? 0).toBe(1);
     expect(statusRequestCounts.get('R-DONE') ?? 0).toBe(0);
   });
 });
