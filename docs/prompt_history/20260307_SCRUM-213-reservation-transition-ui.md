@@ -17,11 +17,12 @@
 - 상세 유형에 따라 CTA를 분리해 예약 상세에는 `대여 시작`, 대여 상세에는 `차량 반납 처리`만 노출되도록 정리했다.
 - 전이 성공 후 상세/목록을 다시 조회하도록 연결했고, 전이 충돌 시 재조회 경로를 보강했다.
 - E2E 시나리오에 예약 시작/반납 처리 흐름을 추가했다.
+- merge 전 리뷰 반영으로 `대여 시작`은 admin/super_admin만 노출되게 맞추고, 전이 404 시 stale 상세 모달을 닫도록 보강했다.
 
 ## Diffs & Files
 - `src/services/reservations.ts`: reservation transition 호출 추가.
-- `src/app/pages/Reservations.tsx`: 상세 액션 노출 조건, 실행 핸들러, 재조회 흐름 추가.
-- `e2e/reservations.spec.ts`: 예약 시작/반납 처리 회귀 시나리오 추가.
+- `src/app/pages/Reservations.tsx`: 상세 액션 노출 조건, 실행 핸들러, 재조회 흐름 추가, admin 전용 gating, 404 stale 상세 정리.
+- `e2e/reservations.spec.ts`: 예약 시작/반납 처리 회귀 시나리오 추가 및 member 비노출 시나리오 추가.
 
 ## Commands Used
 ```bash
@@ -32,6 +33,7 @@ npm run build
 ## Validation
 ```bash
 npm run build
+npx playwright test e2e/reservations.spec.ts --list
 # Result: passed
 ```
 

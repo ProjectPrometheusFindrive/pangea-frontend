@@ -24,6 +24,7 @@ import {
   usePageEndpointState,
 } from '../hooks/usePageEndpointState';
 import { usePaymentStatusSync } from '../hooks/usePaymentStatusSync';
+import { useAuth } from '../context/AuthContext';
 import {
   isUnpaidPaymentStatus,
   toReservationPaymentStatus,
@@ -670,8 +671,11 @@ function toVehicleRows(payload: unknown, reservationRows: Reservation[]): Vehicl
 export default function Reservations() {
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
+  const { user } = useAuth();
   const { canPerformAction, canAccessRoute } = useAuthorization();
   const canWriteReservations = canPerformAction(ACTION_PERMISSIONS.reservationsWrite);
+  const canTransitionReservations = canWriteReservations
+    && ['admin', 'super_admin'].includes((user?.role ?? '').trim().toLowerCase());
   const canViewAssets = canAccessRoute(ROUTE_PERMISSIONS.assets);
   const canViewActionRequired = canAccessRoute(ROUTE_PERMISSIONS.actionRequired);
   const page = toPositiveInteger(searchParams.get('page'), DEFAULT_PAGE);
@@ -1387,7 +1391,7 @@ export default function Reservations() {
   }, [canWriteReservations, selectedReservation]);
 
   const handleStartRentalClick = useCallback(async () => {
-    if (!canWriteReservations) {
+    if (!canTransitionReservations) {
       setTransitionSubmitError('대여 시작 처리 권한이 없습니다. 관리자에게 권한을 요청해 주세요.');
       return;
     }
@@ -1444,6 +1448,7 @@ export default function Reservations() {
         if (error.status === 404) {
           setTransitionSubmitError('선택한 예약을 찾을 수 없습니다. 최신 목록을 확인해 주세요.');
           void hydrateReservationsData();
+          closeReservationDetail();
           return;
         }
         if (error.status === 409) {
@@ -1467,7 +1472,7 @@ export default function Reservations() {
     } finally {
       setIsTransitionSubmitting(false);
     }
-  }, [canWriteReservations, hydrateReservationDetail, hydrateReservationsData, isTransitionSubmitting, selectedReservation, vehicleAssets]);
+  }, [canTransitionReservations, closeReservationDetail, hydrateReservationDetail, hydrateReservationsData, isTransitionSubmitting, selectedReservation, vehicleAssets]);
 
   const handleConfirmReturn = useCallback(async () => {
     if (!canWriteReservations) {
@@ -2434,7 +2439,7 @@ export default function Reservations() {
                   <button
                     onClick={handleStartRentalClick}
                     data-testid="reservation-start-button"
-                    disabled={!canWriteReservations || isTransitionSubmitting}
+                    disabled={!canTransitionReservations || isTransitionSubmitting}
                     className="flex-1 min-w-[200px] px-4 py-3 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 font-medium disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     {isTransitionSubmitting ? '처리 중...' : '대여 시작'}

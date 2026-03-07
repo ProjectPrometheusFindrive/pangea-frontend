@@ -293,6 +293,36 @@ test.describe('BK-091 Reservations E2E', () => {
     await expect(page.getByTestId('reservation-return-button')).toBeVisible();
   });
 
+  test('member는 대여 시작 버튼을 볼 수 없다', async ({ page }) => {
+    await installApiMocks(page, {
+      user: {
+        role: 'member',
+      },
+      handlers: {
+        'GET /api/v2/reservations': async ({ route }) => {
+          await fulfillSuccess(route, {
+            reservations: [buildReservationRow()],
+            assets: [buildVehicleAsset()],
+            total: 1,
+            page: 1,
+            pageSize: 20,
+          });
+        },
+        'GET /api/v2/reservations/R-9001': async ({ route }) => {
+          await fulfillSuccess(route, buildReservationRow());
+        },
+      },
+    });
+
+    await loginViaUi(page, 'member', { returnUrl: '/reservations' });
+    await expect(page).toHaveURL(/\/reservations(?:\?.*)?$/);
+    await expect(page.getByTestId('reservation-block-R-9001')).toBeVisible();
+
+    await page.getByTestId('reservation-block-R-9001').click();
+    await expect(page.getByTestId('reservation-detail-modal')).toBeVisible();
+    await expect(page.getByTestId('reservation-start-button')).toHaveCount(0);
+  });
+
   test('예약 상세 403 오류 시 접근 불가 안내를 노출한다', async ({ page }) => {
     await installApiMocks(page, {
       handlers: {
