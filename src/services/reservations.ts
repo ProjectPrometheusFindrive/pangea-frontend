@@ -11,6 +11,7 @@ export interface GetReservationsListParams extends ReservationsRequestOptions {
   contractStatus?: string;
   from?: string;
   to?: string;
+  due?: 'pickup' | 'return' | 'overdue';
 }
 
 export interface GetReservationDetailOptions extends ReservationsRequestOptions {}
@@ -83,6 +84,9 @@ function toContractStatus(statusValue?: string): string | undefined {
   if (normalized === 'return' || normalized === '반납' || normalized === '완료' || normalized === '반납완료') {
     return '완료';
   }
+  if (normalized === 'overdue' || normalized === '연체' || normalized === 'late') {
+    return '대여중';
+  }
 
   return undefined;
 }
@@ -94,6 +98,7 @@ export function getReservationsList({
   contractStatus,
   from,
   to,
+  due,
   signal,
 }: GetReservationsListParams): Promise<unknown> {
   const normalizedContractStatus = contractStatus ?? toContractStatus(status);
@@ -109,6 +114,7 @@ export function getReservationsList({
       contractStatus: normalizedContractStatus,
       from,
       to,
+      due,
     },
     signal,
   });

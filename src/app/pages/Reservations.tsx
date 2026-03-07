@@ -52,7 +52,8 @@ type DragSelection = {
   startDate: number;
   endDate: number;
 } | null;
-type ViewFilter = 'all' | 'reservation' | 'rental' | 'return' | 'unpaid';
+type ViewFilter = 'all' | 'reservation' | 'rental' | 'return' | 'unpaid' | 'overdue';
+type DueFilter = 'pickup' | 'return' | null;
 
 function createTodayBaseDate(): Date {
   const now = new Date();
@@ -344,6 +345,17 @@ function normalizeDateParam(value: string | null): string | null {
   return formatDateAsYmd(parsedDate);
 }
 
+function normalizeDueFilter(value: string | null): DueFilter {
+  const normalized = (value ?? '').trim().toLowerCase();
+  if (normalized === 'pickup' || normalized === 'start') {
+    return 'pickup';
+  }
+  if (normalized === 'return' || normalized === 'end') {
+    return 'return';
+  }
+  return null;
+}
+
 function toDateOffset(value: unknown): number | null {
   const numericOffset = toNumberValue(value);
   if (numericOffset !== null) {
@@ -448,11 +460,14 @@ function normalizeViewFilter(value: string | null): ViewFilter {
   if (normalized === 'unpaid' || normalized === '미납') {
     return 'unpaid';
   }
+  if (normalized === 'overdue' || normalized === '연체' || normalized === 'late') {
+    return 'overdue';
+  }
   return 'all';
 }
 
 function toStatusQueryValue(filterValue: ViewFilter): string | undefined {
-  if (filterValue === 'all' || filterValue === 'unpaid') {
+  if (filterValue === 'all' || filterValue === 'unpaid' || filterValue === 'overdue') {
     return undefined;
   }
   return filterValue;
@@ -467,6 +482,9 @@ function toApiContractStatus(filterValue: ViewFilter): string | undefined {
   }
   if (filterValue === 'return') {
     return '완료';
+  }
+  if (filterValue === 'overdue') {
+    return '대여중';
   }
   return undefined;
 }
@@ -717,6 +735,7 @@ export default function Reservations() {
   const pageSize = toPositiveInteger(searchParams.get('size') ?? searchParams.get('pageSize'), DEFAULT_PAGE_SIZE);
   const fromDate = normalizeDateParam(searchParams.get('from'));
   const toDate = normalizeDateParam(searchParams.get('to'));
+  const dueFilter = normalizeDueFilter(searchParams.get('due'));
   const searchQuery = searchParams.get('q') ?? searchParams.get('search') ?? '';
   const viewFilter = normalizeViewFilter(
     searchParams.get('status') ?? searchParams.get('filter') ?? searchParams.get('contractStatus'),
@@ -806,6 +825,9 @@ export default function Reservations() {
     if (!nextParams.get('q')) {
       nextParams.delete('q');
     }
+    if (!nextParams.get('due')) {
+      nextParams.delete('due');
+    }
 
     nextParams.delete('filter');
     nextParams.delete('contractStatus');
@@ -823,6 +845,8 @@ export default function Reservations() {
     const canonicalQ = searchParams.get('q');
     const canonicalSize = searchParams.get('size');
     const legacyPageSize = searchParams.get('pageSize');
+    const currentDue = searchParams.get('due');
+    const normalizedDue = normalizeDueFilter(currentDue);
     const normalizedFromDate = normalizeDateParam(searchParams.get('from'));
     const normalizedToDate = normalizeDateParam(searchParams.get('to'));
     const currentFromDate = searchParams.get('from');
@@ -837,6 +861,7 @@ export default function Reservations() {
       || Boolean(legacyPageSize && !canonicalSize)
       || Boolean(currentFromDate && normalizedFromDate && currentFromDate !== normalizedFromDate)
       || Boolean(currentToDate && normalizedToDate && currentToDate !== normalizedToDate)
+      || Boolean(currentDue && currentDue !== normalizedDue)
       || Boolean(canonicalStatus && normalizeViewFilter(canonicalStatus) !== canonicalStatus)
       || Boolean(!searchParams.get('page'))
       || Boolean(!canonicalSize)
@@ -871,6 +896,12 @@ export default function Reservations() {
       } else {
         params.delete('to');
       }
+
+      if (normalizedDue) {
+        params.set('due', normalizedDue);
+      } else {
+        params.delete('due');
+      }
     }, true);
   }, [searchParams, updateReservationSearchParams]);
 
@@ -892,6 +923,7 @@ export default function Reservations() {
         contractStatus: toApiContractStatus(viewFilter),
         from: fromDate ?? undefined,
         to: toDate ?? undefined,
+        due: viewFilter === 'overdue' ? 'overdue' : (dueFilter ?? undefined),
         signal,
       });
 
@@ -1002,6 +1034,7 @@ export default function Reservations() {
       params.delete('from');
       params.delete('to');
       params.delete('q');
+      params.delete('due');
       params.set('page', String(DEFAULT_PAGE));
       params.set('size', String(DEFAULT_PAGE_SIZE));
     });
@@ -1083,6 +1116,9 @@ export default function Reservations() {
       } else {
         params.set('status', nextFilter);
       }
+      if (nextFilter === 'all' || nextFilter === 'unpaid' || nextFilter === 'overdue') {
+        params.delete('due');
+      }
       params.set('page', String(DEFAULT_PAGE));
     });
   }, [updateReservationSearchParams]);
@@ -1157,17 +1193,13 @@ export default function Reservations() {
 
   // 먼저 예약 필터링 (상태 필터 + 검색어 적용)
   const filteredReservations = reservations.filter((reservation) => {
+    const reservationStartDate = normalizeDateParam(reservation.startDateFull) ?? toDateLabelFromOffset(reservation.startDate);
+    const reservationEndDate = normalizeDateParam(reservation.endDateFull) ?? toDateLabelFromOffset(reservation.endDate);
+
     if (viewFilter === 'unpaid') {
-      return Boolean(reservation.issues && reservation.issues.includes('미납/결제 문제'));
-    }
-    if (viewFilter === 'return') {
-      return reservation.type === 'return';
-    }
-    if (viewFilter === 'rental') {
-      return reservation.type === 'rental';
-    }
-    if (viewFilter === 'reservation') {
-      return reservation.type === 'reservation';
+      if (!(reservation.issues && reservation.issues.includes('미납/결제 문제'))) {
+        return false;
+      }
     }
     if (!searchQuery) {
       return true;
@@ -1833,6 +1865,16 @@ export default function Reservations() {
                   }`}
                 >
                   미납
+                </button>
+                <button
+                  onClick={() => handleViewFilterChange('overdue')}
+                  className={`px-3 py-1.5 rounded-lg text-sm font-medium ${
+                    viewFilter === 'overdue'
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                >
+                  연체
                 </button>
               </div>
 
