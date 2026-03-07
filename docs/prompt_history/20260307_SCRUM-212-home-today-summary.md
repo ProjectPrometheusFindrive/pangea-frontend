@@ -17,6 +17,7 @@
 - 홈 `오늘 할 일` 카드 클릭 시 overdue 또는 pickup/return due 필터를 가진 reservations 링크로 이동하게 했다.
 - reservations 화면이 today 관련 query param을 인식하도록 분기와 상태 동기화를 보강했다.
 - merge 전 점검에서 발견한 누락을 보완해 reservations 목록 요청에도 `due` 필터를 전달하도록 수정했다.
+- 후속 정리로 reservations 목록은 서버가 내려준 status/date/due 결과를 그대로 사용하고, home drilldown 날짜는 BE today summary와 맞도록 UTC 기준으로 통일했다.
 
 ## Diffs & Files
 - `src/services/home.ts`: `summary.today` 타입/파서 추가.

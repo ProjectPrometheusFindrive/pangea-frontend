@@ -110,6 +110,10 @@ function toIsoDate(value: Date): string {
   return `${year}-${month}-${day}`;
 }
 
+function toUtcIsoDate(value: Date): string {
+  return value.toISOString().slice(0, 10);
+}
+
 function resolveDateRange(preset: PeriodPreset): { from: string; to: string } {
   const days = PERIOD_DAYS_BY_PRESET[preset];
   const toDate = new Date();
@@ -475,7 +479,7 @@ export default function Home() {
   };
 
   const handleTaskClick = useCallback((target: 'pickup' | 'return' | 'overdue') => {
-    const todayDate = toIsoDate(new Date());
+    const todayDate = toUtcIsoDate(new Date());
     const params = new URLSearchParams();
 
     if (target === 'pickup') {

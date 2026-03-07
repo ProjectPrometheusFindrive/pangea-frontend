@@ -329,19 +329,6 @@ function normalizeDueFilter(value: string | null): DueFilter {
   return null;
 }
 
-function dateMatchesRange(value: string | null, fromDate: string | null, toDate: string | null): boolean {
-  if (!value) {
-    return false;
-  }
-  if (fromDate && value < fromDate) {
-    return false;
-  }
-  if (toDate && value > toDate) {
-    return false;
-  }
-  return true;
-}
-
 function toDateOffset(value: unknown): number | null {
   const numericOffset = toNumberValue(value);
   if (numericOffset !== null) {
@@ -1161,46 +1148,10 @@ export default function Reservations() {
   const filteredReservations = reservations.filter((reservation) => {
     const reservationStartDate = normalizeDateParam(reservation.startDateFull) ?? toDateLabelFromOffset(reservation.startDate);
     const reservationEndDate = normalizeDateParam(reservation.endDateFull) ?? toDateLabelFromOffset(reservation.endDate);
-    const todayDate = toDateLabelFromOffset(0);
 
     if (viewFilter === 'unpaid') {
       if (!(reservation.issues && reservation.issues.includes('미납/결제 문제'))) {
         return false;
-      }
-    } else if (viewFilter === 'overdue') {
-      if (reservation.type !== 'rental' || reservationEndDate >= todayDate) {
-        return false;
-      }
-    } else if (viewFilter === 'return') {
-      if (reservation.type !== 'return') {
-        return false;
-      }
-    } else if (viewFilter === 'rental') {
-      if (reservation.type !== 'rental') {
-        return false;
-      }
-    } else if (viewFilter === 'reservation') {
-      if (reservation.type !== 'reservation') {
-        return false;
-      }
-    }
-
-    if (fromDate || toDate) {
-      if (dueFilter === 'pickup') {
-        if (!dateMatchesRange(reservationStartDate, fromDate, toDate)) {
-          return false;
-        }
-      } else if (dueFilter === 'return') {
-        if (!dateMatchesRange(reservationEndDate, fromDate, toDate)) {
-          return false;
-        }
-      } else {
-        if (fromDate && reservationEndDate < fromDate) {
-          return false;
-        }
-        if (toDate && reservationStartDate > toDate) {
-          return false;
-        }
       }
     }
     if (!searchQuery) {
