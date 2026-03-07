@@ -5,7 +5,7 @@
 - Branch: `fix/SCRUM-185-home-summary-korean-translation`
 - Jira Key: `SCRUM-185`
 - Jira Status: `진행 중` during implementation, `Resolved` planned after PR creation
-- PR URL: `PENDING`
+- PR URL: `https://github.com/ProjectPrometheusFindrive/pangea-frontend/pull/81`
 - Tags: `home`, `copy`, `i18n`, `playwright`
 
 ## Start Context
@@ -63,4 +63,4 @@ npm.cmd run build
 ## Notes
 - The temporary isolated Playwright config used port `4174` to avoid a pre-existing `127.0.0.1:4173` Vite server from the base `pangea-frontend` repo. The temporary file was deleted after verification and is not part of the final diff.
 - An unrelated existing local test failure remains in `tests/asset-detail-modal.test.mjs` (`useNavigate()` outside router) and was not changed by this ticket.
-- Update `PR URL` in this file after PR creation so the Jira/PR/documentation chain is complete.
+- GitHub PR: `https://github.com/ProjectPrometheusFindrive/pangea-frontend/pull/81`
