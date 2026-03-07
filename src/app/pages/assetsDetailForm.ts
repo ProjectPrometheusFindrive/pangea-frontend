@@ -152,13 +152,13 @@ export function buildAssetPatchPayload({
     payload.memo = nextMemo;
   }
   if (baseline.color !== nextColor) {
-    payload.color = nextColor || undefined;
+    payload.color = nextColor;
   }
   if (baseline.category !== nextCategory) {
-    payload.category = nextCategory || undefined;
+    payload.category = nextCategory;
   }
   if (baseline.vehicleType !== nextVehicleType) {
-    payload.vehicleType = nextVehicleType || undefined;
+    payload.vehicleType = nextVehicleType;
   }
 
   return {

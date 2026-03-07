@@ -81,4 +81,21 @@ test('asset detail form helpers include color/category/vehicleType in hydrate an
     category: '카테고리를 확인해 주세요.',
     vehicleType: '차량 유형을 확인해 주세요.',
   });
+
+  const cleared = module.buildAssetPatchPayload({
+    asset: baselineAsset,
+    form: {
+      ...hydratedForm,
+      color: '',
+      category: '',
+      vehicleType: '',
+    },
+  });
+  assert.deepEqual(cleared.fieldErrors, {});
+  assert.deepEqual(cleared.payload, {
+    version: 3,
+    color: '',
+    category: '',
+    vehicleType: '',
+  });
 });
