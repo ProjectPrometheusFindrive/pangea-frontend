@@ -29,7 +29,7 @@ interface SettingsCompanyPayload {
 function toCompany(payload: SettingsCompanyPayload): Company {
   return {
     id: String(payload.companyId ?? '').trim() || 'company-local',
-    name: String(payload.name ?? '').trim() || '회사',
+    name: String(payload.name ?? '').trim(),
     businessNumber: String(payload.businessNumber ?? payload.bizRegNo ?? '').trim(),
     contactName: String(payload.contactName ?? '').trim() || undefined,
     contactPhone: String(payload.phone ?? payload.contactPhone ?? '').trim() || undefined,

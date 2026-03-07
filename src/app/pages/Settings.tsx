@@ -25,10 +25,18 @@ import {
 import { reservations as templateReservations } from '../data/mockData';
 import { ApiError } from '../../services/api';
 import { useAuthorization } from '../context/AuthorizationContext';
+import { useAuth } from '../context/AuthContext';
 import { useCompany } from '../context/CompanyContext';
 import { ACTION_PERMISSIONS } from '../authorization';
-import { getAssetsList } from '../../services/assets';
+import { createAsset, getAssetsList } from '../../services/assets';
 import { getReservationsList } from '../../services/reservations';
+import {
+  getOcrExtractJob,
+  signAssetUpload,
+  submitOcrExtractJob,
+  uploadFileToSignedUrl,
+  type OcrExtractedField,
+} from '../../services/assetOcr';
 import {
   getSettingsCompany,
   putSettingsCompany,
@@ -59,6 +67,13 @@ interface UploadResult {
   errors: string[];
 }
 
+interface BulkOcrResult {
+  fileName: string;
+  status: 'success' | 'error';
+  message: string;
+  assetId?: string;
+}
+
 interface CompanyFormState {
   name: string;
   businessNumber: string;
@@ -84,6 +99,24 @@ interface SettingsHydrationPayload {
 const DEFAULT_SETTINGS_SCHEMA_VERSION = 'v1';
 const CURRENT_DATA_COUNT_KEYS = ['total', 'totalCount', 'count', 'size', 'itemsCount', 'totalElements'];
 const CURRENT_DATA_PAGE_SIZE = 200;
+const BULK_OCR_ALLOWED_CONTENT_TYPES = new Set([
+  'application/pdf',
+  'image/png',
+  'image/jpeg',
+  'image/jpg',
+  'image/webp',
+]);
+const BULK_OCR_EXTENSION_TO_CONTENT_TYPE: Record<string, string> = {
+  pdf: 'application/pdf',
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  webp: 'image/webp',
+};
+const BULK_OCR_MAX_FILE_SIZE_BYTES = 25 * 1024 * 1024;
+const BULK_OCR_POLL_INTERVAL_MS = 1000;
+const BULK_OCR_POLL_TIMEOUT_MS = 90_000;
+const INVALID_COMPANY_IDS = new Set(['0000000000', '__global__', 'company-local', 'null', 'none']);
 
 const DEFAULT_COMPANY_FORM_STATE: CompanyFormState = {
   name: '',
@@ -137,6 +170,91 @@ function toErrorMessage(error: unknown, fallbackMessage: string): string {
     return error.message;
   }
   return fallbackMessage;
+}
+
+function waitForDuration(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timeoutId = window.setTimeout(resolve, ms);
+    const handleAbort = () => {
+      window.clearTimeout(timeoutId);
+      reject(new DOMException('Aborted', 'AbortError'));
+    };
+    signal?.addEventListener('abort', handleAbort, { once: true });
+  });
+}
+
+function toFileExtension(name: string): string | null {
+  const normalizedName = name.trim().toLowerCase();
+  const separatorIndex = normalizedName.lastIndexOf('.');
+  if (separatorIndex < 0 || separatorIndex >= normalizedName.length - 1) {
+    return null;
+  }
+  return normalizedName.slice(separatorIndex + 1);
+}
+
+function resolveBulkOcrContentType(file: File): string | null {
+  const fileContentType = file.type.trim().toLowerCase();
+  if (BULK_OCR_ALLOWED_CONTENT_TYPES.has(fileContentType)) {
+    return fileContentType;
+  }
+
+  const extension = toFileExtension(file.name);
+  if (extension && BULK_OCR_EXTENSION_TO_CONTENT_TYPE[extension]) {
+    return BULK_OCR_EXTENSION_TO_CONTENT_TYPE[extension];
+  }
+
+  return null;
+}
+
+function normalizeTenantCompanyId(value: unknown): string | null {
+  const companyId = toStringValue(value);
+  if (!companyId) {
+    return null;
+  }
+  return INVALID_COMPANY_IDS.has(companyId.toLowerCase()) ? null : companyId;
+}
+
+function toBulkOcrCreatePayload(
+  fields: OcrExtractedField[],
+  companyId: string,
+): {
+  vin: string;
+  plate: string;
+  vehicleNumber: string;
+  companyId: string;
+  model?: string;
+  year?: number;
+} | null {
+  const values = new Map<string, string>();
+
+  for (const field of fields) {
+    const name = toStringValue(field.name)?.toLowerCase();
+    const value = toStringValue(field.value);
+    if (!name || !value) {
+      continue;
+    }
+    if (!values.has(name)) {
+      values.set(name, value);
+    }
+  }
+
+  const vin = values.get('vin');
+  const plate = values.get('plate') ?? values.get('vehiclenumber');
+  if (!vin || !plate) {
+    return null;
+  }
+
+  const yearValue = values.get('year');
+  const parsedYear = yearValue ? Number(yearValue) : NaN;
+
+  return {
+    vin,
+    plate,
+    vehicleNumber: plate,
+    companyId,
+    model: values.get('model') || undefined,
+    year: Number.isInteger(parsedYear) ? parsedYear : undefined,
+  };
 }
 
 function isRetryableMutationError(error: ApiError): boolean {
@@ -400,6 +518,7 @@ function toReservationTypeLabel(value: unknown): string {
 
 export default function Settings() {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const { canPerformAction } = useAuthorization();
   const { refreshCompany } = useCompany();
 
@@ -412,6 +531,11 @@ export default function Settings() {
   const [isDragging, setIsDragging] = useState(false);
   const [previewData, setPreviewData] = useState<any[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const bulkOcrAbortControllerRef = useRef<AbortController | null>(null);
+  const [isBulkOcrProcessing, setIsBulkOcrProcessing] = useState(false);
+  const [bulkOcrProgressMessage, setBulkOcrProgressMessage] = useState<string | null>(null);
+  const [bulkOcrResults, setBulkOcrResults] = useState<BulkOcrResult[]>([]);
+  const [bulkOcrSelectedFiles, setBulkOcrSelectedFiles] = useState<string[]>([]);
 
   const [companyForm, setCompanyForm] = useState<CompanyFormState>(DEFAULT_COMPANY_FORM_STATE);
   const [companyBaseline, setCompanyBaseline] = useState<CompanyFormState>(DEFAULT_COMPANY_FORM_STATE);
@@ -482,6 +606,172 @@ export default function Settings() {
     }
   }, []);
 
+  const pollBulkOcrJobUntilTerminal = useCallback(async (jobId: string, signal: AbortSignal) => {
+    const startedAt = Date.now();
+
+    while (Date.now() - startedAt < BULK_OCR_POLL_TIMEOUT_MS) {
+      if (signal.aborted) {
+        throw new DOMException('Aborted', 'AbortError');
+      }
+
+      const jobPayload = await getOcrExtractJob(jobId, { signal });
+      if (jobPayload.status === 'queued' || jobPayload.status === 'running') {
+        await waitForDuration(BULK_OCR_POLL_INTERVAL_MS, signal);
+        continue;
+      }
+
+      return jobPayload;
+    }
+
+    throw new ApiError('TIMEOUT', 'OCR 처리 시간이 초과되었습니다.', {
+      status: 504,
+    });
+  }, []);
+
+  const handleBulkOcrFileSelection = useCallback(async (files: File[]) => {
+    if (!canEditSettings) {
+      toast.error('설정 수정 권한이 없습니다.');
+      return;
+    }
+    if (files.length === 0 || isBulkOcrProcessing) {
+      return;
+    }
+
+    const companyId = normalizeTenantCompanyId(user?.companyId);
+    if (!companyId) {
+      setBulkOcrSelectedFiles(files.map((file) => file.name));
+      setBulkOcrResults([
+        {
+          fileName: files[0].name,
+          status: 'error',
+          message: '회사 정보가 없어 일괄 OCR 업로드를 시작할 수 없습니다. 다시 로그인 후 시도해 주세요.',
+        },
+      ]);
+      toast.error('회사 정보가 없어 일괄 OCR 업로드를 시작할 수 없습니다.');
+      return;
+    }
+
+    bulkOcrAbortControllerRef.current?.abort();
+    const controller = new AbortController();
+    bulkOcrAbortControllerRef.current = controller;
+
+    setBulkOcrSelectedFiles(files.map((file) => file.name));
+    setBulkOcrResults([]);
+    setIsBulkOcrProcessing(true);
+    setBulkOcrProgressMessage(`0 / ${files.length} 파일 준비 중`);
+
+    const nextResults: BulkOcrResult[] = [];
+    let successCount = 0;
+
+    try {
+      for (const [index, file] of files.entries()) {
+        if (controller.signal.aborted) {
+          throw new DOMException('Aborted', 'AbortError');
+        }
+
+        try {
+          const resolvedContentType = resolveBulkOcrContentType(file);
+          if (!resolvedContentType) {
+            throw new ApiError('UNSUPPORTED_MEDIA_TYPE', '지원하지 않는 파일 형식입니다. PDF/JPG/PNG/WebP 파일을 사용해 주세요.', {
+              status: 415,
+            });
+          }
+          if (file.size > BULK_OCR_MAX_FILE_SIZE_BYTES) {
+            throw new ApiError('PAYLOAD_TOO_LARGE', 'OCR 파일 크기 제한(25MB)을 초과했습니다.', {
+              status: 413,
+            });
+          }
+
+          setBulkOcrProgressMessage(`${index + 1} / ${files.length} 업로드 중: ${file.name}`);
+          const signedUpload = await signAssetUpload({
+            fileName: file.name,
+            contentType: resolvedContentType,
+            fileSize: file.size,
+            folder: `company/${companyId}/docs`,
+          }, { signal: controller.signal });
+
+          const uploadContentType = signedUpload.contentType?.trim() || resolvedContentType;
+          await uploadFileToSignedUrl(
+            signedUpload.uploadUrl,
+            file,
+            uploadContentType,
+            { signal: controller.signal },
+          );
+
+          setBulkOcrProgressMessage(`${index + 1} / ${files.length} OCR 분석 중: ${file.name}`);
+          let jobPayload = await submitOcrExtractJob({
+            docType: 'registrationDoc',
+            objectName: signedUpload.objectName,
+            sourceName: file.name,
+            contentType: uploadContentType,
+          }, { signal: controller.signal });
+
+          if (jobPayload.status === 'queued' || jobPayload.status === 'running') {
+            jobPayload = await pollBulkOcrJobUntilTerminal(jobPayload.jobId, controller.signal);
+          }
+
+          if (jobPayload.status === 'failed') {
+            throw new ApiError(
+              jobPayload.error?.type ?? 'SERVER_ERROR',
+              jobPayload.error?.message ?? 'OCR 처리에 실패했습니다.',
+              {
+                status: jobPayload.error?.httpStatus,
+                payload: jobPayload,
+              },
+            );
+          }
+
+          const createPayload = toBulkOcrCreatePayload(jobPayload.extractedFields, companyId);
+          if (!createPayload) {
+            throw new ApiError('VALIDATION_ERROR', 'OCR 결과에서 차량번호와 차대번호를 확인할 수 없습니다.', {
+              status: 400,
+              payload: jobPayload,
+            });
+          }
+
+          const createdAsset = await createAsset(createPayload, { signal: controller.signal });
+          const createdRecord = isRecord(createdAsset)
+            ? createdAsset
+            : (isRecord(createdAsset) && isRecord(createdAsset.data) ? createdAsset.data : null);
+          const assetId = toStringValue(createdRecord?.id) ?? createPayload.vin;
+          nextResults.push({
+            fileName: file.name,
+            status: 'success',
+            message: '차량 자산 등록 완료',
+            assetId,
+          });
+          successCount += 1;
+        } catch (error) {
+          if (error instanceof DOMException && error.name === 'AbortError') {
+            throw error;
+          }
+
+          nextResults.push({
+            fileName: file.name,
+            status: 'error',
+            message: toErrorMessage(error, '일괄 OCR 업로드 처리에 실패했습니다.'),
+          });
+        }
+
+        setBulkOcrResults([...nextResults]);
+      }
+    } catch (error) {
+      if (!(error instanceof DOMException && error.name === 'AbortError')) {
+        toast.error(toErrorMessage(error, '일괄 OCR 업로드 처리에 실패했습니다.'));
+      }
+    } finally {
+      if (bulkOcrAbortControllerRef.current === controller) {
+        bulkOcrAbortControllerRef.current = null;
+      }
+      setIsBulkOcrProcessing(false);
+      setBulkOcrProgressMessage(files.length > 0 ? `${successCount} / ${files.length} 처리 완료` : null);
+      void refreshCurrentDataCounts();
+      if (successCount > 0) {
+        toast.success(`일괄 OCR 등록 완료: ${successCount}건 성공`);
+      }
+    }
+  }, [canEditSettings, isBulkOcrProcessing, pollBulkOcrJobUntilTerminal, refreshCurrentDataCounts, user?.companyId]);
+
   const requestSettingsHydration = useCallback(async (signal: AbortSignal): Promise<SettingsHydrationPayload> => {
     const [companyPayload, geofencesPayload, membersPayload] = await Promise.all([
       getSettingsCompany({ signal }),
@@ -545,6 +835,10 @@ export default function Settings() {
   useEffect(() => {
     void refreshCurrentDataCounts();
   }, [refreshCurrentDataCounts]);
+
+  useEffect(() => () => {
+    bulkOcrAbortControllerRef.current?.abort();
+  }, []);
 
   const handleSettingsRetry = useCallback(() => {
     void hydrateSettings();
@@ -1671,28 +1965,68 @@ export default function Settings() {
                     <div className="text-center">
                       <Upload className="mx-auto mb-4 h-16 w-16 text-green-600" />
                       <h3 className="mb-2 text-lg font-semibold text-green-900">차량등록증 이미지 업로드</h3>
-                      <p className="mb-4 text-sm text-gray-700">여러 개의 이미지를 한번에 선택하거나 드래그하여 업로드하세요</p>
+                      <p className="mb-4 text-sm text-gray-700">여러 개의 이미지를 한번에 선택하면 OCR과 차량 등록이 순차적으로 실행됩니다</p>
                       <label className="inline-block cursor-pointer rounded-lg bg-green-600 px-6 py-3 font-medium text-white hover:bg-green-700">
-                        이미지 파일 선택
+                        {isBulkOcrProcessing ? '처리 중...' : '이미지 파일 선택'}
                         <input
+                          data-testid="settings-bulk-ocr-input"
                           type="file"
-                          accept="image/*"
+                          accept="image/*,application/pdf"
                           multiple
                           className="hidden"
+                          disabled={isBulkOcrProcessing}
                           onChange={(event) => {
                             const files = Array.from(event.target.files || []);
-                            if (files.length > 0) {
-                              alert(`${files.length}개의 파일이 선택되었습니다.\nOCR 처리를 시작합니다...`);
-                              setTimeout(() => {
-                                alert(`${files.length}개 차량 정보가 자동 추출되어 등록되었습니다!`);
-                              }, 2000);
-                            }
+                            event.target.value = '';
+                            void handleBulkOcrFileSelection(files);
                           }}
                         />
                       </label>
                       <p className="mt-4 text-xs text-gray-600">지원 형식: JPG, PNG, PDF | 최대 50개 파일까지 업로드 가능</p>
                     </div>
                   </div>
+
+                  {(isBulkOcrProcessing || bulkOcrProgressMessage) && (
+                    <div
+                      data-testid="settings-bulk-ocr-progress"
+                      className="mt-4 rounded-lg border border-green-200 bg-white px-4 py-3 text-sm text-green-900"
+                    >
+                      {bulkOcrProgressMessage ?? '일괄 OCR 업로드를 처리하고 있습니다.'}
+                    </div>
+                  )}
+
+                  {bulkOcrSelectedFiles.length > 0 && (
+                    <div className="mt-4 rounded-lg border border-gray-200 bg-white p-4">
+                      <div
+                        data-testid="settings-bulk-ocr-result-summary"
+                        className="flex items-center justify-between gap-2 text-sm font-medium text-gray-800"
+                      >
+                        <span>선택 파일 {bulkOcrSelectedFiles.length}건</span>
+                        <span>
+                          성공 {bulkOcrResults.filter((item) => item.status === 'success').length}건 / 실패 {bulkOcrResults.filter((item) => item.status === 'error').length}건
+                        </span>
+                      </div>
+                      {bulkOcrResults.length > 0 && (
+                        <ul className="mt-3 space-y-2">
+                          {bulkOcrResults.map((result, index) => (
+                            <li
+                              key={`${result.fileName}-${index}`}
+                              data-testid={`settings-bulk-ocr-result-${index}`}
+                              className={`rounded-lg px-3 py-2 text-sm ${
+                                result.status === 'success'
+                                  ? 'bg-green-50 text-green-800'
+                                  : 'bg-red-50 text-red-800'
+                              }`}
+                            >
+                              <span className="font-semibold">{result.fileName}</span>
+                              {': '}
+                              <span>{result.message}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  )}
 
                   <div className="mt-6 rounded-lg border border-blue-200 bg-blue-50 p-4">
                     <h3 className="mb-2 text-sm font-semibold text-blue-900">OCR 자동 추출 항목</h3>
@@ -1910,8 +2244,10 @@ export default function Settings() {
                   <div>
                     <label className="mb-1 block text-sm font-medium text-gray-700">회사명 *</label>
                     <input
+                      data-testid="settings-company-name-input"
                       type="text"
                       value={companyForm.name}
+                      placeholder="회사명을 입력하세요"
                       disabled={!canEditSettings || isCompanySaving}
                       onChange={(event) => {
                         setCompanyForm((prevState) => ({ ...prevState, name: event.target.value }));
