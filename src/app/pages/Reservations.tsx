@@ -41,6 +41,7 @@ import {
   getReservationsList,
   reportReservationAccident,
   returnReservation,
+  transitionReservation,
 } from '../../services/reservations';
 
 // 드래그 선택 타입 정의
@@ -701,6 +702,8 @@ export default function Reservations() {
   const [isDetailNotFound, setIsDetailNotFound] = useState(false);
   const [isReturnSubmitting, setIsReturnSubmitting] = useState(false);
   const [returnSubmitError, setReturnSubmitError] = useState<string | null>(null);
+  const [isTransitionSubmitting, setIsTransitionSubmitting] = useState(false);
+  const [transitionSubmitError, setTransitionSubmitError] = useState<string | null>(null);
 
   // 동적 날짜 로딩을 위한 상태
   const [totalDaysToShow, setTotalDaysToShow] = useState(42); // 초기 6주
@@ -981,6 +984,11 @@ export default function Reservations() {
     setIsDetailLoading(false);
     setDetailError(null);
     setIsDetailNotFound(false);
+    setShowReturnConfirm(false);
+    setIsReturnSubmitting(false);
+    setReturnSubmitError(null);
+    setIsTransitionSubmitting(false);
+    setTransitionSubmitError(null);
   }, []);
 
   const hydrateReservationDetail = useCallback(async (reservationId: string, fallbackReservation: Reservation) => {
@@ -1221,6 +1229,11 @@ export default function Reservations() {
     const asset = vehicleAssets.find((entry) => entry.vehicleNumber === reservation.vehicleNumber);
     setSelectedVehicleAsset(asset ?? createFallbackVehicleAsset(reservation));
     setActiveTab('reservation');
+    setShowReturnConfirm(false);
+    setIsReturnSubmitting(false);
+    setReturnSubmitError(null);
+    setTransitionSubmitError(null);
+    setIsTransitionSubmitting(false);
     void hydrateReservationDetail(reservation.id, reservation);
   }, [hydrateReservationDetail, vehicleAssets]);
 
@@ -1364,9 +1377,97 @@ export default function Reservations() {
       setReturnSubmitError('차량 반납 처리 권한이 없습니다. 관리자에게 권한을 요청해 주세요.');
       return;
     }
+    if (!selectedReservation || selectedReservation.type !== 'rental') {
+      setReturnSubmitError('대여중 상태에서만 차량 반납 처리가 가능합니다.');
+      return;
+    }
+    setTransitionSubmitError(null);
     setReturnSubmitError(null);
     setShowReturnConfirm(true);
-  }, [canWriteReservations]);
+  }, [canWriteReservations, selectedReservation]);
+
+  const handleStartRentalClick = useCallback(async () => {
+    if (!canWriteReservations) {
+      setTransitionSubmitError('대여 시작 처리 권한이 없습니다. 관리자에게 권한을 요청해 주세요.');
+      return;
+    }
+
+    if (!selectedReservation || isTransitionSubmitting) {
+      return;
+    }
+
+    if (selectedReservation.type !== 'reservation') {
+      setTransitionSubmitError('대여 시작할 수 없는 예약입니다.');
+      return;
+    }
+
+    setIsTransitionSubmitting(true);
+    setTransitionSubmitError(null);
+
+    try {
+      const payload = await transitionReservation(selectedReservation.id, {
+        to: '대여중',
+      });
+      const fallbackReservation: Reservation = {
+        ...selectedReservation,
+        type: 'rental',
+      };
+      const updatedReservation = toReservationDetail(payload, fallbackReservation);
+
+      setReservationsData((prev) => prev.map((reservation) => (
+        reservation.id === updatedReservation.id ? updatedReservation : reservation
+      )));
+      setSelectedReservation(updatedReservation);
+      const matchedAsset = vehicleAssets.find((asset) => asset.vehicleNumber === updatedReservation.vehicleNumber);
+      if (matchedAsset) {
+        setSelectedVehicleAsset({
+          ...matchedAsset,
+          status: toVehicleStatusFromReservation(updatedReservation.type),
+        });
+      } else {
+        setSelectedVehicleAsset(createFallbackVehicleAsset(updatedReservation));
+      }
+
+      await hydrateReservationsData();
+      void hydrateReservationDetail(updatedReservation.id, updatedReservation);
+      toast.success('대여가 시작되었습니다.');
+    } catch (error) {
+      if (error instanceof ApiError) {
+        if (error.status === 400) {
+          setTransitionSubmitError(error.message || '대여 시작 요청값을 확인해 주세요.');
+          return;
+        }
+        if (error.status === 403) {
+          setTransitionSubmitError('대여 시작 처리 권한이 없습니다. 관리자에게 권한을 요청해 주세요.');
+          return;
+        }
+        if (error.status === 404) {
+          setTransitionSubmitError('선택한 예약을 찾을 수 없습니다. 최신 목록을 확인해 주세요.');
+          void hydrateReservationsData();
+          return;
+        }
+        if (error.status === 409) {
+          setTransitionSubmitError(error.message || '상태 전이 충돌이 발생했습니다. 최신 상태를 확인해 주세요.');
+          void hydrateReservationsData();
+          void hydrateReservationDetail(selectedReservation.id, selectedReservation);
+          return;
+        }
+        if (isRetryableMutationError(error)) {
+          setTransitionSubmitError(RETRY_TOAST_MESSAGE);
+          toast.error(RETRY_TOAST_MESSAGE);
+          return;
+        }
+
+        setTransitionSubmitError(error.message || '대여 시작 처리 중 오류가 발생했습니다.');
+        return;
+      }
+
+      setTransitionSubmitError('대여 시작 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.');
+      toast.error(RETRY_TOAST_MESSAGE);
+    } finally {
+      setIsTransitionSubmitting(false);
+    }
+  }, [canWriteReservations, hydrateReservationDetail, hydrateReservationsData, isTransitionSubmitting, selectedReservation, vehicleAssets]);
 
   const handleConfirmReturn = useCallback(async () => {
     if (!canWriteReservations) {
@@ -1378,8 +1479,8 @@ export default function Reservations() {
       return;
     }
 
-    if (selectedReservation.type === 'return') {
-      setReturnSubmitError('이미 반납 처리된 예약입니다.');
+    if (selectedReservation.type !== 'rental') {
+      setReturnSubmitError('대여중 상태에서만 차량 반납 처리가 가능합니다.');
       return;
     }
 
@@ -2274,6 +2375,14 @@ export default function Reservations() {
 
               {/* 액션 버튼 */}
               <div className="p-6 border-t border-gray-200 flex gap-3 flex-wrap">
+                {transitionSubmitError && (
+                  <div
+                    data-testid="reservation-transition-error"
+                    className="w-full rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
+                  >
+                    {transitionSubmitError}
+                  </div>
+                )}
                 <button
                   onClick={() => {
                     if (!canViewAssets) {
@@ -2321,7 +2430,17 @@ export default function Reservations() {
                     예약 취소
                   </button>
                 )}
-                {selectedReservation.type !== 'return' && (
+                {selectedReservation.type === 'reservation' && (
+                  <button
+                    onClick={handleStartRentalClick}
+                    data-testid="reservation-start-button"
+                    disabled={!canWriteReservations || isTransitionSubmitting}
+                    className="flex-1 min-w-[200px] px-4 py-3 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 font-medium disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {isTransitionSubmitting ? '처리 중...' : '대여 시작'}
+                  </button>
+                )}
+                {selectedReservation.type === 'rental' && (
                   <button
                     onClick={handleReturnClick}
                     data-testid="reservation-return-button"

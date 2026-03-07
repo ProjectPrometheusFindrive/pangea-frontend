@@ -35,6 +35,12 @@ export interface ReturnReservationPayload {
   odometer?: number;
 }
 
+export interface TransitionReservationPayload {
+  to: '예약중' | '대여중' | '완료';
+  reason?: string;
+  expectedVersion?: number;
+}
+
 export interface AccidentReportPayload {
   accidentDate: string;
   accidentHour: string;
@@ -133,6 +139,19 @@ export function returnReservation(
 ): Promise<unknown> {
   return apiClient.requestData<unknown>({
     path: `/api/v2/reservations/${encodeURIComponent(reservationId)}/return`,
+    method: 'POST',
+    body: payload,
+    signal: options.signal,
+  });
+}
+
+export function transitionReservation(
+  reservationId: string,
+  payload: TransitionReservationPayload,
+  options: ReservationsRequestOptions = {},
+): Promise<unknown> {
+  return apiClient.requestData<unknown>({
+    path: `/api/v2/reservations/${encodeURIComponent(reservationId)}/transitions`,
     method: 'POST',
     body: payload,
     signal: options.signal,
