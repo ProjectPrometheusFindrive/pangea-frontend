@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { ApiError } from '../../services/api';
 import { getCompany, patchCompany, type Company, type CompanyUpdateRequest } from '../../services/company';
+import { useAuth } from './AuthContext';
 
 interface CompanyContextType {
   company: Company | null;
@@ -63,6 +64,18 @@ function writeCachedCompany(company: Company): void {
   }
 }
 
+function clearCachedCompany(): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    window.localStorage.removeItem(COMPANY_CACHE_KEY);
+  } catch {
+    // localStorage 접근이 제한된 환경에서는 캐시 제거를 건너뛴다.
+  }
+}
+
 function toErrorMessage(error: unknown, fallbackMessage: string): string {
   if (error instanceof ApiError && error.message) {
     return error.message;
@@ -74,6 +87,7 @@ function toErrorMessage(error: unknown, fallbackMessage: string): string {
 }
 
 export function CompanyProvider({ children }: { children: ReactNode }) {
+  const { status: authStatus, isBootstrapping: isAuthBootstrapping, isAuthenticated } = useAuth();
   const [company, setCompany] = useState<Company | null>(() => readCachedCompany());
   const [isLoading, setIsLoading] = useState(true);
   const [isUpdating, setIsUpdating] = useState(false);
@@ -114,8 +128,20 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
+    if (authStatus === 'checking' || isAuthBootstrapping) {
+      return;
+    }
+
+    if (!isAuthenticated) {
+      setCompany(null);
+      setError(null);
+      setIsLoading(false);
+      clearCachedCompany();
+      return;
+    }
+
     void refreshCompany();
-  }, [refreshCompany]);
+  }, [authStatus, isAuthBootstrapping, isAuthenticated, refreshCompany]);
 
   const contextValue = useMemo<CompanyContextType>(() => ({
     company,

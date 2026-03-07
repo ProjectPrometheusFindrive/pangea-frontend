@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router';
 import { CheckCircle2, Loader2, Paperclip, RefreshCw, Search, Send } from 'lucide-react';
 
 import { Layout } from '../components/Layout';
-import { useAuth } from '../context/AuthContext';
+import { useAuthorization } from '../context/AuthorizationContext';
+import { ACTION_PERMISSIONS } from '../authorization';
 import {
   getPageErrorActionLabel,
   handlePageErrorAction,
@@ -260,6 +261,13 @@ function toSupportErrorState(error: unknown, fallbackMessage: string): SupportEr
     }
 
     if (error.status === 400 || error.code === 'VALIDATION_ERROR' || hasFieldErrors) {
+      if (error.message.includes('companyId is required for super_admin')) {
+        return {
+          message: '조회할 회사를 지정한 뒤 다시 시도해 주세요.',
+          kind: 'unknown',
+          fieldErrors,
+        };
+      }
       return {
         message: hasFieldErrors ? '입력값을 확인해 주세요.' : (error.message || fallbackMessage),
         kind: 'unknown',
@@ -1029,11 +1037,11 @@ function SupportAdminManagementView() {
 }
 
 export default function SupportCenter() {
-  const { user } = useAuth();
+  const { canPerformAction } = useAuthorization();
   const navigate = useNavigate();
-  const isSuperAdmin = (user?.role ?? '').trim().toLowerCase() === 'super_admin';
+  const canManageSupport = canPerformAction(ACTION_PERMISSIONS.supportManage);
 
-  if (isSuperAdmin) {
+  if (canManageSupport) {
     return <SupportAdminManagementView />;
   }
 

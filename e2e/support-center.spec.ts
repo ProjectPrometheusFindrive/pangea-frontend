@@ -173,4 +173,26 @@ test.describe('Support Center super_admin management view', () => {
     await expect(page.getByTestId('support-admin-status-success')).toContainText('문의 상태가 업데이트되었습니다.');
     await expect(page.getByTestId('support-admin-detail-status')).toContainText('처리중');
   });
+
+  test('admin also sees the management view instead of the submit form', async ({ page }) => {
+    await installApiMocks(page, {
+      user: {
+        role: 'admin',
+      },
+      handlers: {
+        'GET /api/v2/support/tickets': async ({ route }) => {
+          await fulfillSuccess(route, {
+            items: [],
+            limit: 200,
+            offset: 0,
+          });
+        },
+      },
+    });
+
+    await loginViaUi(page, 'admin', { returnUrl: '/support-center' });
+
+    await expect(page.getByTestId('support-admin-heading')).toBeVisible();
+    await expect(page.getByText('문의 등록')).toHaveCount(0);
+  });
 });

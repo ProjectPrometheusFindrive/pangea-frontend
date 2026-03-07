@@ -28,6 +28,10 @@ export interface AuthLogoutData {
   message: string;
 }
 
+export interface AuthWithdrawData {
+  message?: string;
+}
+
 export interface AuthRefreshData {
   token: string;
   expiresIn: number;
@@ -102,6 +106,13 @@ export function postRefresh(): Promise<AuthRefreshData> {
 export function postLogout(): Promise<AuthLogoutData> {
   return apiClient.requestData<AuthLogoutData>({
     path: '/api/v2/auth/logout',
+    method: 'POST',
+  });
+}
+
+export function postWithdraw(): Promise<AuthWithdrawData> {
+  return apiClient.requestData<AuthWithdrawData>({
+    path: '/api/v2/auth/withdraw',
     method: 'POST',
   });
 }

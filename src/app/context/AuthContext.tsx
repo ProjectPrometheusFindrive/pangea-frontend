@@ -594,7 +594,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   return (
     <AuthContext.Provider value={contextValue}>
       {children}
-      {isSessionExpiredModalOpen && (
+      {isSessionExpiredModalOpen && (typeof window === 'undefined' || !isLoginPath(window.location.pathname)) && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 px-4">
           <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl">
             <h2 className="text-lg font-semibold text-gray-900">세션이 만료되었습니다</h2>

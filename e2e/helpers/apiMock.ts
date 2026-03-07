@@ -83,12 +83,18 @@ const ROLE_DEFAULT_PERMISSIONS: Record<MockUser['role'], readonly string[]> = {
   admin: [
     ...MEMBER_ROUTE_PERMISSIONS,
     ...MEMBER_ACTION_PERMISSIONS,
+    'action.revenue.write',
+    'action.payments.write',
+    'action.support.manage',
     'action.settings.write',
     'action.settings.members.write',
   ],
   super_admin: [
     ...MEMBER_ROUTE_PERMISSIONS,
     ...MEMBER_ACTION_PERMISSIONS,
+    'action.revenue.write',
+    'action.payments.write',
+    'action.support.manage',
     'action.settings.write',
     'action.settings.members.write',
   ],

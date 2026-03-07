@@ -413,30 +413,38 @@ export function AuthorizationProvider({ children }: { children: ReactNode }) {
       return undefined;
     }
 
-    const runRefreshOnFocus = () => {
+    const runRefreshOnFocus = async () => {
       const now = Date.now();
       if (now - lastFocusRefreshAtRef.current < FOCUS_REFRESH_MIN_INTERVAL_MS) {
         return;
       }
       lastFocusRefreshAtRef.current = now;
-      void refreshSession({ silent: true });
+      try {
+        await refreshSession({ silent: true });
+      } finally {
+        await refreshAuthorization({ force: true });
+      }
     };
 
     const handleVisibilityChange = () => {
       if (document.visibilityState !== 'visible') {
         return;
       }
-      runRefreshOnFocus();
+      void runRefreshOnFocus();
     };
 
-    window.addEventListener('focus', runRefreshOnFocus);
+    const handleFocus = () => {
+      void runRefreshOnFocus();
+    };
+
+    window.addEventListener('focus', handleFocus);
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
-      window.removeEventListener('focus', runRefreshOnFocus);
+      window.removeEventListener('focus', handleFocus);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [isAuthenticated, refreshSession]);
+  }, [isAuthenticated, refreshAuthorization, refreshSession]);
 
   const hasPermissionValue = useCallback((permission: AppPermission) => {
     return hasPermission(permissionSet, permission);
