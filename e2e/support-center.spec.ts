@@ -100,6 +100,9 @@ test.describe('Support Center super_admin management view', () => {
     ];
 
     await installApiMocks(page, {
+      user: {
+        role: 'super_admin',
+      },
       handlers: {
         'GET /api/v2/support/tickets': async ({ route, request }) => {
           const url = new URL(request.url());
