@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { delay, fulfillError, fulfillSuccess, installApiMocks } from './helpers/apiMock';
+import { TEST_IMAGE_FILE } from './helpers/files';
 import { loginViaUi } from './helpers/session';
 
 interface AssetFixture {
@@ -149,5 +150,143 @@ test.describe('BK-091 Assets E2E', () => {
     await page.getByTestId('asset-detail-save-button').click();
 
     await expect(page.getByTestId('asset-detail-save-error')).toContainText('차량 자산 수정 권한이 없습니다. 관리자에게 권한을 요청해 주세요.');
+  });
+
+  test('OCR 400 오류 시 실제 원인 메시지를 노출하고 생성 요청에 companyId를 포함한다', async ({ page }) => {
+    let createPayload: Record<string, unknown> | null = null;
+    let extractRequestCount = 0;
+
+    await installApiMocks(page, {
+      handlers: {
+        'GET /api/v2/assets': async ({ route }) => {
+          await fulfillSuccess(route, {
+            items: [],
+            total: 0,
+            page: 1,
+            pageSize: 20,
+          });
+        },
+        'POST /api/v2/assets/upload': async ({ route }) => {
+          await fulfillSuccess(route, {
+            uploadUrl: 'https://signed.example/upload',
+            objectName: 'uploads/company/company-001/docs/fixture.png',
+            contentType: 'image/png',
+          });
+        },
+        'POST /api/v2/ocr/extract': async ({ route }) => {
+          extractRequestCount += 1;
+          const jobId = extractRequestCount === 1 ? 'OCR-FAIL-001' : 'OCR-SUCCESS-001';
+          await fulfillSuccess(route, {
+            jobId,
+            status: 'queued',
+            docType: 'registrationDoc',
+            objectName: 'uploads/company/company-001/docs/fixture.png',
+            deduped: false,
+            createdAt: '2026-03-07T00:00:00.000Z',
+            updatedAt: '2026-03-07T00:00:00.000Z',
+            extractedFields: [],
+            warnings: [],
+          }, 202);
+        },
+        'GET /api/v2/ocr/jobs/OCR-FAIL-001': async ({ route }) => {
+          await fulfillError(route, 400, 'VALIDATION_ERROR', 'Empty OCR text; cannot extract fields.');
+        },
+        'GET /api/v2/ocr/jobs/OCR-SUCCESS-001': async ({ route }) => {
+          await fulfillSuccess(route, {
+            jobId: 'OCR-SUCCESS-001',
+            status: 'succeeded',
+            docType: 'registrationDoc',
+            objectName: 'uploads/company/company-001/docs/fixture.png',
+            deduped: false,
+            createdAt: '2026-03-07T00:00:00.000Z',
+            updatedAt: '2026-03-07T00:00:02.000Z',
+            extractedFields: [
+              { name: 'plate', value: '12가3456', confidence: 0.99 },
+              { name: 'vin', value: 'KMH12A34560000001', confidence: 0.99 },
+              { name: 'model', value: '아반떼', confidence: 0.95 },
+              { name: 'year', value: '2024', confidence: 0.95 },
+            ],
+            warnings: [],
+          });
+        },
+        'POST /api/v2/assets': async ({ route, request }) => {
+          createPayload = request.postDataJSON() as Record<string, unknown>;
+          await fulfillSuccess(route, {
+            id: 'ASSET-NEW-001',
+            vehicleNumber: '12가3456',
+            plate: '12가3456',
+            model: '아반떼',
+            status: '가용',
+            vin: 'KMH12A34560000001',
+            year: '2024',
+            owner: '홍길동',
+            insuranceExpiry: '2026-12-31',
+            nextInspection: '2026-06-30',
+            issues: [],
+            version: 1,
+            updatedAt: '2026-03-07T00:00:00.000Z',
+            companyId: 'company-001',
+          }, 201);
+        },
+      },
+    });
+
+    await page.route('https://signed.example/**', async (route) => {
+      await route.fulfill({ status: 200, body: '' });
+    });
+
+    await loginViaUi(page, 'member', { returnUrl: '/assets' });
+    await page.getByRole('button', { name: '차량 자산 등록' }).click();
+
+    const fileInputs = page.locator('input[type="file"]');
+    await fileInputs.first().setInputFiles(TEST_IMAGE_FILE);
+    await page.getByRole('button', { name: 'OCR 추출 시작' }).click();
+    await expect(page.getByText('차량등록증: Empty OCR text; cannot extract fields. 수동 입력 모드로 계속 진행할 수 있습니다.')).toBeVisible();
+
+    await page.getByRole('button', { name: 'OCR 다시 실행' }).click();
+    await expect(page.getByText('OCR 결과를 폼에 자동 반영했습니다. 저장 전 값이 정확한지 확인해 주세요.')).toBeVisible();
+    await page.getByRole('button', { name: '확인 및 저장' }).click();
+
+    await expect.poll(() => createPayload).not.toBeNull();
+    expect(createPayload?.companyId).toBe('company-001');
+  });
+
+  test('자산 상세에서 삭제 버튼으로 차량을 archive 처리한다', async ({ page }) => {
+    let deleted = false;
+
+    page.on('dialog', (dialog) => dialog.accept());
+
+    await installApiMocks(page, {
+      handlers: {
+        'GET /api/v2/assets': async ({ route }) => {
+          await fulfillSuccess(route, {
+            items: deleted ? [] : [buildAsset('아반떼', 1)],
+            total: deleted ? 0 : 1,
+            page: 1,
+            pageSize: 20,
+          });
+        },
+        'GET /api/v2/assets/ASSET-001': async ({ route }) => {
+          await fulfillSuccess(route, buildAsset('아반떼', 1));
+        },
+        'GET /api/v2/assets/ASSET-001/history': async ({ route }) => {
+          await fulfillSuccess(route, { items: [] });
+        },
+        'DELETE /api/v2/assets/ASSET-001': async ({ route }) => {
+          deleted = true;
+          await fulfillSuccess(route, { id: 'ASSET-001', deleted: true, archived: true });
+        },
+      },
+    });
+
+    await loginViaUi(page, 'member', { returnUrl: '/assets' });
+    await expect(page.getByTestId('asset-row-ASSET-001')).toBeVisible();
+    await page.getByTestId('asset-row-ASSET-001').click();
+    await expect(page.getByTestId('asset-detail-modal')).toBeVisible();
+
+    await page.getByTestId('asset-detail-delete-button').click();
+
+    await expect(page.getByText('차량 자산이 삭제되었습니다.')).toBeVisible();
+    await expect(page.getByTestId('asset-row-ASSET-001')).toHaveCount(0);
   });
 });
