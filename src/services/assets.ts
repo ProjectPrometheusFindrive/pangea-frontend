@@ -30,6 +30,7 @@ export interface PatchAssetPayload {
   category?: string;
   color?: string;
   model?: string;
+  vehicleType?: string;
   year?: number;
   status?: string;
   contractStatus?: string;
