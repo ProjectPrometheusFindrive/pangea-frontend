@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
 import { useNavigate } from 'react-router';
 import { CheckCircle2, Loader2, Paperclip, RefreshCw, Search, Send } from 'lucide-react';
 
 import { Layout } from '../components/Layout';
+import { useAuth } from '../context/AuthContext';
 import {
   getPageErrorActionLabel,
   handlePageErrorAction,
@@ -14,9 +15,11 @@ import {
   createSupportTicket,
   getSupportCategories,
   getSupportTicketDetail,
+  listSupportTickets,
   type SupportCategory,
   type SupportTicket,
   type SupportTicketStatus,
+  updateSupportTicketStatus,
 } from '../../services/support';
 
 type SupportField = 'category' | 'title' | 'content' | 'contactPhone' | 'attachments';
@@ -57,6 +60,19 @@ const MAX_ATTACHMENT_COUNT = toPositiveInteger(
   import.meta.env.VITE_SUPPORT_ATTACHMENT_MAX_COUNT,
   DEFAULT_ATTACHMENT_MAX_COUNT,
 );
+const SUPPORT_STATUS_TRANSITIONS: Record<string, SupportTicketStatus[]> = {
+  RECEIVED: ['IN_PROGRESS', 'CLOSED'],
+  IN_PROGRESS: ['RESOLVED', 'CLOSED'],
+  RESOLVED: ['CLOSED'],
+  CLOSED: [],
+};
+
+const DEFAULT_SUPPORT_ADMIN_FILTERS = {
+  companyId: '',
+  status: '',
+  from: '',
+  to: '',
+};
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
@@ -365,8 +381,618 @@ function buildSubmitFingerprint(payload: {
   });
 }
 
-export default function SupportCenter() {
+function isSameSupportTicket(left: SupportTicket | null, right: SupportTicket | null): boolean {
+  if (!left || !right) {
+    return false;
+  }
+
+  return (left.companyId ?? '') === (right.companyId ?? '') && left.id === right.id;
+}
+
+function toSupportTicketRowTestId(ticket: SupportTicket): string {
+  return `support-admin-ticket-row-${ticket.companyId ?? 'unknown'}-${ticket.id}`.replace(/[^a-zA-Z0-9_-]/g, '-');
+}
+
+function SupportAdminManagementView() {
   const navigate = useNavigate();
+  const [draftFilters, setDraftFilters] = useState(DEFAULT_SUPPORT_ADMIN_FILTERS);
+  const [appliedFilters, setAppliedFilters] = useState(DEFAULT_SUPPORT_ADMIN_FILTERS);
+  const [reloadNonce, setReloadNonce] = useState(0);
+  const [tickets, setTickets] = useState<SupportTicket[]>([]);
+  const [selectedTicket, setSelectedTicket] = useState<SupportTicket | null>(null);
+  const [ticketsError, setTicketsError] = useState<SupportErrorState | null>(null);
+  const [detailError, setDetailError] = useState<SupportErrorState | null>(null);
+  const [statusUpdateError, setStatusUpdateError] = useState<SupportErrorState | null>(null);
+  const [statusUpdateSuccess, setStatusUpdateSuccess] = useState<string | null>(null);
+  const [isTicketsLoading, setIsTicketsLoading] = useState(true);
+  const [isDetailLoading, setIsDetailLoading] = useState(false);
+  const [isStatusUpdating, setIsStatusUpdating] = useState(false);
+  const [statusDraft, setStatusDraft] = useState<SupportTicketStatus>('IN_PROGRESS');
+  const [statusNote, setStatusNote] = useState('');
+
+  const availableStatusTransitions = useMemo<SupportTicketStatus[]>(() => {
+    return SUPPORT_STATUS_TRANSITIONS[normalizeSupportStatus(selectedTicket?.status ?? 'RECEIVED')] ?? [];
+  }, [selectedTicket]);
+
+  useEffect(() => {
+    if (!selectedTicket) {
+      setStatusDraft('IN_PROGRESS');
+      setStatusNote('');
+      setStatusUpdateError(null);
+      setStatusUpdateSuccess(null);
+      return;
+    }
+
+    setStatusDraft(availableStatusTransitions[0] ?? normalizeSupportStatus(selectedTicket.status));
+    setStatusNote('');
+    setStatusUpdateError(null);
+  }, [availableStatusTransitions, selectedTicket]);
+
+  useEffect(() => {
+    const abortController = new AbortController();
+    let isActive = true;
+
+    setIsTicketsLoading(true);
+    setTicketsError(null);
+
+    void listSupportTickets({
+      limit: 200,
+      offset: 0,
+      companyId: appliedFilters.companyId || undefined,
+      status: appliedFilters.status,
+      from: appliedFilters.from,
+      to: appliedFilters.to,
+      signal: abortController.signal,
+    }).then((items) => {
+      if (!isActive) {
+        return;
+      }
+
+      setTickets(items);
+      setSelectedTicket((previousTicket) => {
+        if (!previousTicket) {
+          return null;
+        }
+
+        const matchedTicket = items.find((item) => isSameSupportTicket(item, previousTicket));
+        return matchedTicket ?? null;
+      });
+    }).catch((error) => {
+      if (!isActive || (error instanceof ApiError && error.code === 'ABORTED')) {
+        return;
+      }
+
+      setTicketsError(toSupportErrorState(error, '문의 목록을 불러오는 중 오류가 발생했습니다.'));
+    }).finally(() => {
+      if (!isActive) {
+        return;
+      }
+      setIsTicketsLoading(false);
+    });
+
+    return () => {
+      isActive = false;
+      abortController.abort();
+    };
+  }, [appliedFilters, reloadNonce]);
+
+  const openTicketDetail = useCallback(async (ticket: SupportTicket) => {
+    setSelectedTicket(ticket);
+    setDetailError(null);
+    setStatusUpdateError(null);
+    setStatusUpdateSuccess(null);
+    setIsDetailLoading(true);
+
+    try {
+      const detail = await getSupportTicketDetail(ticket.id, {
+        companyId: ticket.companyId,
+      });
+      setSelectedTicket(detail);
+    } catch (error) {
+      setSelectedTicket(ticket);
+      setDetailError(toSupportErrorState(error, '문의 상세를 불러오는 중 오류가 발생했습니다.'));
+    } finally {
+      setIsDetailLoading(false);
+    }
+  }, []);
+
+  const handleAdminFilterSubmit = useCallback((event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setAppliedFilters({ ...draftFilters });
+  }, [draftFilters]);
+
+  const handleAdminFilterReset = useCallback(() => {
+    setDraftFilters({ ...DEFAULT_SUPPORT_ADMIN_FILTERS });
+    setAppliedFilters({ ...DEFAULT_SUPPORT_ADMIN_FILTERS });
+    setSelectedTicket(null);
+    setReloadNonce((previousValue) => previousValue + 1);
+  }, []);
+
+  const handleTicketsErrorAction = useCallback(() => {
+    if (!ticketsError) {
+      return;
+    }
+    handlePageErrorAction(ticketsError.kind, navigate);
+  }, [navigate, ticketsError]);
+
+  const handleDetailErrorAction = useCallback(() => {
+    if (!detailError) {
+      return;
+    }
+    handlePageErrorAction(detailError.kind, navigate);
+  }, [detailError, navigate]);
+
+  const submitStatusUpdate = useCallback(async () => {
+    if (!selectedTicket || availableStatusTransitions.length === 0 || isStatusUpdating) {
+      return;
+    }
+
+    setStatusUpdateError(null);
+    setStatusUpdateSuccess(null);
+    setIsStatusUpdating(true);
+
+    try {
+      const updatedTicket = await updateSupportTicketStatus(
+        selectedTicket.id,
+        {
+          status: statusDraft,
+          note: statusNote,
+        },
+        {
+          companyId: selectedTicket.companyId,
+        },
+      );
+
+      setSelectedTicket(updatedTicket);
+      setTickets((previousTickets) => previousTickets.map((ticket) => (
+        isSameSupportTicket(ticket, selectedTicket)
+          ? { ...ticket, ...updatedTicket }
+          : ticket
+      )));
+      setStatusUpdateSuccess('문의 상태가 업데이트되었습니다.');
+      setReloadNonce((previousValue) => previousValue + 1);
+    } catch (error) {
+      setStatusUpdateError(toSupportErrorState(error, '문의 상태 변경 중 오류가 발생했습니다.'));
+    } finally {
+      setIsStatusUpdating(false);
+    }
+  }, [availableStatusTransitions.length, isStatusUpdating, selectedTicket, statusDraft, statusNote]);
+
+  const ticketsErrorActionLabel = getPageErrorActionLabel(ticketsError?.kind ?? null);
+  const detailErrorActionLabel = getPageErrorActionLabel(detailError?.kind ?? null);
+  const statusUpdateErrorActionLabel = getPageErrorActionLabel(statusUpdateError?.kind ?? null);
+
+  return (
+    <Layout title="고객센터">
+      <div className="space-y-4 p-6">
+        <div className="rounded-lg bg-gradient-to-r from-slate-800 to-blue-700 px-5 py-4 text-white">
+          <h2 className="text-lg font-bold" data-testid="support-admin-heading">고객센터 문의 관리</h2>
+          <p className="mt-1 text-sm text-blue-100">
+            전체 테넌트 문의를 조회하고 상태를 업데이트할 수 있습니다.
+          </p>
+        </div>
+
+        <form onSubmit={handleAdminFilterSubmit} className="rounded-lg bg-white p-5 shadow-sm">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+            <div>
+              <h3 className="text-base font-semibold text-gray-900">필터</h3>
+              <p className="mt-1 text-sm text-gray-500">기본 진입 시 전체 테넌트 문의를 바로 로드합니다.</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleAdminFilterReset}
+                className="rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+              >
+                초기화
+              </button>
+              <button
+                type="submit"
+                data-testid="support-admin-filter-apply"
+                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+              >
+                필터 적용
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <div>
+              <label htmlFor="support-admin-filter-company" className="mb-1 block text-sm font-semibold text-gray-700">
+                테넌트
+              </label>
+              <input
+                id="support-admin-filter-company"
+                data-testid="support-admin-filter-company"
+                type="text"
+                value={draftFilters.companyId}
+                onChange={(event) => setDraftFilters((previousValue) => ({
+                  ...previousValue,
+                  companyId: event.target.value,
+                }))}
+                placeholder="예) C1"
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+              />
+            </div>
+
+            <div>
+              <label htmlFor="support-admin-filter-status" className="mb-1 block text-sm font-semibold text-gray-700">
+                상태
+              </label>
+              <select
+                id="support-admin-filter-status"
+                value={draftFilters.status}
+                onChange={(event) => setDraftFilters((previousValue) => ({
+                  ...previousValue,
+                  status: event.target.value,
+                }))}
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+              >
+                <option value="">전체 상태</option>
+                <option value="RECEIVED">접수됨</option>
+                <option value="IN_PROGRESS">처리중</option>
+                <option value="RESOLVED">해결됨</option>
+                <option value="CLOSED">종료</option>
+              </select>
+            </div>
+
+            <div>
+              <label htmlFor="support-admin-filter-from" className="mb-1 block text-sm font-semibold text-gray-700">
+                시작일
+              </label>
+              <input
+                id="support-admin-filter-from"
+                type="date"
+                value={draftFilters.from}
+                onChange={(event) => setDraftFilters((previousValue) => ({
+                  ...previousValue,
+                  from: event.target.value,
+                }))}
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+              />
+            </div>
+
+            <div>
+              <label htmlFor="support-admin-filter-to" className="mb-1 block text-sm font-semibold text-gray-700">
+                종료일
+              </label>
+              <input
+                id="support-admin-filter-to"
+                type="date"
+                value={draftFilters.to}
+                onChange={(event) => setDraftFilters((previousValue) => ({
+                  ...previousValue,
+                  to: event.target.value,
+                }))}
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+              />
+            </div>
+          </div>
+        </form>
+
+        {ticketsError && (
+          <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            <p>{ticketsError.message}</p>
+            <div className="mt-2 flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setReloadNonce((previousValue) => previousValue + 1)}
+                className="rounded-md border border-red-200 bg-white px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-100"
+              >
+                다시 시도
+              </button>
+              {ticketsErrorActionLabel && (
+                <button
+                  type="button"
+                  onClick={handleTicketsErrorAction}
+                  className="rounded-md border border-red-200 bg-white px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-100"
+                >
+                  {ticketsErrorActionLabel}
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(360px,0.85fr)]">
+          <div className="rounded-lg bg-white p-5 shadow-sm">
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <div>
+                <h3 className="text-base font-semibold text-gray-900">문의 목록</h3>
+                <p className="mt-1 text-sm text-gray-500">
+                  현재 조건에 맞는 문의 {tickets.length}건
+                </p>
+              </div>
+              {isTicketsLoading && (
+                <div className="inline-flex items-center gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  불러오는 중...
+                </div>
+              )}
+            </div>
+
+            {isTicketsLoading && tickets.length === 0 ? (
+              <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50 px-4 py-10 text-center text-sm text-gray-500">
+                문의 목록을 불러오는 중입니다.
+              </div>
+            ) : tickets.length === 0 ? (
+              <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50 px-4 py-10 text-center text-sm text-gray-500">
+                필터 조건에 맞는 문의가 없습니다.
+              </div>
+            ) : (
+              <div className="space-y-3" data-testid="support-admin-ticket-list">
+                {tickets.map((ticket) => {
+                  const isSelected = isSameSupportTicket(ticket, selectedTicket);
+                  return (
+                    <button
+                      key={`${ticket.companyId ?? 'unknown'}-${ticket.id}`}
+                      type="button"
+                      data-testid={toSupportTicketRowTestId(ticket)}
+                      onClick={() => {
+                        void openTicketDetail(ticket);
+                      }}
+                      className={`w-full rounded-xl border px-4 py-3 text-left transition ${
+                        isSelected
+                          ? 'border-blue-400 bg-blue-50 shadow-sm'
+                          : 'border-gray-200 bg-white hover:border-blue-200 hover:bg-gray-50'
+                      }`}
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <span className="text-sm font-semibold text-gray-900">{ticket.id}</span>
+                          <span className="rounded-md bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700">
+                            {ticket.companyId ?? '-'}
+                          </span>
+                        </div>
+                        <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${toSupportStatusBadgeClass(ticket.status)}`}>
+                          {toSupportStatusLabel(ticket.status)}
+                        </span>
+                      </div>
+                      <p className="mt-2 text-sm font-medium text-gray-900">{ticket.title}</p>
+                      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500">
+                        <span>카테고리: {ticket.category}</span>
+                        <span>등록: {formatDateTime(ticket.createdAt)}</span>
+                        {ticket.requesterName && <span>요청자: {ticket.requesterName}</span>}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          <div className="rounded-lg bg-white p-5 shadow-sm">
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <div>
+                <h3 className="text-base font-semibold text-gray-900">문의 상세</h3>
+                <p className="mt-1 text-sm text-gray-500">목록에서 문의를 선택하면 상세와 상태 변경이 가능합니다.</p>
+              </div>
+              {isDetailLoading && (
+                <div className="inline-flex items-center gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  불러오는 중...
+                </div>
+              )}
+            </div>
+
+            {detailError && (
+              <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                <p>{detailError.message}</p>
+                <div className="mt-2 flex items-center gap-2">
+                  {selectedTicket && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void openTicketDetail(selectedTicket);
+                      }}
+                      className="rounded-md border border-red-200 bg-white px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-100"
+                    >
+                      다시 시도
+                    </button>
+                  )}
+                  {detailErrorActionLabel && (
+                    <button
+                      type="button"
+                      onClick={handleDetailErrorAction}
+                      className="rounded-md border border-red-200 bg-white px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-100"
+                    >
+                      {detailErrorActionLabel}
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {statusUpdateError && (
+              <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                <p>{statusUpdateError.message}</p>
+                <div className="mt-2 flex items-center gap-2">
+                  {statusUpdateError.kind === 'retryable' && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void submitStatusUpdate();
+                      }}
+                      className="rounded-md border border-red-200 bg-white px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-100"
+                    >
+                      다시 시도
+                    </button>
+                  )}
+                  {statusUpdateErrorActionLabel && (
+                    <button
+                      type="button"
+                      onClick={() => handlePageErrorAction(statusUpdateError.kind, navigate)}
+                      className="rounded-md border border-red-200 bg-white px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-100"
+                    >
+                      {statusUpdateErrorActionLabel}
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {statusUpdateSuccess && (
+              <div
+                className="mb-4 rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700"
+                data-testid="support-admin-status-success"
+              >
+                {statusUpdateSuccess}
+              </div>
+            )}
+
+            {!selectedTicket ? (
+              <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50 px-4 py-10 text-center text-sm text-gray-500">
+                왼쪽 목록에서 문의를 선택해 주세요.
+              </div>
+            ) : (
+              <div className="space-y-4" data-testid="support-admin-detail">
+                <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-sm font-semibold text-gray-900">{selectedTicket.id}</span>
+                    <span
+                      className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${toSupportStatusBadgeClass(selectedTicket.status)}`}
+                      data-testid="support-admin-detail-status"
+                    >
+                      {toSupportStatusLabel(selectedTicket.status)}
+                    </span>
+                  </div>
+
+                  <dl className="mt-3 grid gap-2 text-sm text-gray-700 sm:grid-cols-2">
+                    <div>
+                      <dt className="text-xs text-gray-500">테넌트</dt>
+                      <dd className="font-medium text-gray-900" data-testid="support-admin-detail-company">
+                        {selectedTicket.companyId ?? '-'}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs text-gray-500">카테고리</dt>
+                      <dd className="font-medium text-gray-900">{selectedTicket.category}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs text-gray-500">요청자</dt>
+                      <dd className="font-medium text-gray-900">{selectedTicket.requesterName ?? selectedTicket.requesterUserId ?? '-'}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs text-gray-500">등록 일시</dt>
+                      <dd className="font-medium text-gray-900">{formatDateTime(selectedTicket.createdAt)}</dd>
+                    </div>
+                    <div className="sm:col-span-2">
+                      <dt className="text-xs text-gray-500">제목</dt>
+                      <dd className="font-medium text-gray-900">{selectedTicket.title}</dd>
+                    </div>
+                    <div className="sm:col-span-2">
+                      <dt className="text-xs text-gray-500">내용</dt>
+                      <dd className="whitespace-pre-wrap font-medium text-gray-900">{selectedTicket.content || '-'}</dd>
+                    </div>
+                  </dl>
+                </div>
+
+                <div className="rounded-xl border border-gray-200 bg-white p-4">
+                  <h4 className="text-sm font-semibold text-gray-900">상태 변경</h4>
+                  {availableStatusTransitions.length === 0 ? (
+                    <p className="mt-2 text-sm text-gray-500">현재 상태에서는 추가 전이가 없습니다.</p>
+                  ) : (
+                    <>
+                      <div className="mt-3 space-y-3">
+                        <div>
+                          <label htmlFor="support-admin-status-select" className="mb-1 block text-sm font-medium text-gray-700">
+                            다음 상태
+                          </label>
+                          <select
+                            id="support-admin-status-select"
+                            value={statusDraft}
+                            onChange={(event) => setStatusDraft(event.target.value)}
+                            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                          >
+                            {availableStatusTransitions.map((statusValue) => (
+                              <option key={statusValue} value={statusValue}>
+                                {toSupportStatusLabel(statusValue)}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div>
+                          <label htmlFor="support-admin-status-note" className="mb-1 block text-sm font-medium text-gray-700">
+                            메모 (선택)
+                          </label>
+                          <textarea
+                            id="support-admin-status-note"
+                            data-testid="support-admin-status-note"
+                            value={statusNote}
+                            onChange={(event) => setStatusNote(event.target.value)}
+                            rows={3}
+                            placeholder="처리 메모를 남길 수 있습니다."
+                            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="mt-4 flex justify-end">
+                        <button
+                          type="button"
+                          data-testid="support-admin-status-submit"
+                          onClick={() => {
+                            void submitStatusUpdate();
+                          }}
+                          disabled={isStatusUpdating}
+                          className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-400"
+                        >
+                          {isStatusUpdating ? (
+                            <>
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                              저장 중...
+                            </>
+                          ) : (
+                            '상태 변경'
+                          )}
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                {selectedTicket.statusHistory.length > 0 && (
+                  <div className="rounded-xl border border-gray-200 bg-white p-4">
+                    <h4 className="text-sm font-semibold text-gray-900">상태 이력</h4>
+                    <ul className="mt-3 space-y-2">
+                      {selectedTicket.statusHistory.map((entry, index) => (
+                        <li
+                          key={`${selectedTicket.companyId ?? 'unknown'}-${selectedTicket.id}-history-${index + 1}`}
+                          className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-2 text-sm text-gray-700"
+                        >
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="rounded bg-white px-2 py-0.5 text-xs font-medium text-gray-700">
+                              {toSupportStatusLabel(entry.to)}
+                            </span>
+                            {entry.changedAt && <span className="text-xs text-gray-500">{formatDateTime(entry.changedAt)}</span>}
+                            {entry.changedBy && <span className="text-xs text-gray-500">{entry.changedBy}</span>}
+                          </div>
+                          {entry.note && (
+                            <p className="mt-1 text-xs text-gray-500">{entry.note}</p>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </Layout>
+  );
+}
+
+export default function SupportCenter() {
+  const { user } = useAuth();
+  const navigate = useNavigate();
+  const isSuperAdmin = (user?.role ?? '').trim().toLowerCase() === 'super_admin';
+
+  if (isSuperAdmin) {
+    return <SupportAdminManagementView />;
+  }
 
   const [categories, setCategories] = useState<SupportCategory[]>([]);
   const [manualCategoryMode, setManualCategoryMode] = useState(false);
