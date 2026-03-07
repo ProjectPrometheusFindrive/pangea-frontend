@@ -579,10 +579,16 @@ export async function resolvePaymentStatuses(
       }
     }
 
-    let selectedSnapshot = chooseBestSnapshot(candidates);
+    const shouldPreferNotFound = isNotFoundFromStatusEndpoint && Boolean(target.reservationId) && !target.paymentId;
+    const rankedCandidates = shouldPreferNotFound
+      ? candidates.filter((candidate) => candidate.source !== 'fallback')
+      : candidates;
+    let selectedSnapshot = chooseBestSnapshot(rankedCandidates);
 
     if (!selectedSnapshot) {
-      if (cachedSnapshot) {
+      if (shouldPreferNotFound && target.reservationId) {
+        selectedSnapshot = toSnapshot('not-found', 'not-found', target.reservationId, target.paymentId ?? null, null);
+      } else if (cachedSnapshot) {
         selectedSnapshot = cachedSnapshot;
       } else if (isNotFoundFromStatusEndpoint && target.reservationId) {
         selectedSnapshot = toSnapshot('not-found', 'not-found', target.reservationId, target.paymentId ?? null, null);

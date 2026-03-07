@@ -177,3 +177,59 @@ test('reservation view model excludes completed reservations from payment sync t
     },
   ]);
 });
+
+test('reservation view model keeps the highest priority active reservation when a vehicle has multiple rows', async () => {
+  const module = await viteServer.ssrLoadModule('/src/app/pages/reservationsViewModel.ts');
+
+  const rows = module.mergeVehicleRows(
+    {
+      assets: [
+        {
+          vehicleNumber: '12가3456',
+          model: '아반떼',
+          status: '가용',
+          issues: [],
+          insuranceExpiry: '2026-12-31',
+          nextInspection: '2026-06-30',
+          vin: 'VIN-001',
+          year: '2024',
+          owner: '홍길동',
+        },
+      ],
+    },
+    [
+      {
+        id: 'R-RENTAL',
+        vehicleNumber: '12가3456',
+        customer: '김고객',
+        startDate: 0,
+        endDate: 1,
+        type: 'rental',
+        issues: ['실사용 중'],
+        phone: '010-1111-2222',
+        paymentMethod: '카드',
+        amount: '250,000원',
+        deposit: '50,000원',
+        paymentStatus: '대기',
+      },
+      {
+        id: 'R-RETURN',
+        vehicleNumber: '12가3456',
+        customer: '박고객',
+        startDate: 2,
+        endDate: 3,
+        type: 'return',
+        issues: [],
+        phone: '010-3333-4444',
+        paymentMethod: '카드',
+        amount: '180,000원',
+        deposit: '30,000원',
+        paymentStatus: '완료',
+      },
+    ],
+  );
+
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0]?.status, '대여중');
+  assert.deepEqual(rows[0]?.issues, ['실사용 중']);
+});

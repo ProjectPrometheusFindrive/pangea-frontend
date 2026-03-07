@@ -135,3 +135,44 @@ test('resolvePaymentStatuses caches empty status responses as not-found and skip
     globalThis.fetch = originalFetch;
   }
 });
+
+test('resolvePaymentStatuses prefers not-found over fallback status when the status endpoint is empty', async () => {
+  const module = await viteServer.ssrLoadModule('/src/app/utils/paymentStatusSync.ts');
+  let requestCount = 0;
+  const originalFetch = globalThis.fetch;
+
+  globalThis.fetch = async (input) => {
+    const url = new URL(typeof input === 'string' ? input : String(input));
+    if (url.pathname === '/api/v2/payments/status') {
+      requestCount += 1;
+      return createJsonResponse(200, successEnvelope({
+        reservationId: 'R-404-FALLBACK',
+        items: [],
+        total: 0,
+      }));
+    }
+
+    return createJsonResponse(404, {
+      status: 'error',
+      error: {
+        type: 'NOT_FOUND',
+        message: 'not found',
+      },
+    });
+  };
+
+  try {
+    const first = await module.resolvePaymentStatuses([
+      { reservationId: 'R-404-FALLBACK', fallbackStatus: '대기' },
+    ]);
+    const second = await module.resolvePaymentStatuses([
+      { reservationId: 'R-404-FALLBACK', fallbackStatus: '대기' },
+    ]);
+
+    assert.equal(first.byReservationId['R-404-FALLBACK']?.status, 'not-found');
+    assert.equal(second.byReservationId['R-404-FALLBACK']?.status, 'not-found');
+    assert.equal(requestCount, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

@@ -64,6 +64,43 @@ function toVehicleStatusFromReservation(reservationType: Reservation['type']): V
   return '가용';
 }
 
+function getReservationOverlayPriority(reservation: Reservation): number {
+  if (reservation.type === 'rental') {
+    return 300;
+  }
+  if (reservation.type === 'reservation') {
+    return 200;
+  }
+  return 100;
+}
+
+function chooseDominantReservation(current: Reservation | null, next: Reservation): Reservation {
+  if (!current) {
+    return next;
+  }
+
+  const currentPriority = getReservationOverlayPriority(current);
+  const nextPriority = getReservationOverlayPriority(next);
+  if (nextPriority > currentPriority) {
+    return next;
+  }
+  if (nextPriority < currentPriority) {
+    return current;
+  }
+
+  if (next.startDate > current.startDate) {
+    return next;
+  }
+  if (next.startDate < current.startDate) {
+    return current;
+  }
+
+  if (next.endDate > current.endDate) {
+    return next;
+  }
+  return current;
+}
+
 function toVehicleAssetRow(row: unknown): VehicleAsset | null {
   if (!isRecord(row)) {
     return null;
@@ -115,6 +152,7 @@ function overlayReservationOnVehicle(baseAsset: VehicleAsset, reservation: Reser
 
 export function mergeVehicleRows(assetPayload: unknown, reservationRows: Reservation[]): VehicleAsset[] {
   const vehicleMap = new Map<string, VehicleAsset>();
+  const dominantReservationByVehicle = new Map<string, Reservation>();
   const rows = getCollectionFromPayload(assetPayload, ['vehicleAssets', 'vehicles', 'assets']) ?? [];
 
   for (const row of rows) {
@@ -126,12 +164,17 @@ export function mergeVehicleRows(assetPayload: unknown, reservationRows: Reserva
   }
 
   for (const reservation of reservationRows) {
+    const currentReservation = dominantReservationByVehicle.get(reservation.vehicleNumber) ?? null;
+    dominantReservationByVehicle.set(
+      reservation.vehicleNumber,
+      chooseDominantReservation(currentReservation, reservation),
+    );
+  }
+
+  for (const reservation of dominantReservationByVehicle.values()) {
     const existingVehicle = vehicleMap.get(reservation.vehicleNumber);
     if (existingVehicle) {
-      vehicleMap.set(
-        reservation.vehicleNumber,
-        overlayReservationOnVehicle(existingVehicle, reservation),
-      );
+      vehicleMap.set(reservation.vehicleNumber, overlayReservationOnVehicle(existingVehicle, reservation));
       continue;
     }
 
