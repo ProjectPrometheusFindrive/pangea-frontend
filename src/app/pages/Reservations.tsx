@@ -58,6 +58,7 @@ type DragSelection = {
   endDate: number;
 } | null;
 type ViewFilter = 'all' | 'reservation' | 'rental' | 'return' | 'unpaid' | 'overdue';
+type PaymentScope = 'all' | 'delinquent';
 type DueFilter = 'pickup' | 'return' | null;
 
 function createTodayBaseDate(): Date {
@@ -471,6 +472,18 @@ function normalizeViewFilter(value: string | null): ViewFilter {
   return 'all';
 }
 
+function normalizePaymentScope(value: string | null): PaymentScope {
+  if (!value) {
+    return 'all';
+  }
+
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'delinquent') {
+    return 'delinquent';
+  }
+  return 'all';
+}
+
 function toStatusQueryValue(filterValue: ViewFilter): string | undefined {
   if (filterValue === 'all' || filterValue === 'unpaid' || filterValue === 'overdue') {
     return undefined;
@@ -745,6 +758,7 @@ export default function Reservations() {
   const viewFilter = normalizeViewFilter(
     searchParams.get('status') ?? searchParams.get('filter') ?? searchParams.get('contractStatus'),
   );
+  const paymentScope = normalizePaymentScope(searchParams.get('paymentScope'));
 
   const [currentWeekStart, setCurrentWeekStart] = useState(0);
   const [showModal, setShowModal] = useState(false);
@@ -1026,6 +1040,7 @@ export default function Reservations() {
       params.delete('to');
       params.delete('q');
       params.delete('due');
+      params.delete('paymentScope');
       params.set('page', String(DEFAULT_PAGE));
       params.set('size', String(DEFAULT_PAGE_SIZE));
     });
@@ -1107,6 +1122,7 @@ export default function Reservations() {
       } else {
         params.set('status', nextFilter);
       }
+      params.delete('paymentScope');
       if (nextFilter === 'all' || nextFilter === 'unpaid' || nextFilter === 'overdue') {
         params.delete('due');
       }
@@ -1188,6 +1204,15 @@ export default function Reservations() {
     const reservationEndDate = normalizeDateParam(reservation.endDateFull) ?? toDateLabelFromOffset(reservation.endDate);
 
     if (viewFilter === 'unpaid') {
+      if (paymentScope === 'delinquent') {
+        if (normalizePaymentStatus(reservation.paymentStatus) !== normalizePaymentStatus('unpaid')) {
+          return false;
+        }
+        if (!searchQuery) {
+          return true;
+        }
+        return reservation.customer.includes(searchQuery) || reservation.vehicleNumber.includes(searchQuery);
+      }
       if (!(reservation.issues && reservation.issues.includes('미납/결제 문제'))) {
         return false;
       }

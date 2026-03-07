@@ -94,6 +94,7 @@ const DEFAULT_KPIS = {
   activeContracts: 0,
   completedContracts: 0,
   overdueContracts: 0,
+  unpaidContracts: 0,
   utilizationRate: 0,
 };
 
@@ -238,6 +239,19 @@ function toAssetStatusFilter(stageLabel: string): string {
   return '';
 }
 
+function buildReservationsFilterPath(filterValue: string): string {
+  const params = new URLSearchParams();
+
+  if (filterValue === 'home-unpaid') {
+    params.set('filter', 'unpaid');
+    params.set('paymentScope', 'delinquent');
+  } else {
+    params.set('filter', filterValue);
+  }
+
+  return `/reservations?${params.toString()}`;
+}
+
 function isSnapshotEmpty(snapshot: HomeSnapshot): boolean {
   const { kpis, statusCounts, recentChanges } = snapshot.summary;
   const hasKpiData = (
@@ -246,6 +260,7 @@ function isSnapshotEmpty(snapshot: HomeSnapshot): boolean {
     || kpis.activeContracts > 0
     || kpis.completedContracts > 0
     || kpis.overdueContracts > 0
+    || kpis.unpaidContracts > 0
     || kpis.utilizationRate > 0
   );
 
@@ -522,7 +537,7 @@ export default function Home() {
 
   const handleContractClick = useCallback((status: string) => {
     navigateWithRoutePermission(
-      `/reservations?filter=${encodeURIComponent(status)}`,
+      buildReservationsFilterPath(status),
       ROUTE_PERMISSIONS.reservations,
     );
   }, [navigateWithRoutePermission]);
@@ -565,11 +580,11 @@ export default function Home() {
       },
       {
         label: '미납/연체 계약',
-        count: kpis.overdueContracts,
+        count: kpis.unpaidContracts,
         bg: 'bg-yellow-50',
         color: 'text-yellow-600',
         icon: 'DollarSign',
-        onClick: () => handleContractClick('unpaid'),
+        onClick: () => handleContractClick('home-unpaid'),
       },
       {
         label: '운영중 자산',
@@ -625,7 +640,7 @@ export default function Home() {
         onClick: () => setShowPremiumModal(true),
       },
     ];
-  }, [alerts.overdue, alerts.stolen, handleAssetClick, handleContractClick, handleIssueClick, kpis.overdueContracts, kpis.totalContracts, kpis.utilizationRate, managementStageCounts]);
+  }, [alerts.overdue, alerts.stolen, handleAssetClick, handleContractClick, handleIssueClick, kpis.totalContracts, kpis.unpaidContracts, kpis.utilizationRate, managementStageCounts]);
 
   const assetData = useMemo<DashboardDistributionItem[]>(() => {
     const palette = ['#1e3a8a', '#60a5fa', '#22c55e', '#f59e0b'];
@@ -660,7 +675,7 @@ export default function Home() {
       return [
         { name: '대여중', value: kpis.activeContracts, color: palette[0], status: 'rental', unit: '건' },
         { name: '반납완료', value: kpis.completedContracts, color: palette[1], status: 'return', unit: '건' },
-        { name: '연체', value: kpis.overdueContracts, color: palette[2], status: 'unpaid', unit: '건' },
+        { name: '미납/연체', value: kpis.unpaidContracts, color: palette[2], status: 'home-unpaid', unit: '건' },
       ];
     }
 
@@ -671,7 +686,7 @@ export default function Home() {
       status: toContractFilter(name),
       unit: '건' as const,
     }));
-  }, [contractStatusCounts, kpis.activeContracts, kpis.completedContracts, kpis.overdueContracts]);
+  }, [contractStatusCounts, kpis.activeContracts, kpis.completedContracts, kpis.unpaidContracts]);
 
   const operationScores = useMemo(() => {
     const utilizationRateScore = toPercent(kpis.utilizationRate);

@@ -8,6 +8,7 @@ export interface HomeSummaryKpis {
   activeContracts: number;
   completedContracts: number;
   overdueContracts: number;
+  unpaidContracts: number;
   utilizationRate: number;
 }
 
@@ -106,6 +107,7 @@ function normalizeKpis(value: unknown): HomeSummaryKpis {
       activeContracts: 0,
       completedContracts: 0,
       overdueContracts: 0,
+      unpaidContracts: 0,
       utilizationRate: 0,
     };
   }
@@ -117,6 +119,7 @@ function normalizeKpis(value: unknown): HomeSummaryKpis {
     activeContracts: toInteger(value.activeContracts),
     completedContracts: toInteger(value.completedContracts),
     overdueContracts: toInteger(value.overdueContracts),
+    unpaidContracts: toInteger(value.unpaidContracts),
     utilizationRate: Math.max(0, Math.min(1, utilizationRate)),
   };
 }
