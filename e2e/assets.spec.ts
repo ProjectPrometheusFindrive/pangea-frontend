@@ -320,6 +320,71 @@ test.describe('BK-091 Assets E2E', () => {
     expect(createPayload?.companyId).toBe('company-001');
   });
 
+  test('직접 입력 모드에서는 OCR 없이 vehicleNumber와 vin만으로 저장할 수 있다', async ({ page }) => {
+    let uploadCalled = false;
+    let ocrCalled = false;
+    let createPayload: Record<string, unknown> | null = null;
+
+    await installApiMocks(page, {
+      handlers: {
+        'GET /api/v2/assets': async ({ route }) => {
+          await fulfillSuccess(route, {
+            items: [],
+            total: 0,
+            page: 1,
+            pageSize: 20,
+          });
+        },
+        'POST /api/v2/assets/upload': async ({ route }) => {
+          uploadCalled = true;
+          await fulfillError(route, 500, 'UNEXPECTED_UPLOAD', 'upload should not be called');
+        },
+        'POST /api/v2/ocr/extract': async ({ route }) => {
+          ocrCalled = true;
+          await fulfillError(route, 500, 'UNEXPECTED_OCR', 'ocr should not be called');
+        },
+        'POST /api/v2/assets': async ({ route, request }) => {
+          createPayload = request.postDataJSON() as Record<string, unknown>;
+          await fulfillSuccess(route, {
+            id: 'ASSET-MANUAL-001',
+            vehicleNumber: '12가3456',
+            plate: '12가3456',
+            model: '',
+            status: '가용',
+            vin: 'KMH12A34560000001',
+            year: '',
+            owner: '',
+            insuranceExpiry: '',
+            nextInspection: '',
+            issues: [],
+            version: 1,
+            updatedAt: '2026-03-07T00:00:00.000Z',
+            companyId: 'company-001',
+          }, 201);
+        },
+      },
+    });
+
+    await loginViaUi(page, 'member', { returnUrl: '/assets' });
+    await page.getByRole('button', { name: '차량 자산 등록' }).click();
+
+    await page.getByTestId('asset-create-mode-manual-button').click();
+    await page.getByTestId('asset-create-vehicle-number-input').fill('12가3456');
+    await page.getByTestId('asset-create-vin-input').fill('KMH12A34560000001');
+    await page.getByTestId('asset-create-save-button').click();
+
+    await expect.poll(() => createPayload).not.toBeNull();
+    expect(createPayload).toMatchObject({
+      companyId: 'company-001',
+      vehicleNumber: '12가3456',
+      plate: '12가3456',
+      vin: 'KMH12A34560000001',
+    });
+    expect(uploadCalled).toBe(false);
+    expect(ocrCalled).toBe(false);
+    await expect(page.getByText('차량 자산이 등록되었습니다.')).toBeVisible();
+  });
+
   test('자산 상세에서 삭제 버튼으로 차량을 archive 처리한다', async ({ page }) => {
     let deleted = false;
 
