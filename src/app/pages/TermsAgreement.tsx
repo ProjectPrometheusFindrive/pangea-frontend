@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { useNavigate } from 'react-router';
+import { useLocation, useNavigate } from 'react-router';
 import { toast } from 'sonner';
 
 import {
@@ -9,6 +9,7 @@ import {
   saveSignupAgreementState,
   type SignupAgreementState,
 } from './signupAgreementState';
+import { buildSignupRouteWithSearch } from './signupInvitationMode';
 
 type AgreementKey = 'privacy' | 'location' | 'marketing';
 
@@ -59,6 +60,7 @@ function toEditableAgreements(state: SignupAgreementState): Omit<SignupAgreement
 
 export default function TermsAgreement() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [agreements, setAgreements] = useState<Omit<SignupAgreementState, 'agreedAt'>>(() =>
     toEditableAgreements(loadSignupAgreementState()),
   );
@@ -102,7 +104,7 @@ export default function TermsAgreement() {
       ...agreements,
       agreedAt: new Date().toISOString(),
     });
-    navigate('/signup');
+    navigate(buildSignupRouteWithSearch(location.search));
   };
 
   return (

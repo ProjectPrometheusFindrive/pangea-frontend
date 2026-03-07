@@ -1,15 +1,22 @@
 import { FocusEvent, FormEvent, useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router';
+import { useLocation, useNavigate } from 'react-router';
 import { toast } from 'sonner';
 
 import { postRegister, getCheckUserId } from '../../services/auth';
 import { ApiError } from '../../services/api';
+import { postAcceptInvitation } from '../../services/invitations';
 import {
   clearSignupAgreementState,
   hasRequiredSignupAgreements,
   loadSignupAgreementState,
   type SignupAgreementState,
 } from './signupAgreementState';
+import {
+  buildInvitationAcceptPayload,
+  decodeInvitationToken,
+  extractInvitationToken,
+  validateInvitationAwareSignUpForm,
+} from './signupInvitationMode';
 
 type PositionType = '대표' | '직원' | '';
 
@@ -35,7 +42,6 @@ interface UserIdCheckState {
   message: string | null;
 }
 
-const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PHONE_REGEX = /^010-\d{4}-\d{4}$/;
 
 const INITIAL_FORM: SignUpFormState = {
@@ -90,58 +96,6 @@ function normalizeBizRegNoDigits(value: string): string {
   return value.replace(/\D/g, '').slice(0, 10);
 }
 
-function validateForm(values: SignUpFormState): SignUpErrors {
-  const errors: SignUpErrors = {};
-
-  const userId = normalizeEmail(values.userId);
-  if (!userId) {
-    errors.userId = '아이디(이메일)를 입력해 주세요.';
-  } else if (!EMAIL_REGEX.test(userId)) {
-    errors.userId = '올바른 이메일 형식이 아닙니다.';
-  }
-
-  if (!values.password) {
-    errors.password = '비밀번호를 입력해 주세요.';
-  } else if (values.password.length < 8 || !/[A-Za-z]/.test(values.password) || !/\d/.test(values.password)) {
-    errors.password = '비밀번호는 8자 이상, 영문/숫자를 포함해야 합니다.';
-  }
-
-  if (!values.confirmPassword) {
-    errors.confirmPassword = '비밀번호 확인을 입력해 주세요.';
-  } else if (values.password !== values.confirmPassword) {
-    errors.confirmPassword = '비밀번호가 일치하지 않습니다.';
-  }
-
-  if (!values.name.trim()) {
-    errors.name = '이름을 입력해 주세요.';
-  }
-
-  if (!PHONE_REGEX.test(values.phone)) {
-    errors.phone = '전화번호는 010-0000-0000 형식으로 입력해 주세요.';
-  }
-
-  const email = normalizeEmail(values.email);
-  if (!email) {
-    errors.email = '개인 이메일을 입력해 주세요.';
-  } else if (!EMAIL_REGEX.test(email)) {
-    errors.email = '올바른 개인 이메일 형식이 아닙니다.';
-  }
-
-  if (!values.position) {
-    errors.position = '직위를 선택해 주세요.';
-  }
-
-  if (!values.company.trim()) {
-    errors.company = '회사명을 입력해 주세요.';
-  }
-
-  if (normalizeBizRegNoDigits(values.bizRegNo).length !== 10) {
-    errors.bizRegNo = '사업자등록번호 10자리를 입력해 주세요.';
-  }
-
-  return errors;
-}
-
 function buildTouchedAll(): Record<SignUpField, boolean> {
   return {
     userId: true,
@@ -182,6 +136,7 @@ function toSignUpErrorMessage(error: unknown): string {
 
 export default function SignUp() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [form, setForm] = useState<SignUpFormState>(INITIAL_FORM);
   const [errors, setErrors] = useState<SignUpErrors>({});
   const [touched, setTouched] = useState<Partial<Record<SignUpField, boolean>>>({});
@@ -191,6 +146,10 @@ export default function SignUp() {
   const [serverError, setServerError] = useState<string | null>(null);
   const [userIdCheck, setUserIdCheck] = useState<UserIdCheckState>(INITIAL_USER_ID_CHECK);
 
+  const invitationToken = useMemo(() => extractInvitationToken(location.search), [location.search]);
+  const invitationClaims = useMemo(() => decodeInvitationToken(invitationToken), [invitationToken]);
+  const invitationEmail = invitationClaims.email ? normalizeEmail(invitationClaims.email) : null;
+  const isInvitationMode = Boolean(invitationToken && invitationEmail);
   const normalizedUserId = useMemo(() => normalizeEmail(form.userId), [form.userId]);
 
   useEffect(() => {
@@ -199,34 +158,53 @@ export default function SignUp() {
 
     if (!hasRequiredSignupAgreements(latestAgreements)) {
       toast.warning('회원가입을 위해 먼저 필수 약관 동의가 필요합니다.');
-      navigate('/terms', { replace: true });
+      navigate({ pathname: '/terms', search: location.search }, { replace: true });
     }
-  }, [navigate]);
+  }, [location.search, navigate]);
 
   useEffect(() => {
-    if (!userIdCheck.checkedUserId) {
+    if (!isInvitationMode || !invitationEmail) {
+      return;
+    }
+    setForm((previous) => ({
+      ...previous,
+      userId: invitationEmail,
+      email: invitationEmail,
+      company: previous.company || invitationClaims.companyId || '',
+    }));
+    setUserIdCheck({
+      checking: false,
+      checkedUserId: invitationEmail,
+      available: true,
+      message: null,
+    });
+  }, [invitationClaims.companyId, invitationEmail, isInvitationMode]);
+
+  useEffect(() => {
+    if (isInvitationMode || !userIdCheck.checkedUserId) {
       return;
     }
     if (userIdCheck.checkedUserId !== normalizedUserId) {
       setUserIdCheck(INITIAL_USER_ID_CHECK);
     }
-  }, [normalizedUserId, userIdCheck.checkedUserId]);
+  }, [isInvitationMode, normalizedUserId, userIdCheck.checkedUserId]);
 
   const completedFields = useMemo(() => {
     let count = 0;
-    if (EMAIL_REGEX.test(normalizedUserId)) count += 1;
+    if (!isInvitationMode && /.+@.+\..+/.test(normalizedUserId)) count += 1;
     if (form.password.length >= 8 && /[A-Za-z]/.test(form.password) && /\d/.test(form.password)) count += 1;
     if (form.confirmPassword && form.confirmPassword === form.password) count += 1;
     if (form.name.trim()) count += 1;
     if (PHONE_REGEX.test(form.phone)) count += 1;
-    if (EMAIL_REGEX.test(normalizeEmail(form.email))) count += 1;
+    if ((isInvitationMode && invitationEmail) || /.+@.+\..+/.test(normalizeEmail(form.email))) count += 1;
     if (form.position) count += 1;
-    if (form.company.trim()) count += 1;
-    if (normalizeBizRegNoDigits(form.bizRegNo).length === 10) count += 1;
+    if (!isInvitationMode && form.company.trim()) count += 1;
+    if (!isInvitationMode && normalizeBizRegNoDigits(form.bizRegNo).length === 10) count += 1;
     return count;
-  }, [form, normalizedUserId]);
+  }, [form, invitationEmail, isInvitationMode, normalizedUserId]);
 
-  const progress = Math.round((completedFields / 9) * 100);
+  const totalProgressFields = isInvitationMode ? 6 : 9;
+  const progress = Math.round((completedFields / totalProgressFields) * 100);
 
   const handleFieldChange = (field: SignUpField, value: string) => {
     const nextValue = field === 'phone'
@@ -246,7 +224,7 @@ export default function SignUp() {
 
     if (field === 'bizRegNo') {
       setTouched((previous) => ({ ...previous, bizRegNo: true }));
-      const bizRegNoError = validateForm(nextForm).bizRegNo;
+      const bizRegNoError = validateInvitationAwareSignUpForm(nextForm, { invitationEmail }).bizRegNo;
       setErrors((previous) => ({
         ...previous,
         bizRegNo: bizRegNoError,
@@ -264,7 +242,7 @@ export default function SignUp() {
 
   const handleBlur = (field: SignUpField) => {
     setTouched((previous) => ({ ...previous, [field]: true }));
-    const validationErrors = validateForm(form);
+    const validationErrors = validateInvitationAwareSignUpForm(form, { invitationEmail });
     setErrors((previous) => ({
       ...previous,
       [field]: validationErrors[field],
@@ -281,7 +259,10 @@ export default function SignUp() {
   };
 
   const handleCheckUserId = async () => {
-    const userIdError = validateForm(form).userId;
+    if (isInvitationMode) {
+      return;
+    }
+    const userIdError = validateInvitationAwareSignUpForm(form, { invitationEmail }).userId;
     setTouched((previous) => ({ ...previous, userId: true }));
 
     if (userIdError) {
@@ -331,7 +312,7 @@ export default function SignUp() {
     event.preventDefault();
     setServerError(null);
 
-    const validationErrors = validateForm(form);
+    const validationErrors = validateInvitationAwareSignUpForm(form, { invitationEmail });
     setErrors(validationErrors);
     setTouched(buildTouchedAll());
     if (Object.keys(validationErrors).length > 0) {
@@ -341,11 +322,11 @@ export default function SignUp() {
 
     if (!hasRequiredSignupAgreements(agreements)) {
       toast.warning('필수 약관 동의가 필요합니다.');
-      navigate('/terms');
+      navigate({ pathname: '/terms', search: location.search });
       return;
     }
 
-    if (userIdCheck.checkedUserId !== normalizedUserId || userIdCheck.available !== true) {
+    if (!isInvitationMode && (userIdCheck.checkedUserId !== normalizedUserId || userIdCheck.available !== true)) {
       setErrors((previous) => ({
         ...previous,
         userId: '아이디 중복 확인을 완료해 주세요.',
@@ -357,27 +338,34 @@ export default function SignUp() {
 
     setIsSubmitting(true);
     try {
-      await postRegister({
-        userId: normalizedUserId,
-        password: form.password,
-        name: form.name.trim(),
-        phone: form.phone,
-        email: normalizeEmail(form.email),
-        position: form.position,
-        company: form.company.trim(),
-        companyName: form.company.trim(),
-        bizRegNo: normalizeBizRegNoDigits(form.bizRegNo),
-        role: form.position === '대표' ? 'admin' : 'member',
-        agreements: {
-          privacy: agreements.privacy,
-          location: agreements.location,
-          marketing: agreements.marketing,
-          agreedAt: agreements.agreedAt ?? new Date().toISOString(),
-        },
-      });
+      if (isInvitationMode) {
+        if (!invitationToken) {
+          throw new Error('유효한 초대 토큰이 없습니다.');
+        }
+        await postAcceptInvitation(invitationToken, buildInvitationAcceptPayload(form));
+      } else {
+        await postRegister({
+          userId: normalizedUserId,
+          password: form.password,
+          name: form.name.trim(),
+          phone: form.phone,
+          email: normalizeEmail(form.email),
+          position: form.position,
+          company: form.company.trim(),
+          companyName: form.company.trim(),
+          bizRegNo: normalizeBizRegNoDigits(form.bizRegNo),
+          role: form.position === '대표' ? 'admin' : 'member',
+          agreements: {
+            privacy: agreements.privacy,
+            location: agreements.location,
+            marketing: agreements.marketing,
+            agreedAt: agreements.agreedAt ?? new Date().toISOString(),
+          },
+        });
+      }
       clearSignupAgreementState();
       setIsSuccess(true);
-      toast.success('회원가입이 완료되었습니다.');
+      toast.success(isInvitationMode ? '초대 수락이 완료되었습니다.' : '회원가입이 완료되었습니다.');
     } catch (error) {
       setServerError(toSignUpErrorMessage(error));
     } finally {
@@ -389,12 +377,18 @@ export default function SignUp() {
     return (
       <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-100 via-blue-50 to-indigo-100 px-4">
         <section className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-xl">
-          <p className="text-sm font-medium text-blue-600">회원가입 완료</p>
-          <h1 className="mt-2 text-2xl font-bold text-slate-900">가입 요청이 접수되었습니다.</h1>
+          <p className="text-sm font-medium text-blue-600">{isInvitationMode ? '초대 수락 완료' : '회원가입 완료'}</p>
+          <h1 className="mt-2 text-2xl font-bold text-slate-900">
+            {isInvitationMode ? '계정 생성이 완료되었습니다.' : '가입 요청이 접수되었습니다.'}
+          </h1>
           <p className="mt-3 text-sm leading-6 text-slate-600">
-            관리자 승인 후 로그인할 수 있습니다.
-            <br />
-            승인 상태는 등록한 이메일로 안내됩니다.
+            {isInvitationMode ? '이제 바로 로그인할 수 있습니다.' : '관리자 승인 후 로그인할 수 있습니다.'}
+            {!isInvitationMode && (
+              <>
+                <br />
+                승인 상태는 등록한 이메일로 안내됩니다.
+              </>
+            )}
           </p>
           <button
             type="button"
@@ -412,8 +406,10 @@ export default function SignUp() {
     <div className="flex min-h-screen bg-gradient-to-br from-slate-100 via-blue-50 to-indigo-100">
       <aside className="hidden w-80 border-r border-slate-200 bg-slate-900/95 p-8 text-slate-100 lg:block">
         <p className="text-sm font-medium uppercase tracking-wider text-blue-300">Pangea Console</p>
-        <h1 className="mt-4 text-3xl font-bold">회원가입</h1>
-        <p className="mt-3 text-sm leading-6 text-slate-300">기본 정보와 회사 정보를 입력해 가입 요청을 제출합니다.</p>
+        <h1 className="mt-4 text-3xl font-bold">{isInvitationMode ? '팀 초대 수락' : '회원가입'}</h1>
+        <p className="mt-3 text-sm leading-6 text-slate-300">
+          {isInvitationMode ? '초대받은 계정 정보를 확인하고 비밀번호를 설정해 가입을 완료합니다.' : '기본 정보와 회사 정보를 입력해 가입 요청을 제출합니다.'}
+        </p>
 
         <ol className="mt-10 space-y-4">
           <li className="flex items-center gap-3 rounded-lg px-3 py-2 text-slate-400">
@@ -443,8 +439,12 @@ export default function SignUp() {
         <section className="w-full max-w-3xl rounded-2xl border border-slate-200 bg-white p-6 shadow-xl sm:p-8">
           <header className="mb-6">
             <p className="text-sm font-medium text-blue-600">Step 2</p>
-            <h2 className="mt-1 text-2xl font-bold text-slate-900">기본 정보 입력</h2>
-            <p className="mt-1 text-sm text-slate-500">모든 필수 항목을 입력하고 아이디 중복 확인을 완료해 주세요.</p>
+            <h2 className="mt-1 text-2xl font-bold text-slate-900">{isInvitationMode ? '초대 정보 확인' : '기본 정보 입력'}</h2>
+            <p className="mt-1 text-sm text-slate-500">
+              {isInvitationMode
+                ? '초대된 이메일과 회사는 고정되며, 나머지 기본 정보만 입력하면 됩니다.'
+                : '모든 필수 항목을 입력하고 아이디 중복 확인을 완료해 주세요.'}
+            </p>
           </header>
 
           <div className="mb-5 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
@@ -454,8 +454,18 @@ export default function SignUp() {
             </p>
           </div>
 
+          {isInvitationMode && (
+            <div className="mb-5 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+              <p className="font-semibold">초대 정보</p>
+              <p className="mt-1">이메일: {invitationEmail}</p>
+              <p className="mt-1">회사: {invitationClaims.companyId || '-'}</p>
+              <p className="mt-1">역할: {invitationClaims.role === 'admin' ? '관리자' : invitationClaims.role === 'member' ? '운영자' : '-'}</p>
+            </div>
+          )}
+
           <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
+            {!isInvitationMode && (
+              <div>
               <label htmlFor="signup-user-id" className="mb-1 block text-sm font-medium text-slate-700">
                 아이디(이메일)
               </label>
@@ -485,7 +495,8 @@ export default function SignUp() {
                   {userIdCheck.message}
                 </p>
               )}
-            </div>
+              </div>
+            )}
 
             <div className="grid gap-4 md:grid-cols-2">
               <div>
@@ -556,10 +567,10 @@ export default function SignUp() {
               </div>
             </div>
 
-            <div className="grid gap-4 md:grid-cols-2">
+            <div className={`grid gap-4 ${isInvitationMode ? '' : 'md:grid-cols-2'}`}>
               <div>
                 <label htmlFor="signup-email" className="mb-1 block text-sm font-medium text-slate-700">
-                  개인 이메일
+                  {isInvitationMode ? '초대 이메일' : '개인 이메일'}
                 </label>
                 <input
                   id="signup-email"
@@ -567,6 +578,7 @@ export default function SignUp() {
                   value={form.email}
                   onChange={(event) => handleFieldChange('email', event.target.value)}
                   onBlur={() => handleBlur('email')}
+                  readOnly={isInvitationMode}
                   className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
                   placeholder="personal@example.com"
                   autoComplete="email"
@@ -602,7 +614,8 @@ export default function SignUp() {
               </div>
             </div>
 
-            <div className="grid gap-4 md:grid-cols-2">
+            {!isInvitationMode && (
+              <div className="grid gap-4 md:grid-cols-2">
               <div>
                 <label htmlFor="signup-company" className="mb-1 block text-sm font-medium text-slate-700">
                   회사명
@@ -635,7 +648,8 @@ export default function SignUp() {
                 />
                 {touched.bizRegNo && errors.bizRegNo && <p className="mt-1 text-sm text-red-600">{errors.bizRegNo}</p>}
               </div>
-            </div>
+              </div>
+            )}
 
             {serverError && (
               <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
@@ -646,7 +660,7 @@ export default function SignUp() {
             <div className="flex flex-col-reverse gap-3 pt-2 sm:flex-row sm:justify-end">
               <button
                 type="button"
-                onClick={() => navigate('/terms')}
+                onClick={() => navigate({ pathname: '/terms', search: location.search })}
                 disabled={isSubmitting}
                 className="rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
               >
@@ -657,7 +671,9 @@ export default function SignUp() {
                 disabled={isSubmitting}
                 className="rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300"
               >
-                {isSubmitting ? '가입 요청 중...' : '회원가입'}
+                {isSubmitting
+                  ? (isInvitationMode ? '초대 수락 중...' : '가입 요청 중...')
+                  : (isInvitationMode ? '초대 수락' : '회원가입')}
               </button>
             </div>
           </form>

@@ -51,6 +51,21 @@ import {
   type SettingsGeofence,
   type SettingsMember,
 } from '../../services/settings';
+import {
+  createInvitation,
+  listInvitations,
+  resendInvitation,
+  type Invitation,
+  type InvitationRole,
+} from '../../services/invitations';
+import {
+  buildInvitationCreatePayload,
+  getInvitationStatusBadgeColor,
+  toInvitationRoleLabel,
+  toInvitationStatusLabel,
+  upsertPendingInvitation,
+  validateInvitationDraft,
+} from './settingsInvitations';
 
 type TabType = 'bulk' | 'company' | 'geofence' | 'accounts';
 type UploadType = 'vehicles' | 'reservations' | 'ocr';
@@ -58,6 +73,7 @@ type CurrentDataType = Extract<UploadType, 'vehicles' | 'reservations'>;
 type CompanyField = 'name' | 'businessNumber' | 'phone' | 'email' | 'address';
 type GeofenceField = 'name' | 'lat' | 'lng' | 'radiusMeter';
 type MemberRoleField = 'role';
+type InvitationField = 'email' | 'role';
 type FieldErrorMap<TField extends string> = Partial<Record<TField, string>>;
 
 interface UploadResult {
@@ -90,10 +106,16 @@ interface GeofenceFormState {
   active: boolean;
 }
 
+interface InvitationFormState {
+  email: string;
+  role: InvitationRole;
+}
+
 interface SettingsHydrationPayload {
   company: SettingsCompanyProfile;
   geofences: SettingsGeofence[];
   members: SettingsMember[];
+  invitations: Invitation[];
 }
 
 const DEFAULT_SETTINGS_SCHEMA_VERSION = 'v1';
@@ -132,6 +154,11 @@ const DEFAULT_GEOFENCE_FORM_STATE: GeofenceFormState = {
   lng: '',
   radiusMeter: '',
   active: true,
+};
+
+const DEFAULT_INVITATION_FORM_STATE: InvitationFormState = {
+  email: '',
+  role: 'member',
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -567,6 +594,15 @@ export default function Settings() {
   const [memberSaveSuccess, setMemberSaveSuccess] = useState<string | null>(null);
   const [memberRetryAction, setMemberRetryAction] = useState<(() => void) | null>(null);
   const [savingMemberId, setSavingMemberId] = useState<string | null>(null);
+  const [invitations, setInvitations] = useState<Invitation[]>([]);
+  const [isInvitationEditorOpen, setIsInvitationEditorOpen] = useState(false);
+  const [invitationForm, setInvitationForm] = useState<InvitationFormState>(DEFAULT_INVITATION_FORM_STATE);
+  const [invitationFieldErrors, setInvitationFieldErrors] = useState<FieldErrorMap<InvitationField>>({});
+  const [invitationSaveError, setInvitationSaveError] = useState<string | null>(null);
+  const [invitationSaveSuccess, setInvitationSaveSuccess] = useState<string | null>(null);
+  const [invitationRetryAction, setInvitationRetryAction] = useState<(() => void) | null>(null);
+  const [isInvitationSaving, setIsInvitationSaving] = useState(false);
+  const [resendingInvitationId, setResendingInvitationId] = useState<string | null>(null);
   const [currentVehicleCount, setCurrentVehicleCount] = useState<number | null>(null);
   const [currentReservationCount, setCurrentReservationCount] = useState<number | null>(null);
   const [activeCurrentDownloadType, setActiveCurrentDownloadType] = useState<CurrentDataType | null>(null);
@@ -582,6 +618,17 @@ export default function Settings() {
     setMemberRoleDrafts({});
     setMemberFieldErrors({});
   }, []);
+
+  const hydrateInvitationsOnly = useCallback(async () => {
+    if (!canManageMemberRoles) {
+      setInvitations([]);
+      return;
+    }
+
+    const invitationsPayload = await listInvitations('pending');
+    const invitationItems = Array.isArray(invitationsPayload.items) ? invitationsPayload.items : [];
+    setInvitations(invitationItems.reduce<Invitation[]>((items, invitation) => upsertPendingInvitation(items, invitation), []));
+  }, [canManageMemberRoles]);
 
   const hydrateGeofencesOnly = useCallback(async () => {
     const geofencesPayload = await listSettingsGeofences();
@@ -773,18 +820,24 @@ export default function Settings() {
   }, [canEditSettings, isBulkOcrProcessing, pollBulkOcrJobUntilTerminal, refreshCurrentDataCounts, user?.companyId]);
 
   const requestSettingsHydration = useCallback(async (signal: AbortSignal): Promise<SettingsHydrationPayload> => {
-    const [companyPayload, geofencesPayload, membersPayload] = await Promise.all([
+    const [companyPayload, geofencesPayload, membersPayload, invitationsPayload] = await Promise.all([
       getSettingsCompany({ signal }),
       listSettingsGeofences({ signal }),
       listSettingsMembers(undefined, { signal }),
+      canManageMemberRoles
+        ? listInvitations('pending', { signal })
+        : Promise.resolve({ items: [] }),
     ]);
 
     return {
       company: companyPayload,
       geofences: Array.isArray(geofencesPayload.items) ? geofencesPayload.items : [],
       members: Array.isArray(membersPayload.items) ? membersPayload.items : [],
+      invitations: Array.isArray(invitationsPayload.items)
+        ? invitationsPayload.items.reduce<Invitation[]>((items, invitation) => upsertPendingInvitation(items, invitation), [])
+        : [],
     };
-  }, []);
+  }, [canManageMemberRoles]);
 
   const handleSettingsHydrationSuccess = useCallback((payload: SettingsHydrationPayload) => {
     const nextCompanyForm = toCompanyForm(payload.company);
@@ -813,6 +866,14 @@ export default function Settings() {
     setMemberSaveError(null);
     setMemberSaveSuccess(null);
     setMemberRetryAction(null);
+
+    setInvitations(payload.invitations);
+    setIsInvitationEditorOpen(false);
+    setInvitationForm(DEFAULT_INVITATION_FORM_STATE);
+    setInvitationFieldErrors({});
+    setInvitationSaveError(null);
+    setInvitationSaveSuccess(null);
+    setInvitationRetryAction(null);
   }, []);
 
   const isSettingsHydrationEmpty = useCallback(() => false, []);
@@ -889,18 +950,26 @@ export default function Settings() {
     return typeof draftValue === 'string' && draftValue !== member.role;
   }), [memberRoleDrafts, members]);
 
+  const isInvitationEditorDirty = useMemo(() => (
+    Boolean(invitationForm.email.trim())
+    || invitationForm.role !== DEFAULT_INVITATION_FORM_STATE.role
+  ), [invitationForm.email, invitationForm.role]);
+
   const isAnySaving = (
     isCompanySaving
     || isGeofenceSaving
     || activeToggleTargetId !== null
     || deletingGeofenceId !== null
     || savingMemberId !== null
+    || isInvitationSaving
+    || resendingInvitationId !== null
   );
 
   const hasUnsavedChanges = (
     isCompanyDirty
     || isGeofenceEditorDirty
     || hasPendingMemberRoleChanges
+    || (isInvitationEditorOpen && isInvitationEditorDirty)
   );
 
   useEffect(() => {
@@ -1513,6 +1582,158 @@ export default function Settings() {
       return nextErrors;
     });
   }, []);
+
+  const openInvitationEditor = useCallback(() => {
+    if (!canManageMemberRoles || isInvitationSaving || resendingInvitationId !== null) {
+      return;
+    }
+
+    setIsInvitationEditorOpen(true);
+    setInvitationForm(DEFAULT_INVITATION_FORM_STATE);
+    setInvitationFieldErrors({});
+    setInvitationSaveError(null);
+    setInvitationSaveSuccess(null);
+    setInvitationRetryAction(null);
+  }, [canManageMemberRoles, isInvitationSaving, resendingInvitationId]);
+
+  const closeInvitationEditor = useCallback(() => {
+    if (isInvitationSaving) {
+      return;
+    }
+
+    setIsInvitationEditorOpen(false);
+    setInvitationForm(DEFAULT_INVITATION_FORM_STATE);
+    setInvitationFieldErrors({});
+  }, [isInvitationSaving]);
+
+  const handleInvitationFieldChange = useCallback((field: InvitationField, value: string) => {
+    setInvitationForm((prevState) => ({
+      ...prevState,
+      [field]: value,
+    }));
+    setInvitationFieldErrors((prevErrors) => ({
+      ...prevErrors,
+      [field]: undefined,
+    }));
+    setInvitationSaveError(null);
+    setInvitationSaveSuccess(null);
+    setInvitationRetryAction(null);
+  }, []);
+
+  const runInvitationCreate = useCallback(async (draft: InvitationFormState) => {
+    if (!canManageMemberRoles) {
+      return;
+    }
+
+    setIsInvitationSaving(true);
+    setInvitationFieldErrors({});
+    setInvitationSaveError(null);
+    setInvitationSaveSuccess(null);
+    setInvitationRetryAction(null);
+
+    try {
+      const createdInvitation = await createInvitation(buildInvitationCreatePayload(draft));
+      setInvitations((prevInvitations) => upsertPendingInvitation(prevInvitations, createdInvitation));
+      setInvitationForm(DEFAULT_INVITATION_FORM_STATE);
+      setIsInvitationEditorOpen(false);
+      setInvitationSaveSuccess('초대 메일을 발송했습니다.');
+      toast.success('초대 메일을 발송했습니다.');
+    } catch (error) {
+      if (error instanceof ApiError) {
+        if (error.status === 400) {
+          const mappedErrors = mapFieldErrors<InvitationField>(toErrorFieldEntries(error), {
+            email: 'email',
+            role: 'role',
+          });
+          setInvitationFieldErrors(mappedErrors);
+          setInvitationSaveError(error.message ?? '입력값을 확인해 주세요.');
+          return;
+        }
+        if (error.status === 403) {
+          setInvitationSaveError('초대 생성 권한이 없습니다.');
+          return;
+        }
+        if (error.status === 409) {
+          setInvitationFieldErrors((prevErrors) => ({
+            ...prevErrors,
+            email: error.message || '이미 가입되었거나 초대가 진행 중인 사용자입니다.',
+          }));
+          setInvitationSaveError(error.message || '이미 가입되었거나 초대가 진행 중인 사용자입니다.');
+          void hydrateInvitationsOnly();
+          return;
+        }
+        if (isRetryableMutationError(error)) {
+          setInvitationSaveError('일시적인 오류로 초대 생성에 실패했습니다. 다시 시도해 주세요.');
+          setInvitationRetryAction(() => () => {
+            void runInvitationCreate(draft);
+          });
+          return;
+        }
+      }
+
+      setInvitationSaveError(toErrorMessage(error, '초대 생성에 실패했습니다.'));
+    } finally {
+      setIsInvitationSaving(false);
+    }
+  }, [canManageMemberRoles, hydrateInvitationsOnly]);
+
+  const handleInvitationCreate = useCallback(() => {
+    const validationErrors = validateInvitationDraft(invitationForm);
+    if (Object.keys(validationErrors).length > 0) {
+      setInvitationFieldErrors(validationErrors);
+      return;
+    }
+
+    void runInvitationCreate(invitationForm);
+  }, [invitationForm, runInvitationCreate]);
+
+  const runInvitationResend = useCallback(async (invitationId: string) => {
+    if (!canManageMemberRoles) {
+      return;
+    }
+
+    setResendingInvitationId(invitationId);
+    setInvitationSaveError(null);
+    setInvitationSaveSuccess(null);
+    setInvitationRetryAction(null);
+
+    try {
+      const resentInvitation = await resendInvitation(invitationId);
+      setInvitations((prevInvitations) => upsertPendingInvitation(prevInvitations, resentInvitation));
+      setInvitationSaveSuccess('초대를 재발송했습니다.');
+      toast.success('초대를 재발송했습니다.');
+    } catch (error) {
+      if (error instanceof ApiError) {
+        if (error.status === 403) {
+          setInvitationSaveError('초대 재발송 권한이 없습니다.');
+          return;
+        }
+        if (error.status === 404 || error.status === 409) {
+          setInvitationSaveError(error.message || '초대 상태가 변경되어 목록을 다시 불러옵니다.');
+          void hydrateInvitationsOnly();
+          return;
+        }
+        if (isRetryableMutationError(error)) {
+          setInvitationSaveError('일시적인 오류로 초대 재발송에 실패했습니다. 다시 시도해 주세요.');
+          setInvitationRetryAction(() => () => {
+            void runInvitationResend(invitationId);
+          });
+          return;
+        }
+      }
+
+      setInvitationSaveError(toErrorMessage(error, '초대 재발송에 실패했습니다.'));
+    } finally {
+      setResendingInvitationId(null);
+    }
+  }, [canManageMemberRoles, hydrateInvitationsOnly]);
+
+  const handleInvitationResend = useCallback((invitationId: string) => {
+    if (isInvitationSaving || resendingInvitationId !== null) {
+      return;
+    }
+    void runInvitationResend(invitationId);
+  }, [isInvitationSaving, resendingInvitationId, runInvitationResend]);
 
   // CSV 템플릿 다운로드
   const downloadTemplate = (type: UploadType) => {
@@ -2616,6 +2837,30 @@ export default function Settings() {
                 </div>
               )}
 
+              {(invitationSaveError || invitationSaveSuccess) && (
+                <div
+                  className={`rounded-lg border px-4 py-3 text-sm ${
+                    invitationSaveError
+                      ? 'border-red-200 bg-red-50 text-red-700'
+                      : 'border-green-200 bg-green-50 text-green-700'
+                  }`}
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <p>{invitationSaveError ?? invitationSaveSuccess}</p>
+                    {invitationSaveError && invitationRetryAction && (
+                      <button
+                        type="button"
+                        onClick={invitationRetryAction}
+                        className="inline-flex items-center gap-1 rounded-md border border-red-200 bg-white px-3 py-1 text-xs font-medium text-red-700 hover:bg-red-100"
+                      >
+                        <RefreshCw className="h-3.5 w-3.5" />
+                        다시 시도
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+
               {(memberSaveError || memberSaveSuccess) && (
                 <div
                   className={`rounded-lg border px-4 py-3 text-sm ${
@@ -2648,14 +2893,74 @@ export default function Settings() {
                   </div>
                   <button
                     type="button"
-                    disabled
-                    className="inline-flex cursor-not-allowed items-center gap-2 rounded-lg bg-gray-200 px-4 py-2 font-medium text-gray-600"
-                    title="초대 기능은 별도 티켓에서 구현 예정입니다."
+                    onClick={openInvitationEditor}
+                    disabled={!canManageMemberRoles || isInvitationSaving || resendingInvitationId !== null}
+                    className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-600"
                   >
                     <Plus className="h-4 w-4" />
                     초대하기
                   </button>
                 </div>
+
+                {isInvitationEditorOpen && (
+                  <div className="border-b border-blue-100 bg-blue-50 px-6 py-5">
+                    <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_180px]">
+                      <div>
+                        <label htmlFor="settings-invitation-email" className="mb-1 block text-sm font-medium text-blue-900">
+                          초대 이메일
+                        </label>
+                        <input
+                          id="settings-invitation-email"
+                          type="email"
+                          value={invitationForm.email}
+                          onChange={(event) => handleInvitationFieldChange('email', event.target.value)}
+                          disabled={isInvitationSaving}
+                          placeholder="invitee@example.com"
+                          className="w-full rounded-lg border border-blue-200 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 disabled:bg-gray-100"
+                        />
+                        {invitationFieldErrors.email && (
+                          <p className="mt-1 text-xs text-red-600">{invitationFieldErrors.email}</p>
+                        )}
+                      </div>
+                      <div>
+                        <label htmlFor="settings-invitation-role" className="mb-1 block text-sm font-medium text-blue-900">
+                          권한
+                        </label>
+                        <select
+                          id="settings-invitation-role"
+                          value={invitationForm.role}
+                          onChange={(event) => handleInvitationFieldChange('role', event.target.value)}
+                          disabled={isInvitationSaving}
+                          className="w-full rounded-lg border border-blue-200 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 disabled:bg-gray-100"
+                        >
+                          <option value="member">운영자</option>
+                          <option value="admin">관리자</option>
+                        </select>
+                        {invitationFieldErrors.role && (
+                          <p className="mt-1 text-xs text-red-600">{invitationFieldErrors.role}</p>
+                        )}
+                      </div>
+                    </div>
+                    <div className="mt-4 flex justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={closeInvitationEditor}
+                        disabled={isInvitationSaving}
+                        className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        취소
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleInvitationCreate}
+                        disabled={!canManageMemberRoles || isInvitationSaving}
+                        className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+                      >
+                        {isInvitationSaving ? '발송 중...' : '초대 메일 발송'}
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 <div className="overflow-x-auto">
                   <table className="w-full">
@@ -2761,6 +3066,73 @@ export default function Settings() {
                     <p><span className="font-medium">운영자(member):</span> 데이터 조회/운영 기능 사용, 설정 변경 제한</p>
                     <p><span className="font-medium">상태:</span> approved(활성), pending(승인 대기), rejected(거절), withdrawn(탈퇴)</p>
                   </div>
+                </div>
+              </div>
+
+              <div className="overflow-hidden rounded-xl bg-white shadow-sm">
+                <div className="border-b border-gray-200 px-6 py-4">
+                  <h2 className="text-base font-semibold text-[#1e2939]">초대 대기 목록</h2>
+                  <p className="mt-1 text-sm text-gray-600">아직 가입을 완료하지 않은 초대만 표시됩니다.</p>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead className="border-b border-gray-200 bg-gray-50">
+                      <tr>
+                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">이메일</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">권한</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">상태</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">초대 시각</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">만료 시각</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">재발송</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">액션</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-200">
+                      {invitations.length === 0 && (
+                        <tr>
+                          <td colSpan={7} className="px-6 py-10 text-center text-sm text-gray-500">
+                            대기 중인 초대가 없습니다.
+                          </td>
+                        </tr>
+                      )}
+                      {invitations.map((invitation) => (
+                        <tr key={invitation.id} className="hover:bg-gray-50">
+                          <td className="whitespace-nowrap px-6 py-4 text-sm font-medium text-gray-900">
+                            {invitation.email}
+                          </td>
+                          <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-600">
+                            {toInvitationRoleLabel(invitation.role)}
+                          </td>
+                          <td className="whitespace-nowrap px-6 py-4">
+                            <span className={`rounded-full px-2 py-1 text-xs font-medium ${getInvitationStatusBadgeColor(invitation.status)}`}>
+                              {toInvitationStatusLabel(invitation.status)}
+                            </span>
+                          </td>
+                          <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-600">
+                            {formatUpdatedAt(invitation.invitedAt)}
+                          </td>
+                          <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-600">
+                            {formatUpdatedAt(invitation.expiresAt)}
+                          </td>
+                          <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-600">
+                            {invitation.resendCount}회
+                            {invitation.resentAt ? ` / 최근 ${formatUpdatedAt(invitation.resentAt)}` : ''}
+                          </td>
+                          <td className="px-6 py-4 text-sm">
+                            <button
+                              type="button"
+                              onClick={() => handleInvitationResend(invitation.id)}
+                              disabled={!canManageMemberRoles || isInvitationSaving || resendingInvitationId === invitation.id}
+                              className="font-medium text-blue-600 hover:text-blue-800 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              {resendingInvitationId === invitation.id ? '재발송 중...' : '재발송'}
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               </div>
             </div>
