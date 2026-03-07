@@ -1,9 +1,9 @@
 ﻿# Prompt Library v1
 
-- Version: v1.2.45
+- Version: v1.2.46
 - Date: 2026-03-07
 - Owner: Pangea Frontend Team
-- Tags: prompt-library,workflow,branch-policy,history-policy,commit-policy,pr-automation,jira-traceability,end-prompt-protocol,worktree-cleanup,jira-status-sync,jira-comment-sync,ac-evidence,mock-removal,reservations-write,reservations-mock-removal,ocr-flow,revenue-api,settings-api,payment-status-sync,home-api,home-summary,action-payment-mock-removal,support-center,rbac-permission-hardening,e2e-test-hardening,playwright-artifact-policy,device-installation-tenant-scope,authorization-loading-guard,auth-silent-refresh
+- Tags: prompt-library,workflow,branch-policy,history-policy,commit-policy,pr-automation,jira-traceability,end-prompt-protocol,worktree-cleanup,jira-status-sync,jira-comment-sync,ac-evidence,mock-removal,reservations-write,reservations-mock-removal,ocr-flow,revenue-api,settings-api,payment-status-sync,home-api,home-summary,home-copy,i18n-regression,action-payment-mock-removal,support-center,rbac-permission-hardening,e2e-test-hardening,playwright-artifact-policy,device-installation-tenant-scope,authorization-loading-guard,auth-silent-refresh
 
 ## Context
 - 珥덇린 ?명똿 ?묒뾽?먯꽌 ?꾨＼?꾪듃 ?쒗뵆由? 釉뚮옖移??뺤콉, 臾몄꽌???덉감瑜?諛섎났 媛?ν븯寃??쒖??뷀븷 ?꾩슂媛 ?덉쓬.
@@ -80,6 +80,7 @@ End Prompt:
 - Revenue API ?곕룞 ?곗폆(BK-074/SCRUM-56 怨꾩뿴)? `prompt_history`??`/api/v2/revenue/summary(from,to,granularity)` 諛?`/api/v2/revenue/trend(from,to)` ?뚮씪誘명꽣 ?숆린?? 湲곌컙/?⑥쐞 蹂寃???loading 媛깆떊, empty-state, `400/401/403/5xx+network` 遺꾧린? Retry/?댁쟾 ?ㅻ깄??蹂듭썝 洹쇨굅瑜??④퍡 湲곕줉?쒕떎.
 - Home API ?곕룞 ?곗폆(BK-073/SCRUM-55 怨꾩뿴)? `prompt_history`??`/api/v2/home/summary(from,to,tenantId)` ?뚮씪誘명꽣 ?숆린?? 湲곌컙 ?꾪꽣 蹂寃??ъ“?? `loading/empty/401/403/5xx+network` 遺꾧린, race-safe ?붿껌 泥섎━? ?ъ“???ㅽ뙣 ???댁쟾 ?ㅻ깄???좎? 洹쇨굅, null-safe 湲곕낯媛??뚮뜑 諛?Home ?고???mock 寃쎈줈 ?쒓굅 洹쇨굅瑜??④퍡 湲곕줉?쒕떎.
 - Home KPI ?꾩냽 ?곗폆(SCRUM-183 怨꾩뿴)? `prompt_history`??`alerts.overdue`(諛섎궔 吏??)??`kpis.unpaidContracts`(誘몃궔/?곗껜 怨꾩빟) 遺꾩쓣 ?④퍡 湲곕줉?섍퀬, Home -> Reservations ?대룞 ???쇰줈 `paymentScope=delinquent` ?뚮뜑 ?숈씪 踰붿쐞濡??곌퀎?섏뿬 card/count/list 媛믪씠 ?쇱튂?섎뒗吏 蹂닿컯 ?뚯뒪??洹쇨굅瑜??④퍡 湲곕줉?쒕떎.
+- Home copy/i18n regression tickets (SCRUM-185 series) must record the exact localized string replacement, the rendered surface where the copy changed, and regression evidence that the Korean label is shown instead of the legacy English text. If Playwright reuses a running dev server, record whether `127.0.0.1:4173` was free or an isolated-port workaround was required.
 - Settings API ?곕룞 ?곗폆(BK-075/SCRUM-57 怨꾩뿴)? `prompt_history`??company/geofences/members API ?곌껐 洹쇨굅, ?뚯궗 ?뺣낫 dirty-check/遺遺??낅뜲?댄듃(schemaVersion ?ы븿)/????곹깭 遺꾧린, 沅뚰븳 湲곕컲 ?쎄린?꾩슜 泥섎━, `400 ?꾨뱶 ?ㅻ쪟쨌403 沅뚰븳쨌409 異⑸룎 ?щ줈?㈑?xx+network ?ъ떆??, ???誘몄????곹깭 ?댄깉 寃쎄퀬(beforeunload) 洹쇨굅瑜??④퍡 湲곕줉?쒕떎.
 - 怨좉컼?쇳꽣 UI/?곕룞 ?곗폆(BK-087/SCRUM-66 怨꾩뿴)? `prompt_history`??`/api/v2/support/categories`, `/api/v2/support/tickets`, `/api/v2/support/tickets/{ticketId}` ?곕룞 洹쇨굅, 移댄뀒怨좊━ loading/empty/吏곸젒?낅젰 遺꾧린, 臾몄쓽 submitting/以묐났 ?쒖텧 諛⑹?/?깃났 ticketId 蹂듦뎄, `400/401/403/5xx+network` 遺꾧린? Retry/沅뚰븳 ?≪뀡, 泥⑤??뚯씪 ?⑸웾 ?쒗븳 ?뺤콉 諛섏쁺 洹쇨굅瑜??④퍡 湲곕줉?쒕떎.
 - ??븷 湲곕컲 硫붾돱/沅뚰븳 ?섎뱶???곗폆(BK-076/SCRUM-58 怨꾩뿴)? `prompt_history`??`/api/v2/auth/me` + `/api/v2/permissions/me` 沅뚰븳 ?뚯뒪 ?듯빀 洹쇨굅, 硫붾돱/?쇱슦???≪뀡 沅뚰븳 ???쇨??? `401/403/5xx` 遺꾧린 ??deny-by-default ?뺤콉, role 蹂寃?沅뚰븳 罹먯떆 TTL/?뚮꼳???꾪솚 ???ы룊媛 洹쇨굅瑜??④퍡 湲곕줉?쒕떎.
@@ -167,6 +168,7 @@ cp docs/prompt_history/_TEMPLATE.md docs/prompt_history/$(date +%Y%m%d)_SCRUM-12
 - Production push triggers auto tag (`vX.Y.Z`)
 
 ## Version History
+- v1.2.46 (2026-03-07, SCRUM-185): Add prompt_history evidence rule for Home heading localization regressions, including exact copy replacement and the Playwright reused-server caveat/workaround.
 - v1.2.44 (2026-03-03, SCRUM-162): Add prompt_history evidence rule for auth/authorization silent-refresh UX hardening (initial bootstrap-only blocking, focus/visibility background refresh, and no full-screen auth fallback regression checks).
 - v1.2.43 (2026-03-03, SCRUM-73): Add prompt_history evidence rule for BK-095 observability baseline (FE `X-Request-Id` propagation via API client interceptor, request/response trace context capture, and Chrome DevTools MCP-based header verification evidence).
 - v1.2.45 (2026-03-07, SCRUM-183): Add prompt_history evidence rule for overdue/unpaid split on Home (`kpis.unpaidContracts`, Home->Reservations delinquent scope sync, and label-based Playwright regression coverage).

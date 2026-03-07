@@ -132,6 +132,8 @@ test.describe('SCRUM-183 Home E2E', () => {
       && response.ok()
     ));
 
+    await expect(page.getByRole('heading', { name: '홈 요약' })).toBeVisible();
+
     const overdueCard = getMetricCard(page, '반납 지연');
     const unpaidCard = getMetricCard(page, '미납/연체 계약');
 
