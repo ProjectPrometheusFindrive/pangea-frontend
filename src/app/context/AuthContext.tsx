@@ -35,7 +35,6 @@ interface AuthContextType {
   login: (payload: AuthLoginPayload) => Promise<void>;
   refreshSession: (options?: RefreshSessionOptions) => Promise<void>;
   logout: (options?: LogoutOptions) => Promise<void>;
-  dismissSessionExpiredModal: () => void;
 }
 
 interface AuthSession {
@@ -54,7 +53,6 @@ const AUTH_STORAGE_KEYS = [
   'refreshToken',
 ];
 const LOGIN_PATH = '/login';
-const LOCATION_CHANGE_EVENT = 'pangea:locationchange';
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 function isLoginPath(path: string): boolean {
@@ -78,13 +76,6 @@ function buildCurrentPath(): string {
     return '/';
   }
   return `${window.location.pathname}${window.location.search}${window.location.hash}`;
-}
-
-function getCurrentPathname(): string {
-  if (typeof window === 'undefined') {
-    return '/';
-  }
-  return window.location.pathname;
 }
 
 function removeStorageItem(storage: Storage, key: string): void {
@@ -291,9 +282,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
   const [isBootstrapping, setIsBootstrapping] = useState(true);
   const [isSessionExpiredModalOpen, setIsSessionExpiredModalOpen] = useState(false);
-  const [currentPathname, setCurrentPathname] = useState<string>(() => getCurrentPathname());
   const refreshPromiseRef = useRef<Promise<AuthSession | null> | null>(null);
   const sessionExpiredHandledRef = useRef(false);
+  const authRequestVersionRef = useRef(0);
 
   const applySession = useCallback((session: AuthSession) => {
     setToken(session.token);
@@ -373,6 +364,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [applySession]);
 
   const refreshSession = useCallback(async (options?: RefreshSessionOptions) => {
+    const requestVersion = authRequestVersionRef.current;
+    const isStaleRequest = () => requestVersion !== authRequestVersionRef.current;
     const storedSession = readStoredSession();
     const isSilentRefresh = options?.silent === true;
 
@@ -394,13 +387,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     try {
       const nextUser = await getMe();
+      if (isStaleRequest()) {
+        return;
+      }
       applySession({
         ...storedSession,
         user: nextUser,
       });
     } catch (refreshError) {
+      if (isStaleRequest()) {
+        return;
+      }
+
       if (refreshError instanceof ApiError && refreshError.status === 401) {
         const refreshedSession = await refreshAccessToken();
+        if (isStaleRequest()) {
+          return;
+        }
 
         if (!refreshedSession) {
           if (isSilentRefresh || status === 'authenticated') {
@@ -413,11 +416,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         try {
           const refreshedUser = await getMe();
+          if (isStaleRequest()) {
+            return;
+          }
           applySession({
             ...refreshedSession,
             user: refreshedUser,
           });
         } catch {
+          if (isStaleRequest()) {
+            return;
+          }
           if (isSilentRefresh || status === 'authenticated') {
             handleSessionExpired();
           } else {
@@ -426,6 +435,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           return;
         }
       } else {
+        if (isStaleRequest()) {
+          return;
+        }
         clearSession();
         setError(toErrorMessage(refreshError, '세션 정보를 확인하지 못했습니다.'));
       }
@@ -436,6 +448,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [applySession, clearSession, handleBootstrapSessionExpired, handleSessionExpired, refreshAccessToken, status]);
 
   const login = useCallback(async (payload: AuthLoginPayload) => {
+    authRequestVersionRef.current += 1;
     setError(null);
     setIsLoading(true);
     setStatus('checking');
@@ -468,6 +481,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [applySession, clearSession]);
 
   const logout = useCallback(async (options?: LogoutOptions) => {
+    authRequestVersionRef.current += 1;
     setError(null);
     setIsLoading(true);
 
@@ -499,12 +513,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     redirectToLogin('expired');
   }, []);
 
-  const dismissSessionExpiredModal = useCallback(() => {
-    setIsSessionExpiredModalOpen(false);
-  }, []);
-
   useEffect(() => {
     const removeInterceptor = apiClient.useResponseInterceptor(async (context) => {
+      const requestVersion = authRequestVersionRef.current;
+      const isStaleRequest = () => requestVersion !== authRequestVersionRef.current;
+
       if (context.response.status !== 401 || context.request.config.skipAuth) {
         return context;
       }
@@ -527,11 +540,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       if (context.request.config.internal?.hasRetriedAuth) {
-        handleSessionExpired();
+        if (!isStaleRequest()) {
+          handleSessionExpired();
+        }
         return context;
       }
 
       const refreshedSession = await refreshAccessToken();
+      if (isStaleRequest()) {
+        return context;
+      }
       if (!refreshedSession) {
         handleSessionExpired();
         return context;
@@ -552,7 +570,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           body: retriedBody,
         };
       } catch (retryError) {
-        if (retryError instanceof ApiError && retryError.status === 401) {
+        if (!isStaleRequest() && retryError instanceof ApiError && retryError.status === 401) {
           handleSessionExpired();
         }
         throw retryError;
@@ -601,41 +619,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       };
   }, [applySession, clearSession]);
 
-  useEffect(() => {
-    if (typeof window === 'undefined') {
-      return undefined;
-    }
-
-    const updateCurrentPathname = () => {
-      setCurrentPathname(window.location.pathname);
-    };
-
-    const originalPushState = window.history.pushState.bind(window.history);
-    const originalReplaceState = window.history.replaceState.bind(window.history);
-
-    window.history.pushState = function pushState(...args) {
-      const result = originalPushState(...args);
-      window.dispatchEvent(new Event(LOCATION_CHANGE_EVENT));
-      return result;
-    };
-
-    window.history.replaceState = function replaceState(...args) {
-      const result = originalReplaceState(...args);
-      window.dispatchEvent(new Event(LOCATION_CHANGE_EVENT));
-      return result;
-    };
-
-    window.addEventListener('popstate', updateCurrentPathname);
-    window.addEventListener(LOCATION_CHANGE_EVENT, updateCurrentPathname);
-
-    return () => {
-      window.history.pushState = originalPushState;
-      window.history.replaceState = originalReplaceState;
-      window.removeEventListener('popstate', updateCurrentPathname);
-      window.removeEventListener(LOCATION_CHANGE_EVENT, updateCurrentPathname);
-    };
-  }, []);
-
   const viewRole = useMemo<AuthViewRole | null>(() => {
     if (!user) {
       return null;
@@ -655,13 +638,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     login,
     refreshSession,
     logout,
-    dismissSessionExpiredModal,
-  }), [dismissSessionExpiredModal, error, isBootstrapping, isLoading, login, logout, refreshSession, status, token, user, viewRole]);
+  }), [error, isBootstrapping, isLoading, login, logout, refreshSession, status, token, user, viewRole]);
 
   return (
     <AuthContext.Provider value={contextValue}>
       {children}
-      {isSessionExpiredModalOpen && !isLoginPath(currentPathname) && (
+      {isSessionExpiredModalOpen && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 px-4">
           <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl">
             <h2 className="text-lg font-semibold text-gray-900">세션이 만료되었습니다</h2>
