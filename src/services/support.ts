@@ -60,10 +60,23 @@ export interface CreateSupportTicketPayload {
   attachments?: CreateSupportTicketAttachmentPayload[];
 }
 
-interface SupportTicketListOptions extends SupportRequestOptions {
+export interface SupportTicketListOptions extends SupportRequestOptions {
   limit?: number;
   offset?: number;
   ticketId?: string;
+  companyId?: string;
+  status?: SupportTicketStatus | '';
+  from?: string;
+  to?: string;
+}
+
+export interface SupportTicketDetailOptions extends SupportRequestOptions {
+  companyId?: string;
+}
+
+export interface UpdateSupportTicketStatusPayload {
+  status: SupportTicketStatus;
+  note?: string;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -341,10 +354,14 @@ function toSupportTicketList(payload: unknown): SupportTicket[] {
     .filter((item): item is SupportTicket => item !== null);
 }
 
-async function listSupportTickets({
+export async function listSupportTickets({
   limit = 200,
   offset = 0,
   ticketId,
+  companyId,
+  status,
+  from,
+  to,
   signal,
 }: SupportTicketListOptions = {}): Promise<SupportTicket[]> {
   const payload = await apiClient.requestData<unknown>({
@@ -354,6 +371,10 @@ async function listSupportTickets({
       limit,
       offset,
       ticketId,
+      companyId,
+      status: toStringValue(status) ?? undefined,
+      from,
+      to,
     },
     signal,
   });
@@ -438,7 +459,7 @@ export async function createSupportTicket(payload: CreateSupportTicketPayload): 
 
 export async function getSupportTicketDetail(
   ticketId: string,
-  options: SupportRequestOptions = {},
+  options: SupportTicketDetailOptions = {},
 ): Promise<SupportTicket> {
   const normalizedTicketId = ticketId.trim();
   if (!normalizedTicketId) {
@@ -449,6 +470,9 @@ export async function getSupportTicketDetail(
     const payload = await apiClient.requestData<unknown>({
       path: `/api/v2/support/tickets/${encodeURIComponent(normalizedTicketId)}`,
       method: 'GET',
+      query: {
+        companyId: options.companyId,
+      },
       signal: options.signal,
     });
 
@@ -464,6 +488,7 @@ export async function getSupportTicketDetail(
         limit: 200,
         offset: 0,
         ticketId: normalizedTicketId,
+        companyId: options.companyId,
         signal: options.signal,
       });
 
@@ -477,4 +502,38 @@ export async function getSupportTicketDetail(
 
     throw error;
   }
+}
+
+export async function updateSupportTicketStatus(
+  ticketId: string,
+  payload: UpdateSupportTicketStatusPayload,
+  options: SupportTicketDetailOptions = {},
+): Promise<SupportTicket> {
+  const normalizedTicketId = ticketId.trim();
+  const nextStatus = normalizeSupportTicketStatus(payload.status);
+  const note = toStringValue(payload.note) ?? undefined;
+
+  if (!normalizedTicketId) {
+    throw new ApiError('VALIDATION_ERROR', 'ticketId is required', { status: 400 });
+  }
+
+  const responsePayload = await apiClient.requestData<unknown>({
+    path: `/api/v2/support/tickets/${encodeURIComponent(normalizedTicketId)}/status`,
+    method: 'PATCH',
+    query: {
+      companyId: options.companyId,
+    },
+    body: {
+      status: nextStatus,
+      note,
+    },
+    signal: options.signal,
+  });
+
+  const updatedTicket = toSupportTicketFromPayload(responsePayload);
+  if (!updatedTicket) {
+    throw new ApiError('API_ERROR', 'Unexpected support ticket update response payload');
+  }
+
+  return updatedTicket;
 }
