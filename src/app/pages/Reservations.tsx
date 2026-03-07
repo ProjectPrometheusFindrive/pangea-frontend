@@ -894,6 +894,7 @@ export default function Reservations() {
         contractStatus: toApiContractStatus(viewFilter),
         from: fromDate ?? undefined,
         to: toDate ?? undefined,
+        due: viewFilter === 'overdue' ? 'overdue' : (dueFilter ?? undefined),
         signal,
       });
 
