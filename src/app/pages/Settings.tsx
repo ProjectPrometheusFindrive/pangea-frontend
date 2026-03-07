@@ -116,6 +116,7 @@ interface SettingsHydrationPayload {
   geofences: SettingsGeofence[];
   members: SettingsMember[];
   invitations: Invitation[];
+  invitationLoadError: string | null;
 }
 
 const DEFAULT_SETTINGS_SCHEMA_VERSION = 'v1';
@@ -625,9 +626,13 @@ export default function Settings() {
       return;
     }
 
-    const invitationsPayload = await listInvitations('pending');
-    const invitationItems = Array.isArray(invitationsPayload.items) ? invitationsPayload.items : [];
-    setInvitations(invitationItems.reduce<Invitation[]>((items, invitation) => upsertPendingInvitation(items, invitation), []));
+    try {
+      const invitationsPayload = await listInvitations('pending');
+      const invitationItems = Array.isArray(invitationsPayload.items) ? invitationsPayload.items : [];
+      setInvitations(invitationItems.reduce<Invitation[]>((items, invitation) => upsertPendingInvitation(items, invitation), []));
+    } catch (error) {
+      setInvitationSaveError(toErrorMessage(error, '초대 목록을 다시 불러오지 못했습니다.'));
+    }
   }, [canManageMemberRoles]);
 
   const hydrateGeofencesOnly = useCallback(async () => {
@@ -820,22 +825,33 @@ export default function Settings() {
   }, [canEditSettings, isBulkOcrProcessing, pollBulkOcrJobUntilTerminal, refreshCurrentDataCounts, user?.companyId]);
 
   const requestSettingsHydration = useCallback(async (signal: AbortSignal): Promise<SettingsHydrationPayload> => {
-    const [companyPayload, geofencesPayload, membersPayload, invitationsPayload] = await Promise.all([
+    const [companyPayload, geofencesPayload, membersPayload, invitationsResult] = await Promise.all([
       getSettingsCompany({ signal }),
       listSettingsGeofences({ signal }),
       listSettingsMembers(undefined, { signal }),
       canManageMemberRoles
         ? listInvitations('pending', { signal })
-        : Promise.resolve({ items: [] }),
+            .then((payload) => ({ payload, error: null as string | null }))
+            .catch((error: unknown) => {
+              if (error instanceof DOMException && error.name === 'AbortError') {
+                throw error;
+              }
+              return {
+                payload: { items: [] },
+                error: toErrorMessage(error, '초대 목록을 불러오지 못했습니다.'),
+              };
+            })
+        : Promise.resolve({ payload: { items: [] }, error: null as string | null }),
     ]);
 
     return {
       company: companyPayload,
       geofences: Array.isArray(geofencesPayload.items) ? geofencesPayload.items : [],
       members: Array.isArray(membersPayload.items) ? membersPayload.items : [],
-      invitations: Array.isArray(invitationsPayload.items)
-        ? invitationsPayload.items.reduce<Invitation[]>((items, invitation) => upsertPendingInvitation(items, invitation), [])
+      invitations: Array.isArray(invitationsResult.payload.items)
+        ? invitationsResult.payload.items.reduce<Invitation[]>((items, invitation) => upsertPendingInvitation(items, invitation), [])
         : [],
+      invitationLoadError: invitationsResult.error,
     };
   }, [canManageMemberRoles]);
 
@@ -871,7 +887,7 @@ export default function Settings() {
     setIsInvitationEditorOpen(false);
     setInvitationForm(DEFAULT_INVITATION_FORM_STATE);
     setInvitationFieldErrors({});
-    setInvitationSaveError(null);
+    setInvitationSaveError(payload.invitationLoadError);
     setInvitationSaveSuccess(null);
     setInvitationRetryAction(null);
   }, []);
