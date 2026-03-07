@@ -146,7 +146,7 @@ test.describe('Account settings', () => {
     await pendingRow.getByRole('button', { name: '재발송' }).click();
 
     await expect.poll(() => resendCount).toBe(1);
-    await expect(page.getByText('초대를 재발송했습니다.')).toBeVisible();
+    await expect(page.getByRole('main').getByText('초대를 재발송했습니다.')).toBeVisible();
     await expect(pendingRow.getByText('1회')).toBeVisible();
   });
 });
