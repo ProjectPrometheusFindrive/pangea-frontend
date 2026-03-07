@@ -1791,9 +1791,11 @@ function SupportTicketSubmitView() {
 
 export default function SupportCenter() {
   const { canPerformAction } = useAuthorization();
+  const location = useLocation();
   const canManageSupport = canPerformAction(ACTION_PERMISSIONS.supportManage);
+  const supportPrefill = useMemo(() => readSupportPrefillState(location.state), [location.state]);
 
-  if (canManageSupport) {
+  if (canManageSupport && !supportPrefill) {
     return <SupportAdminManagementView />;
   }
 

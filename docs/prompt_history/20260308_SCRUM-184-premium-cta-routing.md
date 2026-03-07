@@ -15,8 +15,8 @@
 
 ## Changes Summary
 - Added a shared premium inquiry navigation helper so Premium CTA entry points in Home, Layout, and Vehicle Detail now route users to `SupportCenter` with source-specific prefilled title/content/category instead of opening an alert.
-- Updated `SupportCenter` to consume the routed prefill safely, preserving manual-category fallback when the prefilled category is not present in the fetched category list and separating the submit flow from the admin management view to avoid conditional-hook instability.
-- Replaced the Home `단말 OFF` hard-coded count with an explicit `데이터 없음` fallback and added CTA-driven Playwright coverage that verifies the real `/support-center` handoff and prefilled form state.
+- Updated `SupportCenter` to consume the routed prefill safely, preserving manual-category fallback when the prefilled category is not present in the fetched category list, honoring prefilled submit mode even for support-manage roles, and separating the submit flow from the admin management view to avoid conditional-hook instability.
+- Replaced the Home `단말 OFF` hard-coded count with an explicit `데이터 없음` fallback and added CTA-driven Playwright coverage that verifies both the Home modal and Layout banner `/support-center` handoffs with prefilled form state.
 
 ## Diffs & Files
 - `src/app/utils/premiumInquiry.ts`
@@ -29,9 +29,9 @@
 - `src/app/components/VehicleDetailModal.tsx`
   - Routed the vehicle-level premium upgrade CTA through the shared helper.
 - `src/app/pages/SupportCenter.tsx`
-  - Read navigation-state prefills, preserved manual-category handling, and split submit/admin views to keep hooks stable.
+  - Read navigation-state prefills, preserved manual-category handling, and split submit/admin views while allowing premium-prefilled admin users to stay on the submit flow.
 - `e2e/home.spec.ts`
-  - Added a real home-to-support-center Premium CTA regression and a `단말 OFF` no-data assertion.
+  - Added real home-to-support-center regressions for the Home modal and admin Layout banner CTA paths, plus a `단말 OFF` no-data assertion.
 - `e2e/support-center.spec.ts`
   - Seeded authorization state so the existing admin/support-center regressions remain stable in Playwright.
 - `docs/plans/2026-03-07-scrum-184-premium-cta-routing-design.md`
