@@ -34,7 +34,7 @@ test.describe('Account settings', () => {
     await page.getByRole('button', { name: /E2E Member/i }).click();
     await page.getByRole('button', { name: '계정 설정' }).click();
     await page.getByRole('button', { name: '계정 삭제' }).click();
-    await page.getByRole('button', { name: '삭제' }).click();
+    await page.getByRole('button', { name: '삭제', exact: true }).click();
 
     await expect.poll(() => withdrawCount).toBe(1);
     await expect(page).toHaveURL(/\/login/);

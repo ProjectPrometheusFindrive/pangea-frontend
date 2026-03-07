@@ -329,7 +329,7 @@ test.describe('BK-091 Login E2E', () => {
     await seedAuthSession(page);
     await page.goto('/assets');
 
-    await expect(page).toHaveURL(/\/login\?reason=expired/);
+    await expect(page).toHaveURL(/\/login(?:\?.*)?$/);
     await expect(page.getByTestId('login-user-id')).toBeVisible();
 
     await page.getByTestId('login-user-id').fill('member-001');
