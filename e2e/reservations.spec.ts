@@ -246,11 +246,13 @@ test.describe('BK-091 Reservations E2E', () => {
   });
 
   test('예약 반납 5xx 오류 시 재시도 안내를 노출한다', async ({ page }) => {
+    const rentalReservation = buildReservationRow({ contractStatus: '대여중' });
+
     await installApiMocks(page, {
       handlers: {
         'GET /api/v2/reservations': async ({ route }) => {
           await fulfillSuccess(route, {
-            reservations: [buildReservationRow()],
+            reservations: [rentalReservation],
             assets: [buildVehicleAsset()],
             total: 1,
             page: 1,
@@ -258,7 +260,7 @@ test.describe('BK-091 Reservations E2E', () => {
           });
         },
         'GET /api/v2/reservations/R-9001': async ({ route }) => {
-          await fulfillSuccess(route, buildReservationRow());
+          await fulfillSuccess(route, rentalReservation);
         },
         'POST /api/v2/reservations/R-9001/return': async ({ route }) => {
           await fulfillError(route, 500, 'SERVER_ERROR', 'temporary error');
