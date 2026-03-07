@@ -45,7 +45,7 @@ after(async () => {
   await viteServer?.close();
 });
 
-test('getReservationsList sends only the canonical size query parameter', async () => {
+test('getReservationsList sends canonical size and paymentScope query parameters', async () => {
   const module = await viteServer.ssrLoadModule('/src/services/reservations.ts');
   const requestedUrls = [];
   const originalFetch = globalThis.fetch;
@@ -66,12 +66,14 @@ test('getReservationsList sends only the canonical size query parameter', async 
       page: 2,
       size: 50,
       status: 'reservation',
+      paymentScope: 'delinquent',
     });
 
     assert.equal(requestedUrls.length, 1);
     const requestUrl = requestedUrls[0];
     assert.equal(requestUrl.searchParams.get('page'), '2');
     assert.equal(requestUrl.searchParams.get('size'), '50');
+    assert.equal(requestUrl.searchParams.get('paymentScope'), 'delinquent');
     assert.equal(requestUrl.searchParams.has('pageSize'), false);
   } finally {
     globalThis.fetch = originalFetch;
