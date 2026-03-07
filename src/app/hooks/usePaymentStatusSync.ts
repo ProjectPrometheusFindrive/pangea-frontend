@@ -60,10 +60,7 @@ export function usePaymentStatusSync({
 
   const sequenceRef = useRef(0);
   const controllerRef = useRef<AbortController | null>(null);
-
-  useEffect(() => () => {
-    controllerRef.current?.abort();
-  }, []);
+  const intervalRef = useRef<number | null>(null);
 
   const applyResolveResult = useCallback((result: PaymentStatusResolveResult) => {
     setByReservationId(result.byReservationId);
@@ -122,22 +119,51 @@ export function usePaymentStatusSync({
   }, [applyResolveResult, enabled, normalizedTargets]);
 
   useEffect(() => {
-    void runSync();
-  }, [targetsKey, runSync]);
-
-  useEffect(() => {
-    if (!enabled || normalizedTargets.length === 0 || pollIntervalMs <= 0) {
-      return;
-    }
-
-    const timerId = window.setInterval(() => {
-      void runSync();
-    }, pollIntervalMs);
+    const clearTimer = () => {
+      if (intervalRef.current !== null) {
+        window.clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+    };
 
     return () => {
-      window.clearInterval(timerId);
+      clearTimer();
+      controllerRef.current?.abort();
     };
-  }, [enabled, normalizedTargets.length, pollIntervalMs, runSync]);
+  }, []);
+
+  useEffect(() => {
+    const clearTimer = () => {
+      if (intervalRef.current !== null) {
+        window.clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+    };
+
+    clearTimer();
+
+    if (!enabled || normalizedTargets.length === 0) {
+      controllerRef.current?.abort();
+      void runSync();
+      return () => {
+        clearTimer();
+        controllerRef.current?.abort();
+      };
+    }
+
+    void runSync();
+
+    if (pollIntervalMs > 0) {
+      intervalRef.current = window.setInterval(() => {
+        void runSync();
+      }, pollIntervalMs);
+    }
+
+    return () => {
+      clearTimer();
+      controllerRef.current?.abort();
+    };
+  }, [enabled, normalizedTargets.length, pollIntervalMs, runSync, targetsKey]);
 
   return {
     byReservationId,

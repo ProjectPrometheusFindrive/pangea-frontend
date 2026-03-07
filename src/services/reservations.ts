@@ -109,7 +109,6 @@ export function getReservationsList({
     query: {
       page,
       size,
-      pageSize: size,
       status,
       contractStatus: normalizedContractStatus,
       from,

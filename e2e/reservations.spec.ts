@@ -485,4 +485,177 @@ test.describe('BK-091 Reservations E2E', () => {
     await expect.poll(() => new URL(page.url()).searchParams.get('returnUrl')).toBe('/reservations');
     await expect(page.getByTestId('login-user-id')).toBeVisible();
   });
+
+  test('예약이 있어도 전체 자산 행과 실제 차종 필터를 유지하고 size만 전송한다', async ({ page }) => {
+    const reservationQueries: string[] = [];
+    const vehicleAssets = [
+      buildVehicleAsset(),
+      {
+        ...buildVehicleAsset(),
+        vehicleNumber: '34나5678',
+        model: '쏘나타',
+        vin: 'KMH12A34560000002',
+        year: '2025',
+        owner: '김영희',
+      },
+    ];
+
+    await installApiMocks(page, {
+      user: {
+        role: 'admin',
+      },
+      handlers: {
+        'GET /api/v2/reservations': async ({ route, request }) => {
+          reservationQueries.push(new URL(request.url()).search);
+          await fulfillSuccess(route, {
+            items: [
+              buildReservationRow({
+                id: 'R-9301',
+                vehicleNumber: '12가3456',
+              }),
+            ],
+            total: 1,
+            page: 1,
+            pageSize: 20,
+          });
+        },
+        'GET /api/v2/assets': async ({ route }) => {
+          await fulfillSuccess(route, {
+            items: vehicleAssets,
+            total: vehicleAssets.length,
+            page: 1,
+            size: 500,
+          });
+        },
+      },
+    });
+
+    await loginViaUi(page, 'admin', { returnUrl: '/reservations' });
+    await expect(page).toHaveURL(/\/reservations(?:\?.*)?$/);
+    await expect(page.getByText('총 2대 표시 중')).toBeVisible();
+    await expect(page.getByText('12가3456')).toBeVisible();
+    await expect(page.getByText('34나5678')).toBeVisible();
+
+    const modelFilter = page.locator('select').filter({
+      has: page.locator('option[value="all"]'),
+    }).first();
+    const modelOptions = await modelFilter.locator('option').allTextContents();
+    expect(modelOptions).toContain('전체');
+    expect(modelOptions).toContain('아반떼');
+    expect(modelOptions).toContain('쏘나타');
+
+    expect(reservationQueries).toHaveLength(1);
+    expect(reservationQueries[0]).toContain('size=20');
+    expect(reservationQueries[0]).not.toContain('pageSize=');
+  });
+
+  test('결제 폴링은 완료 예약을 제외하고 빈 결제 예약도 최초 동기화만 수행한다', async ({ page }) => {
+    const statusRequestCounts = new Map<string, number>();
+    const vehicleAssets = [
+      buildVehicleAsset(),
+      {
+        ...buildVehicleAsset(),
+        vehicleNumber: '34나5678',
+        model: '쏘나타',
+        vin: 'KMH12A34560000002',
+        year: '2025',
+        owner: '김영희',
+      },
+      {
+        ...buildVehicleAsset(),
+        vehicleNumber: '56다7890',
+        model: '그랜저',
+        vin: 'KMH12A34560000003',
+        year: '2023',
+        owner: '최민수',
+      },
+    ];
+
+    await installApiMocks(page, {
+      user: {
+        role: 'admin',
+      },
+      handlers: {
+        'GET /api/v2/reservations': async ({ route }) => {
+          await fulfillSuccess(route, {
+            items: [
+              buildReservationRow({
+                id: 'R-ACTIVE',
+                vehicleNumber: '12가3456',
+                paymentStatus: '대기',
+                contractStatus: '예약중',
+              }),
+              buildReservationRow({
+                id: 'R-EMPTY',
+                vehicleNumber: '34나5678',
+                paymentStatus: '대기',
+                contractStatus: '예약중',
+              }),
+              buildReservationRow({
+                id: 'R-DONE',
+                vehicleNumber: '56다7890',
+                paymentStatus: '완료',
+                contractStatus: '완료',
+              }),
+            ],
+            total: 3,
+            page: 1,
+            pageSize: 20,
+          });
+        },
+        'GET /api/v2/assets': async ({ route }) => {
+          await fulfillSuccess(route, {
+            items: vehicleAssets,
+            total: vehicleAssets.length,
+            page: 1,
+            size: 500,
+          });
+        },
+        'GET /api/v2/payments/status': async ({ route, request }) => {
+          const reservationId = new URL(request.url()).searchParams.get('reservationId') ?? '';
+          statusRequestCounts.set(
+            reservationId,
+            (statusRequestCounts.get(reservationId) ?? 0) + 1,
+          );
+
+          if (reservationId === 'R-ACTIVE') {
+            await fulfillSuccess(route, {
+              reservationId,
+              items: [
+                {
+                  id: 'PAY-1001',
+                  reservationId,
+                  status: 'pending',
+                  updatedAt: '2026-03-07T00:00:00Z',
+                },
+              ],
+              total: 1,
+            });
+            return;
+          }
+
+          if (reservationId === 'R-EMPTY') {
+            await fulfillSuccess(route, {
+              reservationId,
+              items: [],
+              total: 0,
+            });
+            return;
+          }
+
+          await fulfillError(route, 500, 'UNEXPECTED_TARGET', `unexpected polling target: ${reservationId}`);
+        },
+      },
+    });
+
+    await loginViaUi(page, 'admin', { returnUrl: '/reservations' });
+    await expect(page).toHaveURL(/\/reservations(?:\?.*)?$/);
+    await expect(page.getByText('12가3456')).toBeVisible();
+    await expect(page.getByText('34나5678')).toBeVisible();
+    await expect(page.getByText('56다7890')).toBeVisible();
+
+    await expect.poll(() => statusRequestCounts.get('R-ACTIVE') ?? 0).toBe(1);
+    await expect.poll(() => statusRequestCounts.get('R-EMPTY') ?? 0).toBe(1);
+    expect(statusRequestCounts.get('R-DONE') ?? 0).toBe(0);
+  });
 });

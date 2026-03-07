@@ -425,6 +425,18 @@ function getCachedSnapshot(target: PaymentSyncTarget): PaymentStatusSnapshot | n
   return null;
 }
 
+function shouldUseCachedNotFoundSnapshot(
+  target: PaymentSyncTarget,
+  cachedSnapshot: PaymentStatusSnapshot | null,
+): cachedSnapshot is PaymentStatusSnapshot {
+  return Boolean(
+    cachedSnapshot
+    && cachedSnapshot.status === 'not-found'
+    && target.reservationId
+    && !target.paymentId,
+  );
+}
+
 function dedupeTargets(targets: PaymentSyncTarget[]): PaymentSyncTarget[] {
   const map = new Map<string, PaymentSyncTarget>();
 
@@ -490,6 +502,17 @@ export async function resolvePaymentStatuses(
   let errorMessage: string | null = null;
 
   for (const target of normalizedTargets) {
+    const cachedSnapshot = getCachedSnapshot(target);
+    if (shouldUseCachedNotFoundSnapshot(target, cachedSnapshot)) {
+      if (target.reservationId) {
+        byReservationId[target.reservationId] = cachedSnapshot;
+      }
+      if (cachedSnapshot.paymentId) {
+        byPaymentId[cachedSnapshot.paymentId] = cachedSnapshot;
+      }
+      continue;
+    }
+
     const candidates: PaymentStatusSnapshot[] = [];
     const fallbackSnapshot = toFallbackSnapshot(target);
     if (fallbackSnapshot) {
@@ -505,42 +528,11 @@ export async function resolvePaymentStatuses(
           .map((row) => toSnapshotFromRecord(row, 'status-endpoint', { reservationId: target.reservationId }))
           .filter((snapshot): snapshot is PaymentStatusSnapshot => snapshot !== null);
 
-        candidates.push(...statusSnapshots);
-
-        const paymentIds = Array.from(new Set(
-          statusSnapshots
-            .map((snapshot) => snapshot.paymentId)
-            .filter((value): value is string => Boolean(value)),
-        ));
-
-        for (const paymentId of paymentIds) {
-          try {
-            const detailPayload = await getPaymentById(paymentId, { signal: options.signal });
-            const detailSnapshot = chooseBestSnapshot(
-              toRecordCollection(detailPayload)
-                .map((row) => toSnapshotFromRecord(row, 'payment-detail', {
-                  reservationId: target.reservationId,
-                  paymentId,
-                }))
-                .filter((snapshot): snapshot is PaymentStatusSnapshot => snapshot !== null),
-            );
-            if (detailSnapshot) {
-              candidates.push(detailSnapshot);
-            }
-          } catch (error) {
-            if (error instanceof ApiError) {
-              if (error.status === 404) {
-                continue;
-              }
-              errorMessage ??= resolveErrorMessage(error);
-              if (isRetryableApiError(error)) {
-                hasRetriableFailure = true;
-              }
-            } else if (error instanceof Error) {
-              errorMessage ??= error.message;
-            }
-          }
+        if (statusSnapshots.length === 0) {
+          isNotFoundFromStatusEndpoint = true;
         }
+
+        candidates.push(...statusSnapshots);
       } catch (error) {
         if (error instanceof ApiError) {
           if (error.status === 404) {
@@ -587,11 +579,16 @@ export async function resolvePaymentStatuses(
       }
     }
 
-    let selectedSnapshot = chooseBestSnapshot(candidates);
+    const shouldPreferNotFound = isNotFoundFromStatusEndpoint && Boolean(target.reservationId) && !target.paymentId;
+    const rankedCandidates = shouldPreferNotFound
+      ? candidates.filter((candidate) => candidate.source !== 'fallback')
+      : candidates;
+    let selectedSnapshot = chooseBestSnapshot(rankedCandidates);
 
     if (!selectedSnapshot) {
-      const cachedSnapshot = getCachedSnapshot(target);
-      if (cachedSnapshot) {
+      if (shouldPreferNotFound && target.reservationId) {
+        selectedSnapshot = toSnapshot('not-found', 'not-found', target.reservationId, target.paymentId ?? null, null);
+      } else if (cachedSnapshot) {
         selectedSnapshot = cachedSnapshot;
       } else if (isNotFoundFromStatusEndpoint && target.reservationId) {
         selectedSnapshot = toSnapshot('not-found', 'not-found', target.reservationId, target.paymentId ?? null, null);
