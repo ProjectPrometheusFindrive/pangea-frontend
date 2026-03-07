@@ -26,6 +26,12 @@ import {
   type AssetEditForm,
 } from './assetsDetailForm';
 import {
+  isCreateDirty as isCreateDirtyForMode,
+  resolveCreateModeSwitch,
+  type CreateMode,
+  type UploadStep,
+} from './assetCreateMode';
+import {
   getCollectionFromPayload,
   getPageErrorActionLabel,
   handlePageErrorAction,
@@ -106,7 +112,6 @@ interface OcrSuggestion {
   confidence: number;
 }
 
-type UploadStep = 'upload' | 'processing' | 'preview';
 type StatusFilterCode = 'all' | 'rental' | 'reserved' | 'available' | 'maintenance';
 type CreateField = keyof Pick<CreateFormState, 'vehicleNumber' | 'vin' | 'model' | 'year'>;
 type FieldErrorMap<TField extends string> = Partial<Record<TField, string>>;
@@ -892,6 +897,7 @@ export default function Assets() {
   const [showModal, setShowModal] = useState(false);
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
+  const [createMode, setCreateMode] = useState<CreateMode>('ocr');
   const [uploadStep, setUploadStep] = useState<UploadStep>('upload');
   const [createForm, setCreateForm] = useState<CreateFormState>(DEFAULT_CREATE_FORM_STATE);
   const [createFieldErrors, setCreateFieldErrors] = useState<FieldErrorMap<CreateField>>({});
@@ -1027,6 +1033,7 @@ export default function Assets() {
 
   const resetCreateModalState = useCallback(() => {
     abortOcrProcessing();
+    setCreateMode('ocr');
     setUploadStep('upload');
     setCreateForm(DEFAULT_CREATE_FORM_STATE);
     setCreateFieldErrors({});
@@ -1046,18 +1053,12 @@ export default function Assets() {
     abortOcrProcessing();
   }, [abortOcrProcessing]);
 
-  const isCreateDirty = useMemo(() => (
-    uploadStep !== 'upload'
-    || Boolean(createForm.vehicleNumber.trim())
-    || Boolean(createForm.vin.trim())
-    || Boolean(createForm.model.trim())
-    || Boolean(createForm.year.trim())
-    || Boolean(createForm.owner.trim())
-    || Boolean(createForm.insuranceExpiry.trim())
-    || uploadedFiles.vehicleRegistration !== null
-    || uploadedFiles.insurance !== null
-    || uploadedFiles.loanSchedule !== null
-  ), [createForm, uploadStep, uploadedFiles]);
+  const isCreateDirty = useMemo(() => isCreateDirtyForMode({
+    createMode,
+    uploadStep,
+    createForm,
+    uploadedFiles,
+  }), [createForm, createMode, uploadStep, uploadedFiles]);
 
   const isDetailDirty = useMemo(() => {
     if (!selectedAsset) {
@@ -1748,13 +1749,39 @@ export default function Assets() {
     user?.companyId,
   ]);
 
-  const handleSwitchToManualMode = useCallback(() => {
+  const handleCreateModeChange = useCallback((nextMode: CreateMode) => {
     abortOcrProcessing();
-    setUploadStep('preview');
+    const nextUploadStep = resolveCreateModeSwitch({
+      nextMode,
+      hasRegistrationFile: uploadedFiles.vehicleRegistration !== null,
+      hasOcrOutput: ocrSuggestions.length > 0 || ocrWarnings.length > 0,
+    });
+
+    setCreateMode(nextMode);
+    setUploadStep(nextUploadStep);
     setOcrProgressMessage(null);
-    setOcrCanRetry(true);
-    setCreateSaveError('OCR 처리를 중단하고 수동 입력 모드로 전환했습니다.');
-  }, [abortOcrProcessing]);
+    if (nextUploadStep === 'upload') {
+      resetOcrFeedback();
+    }
+
+    if (nextMode === 'manual' && uploadStep === 'processing') {
+      setCreateSaveError('OCR 처리를 중단하고 직접 입력 모드로 전환했습니다.');
+      return;
+    }
+
+    setCreateSaveError(null);
+  }, [
+    abortOcrProcessing,
+    ocrSuggestions.length,
+    ocrWarnings.length,
+    resetOcrFeedback,
+    uploadStep,
+    uploadedFiles.vehicleRegistration,
+  ]);
+
+  const handleSwitchToManualMode = useCallback(() => {
+    handleCreateModeChange('manual');
+  }, [handleCreateModeChange]);
 
   const handleCreateSave = useCallback(async () => {
     if (!canWriteAssets) {
@@ -2213,12 +2240,43 @@ export default function Assets() {
             <div className="bg-white rounded-xl w-[600px] max-h-[80vh] overflow-y-auto">
               <div className="p-6">
                 <div className="flex items-center justify-between mb-6">
-                  <h2 className="text-xl font-bold text-[#1e2939]">차량등록증 업로드 (OCR)</h2>
+                  <h2 className="text-xl font-bold text-[#1e2939]">
+                    {createMode === 'ocr' ? '차량등록증 업로드 (OCR)' : '차량 자산 직접 입력'}
+                  </h2>
                   <button
                     onClick={closeCreateModal}
                     className="p-2 hover:bg-gray-100 rounded-lg"
                   >
                     <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                <div className="mb-4 inline-flex rounded-xl bg-slate-100 p-1">
+                  <button
+                    type="button"
+                    data-testid="asset-create-mode-ocr-button"
+                    onClick={() => handleCreateModeChange('ocr')}
+                    disabled={isCreateSaving}
+                    className={`rounded-lg px-4 py-2 text-sm font-semibold transition-colors ${
+                      createMode === 'ocr'
+                        ? 'bg-white text-slate-900 shadow-sm'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    OCR
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="asset-create-mode-manual-button"
+                    onClick={() => handleCreateModeChange('manual')}
+                    disabled={isCreateSaving}
+                    className={`rounded-lg px-4 py-2 text-sm font-semibold transition-colors ${
+                      createMode === 'manual'
+                        ? 'bg-white text-slate-900 shadow-sm'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    직접 입력
                   </button>
                 </div>
 
@@ -2235,33 +2293,35 @@ export default function Assets() {
                 )}
 
                 {/* 단계 표시 */}
-                <div className="flex items-center justify-center mb-8">
-                  <div className="flex items-center gap-4">
-                    <div className={`flex items-center gap-2 ${uploadStep === 'upload' ? 'text-blue-600' : 'text-gray-400'}`}>
-                      <div className={`w-8 h-8 rounded-full flex items-center justify-center ${uploadStep === 'upload' ? 'bg-blue-600 text-white' : 'bg-gray-200'}`}>
-                        1
+                {createMode === 'ocr' && (
+                  <div className="flex items-center justify-center mb-8">
+                    <div className="flex items-center gap-4">
+                      <div className={`flex items-center gap-2 ${uploadStep === 'upload' ? 'text-blue-600' : 'text-gray-400'}`}>
+                        <div className={`w-8 h-8 rounded-full flex items-center justify-center ${uploadStep === 'upload' ? 'bg-blue-600 text-white' : 'bg-gray-200'}`}>
+                          1
+                        </div>
+                        <span className="text-sm font-medium">업로드</span>
                       </div>
-                      <span className="text-sm font-medium">업로드</span>
-                    </div>
-                    <div className="w-12 h-0.5 bg-gray-300" />
-                    <div className={`flex items-center gap-2 ${uploadStep === 'processing' ? 'text-blue-600' : 'text-gray-400'}`}>
-                      <div className={`w-8 h-8 rounded-full flex items-center justify-center ${uploadStep === 'processing' ? 'bg-blue-600 text-white' : 'bg-gray-200'}`}>
-                        2
+                      <div className="w-12 h-0.5 bg-gray-300" />
+                      <div className={`flex items-center gap-2 ${uploadStep === 'processing' ? 'text-blue-600' : 'text-gray-400'}`}>
+                        <div className={`w-8 h-8 rounded-full flex items-center justify-center ${uploadStep === 'processing' ? 'bg-blue-600 text-white' : 'bg-gray-200'}`}>
+                          2
+                        </div>
+                        <span className="text-sm font-medium">처리중</span>
                       </div>
-                      <span className="text-sm font-medium">처리중</span>
-                    </div>
-                    <div className="w-12 h-0.5 bg-gray-300" />
-                    <div className={`flex items-center gap-2 ${uploadStep === 'preview' ? 'text-blue-600' : 'text-gray-400'}`}>
-                      <div className={`w-8 h-8 rounded-full flex items-center justify-center ${uploadStep === 'preview' ? 'bg-blue-600 text-white' : 'bg-gray-200'}`}>
-                        3
+                      <div className="w-12 h-0.5 bg-gray-300" />
+                      <div className={`flex items-center gap-2 ${uploadStep === 'preview' ? 'text-blue-600' : 'text-gray-400'}`}>
+                        <div className={`w-8 h-8 rounded-full flex items-center justify-center ${uploadStep === 'preview' ? 'bg-blue-600 text-white' : 'bg-gray-200'}`}>
+                          3
+                        </div>
+                        <span className="text-sm font-medium">미리보기</span>
                       </div>
-                      <span className="text-sm font-medium">미리보기</span>
                     </div>
                   </div>
-                </div>
+                )}
 
                 {/* 업로드 단계 */}
-                {uploadStep === 'upload' && (
+                {createMode === 'ocr' && uploadStep === 'upload' && (
                   <div className="space-y-4">
                     {/* 차량등록증 업로드 (필수) */}
                     <div>
@@ -2359,7 +2419,7 @@ export default function Assets() {
                 )}
 
                 {/* 처리중 단계 */}
-                {uploadStep === 'processing' && (
+                {createMode === 'ocr' && uploadStep === 'processing' && (
                   <div className="flex flex-col items-center justify-center py-12 space-y-4">
                     <Loader2 className="w-12 h-12 text-blue-600 animate-spin mb-4" />
                     <p className="text-base text-gray-700">OCR 처리중...</p>
@@ -2379,61 +2439,70 @@ export default function Assets() {
                 {/* 미리보기 단계 */}
                 {uploadStep === 'preview' && (
                   <div className="space-y-4">
-                    <div className="flex items-center justify-between gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
-                      <p className="text-xs text-gray-600">
-                        OCR 제안 {ocrSuggestions.length}건 · 경고 {ocrWarnings.length}건
-                      </p>
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            void handleStartOcrExtraction();
-                          }}
-                          disabled={!canWriteAssets || !uploadedFiles.vehicleRegistration || isCreateSaving}
-                          className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-60"
-                        >
-                          OCR 다시 실행
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setUploadStep('upload')}
-                          disabled={isCreateSaving}
-                          className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-60"
-                        >
-                          문서 다시 선택
-                        </button>
-                      </div>
-                    </div>
+                    {createMode === 'ocr' ? (
+                      <>
+                        <div className="flex items-center justify-between gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+                          <p className="text-xs text-gray-600">
+                            OCR 제안 {ocrSuggestions.length}건 · 경고 {ocrWarnings.length}건
+                          </p>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                void handleStartOcrExtraction();
+                              }}
+                              disabled={!canWriteAssets || !uploadedFiles.vehicleRegistration || isCreateSaving}
+                              className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              OCR 다시 실행
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setUploadStep('upload')}
+                              disabled={isCreateSaving}
+                              className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              문서 다시 선택
+                            </button>
+                          </div>
+                        </div>
 
-                    {ocrSuggestions.length > 0 && (
-                      <div className="rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-xs text-green-800">
-                        OCR 결과를 폼에 자동 반영했습니다. 저장 전 값이 정확한지 확인해 주세요.
-                      </div>
-                    )}
-
-                    {ocrWarnings.length > 0 && (
-                      <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                        <p className="font-semibold">확인 필요</p>
-                        <ul className="mt-1 space-y-1">
-                          {ocrWarnings.slice(0, 4).map((warning, index) => (
-                            <li key={`${warning}-${index}`}>• {warning}</li>
-                          ))}
-                        </ul>
-                        {ocrWarnings.length > 4 && (
-                          <p className="mt-1">외 {ocrWarnings.length - 4}건</p>
+                        {ocrSuggestions.length > 0 && (
+                          <div className="rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-xs text-green-800">
+                            OCR 결과를 폼에 자동 반영했습니다. 저장 전 값이 정확한지 확인해 주세요.
+                          </div>
                         )}
-                      </div>
-                    )}
 
-                    {ocrCanRetry && (
-                      <p className="text-xs text-gray-500">
-                        OCR 실패/타임아웃이 포함되어 다시 시도할 수 있습니다.
-                      </p>
+                        {ocrWarnings.length > 0 && (
+                          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                            <p className="font-semibold">확인 필요</p>
+                            <ul className="mt-1 space-y-1">
+                              {ocrWarnings.slice(0, 4).map((warning, index) => (
+                                <li key={`${warning}-${index}`}>• {warning}</li>
+                              ))}
+                            </ul>
+                            {ocrWarnings.length > 4 && (
+                              <p className="mt-1">외 {ocrWarnings.length - 4}건</p>
+                            )}
+                          </div>
+                        )}
+
+                        {ocrCanRetry && (
+                          <p className="text-xs text-gray-500">
+                            OCR 실패/타임아웃이 포함되어 다시 시도할 수 있습니다.
+                          </p>
+                        )}
+                      </>
+                    ) : (
+                      <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700">
+                        OCR 없이 직접 입력합니다. 차량번호와 차대번호만 입력해도 저장할 수 있습니다.
+                      </div>
                     )}
 
                     <div>
                       <label className="block text-sm font-semibold text-gray-600 mb-2">차량번호</label>
                       <input
+                        data-testid="asset-create-vehicle-number-input"
                         type="text"
                         value={createForm.vehicleNumber}
                         onChange={(e) => handleCreateFieldChange('vehicleNumber', e.target.value)}
@@ -2447,6 +2516,7 @@ export default function Assets() {
                     <div>
                       <label className="block text-sm font-semibold text-gray-600 mb-2">차대번호</label>
                       <input
+                        data-testid="asset-create-vin-input"
                         type="text"
                         value={createForm.vin}
                         onChange={(e) => handleCreateFieldChange('vin', e.target.value)}
@@ -2460,6 +2530,7 @@ export default function Assets() {
                     <div>
                       <label className="block text-sm font-semibold text-gray-600 mb-2">차종</label>
                       <input
+                        data-testid="asset-create-model-input"
                         type="text"
                         value={createForm.model}
                         onChange={(e) => handleCreateFieldChange('model', e.target.value)}
@@ -2473,6 +2544,7 @@ export default function Assets() {
                     <div>
                       <label className="block text-sm font-semibold text-gray-600 mb-2">연식</label>
                       <input
+                        data-testid="asset-create-year-input"
                         type="text"
                         value={createForm.year}
                         onChange={(e) => handleCreateFieldChange('year', e.target.value)}
@@ -2505,6 +2577,7 @@ export default function Assets() {
 
                     <div className="pt-4">
                       <button
+                        data-testid="asset-create-save-button"
                         onClick={handleCreateSave}
                         disabled={!canWriteAssets || isCreateSaving}
                         className="w-full px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium disabled:cursor-not-allowed disabled:opacity-60"
