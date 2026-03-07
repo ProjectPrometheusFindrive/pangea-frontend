@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
-import { useNavigate } from 'react-router';
+import { useLocation, useNavigate } from 'react-router';
 import { CheckCircle2, Loader2, Paperclip, RefreshCw, Search, Send } from 'lucide-react';
 
 import { Layout } from '../components/Layout';
@@ -22,6 +22,7 @@ import {
   type SupportTicketStatus,
   updateSupportTicketStatus,
 } from '../../services/support';
+import type { SupportCenterLocationState, SupportPrefillState } from '../utils/premiumInquiry';
 
 type SupportField = 'category' | 'title' | 'content' | 'contactPhone' | 'attachments';
 type SupportFieldErrors = Partial<Record<SupportField, string>>;
@@ -88,6 +89,27 @@ function toStringValue(value: unknown): string | null {
     return String(value);
   }
   return null;
+}
+
+function readSupportPrefillState(locationState: unknown): SupportPrefillState | null {
+  const nextLocationState = locationState as SupportCenterLocationState | null;
+  if (!isRecord(nextLocationState) || !isRecord(nextLocationState.supportPrefill)) {
+    return null;
+  }
+
+  const category = toStringValue(nextLocationState.supportPrefill.category);
+  const title = toStringValue(nextLocationState.supportPrefill.title);
+  const content = toStringValue(nextLocationState.supportPrefill.content);
+
+  if (!category || !title || !content) {
+    return null;
+  }
+
+  return {
+    category,
+    title,
+    content,
+  };
 }
 
 function formatBytes(bytes: number): string {
@@ -1036,14 +1058,9 @@ function SupportAdminManagementView() {
   );
 }
 
-export default function SupportCenter() {
-  const { canPerformAction } = useAuthorization();
+function SupportTicketSubmitView() {
+  const location = useLocation();
   const navigate = useNavigate();
-  const canManageSupport = canPerformAction(ACTION_PERMISSIONS.supportManage);
-
-  if (canManageSupport) {
-    return <SupportAdminManagementView />;
-  }
 
   const [categories, setCategories] = useState<SupportCategory[]>([]);
   const [manualCategoryMode, setManualCategoryMode] = useState(false);
@@ -1058,6 +1075,7 @@ export default function SupportCenter() {
   const [submitError, setSubmitError] = useState<SupportErrorState | null>(null);
   const [submitSuccessMessage, setSubmitSuccessMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const appliedSupportPrefillRef = useRef<string | null>(null);
   const lastSubmitFingerprintRef = useRef<string | null>(null);
   const lastSubmitAtRef = useRef<number>(0);
 
@@ -1066,6 +1084,11 @@ export default function SupportCenter() {
   const [lookupTicket, setLookupTicket] = useState<SupportTicket | null>(null);
   const [lookupError, setLookupError] = useState<SupportErrorState | null>(null);
   const [isLookupLoading, setIsLookupLoading] = useState(false);
+  const supportPrefill = useMemo(() => readSupportPrefillState(location.state), [location.state]);
+  const supportPrefillFingerprint = useMemo(
+    () => (supportPrefill ? JSON.stringify(supportPrefill) : null),
+    [supportPrefill],
+  );
 
   useEffect(() => {
     const storedReceipt = readSupportReceipt();
@@ -1080,6 +1103,20 @@ export default function SupportCenter() {
     setSubmitSuccessMessage(`최근 접수 내역(${restoredTicket.id})을 복구했습니다.`);
   }, []);
 
+  useEffect(() => {
+    if (!supportPrefill || !supportPrefillFingerprint) {
+      return;
+    }
+    if (appliedSupportPrefillRef.current === supportPrefillFingerprint) {
+      return;
+    }
+
+    setCategory((previousValue) => previousValue.trim().length > 0 ? previousValue : supportPrefill.category);
+    setTitle((previousValue) => previousValue.trim().length > 0 ? previousValue : supportPrefill.title);
+    setContent((previousValue) => previousValue.trim().length > 0 ? previousValue : supportPrefill.content);
+    appliedSupportPrefillRef.current = supportPrefillFingerprint;
+  }, [supportPrefill, supportPrefillFingerprint]);
+
   const requestSupportCategories = useCallback((signal: AbortSignal) => (
     getSupportCategories({ signal })
   ), []);
@@ -1088,7 +1125,7 @@ export default function SupportCenter() {
     setCategories(payload);
     if (payload.length > 0) {
       setCategory((previousCategory) => {
-        if (previousCategory && payload.some((item) => item.name === previousCategory)) {
+        if (previousCategory) {
           return previousCategory;
         }
         return payload[0].name;
@@ -1119,6 +1156,16 @@ export default function SupportCenter() {
       setManualCategoryMode(true);
     }
   }, [categoriesEmpty, categoriesError, manualCategoryMode]);
+
+  useEffect(() => {
+    if (!supportPrefill?.category || categories.length === 0) {
+      return;
+    }
+    if (categories.some((item) => item.name === supportPrefill.category)) {
+      return;
+    }
+    setManualCategoryMode(true);
+  }, [categories, supportPrefill]);
 
   const handleCategoryErrorAction = useCallback(() => {
     handlePageErrorAction(categoriesErrorKind, navigate);
@@ -1740,4 +1787,15 @@ export default function SupportCenter() {
       </div>
     </Layout>
   );
+}
+
+export default function SupportCenter() {
+  const { canPerformAction } = useAuthorization();
+  const canManageSupport = canPerformAction(ACTION_PERMISSIONS.supportManage);
+
+  if (canManageSupport) {
+    return <SupportAdminManagementView />;
+  }
+
+  return <SupportTicketSubmitView />;
 }
