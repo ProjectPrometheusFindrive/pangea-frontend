@@ -246,21 +246,29 @@ test.describe('BK-091 Reservations E2E', () => {
   });
 
   test('예약 반납 5xx 오류 시 재시도 안내를 노출한다', async ({ page }) => {
-    const rentalReservation = buildReservationRow({ contractStatus: '대여중' });
+    const reservations: ReservationListRow[] = [buildReservationRow()];
 
     await installApiMocks(page, {
       handlers: {
         'GET /api/v2/reservations': async ({ route }) => {
           await fulfillSuccess(route, {
-            reservations: [rentalReservation],
+            reservations,
             assets: [buildVehicleAsset()],
-            total: 1,
+            total: reservations.length,
             page: 1,
             pageSize: 20,
           });
         },
         'GET /api/v2/reservations/R-9001': async ({ route }) => {
-          await fulfillSuccess(route, rentalReservation);
+          await fulfillSuccess(route, reservations[0]);
+        },
+        'POST /api/v2/reservations/R-9001/transitions': async ({ route }) => {
+          const transitionedReservation = buildReservationRow({
+            id: 'R-9001',
+            contractStatus: '대여중',
+          });
+          reservations.splice(0, reservations.length, transitionedReservation);
+          await fulfillSuccess(route, transitionedReservation);
         },
         'POST /api/v2/reservations/R-9001/return': async ({ route }) => {
           await fulfillError(route, 500, 'SERVER_ERROR', 'temporary error');
@@ -276,6 +284,8 @@ test.describe('BK-091 Reservations E2E', () => {
     await page.getByTestId('reservation-block-R-9001').click();
     await expect(page.getByTestId('reservation-detail-modal')).toBeVisible();
 
+    await page.getByTestId('reservation-start-button').click();
+    await expect(page.getByText('차량 인수 처리가 완료되었습니다.')).toBeVisible();
     await page.getByTestId('reservation-return-button').click();
     await page.getByTestId('reservation-return-confirm-button').click();
 
