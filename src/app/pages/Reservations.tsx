@@ -32,6 +32,7 @@ import {
 } from './reservationsViewModel';
 import {
   isUnpaidPaymentStatus,
+  toCanonicalPaymentStatus,
   toReservationPaymentStatus,
   type PaymentStatusSnapshot,
 } from '../utils/paymentStatusSync';
@@ -432,17 +433,31 @@ function normalizePaymentMethod(value: string | null): Reservation['paymentMetho
   return '카드';
 }
 
-function normalizePaymentStatus(value: string | null): Reservation['paymentStatus'] {
-  if (value === '완료' || value?.toLowerCase() === 'paid') {
-    return '완료';
+export function normalizeReservationPaymentStatus(value: string | null): Reservation['paymentStatus'] {
+  return toReservationPaymentStatus(toCanonicalPaymentStatus(value));
+}
+
+export function isDelinquentPaymentScopeActive(viewFilter: ViewFilter, paymentScope: PaymentScope): boolean {
+  return viewFilter === 'unpaid' && paymentScope === 'delinquent';
+}
+
+export function matchesReservationFilters(
+  reservation: Reservation,
+  options: {
+    viewFilter: ViewFilter;
+    paymentScope: PaymentScope;
+    searchQuery: string;
+  },
+): boolean {
+  const { viewFilter, paymentScope, searchQuery } = options;
+
+  if (viewFilter === 'unpaid' && !isDelinquentPaymentScopeActive(viewFilter, paymentScope) && !(reservation.issues && reservation.issues.includes('미납/결제 문제'))) {
+    return false;
   }
-  if (value === '미납' || value?.toLowerCase() === 'unpaid') {
-    return '미납';
+  if (!searchQuery) {
+    return true;
   }
-  if (value === '부분납부' || value?.toLowerCase() === 'partial') {
-    return '부분납부';
-  }
-  return '대기';
+  return reservation.customer.includes(searchQuery) || reservation.vehicleNumber.includes(searchQuery);
 }
 
 function normalizeViewFilter(value: string | null): ViewFilter {
@@ -598,7 +613,7 @@ function toReservationRow(row: unknown, index: number): Reservation | null {
     paymentMethod: normalizePaymentMethod(toStringValue(row.paymentMethod) ?? toStringValue(row.paymentType)),
     amount: toCurrencyValue(row.amount),
     deposit: toCurrencyValue(row.deposit),
-    paymentStatus: normalizePaymentStatus(toStringValue(row.paymentStatus)),
+    paymentStatus: normalizeReservationPaymentStatus(toStringValue(row.paymentStatus)),
     startDateFull: startDateLabel,
     endDateFull: endDateLabel,
   };
@@ -864,6 +879,8 @@ export default function Reservations() {
     const legacyPageSize = searchParams.get('pageSize');
     const currentDue = searchParams.get('due');
     const normalizedDue = normalizeDueFilter(currentDue);
+    const currentPaymentScope = searchParams.get('paymentScope');
+    const normalizedPaymentScope = normalizePaymentScope(currentPaymentScope);
     const normalizedFromDate = normalizeDateParam(searchParams.get('from'));
     const normalizedToDate = normalizeDateParam(searchParams.get('to'));
     const currentFromDate = searchParams.get('from');
@@ -879,6 +896,10 @@ export default function Reservations() {
       || Boolean(currentFromDate && normalizedFromDate && currentFromDate !== normalizedFromDate)
       || Boolean(currentToDate && normalizedToDate && currentToDate !== normalizedToDate)
       || Boolean(currentDue && currentDue !== normalizedDue)
+      || Boolean(currentPaymentScope && (
+        normalizedPaymentScope !== currentPaymentScope
+        || !isDelinquentPaymentScopeActive(normalizedStatus, normalizedPaymentScope)
+      ))
       || Boolean(canonicalStatus && normalizeViewFilter(canonicalStatus) !== canonicalStatus)
       || Boolean(!searchParams.get('page'))
       || Boolean(!canonicalSize)
@@ -919,6 +940,12 @@ export default function Reservations() {
       } else {
         params.delete('due');
       }
+
+      if (isDelinquentPaymentScopeActive(normalizedStatus, normalizedPaymentScope)) {
+        params.set('paymentScope', 'delinquent');
+      } else {
+        params.delete('paymentScope');
+      }
     }, true);
   }, [searchParams, updateReservationSearchParams]);
 
@@ -938,6 +965,7 @@ export default function Reservations() {
         size: pageSize,
         status: toStatusQueryValue(viewFilter),
         contractStatus: toApiContractStatus(viewFilter),
+        paymentScope: isDelinquentPaymentScopeActive(viewFilter, paymentScope) ? 'delinquent' : undefined,
         from: fromDate ?? undefined,
         to: toDate ?? undefined,
         due: viewFilter === 'overdue' ? 'overdue' : (dueFilter ?? undefined),
@@ -961,7 +989,7 @@ export default function Reservations() {
       setPageErrorStatus(error instanceof ApiError ? error.status ?? null : null);
       throw error;
     }
-  }, [canViewAssets, fromDate, page, pageSize, toDate, viewFilter]);
+  }, [canViewAssets, dueFilter, fromDate, page, pageSize, paymentScope, toDate, viewFilter]);
 
   const handleReservationsSuccess = useCallback((payload: ReservationsHydrationPayload) => {
     const reservationRows = toReservationRows(payload.reservationsPayload);
@@ -1199,29 +1227,11 @@ export default function Reservations() {
   const uniqueModels = Array.from(new Set(vehicleAssets.map(v => v.model))).sort();
 
   // 먼저 예약 필터링 (상태 필터 + 검색어 적용)
-  const filteredReservations = reservations.filter((reservation) => {
-    const reservationStartDate = normalizeDateParam(reservation.startDateFull) ?? toDateLabelFromOffset(reservation.startDate);
-    const reservationEndDate = normalizeDateParam(reservation.endDateFull) ?? toDateLabelFromOffset(reservation.endDate);
-
-    if (viewFilter === 'unpaid') {
-      if (paymentScope === 'delinquent') {
-        if (normalizePaymentStatus(reservation.paymentStatus) !== normalizePaymentStatus('unpaid')) {
-          return false;
-        }
-        if (!searchQuery) {
-          return true;
-        }
-        return reservation.customer.includes(searchQuery) || reservation.vehicleNumber.includes(searchQuery);
-      }
-      if (!(reservation.issues && reservation.issues.includes('미납/결제 문제'))) {
-        return false;
-      }
-    }
-    if (!searchQuery) {
-      return true;
-    }
-    return reservation.customer.includes(searchQuery) || reservation.vehicleNumber.includes(searchQuery);
-  });
+  const filteredReservations = reservations.filter((reservation) => matchesReservationFilters(reservation, {
+    viewFilter,
+    paymentScope,
+    searchQuery,
+  }));
 
   const totalPages = Math.max(1, Math.ceil((totalReservationCount || 0) / pageSize));
   const hasPrevPage = page > 1;

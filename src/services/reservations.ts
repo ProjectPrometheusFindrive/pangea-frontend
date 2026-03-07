@@ -9,6 +9,7 @@ export interface GetReservationsListParams extends ReservationsRequestOptions {
   size: number;
   status?: string;
   contractStatus?: string;
+  paymentScope?: 'delinquent';
   from?: string;
   to?: string;
   due?: 'pickup' | 'return' | 'overdue';
@@ -96,6 +97,7 @@ export function getReservationsList({
   size,
   status,
   contractStatus,
+  paymentScope,
   from,
   to,
   due,
@@ -111,6 +113,7 @@ export function getReservationsList({
       size,
       status,
       contractStatus: normalizedContractStatus,
+      paymentScope,
       from,
       to,
       due,
