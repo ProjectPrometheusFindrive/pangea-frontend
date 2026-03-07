@@ -9,6 +9,7 @@ import {
   markAllNotificationsAsRead,
   type NotificationItem,
 } from '../../services/notifications';
+import { postWithdraw } from '../../services/auth';
 import { useAuth } from '../context/AuthContext';
 import { useAuthorization } from '../context/AuthorizationContext';
 import { useCompany } from '../context/CompanyContext';
@@ -126,6 +127,8 @@ export function Layout({ children, title }: LayoutProps) {
   const [editName, setEditName] = useState('');
   const [editCompany, setEditCompany] = useState('');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [isDeletingAccount, setIsDeletingAccount] = useState(false);
+  const [deleteAccountError, setDeleteAccountError] = useState<string | null>(null);
   const companyName = company?.name?.trim() || user?.company?.trim() || '회사 정보 없음';
   const [showPremiumBanner, setShowPremiumBanner] = useState(() => {
     const bannerDismissed = sessionStorage.getItem('premiumBannerDismissed');
@@ -310,6 +313,7 @@ export function Layout({ children, title }: LayoutProps) {
     setShowAccountMenu(false);
     setEditName(accountName);
     setEditCompany(companyName);
+    setDeleteAccountError(null);
   };
 
   const handleSaveSettings = async () => {
@@ -327,11 +331,25 @@ export function Layout({ children, title }: LayoutProps) {
     alert('계정 정보가 저장되었습니다');
   };
 
-  const handleDeleteAccount = () => {
-    if (window.confirm('정말로 계정을 삭제하시겠습니까? 모든 데이터가 삭제되며 복구할 수 없습니다.')) {
-      alert('계정이 삭제되었습니다');
+  const handleDeleteAccount = async () => {
+    setDeleteAccountError(null);
+    setIsDeletingAccount(true);
+
+    try {
+      await postWithdraw();
       setShowAccountSettings(false);
       setShowDeleteConfirm(false);
+      await logout({ silent: true, redirectToLogin: true });
+    } catch (error) {
+      if (error instanceof ApiError && error.message) {
+        setDeleteAccountError(error.message);
+      } else if (error instanceof Error && error.message) {
+        setDeleteAccountError(error.message);
+      } else {
+        setDeleteAccountError('계정 삭제를 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.');
+      }
+    } finally {
+      setIsDeletingAccount(false);
     }
   };
 
@@ -723,21 +741,29 @@ export function Layout({ children, title }: LayoutProps) {
                 <p className="text-xs text-gray-500 text-center">
                   모든 데이터가 영구적으로 삭제되며 복구할 수 없습니다.
                 </p>
+                {deleteAccountError && (
+                  <p className="mt-3 text-center text-xs text-red-600">{deleteAccountError}</p>
+                )}
               </div>
 
               {/* 푸터 */}
               <div className="px-6 py-4 border-t border-gray-200 flex gap-3">
                 <button
                   onClick={() => setShowDeleteConfirm(false)}
-                  className="flex-1 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 font-medium"
+                  className="flex-1 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 font-medium disabled:opacity-60"
+                  disabled={isDeletingAccount}
                 >
                   취소
                 </button>
                 <button
-                  onClick={handleDeleteAccount}
-                  className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium"
+                  onClick={() => {
+                    void handleDeleteAccount();
+                  }}
+                  data-testid="account-delete-confirm"
+                  className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium disabled:opacity-60"
+                  disabled={isDeletingAccount}
                 >
-                  삭제
+                  {isDeletingAccount ? '삭제 중...' : '삭제'}
                 </button>
               </div>
             </div>

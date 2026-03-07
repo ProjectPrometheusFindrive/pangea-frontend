@@ -5,7 +5,7 @@ import {
   fulfillSuccess,
   installApiMocks,
 } from './helpers/apiMock';
-import { loginViaUi } from './helpers/session';
+import { loginViaUi, seedAuthSession } from './helpers/session';
 
 test.describe('BK-091 Login E2E', () => {
   test('로그인 성공 시 loading 이후 자산 화면으로 이동한다', async ({ page }) => {
@@ -279,5 +279,109 @@ test.describe('BK-091 Login E2E', () => {
     await expect(page).toHaveURL(/\/assets(?:\?.*)?$/);
     await expect(page.locator('table')).toBeVisible();
     await expect(page.locator('tbody tr')).toHaveCount(1);
+  });
+
+  test('does not request settings/company before authentication on the login page', async ({ page }) => {
+    let companyRequestCount = 0;
+
+    await installApiMocks(page, {
+      handlers: {
+        'GET /api/v2/settings/company': async ({ route }) => {
+          companyRequestCount += 1;
+          await fulfillSuccess(route, {
+            id: 'company-001',
+            name: 'Pangea Mobility',
+            businessNumber: '123-45-67890',
+            contactName: '홍길동',
+            contactPhone: '010-1111-2222',
+            address: '서울특별시 강남구',
+            timezone: 'Asia/Seoul',
+            currency: 'KRW',
+          });
+        },
+      },
+    });
+
+    await page.goto('/login');
+    await expect(page.getByTestId('login-user-id')).toBeVisible();
+    await page.waitForTimeout(300);
+
+    expect(companyRequestCount).toBe(0);
+  });
+
+  test('allows login interaction after redirecting to /login from an expired session', async ({ page }) => {
+    await installApiMocks(page, {
+      auth: {
+        me: 'unauthorized-once',
+      },
+      handlers: {
+        'GET /api/v2/assets': async ({ route }) => {
+          await fulfillSuccess(route, {
+            items: [],
+            total: 0,
+            page: 1,
+            pageSize: 20,
+          });
+        },
+      },
+    });
+
+    await seedAuthSession(page);
+    await page.goto('/assets');
+
+    await expect.poll(() => new URL(page.url()).pathname).toBe('/login');
+    await expect.poll(() => new URL(page.url()).searchParams.get('returnUrl')).toBe('/assets');
+    await expect(page.getByTestId('login-user-id')).toBeVisible();
+
+    await page.getByTestId('login-user-id').fill('member-001');
+    await page.getByTestId('login-password').fill('password');
+    await page.getByTestId('login-submit').click();
+
+    await expect(page).toHaveURL(/\/assets(?:\?.*)?$/);
+  });
+
+  test('refreshes permissions as well as session on window focus', async ({ page }) => {
+    let permissionsFetchCount = 0;
+
+    await installApiMocks(page, {
+      user: buildMockUser('member'),
+      handlers: {
+        'GET /api/v2/permissions/me': async ({ route }) => {
+          permissionsFetchCount += 1;
+          await fulfillSuccess(route, {
+            permissions: [
+              'route.home',
+              'route.assets',
+              'route.support-center',
+            ],
+          });
+        },
+        'GET /api/v2/assets': async ({ route }) => {
+          await fulfillSuccess(route, {
+            items: [],
+            total: 0,
+            page: 1,
+            pageSize: 20,
+          });
+        },
+      },
+    });
+
+    await page.goto('/login?returnUrl=%2Fassets');
+    await expect(page.getByTestId('login-user-id')).toBeVisible();
+    await page.getByTestId('login-user-id').fill('member-001');
+    await page.getByTestId('login-password').fill('password');
+    await page.getByTestId('login-submit').click();
+
+    await expect(page).toHaveURL(/\/assets(?:\?.*)?$/);
+
+    const beforeFocus = permissionsFetchCount;
+    await page.waitForTimeout(30_100);
+    await page.evaluate(() => {
+      document.dispatchEvent(new Event('visibilitychange'));
+      window.dispatchEvent(new FocusEvent('focus'));
+    });
+
+    await expect.poll(() => permissionsFetchCount, { timeout: 15_000 }).toBeGreaterThan(beforeFocus);
   });
 });

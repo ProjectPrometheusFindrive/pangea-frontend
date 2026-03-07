@@ -331,23 +331,6 @@ export class ApiClient {
     responseContext = await this.applyResponseInterceptors(responseContext);
 
     if (!responseContext.response.ok || isApiErrorEnvelope(responseContext.body)) {
-      const shouldAttemptRefresh = (
-        !didRetryAfterUnauthorized
-        && !interceptedRequest.config.skipAuth
-        && !interceptedRequest.config.skipAuthRefresh
-        && responseContext.response.status === 401
-      );
-
-      if (shouldAttemptRefresh) {
-        const refreshSucceeded = await this.tryRefreshAuthorization();
-        if (refreshSucceeded) {
-          return this.requestInternal<TResponse>({
-            ...config,
-            skipAuthRefresh: true,
-          }, true);
-        }
-      }
-
       this.emitObservabilityEvent('error', responseContext);
       throw buildApiErrorFromResponse(
         responseContext.response.status,
@@ -361,19 +344,6 @@ export class ApiClient {
 
     this.emitObservabilityEvent('success', responseContext);
     return responseContext.body as TResponse;
-  }
-
-  private async tryRefreshAuthorization(): Promise<boolean> {
-    if (!this.unauthorizedHandler) {
-      return false;
-    }
-
-    try {
-      const result = await this.unauthorizedHandler();
-      return Boolean(result);
-    } catch {
-      return false;
-    }
   }
 
   async requestData<TData = unknown>(config: ApiRequestConfig): Promise<TData> {

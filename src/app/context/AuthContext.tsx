@@ -284,6 +284,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isSessionExpiredModalOpen, setIsSessionExpiredModalOpen] = useState(false);
   const refreshPromiseRef = useRef<Promise<AuthSession | null> | null>(null);
   const sessionExpiredHandledRef = useRef(false);
+  const authRequestVersionRef = useRef(0);
 
   const applySession = useCallback((session: AuthSession) => {
     setToken(session.token);
@@ -314,6 +315,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIsLoading(false);
     setIsBootstrapping(false);
     setIsSessionExpiredModalOpen(true);
+  }, [clearSession]);
+
+  const handleBootstrapSessionExpired = useCallback(() => {
+    refreshPromiseRef.current = null;
+    clearSession();
+    setError('세션이 만료되었습니다. 다시 로그인해 주세요.');
+    setIsLoading(false);
+    setIsBootstrapping(false);
+    setIsSessionExpiredModalOpen(false);
   }, [clearSession]);
 
   const refreshAccessToken = useCallback(async (): Promise<AuthSession | null> => {
@@ -354,6 +364,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [applySession]);
 
   const refreshSession = useCallback(async (options?: RefreshSessionOptions) => {
+    const requestVersion = authRequestVersionRef.current;
+    const isStaleRequest = () => requestVersion !== authRequestVersionRef.current;
     const storedSession = readStoredSession();
     const isSilentRefresh = options?.silent === true;
 
@@ -375,30 +387,57 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     try {
       const nextUser = await getMe();
+      if (isStaleRequest()) {
+        return;
+      }
       applySession({
         ...storedSession,
         user: nextUser,
       });
     } catch (refreshError) {
+      if (isStaleRequest()) {
+        return;
+      }
+
       if (refreshError instanceof ApiError && refreshError.status === 401) {
         const refreshedSession = await refreshAccessToken();
+        if (isStaleRequest()) {
+          return;
+        }
 
         if (!refreshedSession) {
-          handleSessionExpired();
+          if (isSilentRefresh || status === 'authenticated') {
+            handleSessionExpired();
+          } else {
+            handleBootstrapSessionExpired();
+          }
           return;
         }
 
         try {
           const refreshedUser = await getMe();
+          if (isStaleRequest()) {
+            return;
+          }
           applySession({
             ...refreshedSession,
             user: refreshedUser,
           });
         } catch {
-          handleSessionExpired();
+          if (isStaleRequest()) {
+            return;
+          }
+          if (isSilentRefresh || status === 'authenticated') {
+            handleSessionExpired();
+          } else {
+            handleBootstrapSessionExpired();
+          }
           return;
         }
       } else {
+        if (isStaleRequest()) {
+          return;
+        }
         clearSession();
         setError(toErrorMessage(refreshError, '세션 정보를 확인하지 못했습니다.'));
       }
@@ -406,9 +445,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setIsLoading(false);
       setIsBootstrapping(false);
     }
-  }, [applySession, clearSession, handleSessionExpired, refreshAccessToken]);
+  }, [applySession, clearSession, handleBootstrapSessionExpired, handleSessionExpired, refreshAccessToken, status]);
 
   const login = useCallback(async (payload: AuthLoginPayload) => {
+    authRequestVersionRef.current += 1;
     setError(null);
     setIsLoading(true);
     setStatus('checking');
@@ -441,6 +481,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [applySession, clearSession]);
 
   const logout = useCallback(async (options?: LogoutOptions) => {
+    authRequestVersionRef.current += 1;
     setError(null);
     setIsLoading(true);
 
@@ -474,6 +515,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const removeInterceptor = apiClient.useResponseInterceptor(async (context) => {
+      const requestVersion = authRequestVersionRef.current;
+      const isStaleRequest = () => requestVersion !== authRequestVersionRef.current;
+
       if (context.response.status !== 401 || context.request.config.skipAuth) {
         return context;
       }
@@ -496,11 +540,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       if (context.request.config.internal?.hasRetriedAuth) {
-        handleSessionExpired();
+        if (!isStaleRequest()) {
+          handleSessionExpired();
+        }
         return context;
       }
 
       const refreshedSession = await refreshAccessToken();
+      if (isStaleRequest()) {
+        return context;
+      }
       if (!refreshedSession) {
         handleSessionExpired();
         return context;
@@ -521,7 +570,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           body: retriedBody,
         };
       } catch (retryError) {
-        if (retryError instanceof ApiError && retryError.status === 401) {
+        if (!isStaleRequest() && retryError instanceof ApiError && retryError.status === 401) {
           handleSessionExpired();
         }
         throw retryError;
@@ -567,7 +616,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     window.addEventListener('storage', handleStorage);
     return () => {
       window.removeEventListener('storage', handleStorage);
-    };
+      };
   }, [applySession, clearSession]);
 
   const viewRole = useMemo<AuthViewRole | null>(() => {
