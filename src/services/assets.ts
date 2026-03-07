@@ -15,6 +15,7 @@ export interface CreateAssetPayload {
   vin: string;
   plate: string;
   vehicleNumber?: string;
+  companyId?: string;
   category?: string;
   color?: string;
   model?: string;
@@ -23,6 +24,7 @@ export interface CreateAssetPayload {
 
 export interface PatchAssetPayload {
   version: number;
+  companyId?: string;
   plate?: string;
   vehicleNumber?: string;
   category?: string;
@@ -85,6 +87,14 @@ export function patchAsset(
     path: `/api/v2/assets/${encodeURIComponent(assetId)}`,
     method: 'PATCH',
     body: payload,
+    signal: options.signal,
+  });
+}
+
+export function deleteAsset(assetId: string, options: AssetsRequestOptions = {}): Promise<unknown> {
+  return apiClient.requestData<unknown>({
+    path: `/api/v2/assets/${encodeURIComponent(assetId)}`,
+    method: 'DELETE',
     signal: options.signal,
   });
 }
