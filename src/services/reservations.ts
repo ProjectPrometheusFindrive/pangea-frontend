@@ -26,13 +26,24 @@ export interface CreateReservationPayload {
   vehicleNumber?: string;
   status?: string;
   customerName?: string;
+  phone?: string;
   memo?: string;
+}
+
+export interface TransitionReservationPayload {
+  to: string;
+  reason?: string;
+  expectedVersion?: number;
 }
 
 export interface ReturnReservationPayload {
   returnedAt?: string;
   memo?: string;
   odometer?: number;
+}
+
+export interface CancelReservationPayload {
+  reason?: string;
 }
 
 export interface AccidentReportPayload {
@@ -126,6 +137,19 @@ export function createReservation(
   });
 }
 
+export function transitionReservation(
+  reservationId: string,
+  payload: TransitionReservationPayload,
+  options: ReservationsRequestOptions = {},
+): Promise<unknown> {
+  return apiClient.requestData<unknown>({
+    path: `/api/v2/reservations/${encodeURIComponent(reservationId)}/transitions`,
+    method: 'POST',
+    body: payload,
+    signal: options.signal,
+  });
+}
+
 export function returnReservation(
   reservationId: string,
   payload: ReturnReservationPayload,
@@ -133,6 +157,19 @@ export function returnReservation(
 ): Promise<unknown> {
   return apiClient.requestData<unknown>({
     path: `/api/v2/reservations/${encodeURIComponent(reservationId)}/return`,
+    method: 'POST',
+    body: payload,
+    signal: options.signal,
+  });
+}
+
+export function cancelReservation(
+  reservationId: string,
+  payload: CancelReservationPayload = {},
+  options: ReservationsRequestOptions = {},
+): Promise<unknown> {
+  return apiClient.requestData<unknown>({
+    path: `/api/v2/reservations/${encodeURIComponent(reservationId)}/cancel`,
     method: 'POST',
     body: payload,
     signal: options.signal,

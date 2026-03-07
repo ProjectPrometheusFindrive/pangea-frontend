@@ -14,7 +14,8 @@ interface ReservationListRow {
   paymentStatus: string;
   amount: number;
   deposit: number;
-  phone: string;
+  phone?: string;
+  memo?: string;
 }
 
 function formatDateOffset(offsetDays: number): string {
@@ -96,7 +97,7 @@ async function submitContract(page: Page): Promise<void> {
 }
 
 test.describe('BK-091 Reservations E2E', () => {
-  test('예약 생성 후 반납 전이가 성공한다', async ({ page }) => {
+  test('예약 생성 후 대여 시작과 반납 전이가 성공한다', async ({ page }) => {
     const reservations: ReservationListRow[] = [];
 
     await installApiMocks(page, {
@@ -113,6 +114,8 @@ test.describe('BK-091 Reservations E2E', () => {
         },
         'POST /api/v2/reservations': async ({ route }) => {
           await delay(250);
+          const body = route.request().postDataJSON() as Record<string, unknown>;
+          expect(body.phone).toBe('010-2222-3333');
           const created = buildReservationRow({
             id: 'R-1001',
             customerName: '테스트고객',
@@ -123,6 +126,17 @@ test.describe('BK-091 Reservations E2E', () => {
         },
         'GET /api/v2/reservations/R-1001': async ({ route }) => {
           await fulfillSuccess(route, reservations[0]);
+        },
+        'POST /api/v2/reservations/R-1001/transitions': async ({ route }) => {
+          await delay(250);
+          const transitionedReservation = buildReservationRow({
+            id: 'R-1001',
+            customerName: '테스트고객',
+            phone: '010-2222-3333',
+            contractStatus: '대여중',
+          });
+          reservations.splice(0, reservations.length, transitionedReservation);
+          await fulfillSuccess(route, transitionedReservation);
         },
         'POST /api/v2/reservations/R-1001/return': async ({ route }) => {
           await delay(250);
@@ -150,6 +164,12 @@ test.describe('BK-091 Reservations E2E', () => {
     await expect(page.getByTestId('new-contract-submit')).toContainText('저장 중...');
     await expect(page.getByText('예약이 등록되었습니다. 예약번호: R-1001')).toBeVisible();
     await expect(page.getByTestId('reservation-detail-modal')).toBeVisible();
+    await expect(page.getByTestId('reservation-start-button')).toBeVisible();
+    await expect(page.getByTestId('reservation-return-button')).toHaveCount(0);
+
+    await page.getByTestId('reservation-start-button').click();
+    await expect(page.getByText('차량 인수 처리가 완료되었습니다.')).toBeVisible();
+    await expect(page.getByTestId('reservation-return-button')).toBeVisible();
 
     await page.getByTestId('reservation-return-button').click();
     await expect(page.getByTestId('reservation-return-confirm-modal')).toBeVisible();
@@ -157,6 +177,42 @@ test.describe('BK-091 Reservations E2E', () => {
 
     await expect(page.getByTestId('reservation-return-confirm-button')).toContainText('처리 중...');
     await expect(page.getByText('차량이 반납 처리되었습니다.')).toBeVisible();
+  });
+
+  test('상세 조회가 phone을 누락해도 legacy memo 연락처를 유지한다', async ({ page }) => {
+    const listReservation = buildReservationRow({
+      phone: undefined,
+      memo: 'phone=010-9999-8888, pickup=강남지점',
+    });
+    const detailReservation = buildReservationRow({
+      phone: undefined,
+      memo: undefined,
+    });
+
+    await installApiMocks(page, {
+      handlers: {
+        'GET /api/v2/reservations': async ({ route }) => {
+          await fulfillSuccess(route, {
+            reservations: [listReservation],
+            assets: [buildVehicleAsset()],
+            total: 1,
+            page: 1,
+            pageSize: 20,
+          });
+        },
+        'GET /api/v2/reservations/R-9001': async ({ route }) => {
+          await fulfillSuccess(route, detailReservation);
+        },
+      },
+    });
+
+    await loginViaUi(page, 'member', { returnUrl: '/reservations' });
+    await expect(page).toHaveURL(/\/reservations(?:\?.*)?$/);
+    await expect(page.getByTestId('reservation-block-R-9001')).toBeVisible();
+
+    await page.getByTestId('reservation-block-R-9001').click();
+    await expect(page.getByTestId('reservation-detail-modal')).toBeVisible();
+    await expect(page.getByText('010-9999-8888')).toBeVisible();
   });
 
   test('예약 생성 403 오류 시 권한 오류를 노출한다', async ({ page }) => {
@@ -190,11 +246,13 @@ test.describe('BK-091 Reservations E2E', () => {
   });
 
   test('예약 반납 5xx 오류 시 재시도 안내를 노출한다', async ({ page }) => {
+    const rentalReservation = buildReservationRow({ contractStatus: '대여중' });
+
     await installApiMocks(page, {
       handlers: {
         'GET /api/v2/reservations': async ({ route }) => {
           await fulfillSuccess(route, {
-            reservations: [buildReservationRow()],
+            reservations: [rentalReservation],
             assets: [buildVehicleAsset()],
             total: 1,
             page: 1,
@@ -202,7 +260,7 @@ test.describe('BK-091 Reservations E2E', () => {
           });
         },
         'GET /api/v2/reservations/R-9001': async ({ route }) => {
-          await fulfillSuccess(route, buildReservationRow());
+          await fulfillSuccess(route, rentalReservation);
         },
         'POST /api/v2/reservations/R-9001/return': async ({ route }) => {
           await fulfillError(route, 500, 'SERVER_ERROR', 'temporary error');
@@ -222,6 +280,56 @@ test.describe('BK-091 Reservations E2E', () => {
     await page.getByTestId('reservation-return-confirm-button').click();
 
     await expect(page.getByTestId('reservation-return-error')).toContainText('일시적인 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.');
+  });
+
+  test('예약 취소가 실제 cancel API를 호출하고 상세 패널을 닫는다', async ({ page }) => {
+    const reservations: ReservationListRow[] = [buildReservationRow()];
+    let cancelRequestCount = 0;
+
+    await installApiMocks(page, {
+      handlers: {
+        'GET /api/v2/reservations': async ({ route }) => {
+          await fulfillSuccess(route, {
+            reservations,
+            assets: [buildVehicleAsset()],
+            total: reservations.length,
+            page: 1,
+            pageSize: 20,
+          });
+        },
+        'GET /api/v2/reservations/R-9001': async ({ route }) => {
+          await fulfillSuccess(route, reservations[0]);
+        },
+        'POST /api/v2/reservations/R-9001/cancel': async ({ route }) => {
+          cancelRequestCount += 1;
+          reservations.splice(0, reservations.length);
+          await fulfillSuccess(route, {
+            reservationId: 'R-9001',
+            archived: true,
+            canceledAt: formatDateTimeOffset(0, '10:00:00'),
+          });
+        },
+      },
+    });
+
+    page.once('dialog', async (dialog) => {
+      expect(dialog.type()).toBe('confirm');
+      await dialog.accept();
+    });
+
+    await loginViaUi(page, 'member', { returnUrl: '/reservations' });
+    await expect(page).toHaveURL(/\/reservations(?:\?.*)?$/);
+    await expect(page.getByTestId('reservation-block-R-9001')).toBeVisible();
+
+    await page.getByTestId('reservation-block-R-9001').click();
+    await expect(page.getByTestId('reservation-detail-modal')).toBeVisible();
+
+    await page.getByTestId('reservation-cancel-button').click();
+
+    await expect(page.getByText('예약이 취소되었습니다.')).toBeVisible();
+    await expect(page.getByTestId('reservation-detail-modal')).toHaveCount(0);
+    await expect(page.getByTestId('reservation-block-R-9001')).toHaveCount(0);
+    expect(cancelRequestCount).toBe(1);
   });
 
   test('예약 상세 403 오류 시 접근 불가 안내를 노출한다', async ({ page }) => {
