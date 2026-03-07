@@ -48,7 +48,6 @@ export default function Login() {
     login,
     error: authError,
     isLoading,
-    dismissSessionExpiredModal,
   } = useAuth();
 
   const returnUrl = useMemo(
@@ -64,10 +63,6 @@ export default function Login() {
 
   const isBusy = isSubmitting || isLoading;
   const errorMessage = uiError?.message ?? authError;
-
-  useEffect(() => {
-    dismissSessionExpiredModal();
-  }, [dismissSessionExpiredModal]);
 
   useEffect(() => {
     const reason = searchParams.get('reason');

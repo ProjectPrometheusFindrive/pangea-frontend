@@ -35,6 +35,7 @@ interface AuthContextType {
   login: (payload: AuthLoginPayload) => Promise<void>;
   refreshSession: (options?: RefreshSessionOptions) => Promise<void>;
   logout: (options?: LogoutOptions) => Promise<void>;
+  dismissSessionExpiredModal: () => void;
 }
 
 interface AuthSession {
@@ -53,6 +54,7 @@ const AUTH_STORAGE_KEYS = [
   'refreshToken',
 ];
 const LOGIN_PATH = '/login';
+const LOCATION_CHANGE_EVENT = 'pangea:locationchange';
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 function isLoginPath(path: string): boolean {
@@ -76,6 +78,13 @@ function buildCurrentPath(): string {
     return '/';
   }
   return `${window.location.pathname}${window.location.search}${window.location.hash}`;
+}
+
+function getCurrentPathname(): string {
+  if (typeof window === 'undefined') {
+    return '/';
+  }
+  return window.location.pathname;
 }
 
 function removeStorageItem(storage: Storage, key: string): void {
@@ -282,6 +291,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
   const [isBootstrapping, setIsBootstrapping] = useState(true);
   const [isSessionExpiredModalOpen, setIsSessionExpiredModalOpen] = useState(false);
+  const [currentPathname, setCurrentPathname] = useState<string>(() => getCurrentPathname());
   const refreshPromiseRef = useRef<Promise<AuthSession | null> | null>(null);
   const sessionExpiredHandledRef = useRef(false);
 
