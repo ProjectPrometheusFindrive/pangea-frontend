@@ -36,11 +36,13 @@ import type { Reservation } from '../types/reservations';
 import { ApiError } from '../../services/api';
 import { getAssetsList } from '../../services/assets';
 import {
+  cancelReservation,
   createReservation,
   getReservationDetail,
   getReservationsList,
   reportReservationAccident,
   returnReservation,
+  transitionReservation,
 } from '../../services/reservations';
 
 // 드래그 선택 타입 정의
@@ -288,6 +290,30 @@ function toNumberValue(value: unknown): number | null {
   return null;
 }
 
+function parseReservationMemoValue(memo: unknown, key: string): string | null {
+  const memoText = toStringValue(memo);
+  if (!memoText) {
+    return null;
+  }
+
+  const entries = memoText.split(',');
+  for (const entry of entries) {
+    const [entryKey, ...entryValueParts] = entry.split('=');
+    if (!entryKey || entryValueParts.length === 0) {
+      continue;
+    }
+    if (entryKey.trim() !== key) {
+      continue;
+    }
+    const value = entryValueParts.join('=').trim();
+    if (value) {
+      return value;
+    }
+  }
+
+  return null;
+}
+
 function toPositiveInteger(value: string | null, fallbackValue: number): number {
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed <= 0) {
@@ -526,7 +552,12 @@ function toReservationRow(row: unknown, index: number): Reservation | null {
       toStringValue(row.type) ?? toStringValue(row.contractStatus) ?? toStringValue(row.status),
     ),
     issues,
-    phone: toStringValue(row.phone) ?? toStringValue(row.customerPhone) ?? '-',
+    phone: (
+      toStringValue(row.phone)
+      ?? toStringValue(row.customerPhone)
+      ?? parseReservationMemoValue(row.memo, 'phone')
+      ?? '-'
+    ),
     paymentMethod: normalizePaymentMethod(toStringValue(row.paymentMethod) ?? toStringValue(row.paymentType)),
     amount: toCurrencyValue(row.amount),
     deposit: toCurrencyValue(row.deposit),
@@ -553,6 +584,17 @@ function toReservationRows(payload: unknown): Reservation[] {
   return normalizedRows;
 }
 
+function mergeReservationDetail(detailRow: Reservation, fallbackReservation: Reservation): Reservation {
+  const mergedReservation: Reservation = {
+    ...fallbackReservation,
+    ...detailRow,
+  };
+  if (detailRow.phone === '-' && fallbackReservation.phone !== '-') {
+    mergedReservation.phone = fallbackReservation.phone;
+  }
+  return mergedReservation;
+}
+
 function toReservationDetail(payload: unknown, fallbackReservation: Reservation): Reservation {
   if (isRecord(payload)) {
     const detailCandidate = payload.item
@@ -563,19 +605,13 @@ function toReservationDetail(payload: unknown, fallbackReservation: Reservation)
 
     const detailRow = toReservationRow(detailCandidate, 0);
     if (detailRow) {
-      return {
-        ...fallbackReservation,
-        ...detailRow,
-      };
+      return mergeReservationDetail(detailRow, fallbackReservation);
     }
   }
 
   const directDetailRow = toReservationRow(payload, 0);
   if (directDetailRow) {
-    return {
-      ...fallbackReservation,
-      ...directDetailRow,
-    };
+    return mergeReservationDetail(directDetailRow, fallbackReservation);
   }
 
   return fallbackReservation;
@@ -701,6 +737,8 @@ export default function Reservations() {
   const [isDetailNotFound, setIsDetailNotFound] = useState(false);
   const [isReturnSubmitting, setIsReturnSubmitting] = useState(false);
   const [returnSubmitError, setReturnSubmitError] = useState<string | null>(null);
+  const [activeReservationAction, setActiveReservationAction] = useState<'start' | 'cancel' | null>(null);
+  const [reservationActionError, setReservationActionError] = useState<string | null>(null);
 
   // 동적 날짜 로딩을 위한 상태
   const [totalDaysToShow, setTotalDaysToShow] = useState(42); // 초기 6주
@@ -981,6 +1019,9 @@ export default function Reservations() {
     setIsDetailLoading(false);
     setDetailError(null);
     setIsDetailNotFound(false);
+    setReturnSubmitError(null);
+    setReservationActionError(null);
+    setActiveReservationAction(null);
   }, []);
 
   const hydrateReservationDetail = useCallback(async (reservationId: string, fallbackReservation: Reservation) => {
@@ -1221,8 +1262,17 @@ export default function Reservations() {
     const asset = vehicleAssets.find((entry) => entry.vehicleNumber === reservation.vehicleNumber);
     setSelectedVehicleAsset(asset ?? createFallbackVehicleAsset(reservation));
     setActiveTab('reservation');
+    setReturnSubmitError(null);
+    setReservationActionError(null);
+    setActiveReservationAction(null);
     void hydrateReservationDetail(reservation.id, reservation);
   }, [hydrateReservationDetail, vehicleAssets]);
+
+  const refreshReservationsAfterMutation = useCallback((warningMessage: string) => {
+    void hydrateReservationsData().catch(() => {
+      toast.error(warningMessage);
+    });
+  }, [hydrateReservationsData]);
 
   const handleReservationClick = useCallback((reservation: Reservation) => {
     openReservationDetail(reservation);
@@ -1299,8 +1349,8 @@ export default function Reservations() {
         vehicleNumber: formValues.selectedVehicle,
         plate: formValues.selectedVehicle,
         customerName: formValues.customerName.trim(),
+        phone: formValues.customerPhone.trim(),
         memo: [
-          `phone=${formValues.customerPhone.trim()}`,
           `pickup=${formValues.pickupLocation.trim()}`,
           `return=${formValues.returnLocation.trim()}`,
           `paymentMethod=${formValues.paymentMethod}`,
@@ -1359,14 +1409,169 @@ export default function Reservations() {
     }
   }, [canWriteReservations, hydrateReservationsData, openReservationDetail, vehicleAssets]);
 
+  const handleStartReservation = useCallback(async () => {
+    if (!canWriteReservations) {
+      setReservationActionError('예약 상태 변경 권한이 없습니다. 관리자에게 권한을 요청해 주세요.');
+      return;
+    }
+
+    if (!selectedReservation || selectedReservation.type !== 'reservation' || activeReservationAction) {
+      return;
+    }
+
+    setActiveReservationAction('start');
+    setReservationActionError(null);
+
+    try {
+      const payload = await transitionReservation(selectedReservation.id, {
+        to: '대여중',
+        reason: '차량 인수 처리',
+      });
+      const fallbackReservation: Reservation = {
+        ...selectedReservation,
+        type: 'rental',
+      };
+      const updatedReservation = toReservationDetail(payload, fallbackReservation);
+
+      setReservationsData((prev) => prev.map((reservation) => (
+        reservation.id === updatedReservation.id ? updatedReservation : reservation
+      )));
+      setSelectedReservation(updatedReservation);
+      const matchedAsset = vehicleAssets.find((asset) => asset.vehicleNumber === updatedReservation.vehicleNumber);
+      if (matchedAsset) {
+        setSelectedVehicleAsset({
+          ...matchedAsset,
+          status: toVehicleStatusFromReservation(updatedReservation.type),
+        });
+      } else {
+        setSelectedVehicleAsset(createFallbackVehicleAsset(updatedReservation));
+      }
+
+      refreshReservationsAfterMutation('변경은 저장되었지만 목록을 다시 불러오지 못했습니다. 새로고침 후 확인해 주세요.');
+      void hydrateReservationDetail(updatedReservation.id, updatedReservation);
+      toast.success('차량 인수 처리가 완료되었습니다.');
+    } catch (error) {
+      if (error instanceof ApiError) {
+        if (error.status === 403) {
+          setReservationActionError('예약 상태 변경 권한이 없습니다. 관리자에게 권한을 요청해 주세요.');
+          return;
+        }
+        if (error.status === 404) {
+          setReservationActionError('선택한 예약이 삭제되었거나 존재하지 않습니다.');
+          await hydrateReservationsData();
+          closeReservationDetail();
+          return;
+        }
+        if (error.status === 409) {
+          setReservationActionError(error.message || '상태 전이 충돌이 발생했습니다. 최신 상태를 확인해 주세요.');
+          void hydrateReservationsData();
+          void hydrateReservationDetail(selectedReservation.id, selectedReservation);
+          return;
+        }
+        if (isRetryableMutationError(error)) {
+          setReservationActionError(RETRY_TOAST_MESSAGE);
+          toast.error(RETRY_TOAST_MESSAGE);
+          return;
+        }
+
+        setReservationActionError(error.message || '대여 시작 처리 중 오류가 발생했습니다.');
+        return;
+      }
+
+      setReservationActionError('대여 시작 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.');
+      toast.error(RETRY_TOAST_MESSAGE);
+    } finally {
+      setActiveReservationAction(null);
+    }
+  }, [
+    activeReservationAction,
+    canWriteReservations,
+    closeReservationDetail,
+    hydrateReservationDetail,
+    refreshReservationsAfterMutation,
+    selectedReservation,
+    vehicleAssets,
+  ]);
+
+  const handleCancelReservation = useCallback(async () => {
+    if (!canWriteReservations) {
+      setReservationActionError('예약 취소 권한이 없습니다. 관리자에게 권한을 요청해 주세요.');
+      return;
+    }
+
+    if (!selectedReservation || selectedReservation.type !== 'reservation' || activeReservationAction) {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `${selectedReservation.customer}님의 예약을 취소하시겠습니까?\n\n차량번호: ${selectedReservation.vehicleNumber}\n예약 기간: ${selectedReservation.startDateFull} ~ ${selectedReservation.endDateFull}`,
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    setActiveReservationAction('cancel');
+    setReservationActionError(null);
+
+    try {
+      await cancelReservation(selectedReservation.id);
+      closeReservationDetail();
+      refreshReservationsAfterMutation('예약은 취소되었지만 목록을 다시 불러오지 못했습니다. 새로고침 후 확인해 주세요.');
+      toast.success('예약이 취소되었습니다.');
+    } catch (error) {
+      if (error instanceof ApiError) {
+        if (error.status === 403) {
+          setReservationActionError('예약 취소 권한이 없습니다. 관리자에게 권한을 요청해 주세요.');
+          return;
+        }
+        if (error.status === 404) {
+          await hydrateReservationsData();
+          closeReservationDetail();
+          toast.success('이미 취소되었거나 존재하지 않는 예약입니다.');
+          return;
+        }
+        if (error.status === 409) {
+          setReservationActionError(error.message || '예약 취소 상태가 변경되었습니다. 최신 상태를 확인해 주세요.');
+          void hydrateReservationsData();
+          void hydrateReservationDetail(selectedReservation.id, selectedReservation);
+          return;
+        }
+        if (isRetryableMutationError(error)) {
+          setReservationActionError(RETRY_TOAST_MESSAGE);
+          toast.error(RETRY_TOAST_MESSAGE);
+          return;
+        }
+
+        setReservationActionError(error.message || '예약 취소 중 오류가 발생했습니다.');
+        return;
+      }
+
+      setReservationActionError('예약 취소 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.');
+      toast.error(RETRY_TOAST_MESSAGE);
+    } finally {
+      setActiveReservationAction(null);
+    }
+  }, [
+    activeReservationAction,
+    canWriteReservations,
+    closeReservationDetail,
+    hydrateReservationDetail,
+    refreshReservationsAfterMutation,
+    selectedReservation,
+  ]);
+
   const handleReturnClick = useCallback(() => {
     if (!canWriteReservations) {
       setReturnSubmitError('차량 반납 처리 권한이 없습니다. 관리자에게 권한을 요청해 주세요.');
       return;
     }
+    if (selectedReservation?.type !== 'rental') {
+      setReturnSubmitError('반납은 대여중 상태에서만 처리할 수 있습니다.');
+      return;
+    }
     setReturnSubmitError(null);
     setShowReturnConfirm(true);
-  }, [canWriteReservations]);
+  }, [canWriteReservations, selectedReservation]);
 
   const handleConfirmReturn = useCallback(async () => {
     if (!canWriteReservations) {
@@ -2272,12 +2477,18 @@ export default function Reservations() {
                 )}
               </div>
 
-              {/* 액션 버튼 */}
-              <div className="p-6 border-t border-gray-200 flex gap-3 flex-wrap">
-                <button
-                  onClick={() => {
-                    if (!canViewAssets) {
-                      navigate('/forbidden');
+	              {/* 액션 버튼 */}
+	              <div className="p-6 border-t border-gray-200 flex gap-3 flex-wrap">
+	                {reservationActionError && (
+	                  <div className="w-full rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 flex items-start gap-2">
+	                    <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+	                    <span>{reservationActionError}</span>
+	                  </div>
+	                )}
+	                <button
+	                  onClick={() => {
+	                    if (!canViewAssets) {
+	                      navigate('/forbidden');
                       return;
                     }
                     navigate(`/assets?search=${encodeURIComponent(selectedReservation.vehicleNumber)}`);
@@ -2307,24 +2518,34 @@ export default function Reservations() {
                 >
                   이 차량의 조치항목 보기
                 </button>
-                {selectedReservation.type === 'reservation' && (
-                  <button
-                    onClick={() => {
-                      if (confirm(`${selectedReservation.customer}님의 예약을 취소하시겠습니까?\n\n차량번호: ${selectedReservation.vehicleNumber}\n예약 기간: ${selectedReservation.startDateFull} ~ ${selectedReservation.endDateFull}`)) {
-                        alert('예약이 취소되었습니다.\n\n고객에게 취소 안내 문자가 발송되었습니다.');
-                        closeReservationDetail();
-                        // 실제로는 예약 취소 처리 로직 실행
-                      }
-                    }}
-                    className="flex-1 min-w-[200px] px-4 py-3 bg-gray-600 text-white rounded-lg hover:bg-gray-700 font-medium"
-                  >
-                    예약 취소
-                  </button>
-                )}
-                {selectedReservation.type !== 'return' && (
-                  <button
-                    onClick={handleReturnClick}
-                    data-testid="reservation-return-button"
+	                {selectedReservation.type === 'reservation' && (
+	                  <button
+	                    onClick={() => {
+	                      void handleStartReservation();
+	                    }}
+	                    data-testid="reservation-start-button"
+	                    disabled={!canWriteReservations || activeReservationAction !== null}
+	                    className="flex-1 min-w-[200px] px-4 py-3 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 font-medium disabled:cursor-not-allowed disabled:opacity-60"
+	                  >
+	                    {activeReservationAction === 'start' ? '처리 중...' : '차량 인수 처리'}
+	                  </button>
+	                )}
+	                {selectedReservation.type === 'reservation' && (
+	                  <button
+	                    onClick={() => {
+	                      void handleCancelReservation();
+	                    }}
+	                    data-testid="reservation-cancel-button"
+	                    disabled={!canWriteReservations || activeReservationAction !== null}
+	                    className="flex-1 min-w-[200px] px-4 py-3 bg-gray-600 text-white rounded-lg hover:bg-gray-700 font-medium disabled:cursor-not-allowed disabled:opacity-60"
+	                  >
+	                    {activeReservationAction === 'cancel' ? '처리 중...' : '예약 취소'}
+	                  </button>
+	                )}
+	                {selectedReservation.type === 'rental' && (
+	                  <button
+	                    onClick={handleReturnClick}
+	                    data-testid="reservation-return-button"
                     disabled={!canWriteReservations}
                     className="flex-1 min-w-[200px] px-4 py-3 bg-orange-600 text-white rounded-lg hover:bg-orange-700 font-medium disabled:cursor-not-allowed disabled:opacity-60"
                   >
