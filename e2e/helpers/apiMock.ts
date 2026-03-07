@@ -34,7 +34,7 @@ interface ApiMockOptions {
   company?: Partial<MockCompany>;
   auth?: {
     login?: 'success' | 'unauthorized';
-    me?: 'success' | 'unauthorized';
+    me?: 'success' | 'unauthorized' | 'unauthorized-once';
   };
   handlers?: Record<string, ApiMockHandler>;
 }
@@ -253,11 +253,12 @@ export async function installApiMocks(page: Page, options: ApiMockOptions = {}):
   } as const;
 
   await page.addInitScript(
-    ({ mockUser, mockAuth }: { mockUser: MockUser; mockAuth: { login: 'success' | 'unauthorized'; me: 'success' | 'unauthorized' } }) => {
+    ({ mockUser, mockAuth }: { mockUser: MockUser; mockAuth: { login: 'success' | 'unauthorized'; me: 'success' | 'unauthorized' | 'unauthorized-once' } }) => {
       const buildMeta = () => ({
         requestId: 'e2e-request-id',
         timestamp: new Date().toISOString(),
       });
+      let remainingUnauthorizedMeResponses = mockAuth.me === 'unauthorized-once' ? 1 : 0;
 
       const successEnvelope = (data: unknown) => ({
         success: true,
@@ -304,6 +305,10 @@ export async function installApiMocks(page: Page, options: ApiMockOptions = {}):
 
         if (method === 'GET' && path === '/api/v2/auth/me') {
           if (mockAuth.me === 'unauthorized') {
+            return jsonResponse(401, errorEnvelope('UNAUTHORIZED', 'expired session'));
+          }
+          if (remainingUnauthorizedMeResponses > 0) {
+            remainingUnauthorizedMeResponses -= 1;
             return jsonResponse(401, errorEnvelope('UNAUTHORIZED', 'expired session'));
           }
           return jsonResponse(200, successEnvelope(mockUser));

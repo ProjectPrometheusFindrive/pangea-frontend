@@ -312,7 +312,7 @@ test.describe('BK-091 Login E2E', () => {
   test('allows login interaction after redirecting to /login from an expired session', async ({ page }) => {
     await installApiMocks(page, {
       auth: {
-        me: 'unauthorized',
+        me: 'unauthorized-once',
       },
       handlers: {
         'GET /api/v2/assets': async ({ route }) => {

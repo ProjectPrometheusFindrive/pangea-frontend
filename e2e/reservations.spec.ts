@@ -471,7 +471,7 @@ test.describe('BK-091 Reservations E2E', () => {
     await expect(page.getByText('선택한 예약이 삭제되었거나 존재하지 않습니다. 목록 데이터로 표시합니다.')).toBeVisible();
   });
 
-  test('예약 조회 401 세션 만료 시 만료 모달을 노출한다', async ({ page }) => {
+  test('예약 조회 401 세션 만료 시 로그인 화면으로 이동한다', async ({ page }) => {
     await installApiMocks(page, {
       handlers: {
         'GET /api/v2/reservations': async ({ route }) => {
@@ -481,8 +481,8 @@ test.describe('BK-091 Reservations E2E', () => {
     });
 
     await loginViaUi(page, 'member', { returnUrl: '/reservations' });
-    await expect(page).toHaveURL(/\/reservations(?:\?.*)?$/);
-    await expect(page.getByRole('heading', { name: '세션이 만료되었습니다' })).toBeVisible();
-    await expect(page.getByText('보안을 위해 로그인 세션이 종료되었습니다. 다시 로그인해 주세요.')).toBeVisible();
+    await expect.poll(() => new URL(page.url()).pathname).toBe('/login');
+    await expect.poll(() => new URL(page.url()).searchParams.get('returnUrl')).toBe('/reservations');
+    await expect(page.getByTestId('login-user-id')).toBeVisible();
   });
 });
