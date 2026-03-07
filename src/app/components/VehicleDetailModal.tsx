@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { X, Activity, History, Info, Zap, AlertTriangle, Loader2 } from 'lucide-react';
 import type { VehicleAsset } from '../types/assets';
 import { useNavigate } from 'react-router';
+import type { AssetEditForm } from '../pages/assetsDetailForm';
 
 interface AssetHistoryChange {
   field: string;
@@ -16,14 +17,6 @@ interface AssetHistoryEntry {
   versionFrom: number;
   versionTo: number;
   changes: AssetHistoryChange[];
-}
-
-interface AssetEditForm {
-  plate: string;
-  model: string;
-  year: string;
-  status: string;
-  memo: string;
 }
 
 interface VehicleDetailModalProps {
@@ -325,6 +318,51 @@ export function VehicleDetailModal({
                     />
                     {fieldErrors.year && (
                       <p className="mt-1 text-xs text-red-600">{fieldErrors.year}</p>
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-600 mb-2">색상</label>
+                    <input
+                      data-testid="asset-detail-color-input"
+                      type="text"
+                      value={editForm.color}
+                      onChange={(event) => onEditFieldChange('color', event.target.value)}
+                      disabled={!canEdit || isSaving}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-500"
+                    />
+                    {fieldErrors.color && (
+                      <p className="mt-1 text-xs text-red-600">{fieldErrors.color}</p>
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-600 mb-2">카테고리</label>
+                    <input
+                      data-testid="asset-detail-category-input"
+                      type="text"
+                      value={editForm.category}
+                      onChange={(event) => onEditFieldChange('category', event.target.value)}
+                      disabled={!canEdit || isSaving}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-500"
+                    />
+                    {fieldErrors.category && (
+                      <p className="mt-1 text-xs text-red-600">{fieldErrors.category}</p>
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-600 mb-2">차량 유형</label>
+                    <input
+                      data-testid="asset-detail-vehicle-type-input"
+                      type="text"
+                      value={editForm.vehicleType}
+                      onChange={(event) => onEditFieldChange('vehicleType', event.target.value)}
+                      disabled={!canEdit || isSaving}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-500"
+                    />
+                    {fieldErrors.vehicleType && (
+                      <p className="mt-1 text-xs text-red-600">{fieldErrors.vehicleType}</p>
                     )}
                   </div>
 

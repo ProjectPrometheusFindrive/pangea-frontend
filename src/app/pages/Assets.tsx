@@ -17,6 +17,15 @@ import { PageStateBoundary } from '../components/PageStateBoundary';
 import { PremiumInstallationRequestSection } from '../components/PremiumInstallationRequestSection';
 import { VehicleDetailModal } from '../components/VehicleDetailModal';
 import {
+  EMPTY_ASSET_EDIT_FORM,
+  buildAssetPatchPayload,
+  isAssetEditFormDirty,
+  mapAssetEditFieldErrors,
+  toAssetEditForm,
+  type AssetEditField,
+  type AssetEditForm,
+} from './assetsDetailForm';
+import {
   getCollectionFromPayload,
   getPageErrorActionLabel,
   handlePageErrorAction,
@@ -56,6 +65,7 @@ interface Asset extends VehicleAsset {
   memo?: string;
   category?: string;
   color?: string;
+  vehicleType?: string;
   contractStatus?: string;
 }
 
@@ -72,14 +82,6 @@ interface AssetHistoryEntry {
   versionFrom: number;
   versionTo: number;
   changes: AssetHistoryChange[];
-}
-
-interface AssetEditForm {
-  plate: string;
-  model: string;
-  year: string;
-  status: VehicleAsset['status'];
-  memo: string;
 }
 
 interface CreateFormState {
@@ -106,7 +108,6 @@ interface OcrSuggestion {
 
 type UploadStep = 'upload' | 'processing' | 'preview';
 type StatusFilterCode = 'all' | 'rental' | 'reserved' | 'available' | 'maintenance';
-type AssetEditField = keyof AssetEditForm;
 type CreateField = keyof Pick<CreateFormState, 'vehicleNumber' | 'vin' | 'model' | 'year'>;
 type FieldErrorMap<TField extends string> = Partial<Record<TField, string>>;
 type UploadedFileKey = keyof UploadedFiles;
@@ -130,13 +131,6 @@ const DEFAULT_CREATE_FORM_STATE: CreateFormState = {
   year: '',
   owner: '',
   insuranceExpiry: '',
-};
-const DEFAULT_ASSET_EDIT_FORM: AssetEditForm = {
-  plate: '',
-  model: '',
-  year: '',
-  status: '가용',
-  memo: '',
 };
 const STATUS_TO_QUERY_MAP: Record<string, Exclude<StatusFilterCode, 'all'>> = {
   rental: 'rental',
@@ -588,6 +582,7 @@ function toAssetRecord(row: unknown, index: number): Asset | null {
     memo: toStringValue(row.memo) ?? undefined,
     category: toStringValue(row.category) ?? undefined,
     color: toStringValue(row.color) ?? undefined,
+    vehicleType: toStringValue(row.vehicleType) ?? undefined,
     contractStatus: toStringValue(row.contractStatus) ?? undefined,
     hasPremiumDevice: hasDevice,
     hasDevice,
@@ -639,16 +634,6 @@ function toAssetDetail(payload: unknown): Asset | null {
   return toAssetRecord(unwrapAssetDetail(payload), 0);
 }
 
-function toAssetEditForm(asset: Asset): AssetEditForm {
-  return {
-    plate: (asset.plate ?? asset.vehicleNumber ?? '').trim(),
-    model: (asset.model ?? '').trim(),
-    year: (asset.year ?? '').trim(),
-    status: asset.status,
-    memo: (asset.memo ?? '').trim(),
-  };
-}
-
 function toAssetHistoryEntries(payload: unknown): AssetHistoryEntry[] {
   const rows = getCollectionFromPayload(payload, ['items', 'rows', 'list', 'history']);
   if (!rows || rows.length === 0) {
@@ -698,13 +683,6 @@ function toAssetHistoryEntries(payload: unknown): AssetHistoryEntry[] {
       } satisfies AssetHistoryEntry;
     })
     .filter((entry): entry is AssetHistoryEntry => entry !== null);
-}
-
-function normalizePatchStatusValue(status: VehicleAsset['status']): string {
-  if (status === '예약') {
-    return '예약중';
-  }
-  return status;
 }
 
 function toErrorFieldEntries(error: ApiError): Array<{ name: string; reason: string }> {
@@ -784,14 +762,7 @@ function toCreateFieldErrors(error: ApiError): FieldErrorMap<CreateField> {
 }
 
 function toAssetEditFieldErrors(error: ApiError): FieldErrorMap<AssetEditField> {
-  return mapFieldErrors<AssetEditField>(toErrorFieldEntries(error), {
-    vehicleNumber: 'plate',
-    plate: 'plate',
-    model: 'model',
-    year: 'year',
-    status: 'status',
-    memo: 'memo',
-  });
+  return mapAssetEditFieldErrors(toErrorFieldEntries(error));
 }
 
 function toCreatePayload(form: CreateFormState, companyId: string | null): {
@@ -941,7 +912,7 @@ export default function Assets() {
   const [assetsErrorStatus, setAssetsErrorStatus] = useState<number | null>(null);
   const [detailNotice, setDetailNotice] = useState<string | null>(null);
   const [isDetailLoading, setIsDetailLoading] = useState(false);
-  const [detailForm, setDetailForm] = useState<AssetEditForm>(DEFAULT_ASSET_EDIT_FORM);
+  const [detailForm, setDetailForm] = useState<AssetEditForm>(EMPTY_ASSET_EDIT_FORM);
   const [detailFieldErrors, setDetailFieldErrors] = useState<FieldErrorMap<AssetEditField>>({});
   const [detailSaveError, setDetailSaveError] = useState<string | null>(null);
   const [detailConflictNotice, setDetailConflictNotice] = useState<string | null>(null);
@@ -1092,14 +1063,7 @@ export default function Assets() {
     if (!selectedAsset) {
       return false;
     }
-    const baseline = toAssetEditForm(selectedAsset);
-    return (
-      baseline.plate !== detailForm.plate.trim()
-      || baseline.model !== detailForm.model.trim()
-      || baseline.year !== detailForm.year.trim()
-      || baseline.status !== detailForm.status
-      || baseline.memo !== detailForm.memo.trim()
-    );
+    return isAssetEditFormDirty(selectedAsset, detailForm);
   }, [detailForm, selectedAsset]);
 
   useEffect(() => {
@@ -1154,7 +1118,7 @@ export default function Assets() {
     setDetailNotice(null);
     setIsDetailSaving(false);
     setIsDetailDeleting(false);
-    setDetailForm(DEFAULT_ASSET_EDIT_FORM);
+    setDetailForm(EMPTY_ASSET_EDIT_FORM);
     setDetailFieldErrors({});
     setDetailSaveError(null);
     setDetailConflictNotice(null);
@@ -1924,62 +1888,15 @@ export default function Assets() {
       return;
     }
 
-    const clientFieldErrors: FieldErrorMap<AssetEditField> = {};
-    const baseline = toAssetEditForm(selectedAsset);
-    const nextPlate = detailForm.plate.trim();
-    const nextModel = detailForm.model.trim();
-    const nextYearText = detailForm.year.trim();
-    const nextMemo = detailForm.memo.trim();
+    const { payload, fieldErrors } = buildAssetPatchPayload({
+      asset: { ...selectedAsset, version: selectedAsset.version },
+      form: detailForm,
+    });
 
-    if (!nextPlate) {
-      clientFieldErrors.plate = '차량번호를 입력해 주세요.';
-    }
-
-    let parsedYear: number | undefined;
-    if (nextYearText.length > 0) {
-      const numericYear = Number(nextYearText);
-      if (!Number.isInteger(numericYear) || numericYear < 1900 || numericYear > 3000) {
-        clientFieldErrors.year = '연식은 4자리 숫자로 입력해 주세요.';
-      } else {
-        parsedYear = numericYear;
-      }
-    } else if (baseline.year.length > 0 && baseline.year !== nextYearText) {
-      clientFieldErrors.year = '연식을 수정하려면 유효한 숫자를 입력해 주세요.';
-    }
-
-    if (Object.keys(clientFieldErrors).length > 0) {
-      setDetailFieldErrors(clientFieldErrors);
+    if (Object.keys(fieldErrors).length > 0) {
+      setDetailFieldErrors(fieldErrors);
       setDetailSaveError('입력값을 확인해 주세요.');
       return;
-    }
-
-    const payload: {
-      version: number;
-      plate?: string;
-      vehicleNumber?: string;
-      model?: string;
-      year?: number;
-      status?: string;
-      memo?: string;
-    } = {
-      version: selectedAsset.version,
-    };
-
-    if (baseline.plate !== nextPlate) {
-      payload.plate = nextPlate;
-      payload.vehicleNumber = nextPlate;
-    }
-    if (baseline.model !== nextModel) {
-      payload.model = nextModel || undefined;
-    }
-    if (baseline.year !== nextYearText && parsedYear !== undefined) {
-      payload.year = parsedYear;
-    }
-    if (baseline.status !== detailForm.status) {
-      payload.status = normalizePatchStatusValue(detailForm.status);
-    }
-    if (baseline.memo !== nextMemo) {
-      payload.memo = nextMemo;
     }
 
     if (Object.keys(payload).length === 1) {

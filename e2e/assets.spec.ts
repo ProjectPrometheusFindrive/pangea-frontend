@@ -8,6 +8,9 @@ interface AssetFixture {
   vehicleNumber: string;
   plate: string;
   model: string;
+  category?: string;
+  color?: string;
+  vehicleType?: string;
   status: string;
   vin: string;
   year: string;
@@ -19,12 +22,15 @@ interface AssetFixture {
   updatedAt: string;
 }
 
-function buildAsset(model: string, version: number): AssetFixture {
+function buildAsset(model: string, version: number, overrides: Partial<AssetFixture> = {}): AssetFixture {
   return {
     id: 'ASSET-001',
     vehicleNumber: '12가3456',
     plate: '12가3456',
     model,
+    category: 'SUV',
+    color: '검정',
+    vehicleType: '승용',
     status: '가용',
     vin: 'KMH12A34560000001',
     year: '2024',
@@ -34,6 +40,7 @@ function buildAsset(model: string, version: number): AssetFixture {
     issues: [],
     version,
     updatedAt: '2026-02-27T00:00:00.000Z',
+    ...overrides,
   };
 }
 
@@ -83,6 +90,68 @@ test.describe('BK-091 Assets E2E', () => {
     await page.getByTestId('asset-detail-save-button').click();
 
     await expect(page.getByTestId('asset-detail-save-button')).toContainText('저장 중...');
+    await expect(page.getByText('차량 정보가 업데이트되었습니다.')).toBeVisible();
+  });
+
+  test('자산 상세 수정 폼에서 color/category/vehicleType 변경을 PATCH payload에 포함한다', async ({ page }) => {
+    let currentAsset = buildAsset('아반떼', 1, {
+      color: '검정',
+      category: 'SUV',
+      vehicleType: '승용',
+    });
+    let patchPayload: Record<string, unknown> | null = null;
+
+    await installApiMocks(page, {
+      handlers: {
+        'GET /api/v2/assets': async ({ route }) => {
+          await fulfillSuccess(route, {
+            items: [currentAsset],
+            total: 1,
+            page: 1,
+            pageSize: 20,
+          });
+        },
+        'GET /api/v2/assets/ASSET-001': async ({ route }) => {
+          await fulfillSuccess(route, currentAsset);
+        },
+        'GET /api/v2/assets/ASSET-001/history': async ({ route }) => {
+          await fulfillSuccess(route, { items: [] });
+        },
+        'PATCH /api/v2/assets/ASSET-001': async ({ route, request }) => {
+          patchPayload = request.postDataJSON() as Record<string, unknown>;
+          currentAsset = buildAsset('아반떼', 2, {
+            color: String(patchPayload.color ?? currentAsset.color ?? ''),
+            category: String(patchPayload.category ?? currentAsset.category ?? ''),
+            vehicleType: String(patchPayload.vehicleType ?? currentAsset.vehicleType ?? ''),
+          });
+          await fulfillSuccess(route, currentAsset);
+        },
+      },
+    });
+
+    await loginViaUi(page, 'member', { returnUrl: '/assets' });
+    await expect(page.getByTestId('asset-row-ASSET-001')).toBeVisible();
+
+    await page.getByTestId('asset-row-ASSET-001').click();
+    await expect(page.getByTestId('asset-detail-modal')).toBeVisible();
+
+    await expect(page.getByTestId('asset-detail-color-input')).toHaveValue('검정');
+    await expect(page.getByTestId('asset-detail-category-input')).toHaveValue('SUV');
+    await expect(page.getByTestId('asset-detail-vehicle-type-input')).toHaveValue('승용');
+    await expect(page.getByTestId('asset-detail-contract-status-input')).toHaveCount(0);
+
+    await page.getByTestId('asset-detail-color-input').fill('흰색');
+    await page.getByTestId('asset-detail-category-input').fill('세단');
+    await page.getByTestId('asset-detail-vehicle-type-input').fill('중형');
+    await page.getByTestId('asset-detail-save-button').click();
+
+    await expect.poll(() => patchPayload).not.toBeNull();
+    expect(patchPayload).toMatchObject({
+      version: 1,
+      color: '흰색',
+      category: '세단',
+      vehicleType: '중형',
+    });
     await expect(page.getByText('차량 정보가 업데이트되었습니다.')).toBeVisible();
   });
 
