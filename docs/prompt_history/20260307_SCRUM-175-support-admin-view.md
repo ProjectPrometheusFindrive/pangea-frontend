@@ -17,9 +17,10 @@
 - tenant, status, createdAt 기간 필터를 FE service payload와 연동했다.
 - 목록에서 상세 보기와 상태 변경을 이어서 처리할 수 있도록 화면 상태를 정리했다.
 - 관리 시나리오 Playwright 스펙을 추가했다.
+- merge 전 리뷰 반영으로 상세 요청 stale response를 무시하고, 필터 재조회 실패 시 이전 목록은 유지하되 상세/상태 변경 액션은 잠그도록 보강했다.
 
 ## Diffs & Files
-- `src/app/pages/SupportCenter.tsx`: super_admin 목록/필터/상세 관리 UI 추가.
+- `src/app/pages/SupportCenter.tsx`: super_admin 목록/필터/상세 관리 UI 추가, stale detail guard, stale list action lock 보강.
 - `src/services/support.ts`: support ticket list query 확장.
 - `e2e/support-center.spec.ts`: support-center 관리 시나리오 추가.
 
@@ -40,3 +41,4 @@ npx playwright test e2e/support-center.spec.ts --list
 ## Notes
 - 실제 Playwright 브라우저 실행은 호스트 의존성 부족으로 보류됐다.
 - BE 필터 계약 변경과 함께 synchronized merge가 필요하다.
+- 필터 재조회 실패 시에도 이전 목록은 유지하지만, stale 결과에서 상세 변경이 일어나지 않도록 FE에서 방어한다.

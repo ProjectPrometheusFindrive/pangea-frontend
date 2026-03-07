@@ -409,6 +409,10 @@ function SupportAdminManagementView() {
   const [isStatusUpdating, setIsStatusUpdating] = useState(false);
   const [statusDraft, setStatusDraft] = useState<SupportTicketStatus>('IN_PROGRESS');
   const [statusNote, setStatusNote] = useState('');
+  const detailRequestSeqRef = useRef(0);
+  const detailAbortControllerRef = useRef<AbortController | null>(null);
+
+  const isShowingStaleTickets = Boolean(ticketsError) && tickets.length > 0;
 
   const availableStatusTransitions = useMemo<SupportTicketStatus[]>(() => {
     return SUPPORT_STATUS_TRANSITIONS[normalizeSupportStatus(selectedTicket?.status ?? 'RECEIVED')] ?? [];
@@ -462,6 +466,10 @@ function SupportAdminManagementView() {
         return;
       }
 
+      setSelectedTicket(null);
+      setDetailError(null);
+      setStatusUpdateError(null);
+      setStatusUpdateSuccess(null);
       setTicketsError(toSupportErrorState(error, '문의 목록을 불러오는 중 오류가 발생했습니다.'));
     }).finally(() => {
       if (!isActive) {
@@ -477,6 +485,12 @@ function SupportAdminManagementView() {
   }, [appliedFilters, reloadNonce]);
 
   const openTicketDetail = useCallback(async (ticket: SupportTicket) => {
+    detailAbortControllerRef.current?.abort();
+    const requestSeq = detailRequestSeqRef.current + 1;
+    detailRequestSeqRef.current = requestSeq;
+    const abortController = new AbortController();
+    detailAbortControllerRef.current = abortController;
+
     setSelectedTicket(ticket);
     setDetailError(null);
     setStatusUpdateError(null);
@@ -486,25 +500,48 @@ function SupportAdminManagementView() {
     try {
       const detail = await getSupportTicketDetail(ticket.id, {
         companyId: ticket.companyId,
+        signal: abortController.signal,
       });
+      if (detailRequestSeqRef.current !== requestSeq) {
+        return;
+      }
       setSelectedTicket(detail);
     } catch (error) {
+      if (error instanceof ApiError && error.code === 'ABORTED') {
+        return;
+      }
+      if (detailRequestSeqRef.current !== requestSeq) {
+        return;
+      }
       setSelectedTicket(ticket);
       setDetailError(toSupportErrorState(error, '문의 상세를 불러오는 중 오류가 발생했습니다.'));
     } finally {
+      if (detailRequestSeqRef.current !== requestSeq) {
+        return;
+      }
+      detailAbortControllerRef.current = null;
       setIsDetailLoading(false);
     }
   }, []);
 
   const handleAdminFilterSubmit = useCallback((event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    detailAbortControllerRef.current?.abort();
+    setSelectedTicket(null);
+    setDetailError(null);
+    setStatusUpdateError(null);
+    setStatusUpdateSuccess(null);
     setAppliedFilters({ ...draftFilters });
   }, [draftFilters]);
 
   const handleAdminFilterReset = useCallback(() => {
+    detailAbortControllerRef.current?.abort();
     setDraftFilters({ ...DEFAULT_SUPPORT_ADMIN_FILTERS });
     setAppliedFilters({ ...DEFAULT_SUPPORT_ADMIN_FILTERS });
     setSelectedTicket(null);
+    setDetailError(null);
+    setStatusUpdateError(null);
+    setStatusUpdateSuccess(null);
     setReloadNonce((previousValue) => previousValue + 1);
   }, []);
 
@@ -700,7 +737,9 @@ function SupportAdminManagementView() {
               <div>
                 <h3 className="text-base font-semibold text-gray-900">문의 목록</h3>
                 <p className="mt-1 text-sm text-gray-500">
-                  현재 조건에 맞는 문의 {tickets.length}건
+                  {isShowingStaleTickets
+                    ? `재조회 실패로 이전 조회 결과 ${tickets.length}건을 표시 중입니다.`
+                    : `현재 조건에 맞는 문의 ${tickets.length}건`}
                 </p>
               </div>
               {isTicketsLoading && (
@@ -729,13 +768,17 @@ function SupportAdminManagementView() {
                       type="button"
                       data-testid={toSupportTicketRowTestId(ticket)}
                       onClick={() => {
+                        if (isShowingStaleTickets) {
+                          return;
+                        }
                         void openTicketDetail(ticket);
                       }}
+                      disabled={isShowingStaleTickets}
                       className={`w-full rounded-xl border px-4 py-3 text-left transition ${
                         isSelected
                           ? 'border-blue-400 bg-blue-50 shadow-sm'
                           : 'border-gray-200 bg-white hover:border-blue-200 hover:bg-gray-50'
-                      }`}
+                      } ${isShowingStaleTickets ? 'cursor-not-allowed opacity-70' : ''}`}
                     >
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <div className="flex min-w-0 items-center gap-2">
@@ -935,7 +978,7 @@ function SupportAdminManagementView() {
                           onClick={() => {
                             void submitStatusUpdate();
                           }}
-                          disabled={isStatusUpdating}
+                          disabled={isStatusUpdating || isShowingStaleTickets}
                           className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-400"
                         >
                           {isStatusUpdating ? (
