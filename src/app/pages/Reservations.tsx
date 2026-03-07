@@ -2435,7 +2435,7 @@ export default function Reservations() {
                     예약 취소
                   </button>
                 )}
-                {selectedReservation.type === 'reservation' && (
+                {selectedReservation.type === 'reservation' && canTransitionReservations && (
                   <button
                     onClick={handleStartRentalClick}
                     data-testid="reservation-start-button"
