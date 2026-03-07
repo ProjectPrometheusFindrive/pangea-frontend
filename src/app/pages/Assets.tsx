@@ -30,6 +30,7 @@ import type { VehicleAsset } from '../types/assets';
 import { ApiError } from '../../services/api';
 import {
   createAsset,
+  deleteAsset,
   getAssetDetail,
   getAssetHistory,
   getAssetsList,
@@ -191,6 +192,7 @@ const OCR_MAX_FILE_SIZE_BYTES = 25 * 1024 * 1024;
 const OCR_POLL_INTERVAL_MS = 1500;
 const OCR_HIDDEN_POLL_INTERVAL_MS = 3000;
 const OCR_POLL_TIMEOUT_MS = 90_000;
+const INVALID_COMPANY_IDS = new Set(['0000000000', '__global__', 'company-local', 'null', 'none']);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
@@ -260,6 +262,14 @@ function toReadableFileSize(size: number): string {
   return `${size}B`;
 }
 
+function normalizeTenantCompanyId(value: unknown): string | null {
+  const companyId = toStringValue(value);
+  if (!companyId) {
+    return null;
+  }
+  return INVALID_COMPANY_IDS.has(companyId.toLowerCase()) ? null : companyId;
+}
+
 function waitForDuration(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     if (signal.aborted) {
@@ -313,8 +323,11 @@ function isRetryableOcrError(error: unknown): boolean {
 
 function toOcrFailureMessage(error: unknown, documentLabel: string): string {
   if (error instanceof ApiError) {
-    if (error.status === 400 || error.status === 415) {
+    if (error.status === 415) {
       return `${documentLabel}: 파일 형식이 올바르지 않습니다. PDF/JPG/PNG/WebP 파일을 사용해 주세요.`;
+    }
+    if (error.status === 400) {
+      return `${documentLabel}: ${error.message || 'OCR 처리에 실패했습니다. 수동 입력으로 진행해 주세요.'}`;
     }
     if (error.status === 413) {
       return `${documentLabel}: 파일 크기가 OCR 제한(25MB)을 초과했습니다.`;
@@ -781,11 +794,12 @@ function toAssetEditFieldErrors(error: ApiError): FieldErrorMap<AssetEditField> 
   });
 }
 
-function toCreatePayload(form: CreateFormState): {
+function toCreatePayload(form: CreateFormState, companyId: string | null): {
   payload: {
     vin: string;
     plate: string;
     vehicleNumber: string;
+    companyId?: string;
     model?: string;
     year?: number;
   } | null;
@@ -824,6 +838,7 @@ function toCreatePayload(form: CreateFormState): {
       vin,
       plate: vehicleNumber,
       vehicleNumber,
+      companyId: companyId ?? undefined,
       model: model || undefined,
       year,
     },
@@ -931,6 +946,7 @@ export default function Assets() {
   const [detailSaveError, setDetailSaveError] = useState<string | null>(null);
   const [detailConflictNotice, setDetailConflictNotice] = useState<string | null>(null);
   const [isDetailSaving, setIsDetailSaving] = useState(false);
+  const [isDetailDeleting, setIsDetailDeleting] = useState(false);
   const [assetHistory, setAssetHistory] = useState<AssetHistoryEntry[]>([]);
   const [isAssetHistoryLoading, setIsAssetHistoryLoading] = useState(false);
   const [assetHistoryError, setAssetHistoryError] = useState<string | null>(null);
@@ -1137,6 +1153,7 @@ export default function Assets() {
     setIsDetailLoading(false);
     setDetailNotice(null);
     setIsDetailSaving(false);
+    setIsDetailDeleting(false);
     setDetailForm(DEFAULT_ASSET_EDIT_FORM);
     setDetailFieldErrors({});
     setDetailSaveError(null);
@@ -1588,7 +1605,7 @@ export default function Assets() {
       return;
     }
 
-    const companyId = user?.companyId?.trim();
+    const companyId = normalizeTenantCompanyId(user?.companyId);
     if (!companyId) {
       setCreateSaveError('회사 정보가 없어 OCR 업로드를 시작할 수 없습니다. 다시 로그인 후 시도해 주세요.');
       return;
@@ -1785,7 +1802,13 @@ export default function Assets() {
       return;
     }
 
-    const { payload, fieldErrors } = toCreatePayload(createForm);
+    const companyId = normalizeTenantCompanyId(user?.companyId);
+    if (!companyId) {
+      setCreateSaveError('회사 정보가 없어 차량 자산을 저장할 수 없습니다. 다시 로그인 후 시도해 주세요.');
+      return;
+    }
+
+    const { payload, fieldErrors } = toCreatePayload(createForm, companyId);
     if (!payload) {
       setCreateFieldErrors(fieldErrors);
       setCreateSaveError('필수 입력값을 확인해 주세요.');
@@ -1838,7 +1861,50 @@ export default function Assets() {
     } finally {
       setIsCreateSaving(false);
     }
-  }, [canWriteAssets, createForm, hydrateAssets, isCreateSaving, resetCreateModalState, updateAssetsSearchParams]);
+  }, [canWriteAssets, createForm, hydrateAssets, isCreateSaving, resetCreateModalState, updateAssetsSearchParams, user?.companyId]);
+
+  const handleDeleteAsset = useCallback(async () => {
+    if (!canWriteAssets) {
+      setDetailSaveError('차량 자산 삭제 권한이 없습니다. 관리자에게 권한을 요청해 주세요.');
+      return;
+    }
+    if (!selectedAsset || isDetailDeleting || isDetailSaving) {
+      return;
+    }
+    if (typeof window !== 'undefined') {
+      const shouldDelete = window.confirm(`'${selectedAsset.vehicleNumber}' 차량을 삭제하시겠습니까?`);
+      if (!shouldDelete) {
+        return;
+      }
+    }
+
+    setIsDetailDeleting(true);
+    setDetailSaveError(null);
+
+    try {
+      await deleteAsset(selectedAsset.id);
+      closeDetailModalState();
+      void hydrateAssets();
+      toast.success('차량 자산이 삭제되었습니다.');
+    } catch (error) {
+      if (error instanceof ApiError) {
+        if (error.status === 403) {
+          setDetailSaveError('차량 자산 삭제 권한이 없습니다. 관리자에게 권한을 요청해 주세요.');
+          return;
+        }
+        if (error.status === 404) {
+          closeDetailModalState();
+          void hydrateAssets();
+          toast.info('이미 삭제되었거나 존재하지 않는 차량입니다.');
+          return;
+        }
+      }
+      setDetailSaveError('차량 삭제에 실패했습니다. 잠시 후 다시 시도해 주세요.');
+      toast.error('차량 삭제에 실패했습니다. 다시 시도해 주세요.');
+    } finally {
+      setIsDetailDeleting(false);
+    }
+  }, [canWriteAssets, closeDetailModalState, hydrateAssets, isDetailDeleting, isDetailSaving, selectedAsset]);
 
   const handleDetailSave = useCallback(async () => {
     if (!canWriteAssets) {
@@ -2555,10 +2621,12 @@ export default function Assets() {
             saveError={detailSaveError}
             conflictNotice={detailConflictNotice}
             isSaving={isDetailSaving}
+            isDeleting={isDetailDeleting}
             isDirty={isDetailDirty}
             canEdit={canWriteAssets}
             onEditFieldChange={handleDetailFieldChange}
             handleSave={handleDetailSave}
+            handleDelete={handleDeleteAsset}
             getStatusColor={getStatusColor}
           />
         )}

@@ -46,10 +46,12 @@ interface VehicleDetailModalProps {
   saveError: string | null;
   conflictNotice: string | null;
   isSaving: boolean;
+  isDeleting: boolean;
   isDirty: boolean;
   canEdit: boolean;
   onEditFieldChange: (field: keyof AssetEditForm, value: string) => void;
   handleSave: () => void;
+  handleDelete: () => void;
   getStatusColor: (status: string) => string;
 }
 
@@ -83,10 +85,12 @@ export function VehicleDetailModal({
   saveError,
   conflictNotice,
   isSaving,
+  isDeleting,
   isDirty,
   canEdit,
   onEditFieldChange,
   handleSave,
+  handleDelete,
   getStatusColor,
 }: VehicleDetailModalProps) {
   const [detailTab, setDetailTab] = useState<'info' | 'history' | 'sensor'>('info');
@@ -785,6 +789,17 @@ export function VehicleDetailModal({
         {detailTab === 'info' ? (
           <div className="p-6 border-t border-gray-200 flex gap-3">
             <button
+              onClick={handleDelete}
+              data-testid="asset-detail-delete-button"
+              disabled={!canEdit || isSaving || isDeleting}
+              className="px-4 py-3 bg-red-50 text-red-700 rounded-lg hover:bg-red-100 font-medium disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <span className="inline-flex items-center gap-2">
+                {isDeleting && <Loader2 className="h-4 w-4 animate-spin" />}
+                {isDeleting ? '삭제 중...' : '차량 삭제'}
+              </span>
+            </button>
+            <button
               onClick={() => {
                 const closed = onClose();
                 if (closed) {
@@ -798,7 +813,7 @@ export function VehicleDetailModal({
             <button
               onClick={handleSave}
               data-testid="asset-detail-save-button"
-              disabled={!canEdit || isSaving}
+              disabled={!canEdit || isSaving || isDeleting}
               className="flex-1 px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium disabled:cursor-not-allowed disabled:opacity-60"
             >
               <span className="inline-flex items-center gap-2">
