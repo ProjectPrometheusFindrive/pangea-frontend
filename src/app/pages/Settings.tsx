@@ -1,6 +1,6 @@
 import { Layout } from '../components/Layout';
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { useNavigate } from 'react-router';
+import { useNavigate, useSearchParams } from 'react-router';
 import {
   Plus,
   MapPin,
@@ -545,6 +545,7 @@ function toReservationTypeLabel(value: unknown): string {
 }
 
 export default function Settings() {
+  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const { user } = useAuth();
   const { canPerformAction } = useAuthorization();
@@ -987,6 +988,12 @@ export default function Settings() {
     || hasPendingMemberRoleChanges
     || (isInvitationEditorOpen && isInvitationEditorDirty)
   );
+
+  useEffect(() => {
+    if (searchParams.get('tab') === 'company') {
+      setActiveTab('company');
+    }
+  }, [searchParams]);
 
   useEffect(() => {
     if ((!hasUnsavedChanges && !isAnySaving) || typeof window === 'undefined') {
