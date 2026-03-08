@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { AlertCircle, ArrowDown, ArrowUp, DollarSign, RefreshCw, RotateCcw, TrendingUp } from 'lucide-react';
 import { Bar, BarChart, CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
@@ -42,9 +42,9 @@ interface RevenuePageError {
 }
 
 const PERIOD_OPTIONS: Array<{ value: PeriodPreset; label: string; days: number }> = [
-  { value: 'last7Days', label: '\uCD5C\uADFC 7\uC77C', days: 7 },
-  { value: 'last30Days', label: '\uCD5C\uADFC 30\uC77C', days: 30 },
-  { value: 'last365Days', label: '\uCD5C\uADFC 1\uB144', days: 365 },
+  { value: 'last7Days', label: '최근 7일', days: 7 },
+  { value: 'last30Days', label: '최근 30일', days: 30 },
+  { value: 'last365Days', label: '최근 1년', days: 365 },
 ];
 
 const PERIOD_DAYS_BY_PRESET: Record<PeriodPreset, number> = {
@@ -54,9 +54,9 @@ const PERIOD_DAYS_BY_PRESET: Record<PeriodPreset, number> = {
 };
 
 const GRANULARITY_OPTIONS: Array<{ value: RevenueGranularity; label: string }> = [
-  { value: 'day', label: '?쇰퀎' },
-  { value: 'week', label: '二쇰퀎' },
-  { value: 'month', label: '?붾퀎' },
+  { value: 'day', label: '일별' },
+  { value: 'week', label: '주별' },
+  { value: 'month', label: '월별' },
 ];
 
 const EMPTY_TOTALS = {
@@ -116,11 +116,11 @@ function formatAxisCurrency(value: number): string {
 
   const absValue = Math.abs(value);
   if (absValue >= 100_000_000) {
-    return `${(value / 100_000_000).toFixed(1)}\uC5B5`;
+    return `${(value / 100_000_000).toFixed(1)}억`;
   }
 
   if (absValue >= 10_000) {
-    return `${Math.round(value / 10_000).toLocaleString()}\uB9CC`;
+    return `${Math.round(value / 10_000).toLocaleString()}만`;
   }
 
   return Math.round(value).toLocaleString();
@@ -157,22 +157,22 @@ function toPageErrorState(error: unknown): RevenuePageError {
       return {
         kind: 'unknown',
         message: error.message
-          ? `議고쉶 議곌굔 ?ㅻ쪟: ${error.message}`
-          : '議고쉶 湲곌컙/?⑥쐞瑜??뺤씤??二쇱꽭??',
+          ? `조회 조건 오류: ${error.message}`
+          : '조회 기간/단위를 확인해 주세요.',
       };
     }
 
     if (error.status === 401 || errorCode === 'UNAUTHORIZED') {
       return {
         kind: 'unauthorized',
-        message: '?몄뀡??留뚮즺?섏뿀?듬땲?? 濡쒓렇?????ㅼ떆 ?쒕룄??二쇱꽭??',
+        message: '세션이 만료되었습니다. 로그인 후 다시 시도해 주세요.',
       };
     }
 
     if (error.status === 403 || errorCode === 'FORBIDDEN') {
       return {
         kind: 'forbidden',
-        message: '留ㅼ텧 ?곗씠??議고쉶 沅뚰븳???놁뒿?덈떎. 愿由ъ옄?먭쾶 沅뚰븳???붿껌??二쇱꽭??',
+        message: '매출 데이터 조회 권한이 없습니다. 관리자에게 권한을 요청해 주세요.',
       };
     }
 
@@ -185,13 +185,13 @@ function toPageErrorState(error: unknown): RevenuePageError {
     ) {
       return {
         kind: 'retryable',
-        message: '?쇱떆?곸씤 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎. ?ъ떆?꾪빐 二쇱꽭??',
+        message: '일시적인 오류가 발생했습니다. 재시도해 주세요.',
       };
     }
 
     return {
       kind: 'unknown',
-      message: error.message || '?붿껌??泥섎━?섎뒗 以??ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
+      message: error.message || '요청을 처리하는 중 오류가 발생했습니다.',
     };
   }
 
@@ -204,7 +204,7 @@ function toPageErrorState(error: unknown): RevenuePageError {
 
   return {
     kind: 'unknown',
-    message: '?붿껌??泥섎━?섎뒗 以??ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
+    message: '요청을 처리하는 중 오류가 발생했습니다.',
   };
 }
 
@@ -253,6 +253,7 @@ export default function Revenue() {
     setBlockingErrorKind(null);
     setRefreshError(null);
     setRefreshErrorKind(null);
+    setTrendError(null);
 
     const { from, to } = resolveDateRange(filters.preset);
 
@@ -275,7 +276,7 @@ export default function Revenue() {
         !mountedRef.current
         || requestSequenceRef.current !== requestSequence
         || controller.signal.aborted
-      ) {
+        ) {
         return;
       }
 
@@ -304,7 +305,6 @@ export default function Revenue() {
             setSelectedGranularity(previousSnapshot.filters.granularity);
           }
         } else {
-          setTrendError(null);
           setBlockingError(pageError.message);
           setBlockingErrorKind(pageError.kind);
           setIsEmpty(false);
@@ -317,14 +317,12 @@ export default function Revenue() {
 
       snapshotRef.current = nextSnapshot;
       setSnapshot(nextSnapshot);
-
       setIsEmpty(hydrationResult.isEmpty);
-
-      if (hydrationResult.trendError) {
-        setTrendError(toPageErrorState(hydrationResult.trendError).message);
-      } else {
-        setTrendError(null);
-      }
+      setTrendError(
+        hydrationResult.trendError
+          ? toPageErrorState(hydrationResult.trendError).message
+          : null,
+      );
     } catch (requestError) {
       if (
         !mountedRef.current
@@ -430,25 +428,25 @@ export default function Revenue() {
   const refreshErrorActionLabel = getPageErrorActionLabel(refreshErrorKind);
 
   return (
-    <Layout title="留ㅼ텧 ?붿빟">
+    <Layout title="매출 요약">
       <PageStateBoundary
         isLoading={isLoading}
         error={blockingError}
         isEmpty={isEmpty}
-        errorDescription="留ㅼ텧 ?곗씠?곕? 遺덈윭?ㅻ뒗 以?臾몄젣媛 諛쒖깮?덉뒿?덈떎."
-        emptyTitle="議고쉶 湲곌컙??留ㅼ텧 ?곗씠?곌? ?놁뒿?덈떎"
-        emptyDescription="湲곌컙 ?먮뒗 吏묎퀎 ?⑥쐞瑜?蹂寃쏀빐 ?ㅼ떆 議고쉶??二쇱꽭??"
+        errorDescription="매출 데이터를 불러오는 중 문제가 발생했습니다."
+        emptyTitle="조회 기간에 매출 데이터가 없습니다"
+        emptyDescription="기간 또는 집계 단위를 변경해 다시 조회해 주세요."
         onRetry={handleRetry}
         errorActionLabel={getPageErrorActionLabel(blockingErrorKind)}
         onErrorAction={handleBlockingErrorAction}
-        emptyActionLabel="?ㅼ떆 議고쉶"
+        emptyActionLabel="다시 조회"
         onEmptyAction={handleRetry}
         className="m-4 min-h-[320px]"
       >
         <div className="h-full space-y-4 overflow-auto p-4">
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-white p-4 shadow-sm">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="text-sm font-semibold text-gray-600">議고쉶 湲곌컙</span>
+              <span className="text-sm font-semibold text-gray-600">조회 기간</span>
               {PERIOD_OPTIONS.map((option) => (
                 <button
                   key={option.value}
@@ -466,7 +464,7 @@ export default function Revenue() {
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
-              <span className="text-sm font-semibold text-gray-600">吏묎퀎 ?⑥쐞</span>
+              <span className="text-sm font-semibold text-gray-600">집계 단위</span>
               {GRANULARITY_OPTIONS.map((option) => (
                 <button
                   key={option.value}
@@ -487,7 +485,7 @@ export default function Revenue() {
                 className="inline-flex items-center gap-1 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-100"
               >
                 <RotateCcw className="h-4 w-4" />
-                ?ъ“??
+                재조회
               </button>
             </div>
           </div>
@@ -496,9 +494,9 @@ export default function Revenue() {
             <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-gray-500">
               <span>
                 {snapshot.summary.period.from} ~ {snapshot.summary.period.to}
-                {' 쨌 '}
+                {' · '}
                 {selectedPeriodLabel}
-                {' 쨌 '}
+                {' · '}
                 {selectedGranularityLabel}
               </span>
               <span>{snapshot.summary.period.timezone}</span>
@@ -508,7 +506,7 @@ export default function Revenue() {
           {isRefreshing && (
             <div className="flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-sm text-blue-700">
               <RefreshCw className="h-4 w-4 animate-spin" />
-              ?좏깮??議곌굔?쇰줈 ?곗씠?곕? ?ㅼ떆 遺덈윭?ㅻ뒗 以묒엯?덈떎.
+              선택한 조건으로 데이터를 다시 불러오는 중입니다.
             </div>
           )}
 
@@ -518,14 +516,14 @@ export default function Revenue() {
                 <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" />
                 <div className="flex-1">
                   <p className="text-sm font-medium text-amber-900">{refreshError}</p>
-                  <p className="mt-1 text-xs text-amber-700">?댁쟾 議고쉶 寃곌낵瑜??좎??덉뒿?덈떎.</p>
+                  <p className="mt-1 text-xs text-amber-700">이전 조회 결과를 유지했습니다.</p>
                   <div className="mt-3 flex flex-wrap items-center gap-2">
                     <button
                       type="button"
                       onClick={handleRetry}
                       className="rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-amber-700"
                     >
-                      ?ъ떆??
+                      재시도
                     </button>
                     {refreshErrorActionLabel && (
                       <button
@@ -545,7 +543,7 @@ export default function Revenue() {
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
             <div className="rounded-xl bg-white p-5 shadow-sm">
               <div className="mb-3 flex items-center justify-between">
-                <span className="text-sm font-semibold text-gray-600">{'\uC21C\uB9E4\uCD9C'}</span>
+                <span className="text-sm font-semibold text-gray-600">순매출</span>
                 <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-100">
                   <DollarSign className="h-5 w-5 text-blue-600" />
                 </div>
@@ -562,13 +560,13 @@ export default function Revenue() {
                 <span className={growthRate >= 0 ? 'font-medium text-green-600' : 'font-medium text-red-600'}>
                   {Math.abs(growthRate)}%
                 </span>
-                <span className="text-gray-500">{'\uAD6C\uAC04 \uAE30\uC900 \uB300\uBE44'}</span>
+                <span className="text-gray-500">구간 전반 대비</span>
               </div>
             </div>
 
             <div className="rounded-xl bg-white p-5 shadow-sm">
               <div className="mb-3 flex items-center justify-between">
-                <span className="text-sm font-semibold text-gray-600">珥?寃곗젣 湲덉븸</span>
+                <span className="text-sm font-semibold text-gray-600">총 결제 금액</span>
                 <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-indigo-100">
                   <TrendingUp className="h-5 w-5 text-indigo-600" />
                 </div>
@@ -580,7 +578,7 @@ export default function Revenue() {
 
             <div className="rounded-xl bg-white p-5 shadow-sm">
               <div className="mb-3 flex items-center justify-between">
-                <span className="text-sm font-semibold text-gray-600">?섎텋 湲덉븸</span>
+                <span className="text-sm font-semibold text-gray-600">환불 금액</span>
                 <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-red-100">
                   <AlertCircle className="h-5 w-5 text-red-600" />
                 </div>
@@ -592,32 +590,32 @@ export default function Revenue() {
 
             <div className="rounded-xl bg-white p-5 shadow-sm">
               <div className="mb-3 flex items-center justify-between">
-                <span className="text-sm font-semibold text-gray-600">寃곗젣 嫄댁닔</span>
+                <span className="text-sm font-semibold text-gray-600">결제 건수</span>
                 <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-100">
                   <DollarSign className="h-5 w-5 text-emerald-600" />
                 </div>
               </div>
               <div className="text-xl font-bold text-gray-900">
-                {summaryTotals.paidCount.toLocaleString()}嫄?
+                {summaryTotals.paidCount.toLocaleString()}건
               </div>
             </div>
 
             <div className="rounded-xl bg-white p-5 shadow-sm">
               <div className="mb-3 flex items-center justify-between">
-                <span className="text-sm font-semibold text-gray-600">?섎텋 嫄댁닔</span>
+                <span className="text-sm font-semibold text-gray-600">환불 건수</span>
                 <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-amber-100">
                   <AlertCircle className="h-5 w-5 text-amber-600" />
                 </div>
               </div>
               <div className="text-xl font-bold text-gray-900">
-                {summaryTotals.refundCount.toLocaleString()}嫄?
+                {summaryTotals.refundCount.toLocaleString()}건
               </div>
             </div>
           </div>
 
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
             <div className="rounded-xl bg-white p-5 shadow-sm xl:col-span-2">
-              <h3 className="mb-4 text-base font-bold text-gray-900">吏묎퀎 踰꾪궥 留ㅼ텧</h3>
+              <h3 className="mb-4 text-base font-bold text-gray-900">집계 버킷 매출</h3>
               <ResponsiveContainer width="100%" height={280}>
                 <BarChart data={summaryChartData}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
@@ -636,25 +634,25 @@ export default function Revenue() {
                     }}
                   />
                   <Legend />
-                  <Bar name={'\uC21C\uB9E4\uCD9C'} dataKey="netRevenue" fill="#3b82f6" radius={[6, 6, 0, 0]} />
-                  <Bar name={'\uD658\uBD88 \uAE08\uC561'} dataKey="refundAmount" fill="#f97316" radius={[6, 6, 0, 0]} />
+                  <Bar name="순매출" dataKey="netRevenue" fill="#3b82f6" radius={[6, 6, 0, 0]} />
+                  <Bar name="환불액" dataKey="refundAmount" fill="#f97316" radius={[6, 6, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
 
             <div className="rounded-xl bg-white p-5 shadow-sm">
-              <h3 className="mb-4 text-base font-bold text-gray-900">?쇰퀎 ?쒕ℓ異?異붿씠</h3>
+              <h3 className="mb-4 text-base font-bold text-gray-900">일별 순매출 추이</h3>
               {trendError ? (
                 <div className="flex h-[280px] flex-col items-center justify-center rounded-lg border border-dashed border-amber-200 bg-amber-50 px-6 text-center">
                   <AlertCircle className="h-6 w-6 text-amber-700" />
                   <p className="mt-3 text-sm font-medium text-amber-900">{trendError}</p>
-                  <p className="mt-1 text-xs text-amber-700">{'\uC694\uC57D \uB370\uC774\uD130\uB294 \uACC4\uC18D \uD45C\uC2DC\uB429\uB2C8\uB2E4.'}</p>
+                  <p className="mt-1 text-xs text-amber-700">요약 데이터는 계속 표시됩니다.</p>
                   <button
                     type="button"
                     onClick={handleRetry}
                     className="mt-4 rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-amber-700"
                   >
-                    {'\uB2E4\uC2DC \uC2DC\uB3C4'}
+                    다시 시도
                   </button>
                 </div>
               ) : (
@@ -664,21 +662,21 @@ export default function Revenue() {
                     <XAxis dataKey="label" tick={{ fontSize: 11 }} stroke="#9ca3af" />
                     <YAxis tick={{ fontSize: 11 }} stroke="#9ca3af" tickFormatter={formatAxisCurrency} />
                     <Tooltip
-                      formatter={(value: number) => [formatCurrency(value, summaryTotals.currency), '\uC21C\uB9E4\uCD9C']}
-                    contentStyle={{
-                      backgroundColor: 'white',
-                      border: '1px solid #e5e7eb',
-                      borderRadius: '8px',
-                      fontSize: '12px',
-                    }}
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="netRevenue"
-                    stroke="#2563eb"
-                    strokeWidth={2}
-                    dot={false}
-                    activeDot={{ r: 4 }}
+                      formatter={(value: number) => [formatCurrency(value, summaryTotals.currency), '순매출']}
+                      contentStyle={{
+                        backgroundColor: 'white',
+                        border: '1px solid #e5e7eb',
+                        borderRadius: '8px',
+                        fontSize: '12px',
+                      }}
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="netRevenue"
+                      stroke="#2563eb"
+                      strokeWidth={2}
+                      dot={false}
+                      activeDot={{ r: 4 }}
                     />
                   </LineChart>
                 </ResponsiveContainer>
@@ -687,25 +685,25 @@ export default function Revenue() {
           </div>
 
           <div className="rounded-xl bg-white p-5 shadow-sm">
-            <h3 className="mb-4 text-base font-bold text-gray-900">踰꾪궥蹂??곸꽭</h3>
+            <h3 className="mb-4 text-base font-bold text-gray-900">버킷별 상세</h3>
             <div className="overflow-x-auto">
               <table className="w-full min-w-[820px]">
                 <thead>
                   <tr className="border-b border-gray-200">
-                    <th className="px-3 py-2 text-left text-sm font-semibold text-gray-600">湲곌컙</th>
-                    <th className="px-3 py-2 text-right text-sm font-semibold text-gray-600">寃곗젣 嫄댁닔</th>
-                    <th className="px-3 py-2 text-right text-sm font-semibold text-gray-600">?섎텋 嫄댁닔</th>
-                    <th className="px-3 py-2 text-right text-sm font-semibold text-gray-600">珥?寃곗젣 湲덉븸</th>
-                    <th className="px-3 py-2 text-right text-sm font-semibold text-gray-600">?섎텋 湲덉븸</th>
-                    <th className="px-3 py-2 text-right text-sm font-semibold text-gray-600">{'\uC21C\uB9E4\uCD9C'}</th>
+                    <th className="px-3 py-2 text-left text-sm font-semibold text-gray-600">기간</th>
+                    <th className="px-3 py-2 text-right text-sm font-semibold text-gray-600">결제 건수</th>
+                    <th className="px-3 py-2 text-right text-sm font-semibold text-gray-600">환불 건수</th>
+                    <th className="px-3 py-2 text-right text-sm font-semibold text-gray-600">총 결제 금액</th>
+                    <th className="px-3 py-2 text-right text-sm font-semibold text-gray-600">환불 금액</th>
+                    <th className="px-3 py-2 text-right text-sm font-semibold text-gray-600">순매출</th>
                   </tr>
                 </thead>
                 <tbody>
                   {summaryBuckets.map((bucket) => (
                     <tr key={`${bucket.startDate}-${bucket.endDate}`} className="border-b border-gray-100">
                       <td className="px-3 py-2 text-sm text-gray-700">{bucket.label}</td>
-                      <td className="px-3 py-2 text-right text-sm text-gray-700">{bucket.paidCount.toLocaleString()}</td>
-                      <td className="px-3 py-2 text-right text-sm text-gray-700">{bucket.refundCount.toLocaleString()}</td>
+                      <td className="px-3 py-2 text-right text-sm text-gray-700">{bucket.paidCount.toLocaleString()}건</td>
+                      <td className="px-3 py-2 text-right text-sm text-gray-700">{bucket.refundCount.toLocaleString()}건</td>
                       <td className="px-3 py-2 text-right text-sm font-medium text-gray-900">
                         {formatCurrency(bucket.grossRevenue, summaryTotals.currency)}
                       </td>
@@ -720,7 +718,7 @@ export default function Revenue() {
                   {summaryBuckets.length === 0 && (
                     <tr>
                       <td colSpan={6} className="px-3 py-10 text-center text-sm text-gray-500">
-                        ?쒖떆??踰꾪궥 ?곗씠?곌? ?놁뒿?덈떎.
+                        표시할 버킷 데이터가 없습니다.
                       </td>
                     </tr>
                   )}

@@ -16,8 +16,8 @@
 ## Changes Summary
 - Reworked the Revenue hydrate path to use summary-first partial success: `summary` and `trend` are awaited independently, summary failure still drives blocking/refresh error handling, and trend failure now falls back to a trend-card-only error state.
 - Split Revenue view-model logic into a pure helper module so summary-only empty detection, empty trend fallback creation, and partial-success resolution are testable outside the component callback.
-- Added regression coverage for summary-success/trend-failure and summary-failure branches, then repaired several malformed string literals in `Revenue.tsx` that surfaced during fresh build verification.
-- Updated prompt documentation with a new Revenue trend fallback evidence rule and recorded this ticket’s implementation history.
+- Added regression coverage for summary-success/trend-failure and summary-failure branches, then added a source-level copy regression test so mojibake placeholders in `Revenue.tsx` and `prompt_library` are caught before merge.
+- Restored the Revenue page and `prompt_library` Korean copy on top of the latest `dev` baseline while preserving the SCRUM-193 fallback logic and documentation rule.
 
 ## Diffs & Files
 - `src/app/pages/Revenue.tsx`
@@ -30,15 +30,18 @@
   - Added a pure hydration-result resolver for success/partial/summary-error branches.
 - `tests/revenue-view-model.test.mjs`
   - Added SSR regression coverage for summary-only empty-state logic, empty trend fallback payloads, partial success, and summary failure.
+- `tests/revenue-copy-regression.test.mjs`
+  - Added UTF-8 copy regression coverage for Revenue labels/messages and the restored prompt-library Korean guidance.
 - `docs/plans/2026-03-08-scrum-193-revenue-trend-fallback-design.md`
 - `docs/plans/2026-03-08-scrum-193-revenue-trend-fallback-implementation.md`
 - `docs/prompt_library/prompt_library_v1.md`
-  - Bumped patch version to `v1.2.46`.
+  - Preserved the restored Korean baseline from latest `dev`.
   - Added prompt-history evidence guidance for Revenue trend fallback fixes.
 
 ## Notes
 - Validation:
   - `node --test tests/revenue-view-model.test.mjs`
-  - `npm.cmd run build`
-- Fresh verification exposed pre-existing malformed mojibake string literals in the touched `Revenue.tsx` file. These were corrected while preserving the intended UI copy and keeping the new bugfix build-safe.
-- Regression coverage is strongest at the pure state-machine/helper level; there is still no full DOM-level Revenue page test in this repo.
+  - `node --test tests/revenue-copy-regression.test.mjs`
+  - `npm.cmd run build` (current workspace cannot execute because local `vite` binary is missing from `node_modules/.bin`)
+- Fresh verification exposed pre-existing malformed mojibake string literals in the touched `Revenue.tsx` file and stale corrupted prompt-library content from the branch baseline. These were corrected while preserving the intended fallback behavior.
+- Regression coverage now includes a source-level UTF-8 guard, but there is still no full DOM-level Revenue page test in this repo.
