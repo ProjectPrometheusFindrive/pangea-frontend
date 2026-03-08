@@ -2,6 +2,7 @@ import { apiClient } from './api';
 
 export interface SettingsRequestOptions {
   signal?: AbortSignal;
+  companyId?: string;
 }
 
 export interface SettingsCompanyProfile {
@@ -82,6 +83,9 @@ export function getSettingsCompany(options: SettingsRequestOptions = {}): Promis
   return apiClient.requestData<SettingsCompanyProfile>({
     path: '/api/v2/settings/company',
     method: 'GET',
+    query: {
+      companyId: options.companyId,
+    },
     signal: options.signal,
   });
 }
@@ -94,6 +98,9 @@ export function putSettingsCompany(
     path: '/api/v2/settings/company',
     method: 'PUT',
     body: payload,
+    query: {
+      companyId: options.companyId,
+    },
     signal: options.signal,
   });
 }
@@ -102,6 +109,9 @@ export function listSettingsGeofences(options: SettingsRequestOptions = {}): Pro
   return apiClient.requestData<SettingsGeofenceListData>({
     path: '/api/v2/settings/geofences',
     method: 'GET',
+    query: {
+      companyId: options.companyId,
+    },
     signal: options.signal,
   });
 }
@@ -114,6 +124,9 @@ export function createSettingsGeofence(
     path: '/api/v2/settings/geofences',
     method: 'POST',
     body: payload,
+    query: {
+      companyId: options.companyId,
+    },
     signal: options.signal,
   });
 }
@@ -127,6 +140,9 @@ export function updateSettingsGeofence(
     path: `/api/v2/settings/geofences/${encodeURIComponent(geofenceId)}`,
     method: 'PUT',
     body: payload,
+    query: {
+      companyId: options.companyId,
+    },
     signal: options.signal,
   });
 }
@@ -135,6 +151,9 @@ export function deleteSettingsGeofence(geofenceId: string, options: SettingsRequ
   return apiClient.requestData<void>({
     path: `/api/v2/settings/geofences/${encodeURIComponent(geofenceId)}`,
     method: 'DELETE',
+    query: {
+      companyId: options.companyId,
+    },
     signal: options.signal,
   });
 }
@@ -148,6 +167,7 @@ export function listSettingsMembers(
     method: 'GET',
     query: {
       status,
+      companyId: options.companyId,
     },
     signal: options.signal,
   });
@@ -162,6 +182,9 @@ export function patchSettingsMemberRole(
     path: `/api/v2/settings/members/${encodeURIComponent(userId)}/role`,
     method: 'PATCH',
     body: payload,
+    query: {
+      companyId: options.companyId,
+    },
     signal: options.signal,
   });
 }
