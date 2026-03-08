@@ -20,7 +20,7 @@ import {
   type PageErrorKind,
 } from '../hooks/usePageEndpointState';
 import {
-  resolveRevenueHydrationResult,
+  settleRevenueHydration,
 } from './revenueViewModel';
 
 type PeriodPreset = 'last7Days' | 'last30Days' | 'last365Days';
@@ -227,12 +227,17 @@ export default function Revenue() {
   const requestSequenceRef = useRef(0);
   const controllerRef = useRef<AbortController | null>(null);
   const snapshotRef = useRef<RevenueSnapshot | null>(null);
+  const trendErrorRef = useRef<string | null>(null);
   const skipNextAutoHydrateRef = useRef(false);
 
   useEffect(() => () => {
     mountedRef.current = false;
     controllerRef.current?.abort();
   }, []);
+
+  useEffect(() => {
+    trendErrorRef.current = trendError;
+  }, [trendError]);
 
   const hydrateRevenue = useCallback(async (filters: RevenueFilters) => {
     const requestSequence = requestSequenceRef.current + 1;
@@ -253,40 +258,36 @@ export default function Revenue() {
     setBlockingErrorKind(null);
     setRefreshError(null);
     setRefreshErrorKind(null);
-    setTrendError(null);
 
     const { from, to } = resolveDateRange(filters.preset);
 
     try {
-      const [summaryResult, trendResult] = await Promise.allSettled([
-        getRevenueSummary({
+      const hydrationResult = await settleRevenueHydration({
+        filters,
+        from,
+        to,
+        summaryPromise: getRevenueSummary({
           from,
           to,
           granularity: filters.granularity,
           signal: controller.signal,
         }),
-        getRevenueTrend({
+        trendPromise: getRevenueTrend({
           from,
           to,
           signal: controller.signal,
         }),
-      ]);
+        hasPreviousSnapshot: hasSnapshot,
+        previousTrendError: trendErrorRef.current,
+      });
 
       if (
         !mountedRef.current
         || requestSequenceRef.current !== requestSequence
         || controller.signal.aborted
-        ) {
+      ) {
         return;
       }
-
-      const hydrationResult = resolveRevenueHydrationResult({
-        filters,
-        from,
-        to,
-        summaryResult,
-        trendResult,
-      });
 
       if (hydrationResult.kind === 'summary-error') {
         const pageError = toPageErrorState(hydrationResult.summaryError);
@@ -304,10 +305,19 @@ export default function Revenue() {
             setSelectedPreset(previousSnapshot.filters.preset);
             setSelectedGranularity(previousSnapshot.filters.granularity);
           }
+
+          setTrendError(
+            typeof hydrationResult.displayTrendError === 'string'
+              ? hydrationResult.displayTrendError
+              : hydrationResult.displayTrendError
+                ? toPageErrorState(hydrationResult.displayTrendError).message
+                : null,
+          );
         } else {
           setBlockingError(pageError.message);
           setBlockingErrorKind(pageError.kind);
           setIsEmpty(false);
+          setTrendError(null);
         }
 
         return;
@@ -319,8 +329,10 @@ export default function Revenue() {
       setSnapshot(nextSnapshot);
       setIsEmpty(hydrationResult.isEmpty);
       setTrendError(
-        hydrationResult.trendError
-          ? toPageErrorState(hydrationResult.trendError).message
+        typeof hydrationResult.displayTrendError === 'string'
+          ? hydrationResult.displayTrendError
+          : hydrationResult.displayTrendError
+            ? toPageErrorState(hydrationResult.displayTrendError).message
           : null,
       );
     } catch (requestError) {
