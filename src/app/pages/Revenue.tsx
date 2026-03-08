@@ -34,6 +34,7 @@ interface RevenueSnapshot {
   summary: RevenueSummaryResponse;
   trend: RevenueTrendResponse;
   filters: RevenueFilters;
+  trendErrorMessage: string | null;
 }
 
 interface RevenuePageError {
@@ -208,6 +209,16 @@ function toPageErrorState(error: unknown): RevenuePageError {
   };
 }
 
+function toTrendErrorMessage(displayTrendError: unknown | null): string | null {
+  if (typeof displayTrendError === 'string') {
+    return displayTrendError;
+  }
+
+  return displayTrendError
+    ? toPageErrorState(displayTrendError).message
+    : null;
+}
+
 export default function Revenue() {
   const navigate = useNavigate();
   const [selectedPreset, setSelectedPreset] = useState<PeriodPreset>('last30Days');
@@ -227,17 +238,12 @@ export default function Revenue() {
   const requestSequenceRef = useRef(0);
   const controllerRef = useRef<AbortController | null>(null);
   const snapshotRef = useRef<RevenueSnapshot | null>(null);
-  const trendErrorRef = useRef<string | null>(null);
   const skipNextAutoHydrateRef = useRef(false);
 
   useEffect(() => () => {
     mountedRef.current = false;
     controllerRef.current?.abort();
   }, []);
-
-  useEffect(() => {
-    trendErrorRef.current = trendError;
-  }, [trendError]);
 
   const hydrateRevenue = useCallback(async (filters: RevenueFilters) => {
     const requestSequence = requestSequenceRef.current + 1;
@@ -278,7 +284,7 @@ export default function Revenue() {
           signal: controller.signal,
         }),
         hasPreviousSnapshot: hasSnapshot,
-        previousTrendError: trendErrorRef.current,
+        previousTrendError: snapshotRef.current?.trendErrorMessage ?? null,
       });
 
       if (
@@ -305,14 +311,7 @@ export default function Revenue() {
             setSelectedPreset(previousSnapshot.filters.preset);
             setSelectedGranularity(previousSnapshot.filters.granularity);
           }
-
-          setTrendError(
-            typeof hydrationResult.displayTrendError === 'string'
-              ? hydrationResult.displayTrendError
-              : hydrationResult.displayTrendError
-                ? toPageErrorState(hydrationResult.displayTrendError).message
-                : null,
-          );
+          setTrendError(previousSnapshot.trendErrorMessage);
         } else {
           setBlockingError(pageError.message);
           setBlockingErrorKind(pageError.kind);
@@ -323,18 +322,16 @@ export default function Revenue() {
         return;
       }
 
-      const nextSnapshot: RevenueSnapshot = hydrationResult.snapshot;
+      const nextTrendErrorMessage = toTrendErrorMessage(hydrationResult.displayTrendError);
+      const nextSnapshot: RevenueSnapshot = {
+        ...hydrationResult.snapshot,
+        trendErrorMessage: nextTrendErrorMessage,
+      };
 
       snapshotRef.current = nextSnapshot;
       setSnapshot(nextSnapshot);
       setIsEmpty(hydrationResult.isEmpty);
-      setTrendError(
-        typeof hydrationResult.displayTrendError === 'string'
-          ? hydrationResult.displayTrendError
-          : hydrationResult.displayTrendError
-            ? toPageErrorState(hydrationResult.displayTrendError).message
-          : null,
-      );
+      setTrendError(nextTrendErrorMessage);
     } catch (requestError) {
       if (
         !mountedRef.current
@@ -359,6 +356,7 @@ export default function Revenue() {
           setSelectedPreset(previousSnapshot.filters.preset);
           setSelectedGranularity(previousSnapshot.filters.granularity);
         }
+        setTrendError(previousSnapshot.trendErrorMessage);
       } else {
         setTrendError(null);
         setBlockingError(pageError.message);
