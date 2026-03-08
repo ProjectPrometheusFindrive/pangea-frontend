@@ -1,4 +1,4 @@
-﻿# Prompt Library v1
+# Prompt Library v1
 
 - Version: v1.2.46
 - Date: 2026-03-08
@@ -6,29 +6,29 @@
 - Tags: prompt-library,workflow,branch-policy,history-policy,commit-policy,pr-automation,jira-traceability,end-prompt-protocol,worktree-cleanup,jira-status-sync,jira-comment-sync,ac-evidence,mock-removal,reservations-write,reservations-mock-removal,ocr-flow,revenue-api,settings-api,payment-status-sync,home-api,home-summary,home-copy,i18n-regression,action-payment-mock-removal,support-center,rbac-permission-hardening,e2e-test-hardening,playwright-artifact-policy,device-installation-tenant-scope,authorization-loading-guard,auth-silent-refresh
 
 ## Context
-- 珥덇린 ?명똿 ?묒뾽?먯꽌 ?꾨＼?꾪듃 ?쒗뵆由? 釉뚮옖移??뺤콉, 臾몄꽌???덉감瑜?諛섎났 媛?ν븯寃??쒖??뷀븷 ?꾩슂媛 ?덉쓬.
+- 초기 세팅 작업에서 프롬프트 템플릿, 브랜치 정책, 문서화 절차를 반복 가능하게 표준화할 필요가 있음.
 
 ## Goal
-- Start/End Prompt瑜?湲곗??쇰줈 ?묒뾽 ?ы쁽???뺣낫.
-- `dev -> production` 釉뚮옖移??댁쁺 ?뺤콉怨?臾몄꽌??洹쒖튃???쇨??섍쾶 ?곸슜.
-- ?묒뾽 湲곕줉(`prompt_history`)怨??ъ궗???쒗뵆由?`prompt_library`)???곌껐 怨좎젙.
-- ?몄뀡 ?쒖옉 ?쒖젏??`Start Prompt` ?묒뾽遺꾩쓣 ?쇱씠釉뚮윭由ъ? 遺꾨━???덉뒪?좊━??蹂댁〈.
-- 臾몄꽌 ?묒뾽 醫낅즺 ??`Push` 諛??쒓? `PR` ?앹꽦源뚯? ?먮룞??
-- PR ?앹꽦 吏곹썑 ?뚰겕?몃━ ?뺣━? Jira ?곹깭(`Resolved`) ?꾪솚源뚯? 醫낅즺 ?덉감瑜?紐낆떆.
-- Jira ?곗폆 ?묒뾽 醫낅즺 ???듭떖 蹂寃??뱀씠?ы빆??Jira 肄붾찘?몃줈 ?④꺼 PR-?댁뒋 異붿쟻?깆쓣 蹂닿컯.
+- Start/End Prompt를 기준으로 작업 재현성 확보.
+- `dev -> production` 브랜치 운영 정책과 문서화 규칙을 일관되게 적용.
+- 작업 기록(`prompt_history`)과 재사용 템플릿(`prompt_library`)의 연결 고정.
+- 세션 시작 시점의 `Start Prompt` 작업분을 라이브러리와 분리해 히스토리에 보존.
+- 문서 작업 종료 후 `Push` 및 한글 `PR` 생성까지 자동화.
+- PR 생성 직후 워크트리 정리와 Jira 상태(`Resolved`) 전환까지 종료 절차를 명시.
+- Jira 티켓 작업 종료 시 핵심 변경/특이사항을 Jira 코멘트로 남겨 PR-이슈 추적성을 보강.
 
 ## Documentation Scope
-- ???臾몄꽌: `docs/prompt_library/prompt_library_v1.md` (?꾩쟻 愿由? ?좉퇋 v2/v3 ?뚯씪 ?앹꽦 湲덉?)
-- ?대젰 臾몄꽌: `docs/prompt_history/{YYYYMMDD}_{TICKET-ID}-{slug}.md` (?묒뾽 1嫄대떦 1?뚯씪)
-- 蹂??뚰겕?뚮줈???섑뻾 ??肄붾뱶 蹂寃??놁씠 臾몄꽌 踰붿쐞濡??쒖젙 媛?ν빐????
+- 대상 문서: `docs/prompt_library/prompt_library_v1.md` (누적 관리, 신규 v2/v3 파일 생성 금지)
+- 이력 문서: `docs/prompt_history/{YYYYMMDD}_{TICKET-ID}-{slug}.md` (작업 1건당 1파일)
+- 본 워크플로우 수행 시 코드 변경 없이 문서 범위로 한정 가능해야 함.
 
 ## Version Policy
 
-| 蹂寃?踰붿쐞 | ?덉떆 | 踰꾩쟾 蹂??|
+| 변경 범위 | 예시 | 버전 변화 |
 |---|---|---|
-| 援ъ“???뱀뀡 異붽? | ?덈줈??API Design Spec 異붽? | +0.1 (minor) |
-| ?몃? ?댁슜 ?섏젙 | Blueprint Helper 臾몄옣 ?섏젙 | +0.0.1 (patch) |
-| ?꾩껜 由ы뙥?곕쭅 | 援ъ“ ?ы렪, TOC 蹂寃?| +1.0 (major) |
+| 구조적 섹션 추가 | 새로운 API Design Spec 추가 | +0.1 (minor) |
+| 세부 내용 수정 | Blueprint Helper 문장 수정 | +0.0.1 (patch) |
+| 전체 리팩터링 | 구조 재편, TOC 변경 | +1.0 (major) |
 
 ## System Prompt
 ```text
@@ -61,105 +61,105 @@ End Prompt:
 ```
 
 ## Prompt History Naming Rules
-- ?뺤떇: `{YYYYMMDD}_{TICKET-ID}-{slug}.md`
-- slug 洹쒖튃: lower-kebab-case, ASCII `[a-z0-9-]`, 3~8 ?⑥뼱
-- ?덉떆: `20260225_BK-003-bootstrap-branch-policy.md`
-- Jira ?곗폆???녿뒗 ?묒뾽? `{TICKET-ID}`瑜?`NO-JIRA`濡??쒓린
-  - ?덉떆: `20260225_NO-JIRA-planning-backlog-mcp-registration.md`
+- 형식: `{YYYYMMDD}_{TICKET-ID}-{slug}.md`
+- slug 규칙: lower-kebab-case, ASCII `[a-z0-9-]`, 3~8 단어
+- 예시: `20260225_BK-003-bootstrap-branch-policy.md`
+- Jira 티켓이 없는 작업은 `{TICKET-ID}`를 `NO-JIRA`로 표기
+  - 예시: `20260225_NO-JIRA-planning-backlog-mcp-registration.md`
 
 ## Prompt History Capture Rules
-- `prompt_history`??理쒖냼 ?뱀뀡 `## Start Context`, `## Changes Summary`, `## Diffs & Files`, `## Notes`瑜??ы븿?쒕떎.
-- `Start Context`?먮뒗 Start Prompt ?듭떖 議곌굔怨?Jira 二쇱슂 ?붽뎄?ы빆(AC/?쒖빟)???④퍡 ?붿빟?쒕떎.
-- `Changes Summary`?먮뒗 ?ㅼ젣 諛섏쁺 寃곌낵瑜?踰붿쐞蹂꾨줈 湲곗닠?섍퀬, `Diffs & Files`?먮뒗 二쇱슂 ?섏젙 ?뚯씪??紐낆떆?쒕떎.
-- 肄붾뱶 蹂寃쎌씠 ?ы븿??Jira ?곗폆? AC ??ぉ蹂?援ы쁽 洹쇨굅(?뚯씪/?⑥닔 湲곗?)瑜?`Changes Summary` ?먮뒗 `Diffs & Files`??諛섎뱶???④릿??
-- Assets 議고쉶 ?곕룞 ?곗폆(BK-042 怨꾩뿴)? `prompt_history`??`page/size/status/q` 荑쇰━?ㅽ듃留?API ?뚮씪誘명꽣 ?숆린?붿? `400/401/403/404/5xx` 遺꾧린 洹쇨굅瑜??④퍡 湲곕줉?쒕떎.
-- Assets ?곌린 ?곕룞 ?곗폆(BK-043/SCRUM-39 怨꾩뿴)? `prompt_history`??create/patch/history ?곕룞, dirty/saving/以묐났 ?쒖텧 諛⑹?, `400 ?꾨뱶 ?ㅻ쪟/403 沅뚰븳/409 異⑸룎(?낅젰 蹂댁〈)/5xx ?ъ떆???좎뒪?? 遺꾧린 洹쇨굅瑜??④퍡 湲곕줉?쒕떎.
-- Reservations 議고쉶 ?곕룞 ?곗폆(BK-052/SCRUM-43 怨꾩뿴)? `prompt_history`??`page/size/status/from/to` URL-API ?뚮씪誘명꽣 ?숆린?? 紐⑸줉/?곸꽭 race-safe 議고쉶, `from>to` 寃利? `400/401/403/404/5xx` 遺꾧린 洹쇨굅瑜??④퍡 湲곕줉?쒕떎.
-- Reservations ?곌린 ?곕룞 ?곗폆(BK-053/SCRUM-44 怨꾩뿴)? `prompt_history`??create/return/accident API ?곕룞, ?쒖텧 以?以묐났 ?쒖텧 諛⑹?, ?앹꽦 ?깃났 ???곸꽭 ID ?숆린?? `400 ?꾨뱶/???ㅻ쪟쨌403 沅뚰븳쨌409 ?곹깭異⑸룎쨌5xx ?ъ떆???좎뒪?? 遺꾧린 洹쇨굅瑜??④퍡 湲곕줉?쒕떎.
-- OCR ?곕룞 ?곗폆(BK-085/SCRUM-64 怨꾩뿴)? `prompt_history`??`assets/upload -> ocr/extract -> ocr/jobs/{jobId}` ?먮쫫, polling ?곹깭 ?꾪솚(泥섎━以?蹂듦?), partial prefill 泥섎━, re-upload ???댁쟾 OCR ?쒖븞 ?먭린, `400/413 ?뚯씪 ?ㅻ쪟쨌5xx/timeout ?ъ떆?꽷룹닔???낅젰 fallback` 遺꾧린 洹쇨굅瑜??④퍡 湲곕줉?쒕떎.
-- Revenue API ?곕룞 ?곗폆(BK-074/SCRUM-56 怨꾩뿴)? `prompt_history`??`/api/v2/revenue/summary(from,to,granularity)` 諛?`/api/v2/revenue/trend(from,to)` ?뚮씪誘명꽣 ?숆린?? 湲곌컙/?⑥쐞 蹂寃???loading 媛깆떊, empty-state, `400/401/403/5xx+network` 遺꾧린? Retry/?댁쟾 ?ㅻ깄??蹂듭썝 洹쇨굅瑜??④퍡 湲곕줉?쒕떎.
-- Home API ?곕룞 ?곗폆(BK-073/SCRUM-55 怨꾩뿴)? `prompt_history`??`/api/v2/home/summary(from,to,tenantId)` ?뚮씪誘명꽣 ?숆린?? 湲곌컙 ?꾪꽣 蹂寃??ъ“?? `loading/empty/401/403/5xx+network` 遺꾧린, race-safe ?붿껌 泥섎━? ?ъ“???ㅽ뙣 ???댁쟾 ?ㅻ깄???좎? 洹쇨굅, null-safe 湲곕낯媛??뚮뜑 諛?Home ?고???mock 寃쎈줈 ?쒓굅 洹쇨굅瑜??④퍡 湲곕줉?쒕떎.
-- Home KPI ?꾩냽 ?곗폆(SCRUM-183 怨꾩뿴)? `prompt_history`??`alerts.overdue`(諛섎궔 吏??)??`kpis.unpaidContracts`(誘몃궔/?곗껜 怨꾩빟) 遺꾩쓣 ?④퍡 湲곕줉?섍퀬, Home -> Reservations ?대룞 ???쇰줈 `paymentScope=delinquent` ?뚮뜑 ?숈씪 踰붿쐞濡??곌퀎?섏뿬 card/count/list 媛믪씠 ?쇱튂?섎뒗吏 蹂닿컯 ?뚯뒪??洹쇨굅瑜??④퍡 湲곕줉?쒕떎.
+- `prompt_history`는 최소 섹션 `## Start Context`, `## Changes Summary`, `## Diffs & Files`, `## Notes`를 포함한다.
+- `Start Context`에는 Start Prompt 핵심 조건과 Jira 주요 요구사항(AC/제약)을 함께 요약한다.
+- `Changes Summary`에는 실제 반영 결과를 범위별로 기술하고, `Diffs & Files`에는 주요 수정 파일을 명시한다.
+- 코드 변경이 포함된 Jira 티켓은 AC 항목별 구현 근거(파일/함수 기준)를 `Changes Summary` 또는 `Diffs & Files`에 반드시 남긴다.
+- Assets 조회 연동 티켓(BK-042 계열)은 `prompt_history`에 `page/size/status/q` 쿼리스트링-API 파라미터 동기화와 `400/401/403/404/5xx` 분기 근거를 함께 기록한다.
+- Assets 쓰기 연동 티켓(BK-043/SCRUM-39 계열)은 `prompt_history`에 create/patch/history 연동, dirty/saving/중복 제출 방지, `400 필드 오류/403 권한/409 충돌(입력 보존)/5xx 재시도 토스트` 분기 근거를 함께 기록한다.
+- Reservations 조회 연동 티켓(BK-052/SCRUM-43 계열)은 `prompt_history`에 `page/size/status/from/to` URL-API 파라미터 동기화, 목록/상세 race-safe 조회, `from>to` 검증, `400/401/403/404/5xx` 분기 근거를 함께 기록한다.
+- Reservations 쓰기 연동 티켓(BK-053/SCRUM-44 계열)은 `prompt_history`에 create/return/accident API 연동, 제출 중/중복 제출 방지, 생성 성공 시 상세 ID 동기화, `400 필드/폼 오류·403 권한·409 상태충돌·5xx 재시도 토스트` 분기 근거를 함께 기록한다.
+- OCR 연동 티켓(BK-085/SCRUM-64 계열)은 `prompt_history`에 `assets/upload -> ocr/extract -> ocr/jobs/{jobId}` 흐름, polling 상태 전환(처리중/복귀), partial prefill 처리, re-upload 시 이전 OCR 제안 폐기, `400/413 파일 오류·5xx/timeout 재시도·수동 입력 fallback` 분기 근거를 함께 기록한다.
+- Revenue API 연동 티켓(BK-074/SCRUM-56 계열)은 `prompt_history`에 `/api/v2/revenue/summary(from,to,granularity)` 및 `/api/v2/revenue/trend(from,to)` 파라미터 동기화, 기간/단위 변경 시 loading 갱신, empty-state, `400/401/403/5xx+network` 분기와 Retry/이전 스냅샷 복원 근거를 함께 기록한다.
+- Home API 연동 티켓(BK-073/SCRUM-55 계열)은 `prompt_history`에 `/api/v2/home/summary(from,to,tenantId)` 파라미터 동기화, 기간 필터 변경 재조회, `loading/empty/401/403/5xx+network` 분기, race-safe 요청 처리와 재조회 실패 시 이전 스냅샷 유지 근거, null-safe 기본값 렌더 및 Home 런타임 mock 경로 제거 근거를 함께 기록한다.
+- Home KPI 후속 티켓(SCRUM-183 계열)은 `prompt_history`에 `alerts.overdue`(반납 지연)와 `kpis.unpaidContracts`(미납/연체 계약) 분리 근거, Home -> Reservations 이동 시 `paymentScope=delinquent` 범위 동기화 근거, 라벨 기반 Playwright 회귀 검증 근거를 함께 기록한다.
 - Home copy/i18n regression tickets (SCRUM-185 series) must record the exact localized string replacement, the rendered surface where the copy changed, and regression evidence that the Korean label is shown instead of the legacy English text. If Playwright reuses a running dev server, record whether `127.0.0.1:4173` was free or an isolated-port workaround was required.
-- Settings API ?곕룞 ?곗폆(BK-075/SCRUM-57 怨꾩뿴)? `prompt_history`??company/geofences/members API ?곌껐 洹쇨굅, ?뚯궗 ?뺣낫 dirty-check/遺遺??낅뜲?댄듃(schemaVersion ?ы븿)/????곹깭 遺꾧린, 沅뚰븳 湲곕컲 ?쎄린?꾩슜 泥섎━, `400 ?꾨뱶 ?ㅻ쪟쨌403 沅뚰븳쨌409 異⑸룎 ?щ줈?㈑?xx+network ?ъ떆??, ???誘몄????곹깭 ?댄깉 寃쎄퀬(beforeunload) 洹쇨굅瑜??④퍡 湲곕줉?쒕떎.
-- 怨좉컼?쇳꽣 UI/?곕룞 ?곗폆(BK-087/SCRUM-66 怨꾩뿴)? `prompt_history`??`/api/v2/support/categories`, `/api/v2/support/tickets`, `/api/v2/support/tickets/{ticketId}` ?곕룞 洹쇨굅, 移댄뀒怨좊━ loading/empty/吏곸젒?낅젰 遺꾧린, 臾몄쓽 submitting/以묐났 ?쒖텧 諛⑹?/?깃났 ticketId 蹂듦뎄, `400/401/403/5xx+network` 遺꾧린? Retry/沅뚰븳 ?≪뀡, 泥⑤??뚯씪 ?⑸웾 ?쒗븳 ?뺤콉 諛섏쁺 洹쇨굅瑜??④퍡 湲곕줉?쒕떎.
-- ??븷 湲곕컲 硫붾돱/沅뚰븳 ?섎뱶???곗폆(BK-076/SCRUM-58 怨꾩뿴)? `prompt_history`??`/api/v2/auth/me` + `/api/v2/permissions/me` 沅뚰븳 ?뚯뒪 ?듯빀 洹쇨굅, 硫붾돱/?쇱슦???≪뀡 沅뚰븳 ???쇨??? `401/403/5xx` 遺꾧린 ??deny-by-default ?뺤콉, role 蹂寃?沅뚰븳 罹먯떆 TTL/?뚮꼳???꾪솚 ???ы룊媛 洹쇨굅瑜??④퍡 湲곕줉?쒕떎.
-- FE E2E 蹂닿컯 ?곗폆(BK-091/SCRUM-69 怨꾩뿴)? `prompt_history`??login/assets/reservations/device-installation ?듭떖 ?뚮줈???뚯뒪??洹쇨굅, `loading->success` assertion, `401/403/5xx` 遺꾧린 assertion, flaky ?쒖뼱媛?retries/timeouts), ?ㅽ뙣 ?곗텧臾?trace/screenshot/video/report) ?섏쭛 ?뺤콉 諛?CI ?뚰겕?뚮줈???곌퀎 洹쇨굅瑜??④퍡 湲곕줉?쒕떎.
+- Settings API 연동 티켓(BK-075/SCRUM-57 계열)은 `prompt_history`에 company/geofences/members API 연결 근거, 회사 정보 dirty-check/부분 업데이트(schemaVersion 포함)/저장 상태 분기, 권한 기반 읽기전용 처리, `400 필드 오류·403 권한·409 충돌 재로딩·5xx+network 재시도`, 저장/미저장 상태 이탈 경고(beforeunload) 근거를 함께 기록한다.
+- 고객센터 UI/연동 티켓(BK-087/SCRUM-66 계열)은 `prompt_history`에 `/api/v2/support/categories`, `/api/v2/support/tickets`, `/api/v2/support/tickets/{ticketId}` 연동 근거, 카테고리 loading/empty/직접입력 분기, 문의 submitting/중복 제출 방지/성공 ticketId 복구, `400/401/403/5xx+network` 분기와 Retry/권한 액션, 첨부파일 용량 제한 정책 반영 근거를 함께 기록한다.
+- 역할 기반 메뉴/권한 하드닝 티켓(BK-076/SCRUM-58 계열)은 `prompt_history`에 `/api/v2/auth/me` + `/api/v2/permissions/me` 권한 소스 통합 근거, 메뉴/라우트/액션 권한 키 일관성, `401/403/5xx` 분기 시 deny-by-default 정책, role 변경/권한 캐시 TTL/테넌트 전환 시 재평가 근거를 함께 기록한다.
+- FE E2E 보강 티켓(BK-091/SCRUM-69 계열)은 `prompt_history`에 login/assets/reservations/device-installation 핵심 플로우 테스트 근거, `loading->success` assertion, `401/403/5xx` 분기 assertion, flaky 제어값(retries/timeouts), 실패 산출물(trace/screenshot/video/report) 수집 정책 및 CI 워크플로우 연계 근거를 함께 기록한다.
 - Premium CTA support follow-up tickets (SCRUM-184 series) must record prompt_history evidence for shared SupportCenter prefill routing across Home/Layout/VehicleDetailModal, preserved manual-category fallback when the prefetched category is not in the fetched list, and explicit no-data fallback for the `단말 OFF` card with a real CTA-based Playwright regression.
-- FE 沅뚰븳 怨꾩빟 ?뺣젹 ?꾩냽 ?곗폆(SCRUM-101~114 ?꾩냽 怨꾩뿴)? `prompt_history`??`/api/v2/permissions/me` 湲곕낯 怨꾩빟(404 誘몄궗?? role蹂?permission payload ?쒓났)怨?`deny-by-default` ?뺤콉 怨듭〈 洹쇨굅瑜??④퍡 湲곕줉?쒕떎.
-- 沅뚰븳 罹먯떆 ?섎뱶???꾩냽 ?곗폆(SCRUM-105 ?꾩냽 怨꾩뿴)? `prompt_history`??`Authorization cache` source瑜?`api`濡??쒗븳?섍퀬 罹먯떆 ??踰꾩쟾 濡ㅼ삤踰꾨줈 legacy `role-fallback` 罹먯떆瑜?臾댄슚?뷀븳 洹쇨굅瑜??④퍡 湲곕줉?쒕떎.
-- Device Installation 怨꾩빟 ?뺣젹 ?꾩냽 ?곗폆(SCRUM-101~114 ?꾩냽 怨꾩뿴)? `prompt_history`??紐⑸줉 議고쉶 mock 寃쎈줈媛 `/api/v2/device-installations/tasks` canonical 寃쎈줈? ?쇱튂?섎뒗吏 洹쇨굅瑜??④퍡 湲곕줉?쒕떎.
-- Device Installation ?ъ쟾議고쉶 tenant-scope ?뚭? ?곗폆(SCRUM-131 怨꾩뿴)? `prompt_history`??pre-check list 議고쉶 ?몄텧??`companyId` ?꾨떖 洹쇨굅(super_admin cross-tenant ?쇳빀 諛⑹?)? non-super_admin ?숈옉 ?좎? 洹쇨굅瑜??④퍡 湲곕줉?쒕떎.
-- ?뚯썝媛???곕룞 ?곗폆(SCRUM-145 怨꾩뿴)? `prompt_history`???쎄? ?숈쓽 ?④퀎(?꾩닔/?좏깮), 以묐났?뺤씤(`/api/v2/auth/check-userid`), 媛???쒖텧(`/api/v2/auth/register` ?곗꽑 + fallback ?뺤콉) 洹쇨굅瑜??④퍡 湲곕줉?쒕떎.
-- Reservations mock ?쒓굅 ?곗폆(BK-054/SCRUM-45 怨꾩뿴)? `prompt_history`??Reservations ?꾨줈?뺤뀡 寃쎈줈??mock import/fixture ?쒓굅 洹쇨굅, v2 reservations endpoint ?⑥씪 ?몄텧 寃쎈줈, API ?ㅽ뙣 ??mock fallback 誘몄궗??洹쇨굅瑜??④퍡 湲곕줉?쒕떎.
-- Assets mock ?쒓굅 ?곗폆(BK-044/SCRUM-40 怨꾩뿴)? `prompt_history`??Assets ?꾨줈?뺤뀡 寃쎈줈??mock import/flag ?쒓굅 洹쇨굅, v2 assets endpoint ?⑥씪 ?몄텧 寃쎈줈, ?ㅻ쪟 ??mock fallback 誘몄궗??洹쇨굅瑜??④퍡 湲곕줉?쒕떎.
-- 怨듯넻 ?곹깭 UI ?곗폆(loading/error/empty)? `Validation`??`Retry ?ы샇異?, `401/403/5xx 遺꾧린`, `skeleton/empty CTA` ?뺤씤 洹쇨굅瑜??④퍡 湲곕줉?쒕떎.
-- ?몄쬆 而⑦뀓?ㅽ듃 援먯껜 ?곗폆(BK-021/BK-031 怨꾩뿴)? `prompt_history`???몄뀡 ????? API ?좏겙 provider ?곕룞 諛⑹떇, role 留ㅽ븨 洹쒖튃??諛섎뱶??湲곕줉?쒕떎.
-- 濡쒓렇??蹂댄샇 ?쇱슦???곗폆(BK-031 怨꾩뿴)? `prompt_history`??`returnUrl` 蹂듦? ?먮쫫, 濡쒓렇??`401/429/NETWORK_ERROR` 遺꾧린, `401 -> /auth/refresh 1??-> ?먯슂泥??ъ떆?? ?쒖꽌瑜?諛섎뱶??湲곕줉?쒕떎.
-- ?몄쬆 UX ?뺣━ ?곗폆(BK-032/SCRUM-35 怨꾩뿴)? ?섎룞 濡쒓렇?꾩썐 ?좎뒪?? 留뚮즺 紐⑤떖+`returnUrl` 蹂듦뎄, `401` ?곗뇙 1??醫낅즺, storage ?좏겙 ?뺣━ 洹쇨굅瑜?諛섎뱶??湲곕줉?쒕떎.
-- ActionRequired 議고쉶 ?곕룞 ?곗폆(BK-062/SCRUM-48 怨꾩뿴)? 紐⑸줉 荑쇰━(page/size/status/priority/assignee), ?곸꽭 議고쉶(404 fallback), ?꾪꽣 蹂寃?race 諛⑹? 洹쇨굅瑜?諛섎뱶??湲곕줉?쒕떎.
-- ActionRequired ?곌린 ?곕룞 ?곗폆(BK-063/SCRUM-49 怨꾩뿴)? ?곹깭 蹂寃??닿껐 ?꾨즺/硫붾え ???API ?곕룞 洹쇨굅, saving 以묐났 ?쒖텧 諛⑹?, ?ㅽ뙣 ???숆????낅뜲?댄듃 濡ㅻ갚, `400/403/409/5xx+network` 遺꾧린? Retry ?쒓났 洹쇨굅, ?곹깭 蹂寃????꾪꽣 ?댄깉 泥섎━ 洹쇨굅瑜?諛섎뱶??湲곕줉?쒕떎.
-- 寃곗젣 ?곹깭 ?곕룞 ?듯빀 ?곗폆(BK-064/SCRUM-50 怨꾩뿴)? 寃곗젣 ?곹깭 canonical 留ㅽ븨/?곗꽑?쒖쐞(?ㅼ쨷 寃곗젣/遺遺꾪솚遺?out-of-order timestamp) 洹쇨굅, Reservations/Home/Action ?붾㈃ ?숆린??吏?? `401/403/404/5xx+network` 遺꾧린? last-known fallback + ?ъ떆??UX 洹쇨굅瑜?諛섎뱶??湲곕줉?쒕떎.
-- Action/Payment mock ?쒓굅 ?곗폆(BK-065/SCRUM-52 怨꾩뿴)? Action/Payment 寃쎈줈??`mockData`/`mockPayments` ?섏〈 ?쒓굅 洹쇨굅, 寃곗젣 ?곹깭 ?숆린?붽? `/api/v2/payments/status`? `/api/v2/payments/{paymentId}`留??ъ슜?섎룄濡??뺣━??洹쇨굅(`/api/v2/payments` list fallback ?쒓굅 ?ы븿), `401/403/404/5xx` 遺꾧린? Retry, stale ?묐떟 理쒖떊媛?諛섏쁺 洹쇨굅瑜?諛섎뱶??湲곕줉?쒕떎.
-- 肄붾뱶 蹂寃쎌씠 ?ы븿??Jira ?곗폆? `Validation` ?뱀뀡??理쒖냼 1媛쒖쓽 ?ㅽ뻾 紐낅졊 寃곌낵(`build` ?먮뒗 `test`)瑜?湲곕줉?쒕떎.
-- ????섏젙 ?먮쫫 踰꾧렇 ?곗폆? `Changes Summary` ?먮뒗 `Diffs & Files`???깃났/?ㅽ뙣 遺꾧린 泥섎━ 洹쇨굅(?깃났 ???숈옉, ?ㅽ뙣 ???숈옉)瑜?紐⑤몢 湲곕줉?쒕떎.
-- `Notes`?먮뒗 李④린 沅뚯옣 ?쒖뒪?щ쭔 湲곕줉?섎ŉ 利됱떆 諛섏쁺? 湲덉??쒕떎.
-- `prompt_library`??怨듭슜 洹쒖튃/?쒗뵆由용쭔 愿由ы븯怨? ?몄뀡 ?뱀씠?ы빆? `prompt_history`??湲곕줉.
-- API 怨꾩빟 臾몄꽌(OpenAPI/YAML) 蹂寃???`Validation` ?뱀뀡???ㅽ럺 ?좏슚??寃利?寃곌낵瑜??ы븿?쒕떎.
-- FE?먯꽌 API 怨꾩빟 臾몄꽌媛 ?몃? canonical(BE)濡?愿由щ맆 寃쎌슦, FE???щ낯???좎??섏? ?딄퀬 李몄“ 臾몄꽌(?? `docs/api/README.md`)? canonical 留곹겕留??좎??쒕떎.
-- Jira ?댁쁺 洹쒖튃(BK-003 怨꾩뿴) 蹂寃???`docs/jira_operating_rules.md`? `planning/06_jira_backlog_breakdown.md`瑜??④퍡 ?숆린?뷀븳??
-- `planning/local/06_jira_worktree_parallel_groups.md`瑜?媛깆떊???뚮뒗 Jira ?ㅻ깄??湲곗??쇨낵 ?좉퇋 ?곗폆 踰붿쐞瑜?臾몄꽌 `湲곗?` ?뱀뀡??紐낆떆?쒕떎.
-- `planning/local/06_jira_worktree_parallel_groups.md`瑜?媛깆떊???뚮뒗 BK ??ぉ?????`SCRUM` 踰덊샇瑜?蹂묎린?섍퀬 媛???ぉ??Jira browse 留곹겕瑜??ы븿?쒕떎.
-- 臾몄꽌/諛깅줈洹?硫뷀??곗씠?곗쓽 BE ??μ냼 ?쒓린??`Project_Prometheus_BE`瑜?canonical濡??ъ슜?섍퀬 legacy ?묐몢 寃쎈줈 ?쒓린???ъ슜?섏? ?딅뒗??
+- FE 권한 계약 정렬 후속 티켓(SCRUM-101~114 후속 계열)은 `prompt_history`에 `/api/v2/permissions/me` 기본 계약(404 미사용, role별 permission payload 제공)과 `deny-by-default` 정책 공존 근거를 함께 기록한다.
+- 권한 캐시 하드닝 후속 티켓(SCRUM-105 후속 계열)은 `prompt_history`에 `Authorization cache` source를 `api`로 제한하고 캐시 키/버전 롤오버로 legacy `role-fallback` 캐시를 무효화한 근거를 함께 기록한다.
+- Device Installation 계약 정렬 후속 티켓(SCRUM-101~114 후속 계열)은 `prompt_history`에 목록 조회 mock 경로가 `/api/v2/device-installations/tasks` canonical 경로와 일치하는지 근거를 함께 기록한다.
+- Device Installation 사전조회 tenant-scope 회귀 티켓(SCRUM-131 계열)은 `prompt_history`에 pre-check list 조회 호출의 `companyId` 전달 근거(super_admin cross-tenant 혼합 방지)와 non-super_admin 동작 유지 근거를 함께 기록한다.
+- 회원가입 연동 티켓(SCRUM-145 계열)은 `prompt_history`에 약관 동의 단계(필수/선택), 중복확인(`/api/v2/auth/check-userid`), 가입 제출(`/api/v2/auth/register` 우선 + fallback 정책) 근거를 함께 기록한다.
+- Reservations mock 제거 티켓(BK-054/SCRUM-45 계열)은 `prompt_history`에 Reservations 프로덕션 경로의 mock import/fixture 제거 근거, v2 reservations endpoint 단일 호출 경로, API 실패 시 mock fallback 미사용 근거를 함께 기록한다.
+- Assets mock 제거 티켓(BK-044/SCRUM-40 계열)은 `prompt_history`에 Assets 프로덕션 경로의 mock import/flag 제거 근거, v2 assets endpoint 단일 호출 경로, 오류 시 mock fallback 미사용 근거를 함께 기록한다.
+- 공통 상태 UI 티켓(loading/error/empty)은 `Validation`에 `Retry 재호출`, `401/403/5xx 분기`, `skeleton/empty CTA` 확인 근거를 함께 기록한다.
+- 인증 컨텍스트 교체 티켓(BK-021/BK-031 계열)은 `prompt_history`에 세션 저장 키, API 토큰 provider 연동 방식, role 매핑 규칙을 반드시 기록한다.
+- 로그인/보호 라우트 티켓(BK-031 계열)은 `prompt_history`에 `returnUrl` 복귀 흐름, 로그인 `401/429/NETWORK_ERROR` 분기, `401 -> /auth/refresh 1회 -> 원요청 재시도` 순서를 반드시 기록한다.
+- 인증 UX 정리 티켓(BK-032/SCRUM-35 계열)은 수동 로그아웃 토스트, 만료 모달+`returnUrl` 복구, `401` 연쇄 1회 종료, storage 토큰 정리 근거를 반드시 기록한다.
+- ActionRequired 조회 연동 티켓(BK-062/SCRUM-48 계열)은 목록 쿼리(page/size/status/priority/assignee), 상세 조회(404 fallback), 필터 변경 race 방지 근거를 반드시 기록한다.
+- ActionRequired 쓰기 연동 티켓(BK-063/SCRUM-49 계열)은 상태 변경/해결 완료/메모 저장 API 연동 근거, saving 중복 제출 방지, 실패 시 낙관적 업데이트 롤백, `400/403/409/5xx+network` 분기와 Retry 제공 근거, 상태 변경 후 필터 이탈 처리 근거를 반드시 기록한다.
+- 결제 상태 연동 통합 티켓(BK-064/SCRUM-50 계열)은 결제 상태 canonical 매핑/우선순위(다중 결제/부분환불/out-of-order timestamp) 근거, Reservations/Home/Action 화면 동기화 지점, `401/403/404/5xx+network` 분기와 last-known fallback + 재시도 UX 근거를 반드시 기록한다.
+- Action/Payment mock 제거 티켓(BK-065/SCRUM-52 계열)은 Action/Payment 경로의 `mockData`/`mockPayments` 의존 제거 근거, 결제 상태 동기화가 `/api/v2/payments/status`와 `/api/v2/payments/{paymentId}`만 사용하도록 정리된 근거(`/api/v2/payments` list fallback 제거 포함), `401/403/404/5xx` 분기와 Retry, stale 응답 최신값 반영 근거를 반드시 기록한다.
+- 코드 변경이 포함된 Jira 티켓은 `Validation` 섹션에 최소 1개의 실행 명령 결과(`build` 또는 `test`)를 기록한다.
+- 저장/수정 흐름 버그 티켓은 `Changes Summary` 또는 `Diffs & Files`에 성공/실패 분기 처리 근거(성공 시 동작, 실패 시 동작)를 모두 기록한다.
+- `Notes`에는 차기 권장 태스크만 기록하며 즉시 반영은 금지한다.
+- `prompt_library`는 공용 규칙/템플릿만 관리하고, 세션 특이사항은 `prompt_history`에 기록.
+- API 계약 문서(OpenAPI/YAML) 변경 시 `Validation` 섹션에 스펙 유효성 검증 결과를 포함한다.
+- FE에서 API 계약 문서가 외부 canonical(BE)로 관리될 경우, FE는 사본을 유지하지 않고 참조 문서(예: `docs/api/README.md`)와 canonical 링크만 유지한다.
+- Jira 운영 규칙(BK-003 계열) 변경 시 `docs/jira_operating_rules.md`와 `planning/06_jira_backlog_breakdown.md`를 함께 동기화한다.
+- `planning/local/06_jira_worktree_parallel_groups.md`를 갱신할 때는 Jira 스냅샷 기준일과 신규 티켓 범위를 문서 `기준` 섹션에 명시한다.
+- `planning/local/06_jira_worktree_parallel_groups.md`를 갱신할 때는 BK 항목에 대응 `SCRUM` 번호를 병기하고 각 항목에 Jira browse 링크를 포함한다.
+- 문서/백로그 메타데이터의 BE 저장소 표기는 `Project_Prometheus_BE`를 canonical로 사용하고 legacy 접두 경로 표기는 사용하지 않는다.
 
 ## Inputs
-- ?묒뾽 紐⑺몴 ??以?
-- 釉뚮옖移??ㅼ씠諛?slug
-- 蹂寃??뚯씪 紐⑸줉
-- 寃利?紐낅졊 寃곌낵
+- 작업 목표 한 줄
+- 브랜치 네이밍 slug
+- 변경 파일 목록
+- 검증 명령 결과
 
 ## Outputs
-- ?낅뜲?댄듃??`prompt_library_v1.md`
-- ?좉퇋 `prompt_history` 湲곕줉 ?뚯씪 1媛?
-- 蹂寃??붿빟(?뱀뀡 ?곹뼢, ?섎룄, 湲곕? ?④낵)
+- 업데이트된 `prompt_library_v1.md`
+- 신규 `prompt_history` 기록 파일 1개
+- 변경 요약(섹션 영향, 의도, 기대 효과)
 
 ## Usage
 ```bash
 cp docs/prompt_history/_TEMPLATE.md docs/prompt_history/$(date +%Y%m%d)_SCRUM-123-your-task.md
-# ?묒뾽 醫낅즺 ??prompt_library_v1.md Version/Date/Version History 媛깆떊
+# 작업 종료 시 prompt_library_v1.md Version/Date/Version History 갱신
 ```
 
 ## End-of-Task Checklist
-- `prompt_library_v1.md` ?곷떒 `Version`/`Date`/`Version History` 媛깆떊
-- `docs/prompt_history/_TEMPLATE.md` 湲곕컲 ?대젰 ?뚯씪 異붽?
-- `prompt_history`??`Start Prompt` ?듭떖 ?댁슜 諛?諛섏쁺 寃곌낵 ?ы븿
-- ?꾩옱 ?묒뾽 釉뚮옖移?`git push` ?섑뻾
-- `dev` ????쒓? PR ?앹꽦(UTF-8)
-- PR ?앹꽦 ?꾨즺 ??踰좎씠????μ냼?먯꽌 `git worktree remove <worktree-path>` ?섑뻾
-- Jira ?곗폆 ?묒뾽?대㈃ PR ?앹꽦 吏곹썑 Jira ?곹깭瑜?`Resolved`濡?蹂寃?(`NO-JIRA` ?묒뾽? ?앸왂 ?ъ쑀 湲곕줉)
-- Jira ?곗폆 ?묒뾽?대㈃ ?곹깭 ?꾪솚 吏곹썑 ?듭떖 蹂寃??ы빆/?뱀씠?ы빆/PR 留곹겕瑜?Jira 肄붾찘?몃줈 湲곕줉
-- 寃곌낵 異쒕젰???꾨옒 ??ぉ ?ы븿:
-  - 蹂寃?異붽????뚯씪
-  - 二쇱슂 蹂寃??붿빟
-  - ?ㅼ쓬 諛섏쁺 ???釉뚮옖移?(`dev`, PR ???
-  - 諛고룷 ?꾩슂 ??(`dev -> production` PR)
+- `prompt_library_v1.md` 상단 `Version`/`Date`/`Version History` 갱신
+- `docs/prompt_history/_TEMPLATE.md` 기반 이력 파일 추가
+- `prompt_history`에 `Start Prompt` 핵심 내용 및 반영 결과 포함
+- 현재 작업 브랜치 `git push` 수행
+- `dev` 대상 한글 PR 생성(UTF-8)
+- PR 생성 완료 후 베이스 저장소에서 `git worktree remove <worktree-path>` 수행
+- Jira 티켓 작업이면 PR 생성 직후 Jira 상태를 `Resolved`로 변경 (`NO-JIRA` 작업은 생략 사유 기록)
+- Jira 티켓 작업이면 상태 전환 직후 핵심 변경 사항/특이사항/PR 링크를 Jira 코멘트로 기록
+- 결과 출력에 아래 항목 포함:
+  - 변경/추가된 파일
+  - 주요 변경 요약
+  - 다음 반영 대상 브랜치 (`dev`, PR 대상)
+  - 배포 필요 시 (`dev -> production` PR)
 
 ## Commit Message Convention
 - Subject: `Docs({TICKET-ID}): update prompt_library to vX.Y.Z; add {YYYYMMDD}_{TICKET-ID}-{summary}.md`
-- Body: `prompt_history`??`Changes Summary` ?곸쐞 3~5媛?bullet ?붿빟
-- 而ㅻ컠 ?④퀎 湲덉?: push / tag / rebase / reset
+- Body: `prompt_history`의 `Changes Summary` 상위 3~5개 bullet 요약
+- 커밋 단계 금지: push / tag / rebase / reset
 
 ## Push & PR Convention
-- Push: ?꾩옱 ?묒뾽 釉뚮옖移섎? ?먭꺽??諛섏쁺 (`git push -u origin <branch>`)
-- PR: `base=dev`濡??앹꽦, ?쒕ぉ/蹂몃Ц? ?쒓? ?묒꽦, UTF-8 ?몄퐫??以??
-- Jira ?곗폆???녿뒗 寃쎌슦 PR 蹂몃Ц??`愿???곗폆`?먮뒗 `Jira: ?놁쓬 (NO-JIRA)`濡?紐낆떆
-- Cleanup: PR ?앹꽦 ??踰좎씠????μ냼濡??대룞???묒뾽 ?뚰겕?몃━瑜??쒓굅 (`git worktree remove`)
-- Jira ?곹깭: ?곗폆???덈뒗 ?묒뾽? PR ?앹꽦 ??`In Progress -> Resolved` ?꾪솚, ?곗폆???녿뒗 ?묒뾽? `NO-JIRA`濡?紐낆떆
-- Jira 肄붾찘?? ?곗폆 ?묒뾽? `Resolved` ?꾪솚 吏곹썑 ?듭떖 蹂寃??ы빆, ?뱀씠?ы빆(由ъ뒪??寃利?, PR 留곹겕瑜?肄붾찘?몃줈 ?④릿??
-- PR 蹂몃Ц 湲곕낯 ?ы븿 ??ぉ:
-  - ?묒뾽 ?붿빟
-  - ?곸꽭 蹂寃??댁슜 (Start Prompt 諛섏쁺遺??ы븿)
-  - 鍮꾧퀬 (Notes/Follow-ups 李몄“)
+- Push: 현재 작업 브랜치를 원격에 반영 (`git push -u origin <branch>`)
+- PR: `base=dev`로 생성, 제목/본문은 한글 작성, UTF-8 인코딩 준수
+- Jira 티켓이 없는 경우 PR 본문의 `관련 티켓`에는 `Jira: 없음 (NO-JIRA)`로 명시
+- Cleanup: PR 생성 후 베이스 저장소로 이동해 작업 워크트리를 제거 (`git worktree remove`)
+- Jira 상태: 티켓이 있는 작업은 PR 생성 후 `In Progress -> Resolved` 전환, 티켓이 없는 작업은 `NO-JIRA`로 명시
+- Jira 코멘트: 티켓 작업은 `Resolved` 전환 직후 핵심 변경 사항, 특이사항(리스크/검증), PR 링크를 코멘트로 남긴다.
+- PR 본문 기본 포함 항목:
+  - 작업 요약
+  - 상세 변경 내용 (Start Prompt 반영분 포함)
+  - 비고 (Notes/Follow-ups 참조)
 
 ## Dependencies & Assumptions
 - Default branch: `dev`
@@ -176,12 +176,12 @@ cp docs/prompt_history/_TEMPLATE.md docs/prompt_history/$(date +%Y%m%d)_SCRUM-12
 - v1.2.45 (2026-03-07, SCRUM-183): Add prompt_history evidence rule for overdue/unpaid split on Home (`kpis.unpaidContracts`, Home->Reservations delinquent scope sync, and label-based Playwright regression coverage).
 - v1.2.42 (2026-03-02, SCRUM-132): Add prompt_history evidence rule for Premium installation tenant consistency hardening (single request companyId across pre-check/create/409-recover/refresh, receipt session companyId persistence, and super_admin cross-tenant regression coverage).
 - v1.2.41 (2026-03-02, SCRUM-147): Add prompt_history evidence guidance for authorization-loading stuck fixes (user metadata normalization guard, checking-to-ready transition safety, and /auth/me companyId-missing regression coverage).
-- v1.2.40 (2026-03-02, SCRUM-145): Add prompt_history evidence rule for legacy-style FE signup flow alignment (?쎄? ?숈쓽 ?④퀎, userId 以묐났?뺤씤, `/api/v2/auth/register` ?곗꽑/fallback ?쒖텧 寃쎈줈 洹쇨굅).
-- v1.2.39 (2026-02-28, SCRUM-131): Add prompt_history evidence rule for Device Installation pre-check tenant scope regression (`companyId` ?꾨떖濡?super_admin cross-tenant ?쇳빀 諛⑹? + non-super_admin ?숈옉 ?좎? 洹쇨굅).
-- v1.2.38 (2026-02-28, SCRUM-115): Add prompt_history evidence rule for authorization cache source hardening (`role-fallback` source ?쒓굅, cache key/version 濡ㅼ삤踰꾨줈 stale 沅뚰븳 罹먯떆 臾댄슚??.
-- v1.2.37 (2026-02-27, SCRUM-101~SCRUM-114): Add prompt_history evidence rule for Device Installation E2E contract alignment (list mock path `/api/v2/device-installations/tasks` canonical ?좎? 洹쇨굅).
-- v1.2.36 (2026-02-27, SCRUM-101~SCRUM-114): Add prompt_history evidence rule for FE E2E permission-contract alignment (`/api/v2/permissions/me` default mock 404 ?쒓굅, role蹂?沅뚰븳 payload 諛섑솚?쇰줈 deny-by-default ?뺤콉怨??뚯뒪??怨꾩빟 ?뺣젹).
-- v1.2.35 (2026-02-27, SCRUM-101~SCRUM-109/SCRUM-113): Add prompt_history evidence rule for FE follow-up batch fixes (canonical endpoint ?뺣젹: settings/company + action-items + device-installations, permissions ?뚯꽌 硫뷀??곗씠??臾몄옄??李⑤떒 + `*` ??쇰뱶移대뱶 蹂댁〈, Authorization refresh race-safe, ActionRequired ?ㅽ뙣 rollback ?щ룞湲고솕 洹쇨굅).
+- v1.2.40 (2026-03-02, SCRUM-145): Add prompt_history evidence rule for legacy-style FE signup flow alignment (약관 동의 단계, userId 중복확인, `/api/v2/auth/register` 우선/fallback 제출 경로 근거).
+- v1.2.39 (2026-02-28, SCRUM-131): Add prompt_history evidence rule for Device Installation pre-check tenant scope regression (`companyId` 전달로 super_admin cross-tenant 혼합 방지 + non-super_admin 동작 유지 근거).
+- v1.2.38 (2026-02-28, SCRUM-115): Add prompt_history evidence rule for authorization cache source hardening (`role-fallback` source 제거, cache key/version 롤오버로 stale 권한 캐시 무효화).
+- v1.2.37 (2026-02-27, SCRUM-101~SCRUM-114): Add prompt_history evidence rule for Device Installation E2E contract alignment (list mock path `/api/v2/device-installations/tasks` canonical 유지 근거).
+- v1.2.36 (2026-02-27, SCRUM-101~SCRUM-114): Add prompt_history evidence rule for FE E2E permission-contract alignment (`/api/v2/permissions/me` default mock 404 제거, role별 권한 payload 반환으로 deny-by-default 정책과 테스트 계약 정렬).
+- v1.2.35 (2026-02-27, SCRUM-101~SCRUM-109/SCRUM-113): Add prompt_history evidence rule for FE follow-up batch fixes (canonical endpoint 정렬: settings/company + action-items + device-installations, permissions 파서 메타데이터 문자열 차단 + `*` 와일드카드 보존, Authorization refresh race-safe, ActionRequired 실패 rollback 재동기화 근거).
 - v1.2.34 (2026-02-27, SCRUM-69): Add prompt_history evidence rule for BK-091 FE E2E hardening (login/assets/reservations/device-installation flows, loading-success + 401/403/5xx branches, retries/timeouts, and failure artifact policy with CI linkage).
 - v1.2.33 (2026-02-27, SCRUM-58): Add prompt_history evidence rule for BK-076 role-based menu/route/action hardening (`/api/v2/auth/me` + `/api/v2/permissions/me` source integration, deny-by-default on 401/403/5xx, role/cache/tenant re-evaluation evidence).
 - v1.2.32 (2026-02-27, SCRUM-66): Add prompt_history evidence rule for BK-087 support-center integration (categories/create/detail endpoints, loading-empty-manual-category flow, submit dedupe/receipt restore, 400/401/403/5xx+retry, attachment size policy evidence).
@@ -220,4 +220,3 @@ cp docs/prompt_history/_TEMPLATE.md docs/prompt_history/$(date +%Y%m%d)_SCRUM-12
 - v1.2.0 (2026-02-25): Add Start Prompt capture rules and Push/PR automation convention (Korean PR to dev).
 - v1.1.0 (2026-02-25): Add version policy table, prompt_history naming rules, end-of-task checklist, and commit message convention.
 - v1.0.0 (2026-02-25): Initial baseline for prompt library + history workflow and branch policy alignment.
-
