@@ -29,6 +29,7 @@ import { Layout } from '../components/Layout';
 import { PageStateBoundary } from '../components/PageStateBoundary';
 import { useAuthorization } from '../context/AuthorizationContext';
 import { useAuth } from '../context/AuthContext';
+import { navigateToPremiumInquiry } from '../utils/premiumInquiry';
 import {
   getPageErrorActionLabel,
   handlePageErrorAction,
@@ -61,7 +62,7 @@ interface DashboardDistributionItem {
 
 interface HomeStatCard {
   label: string;
-  count: number;
+  count: number | string;
   icon: string;
   bg: string;
   color: string;
@@ -305,6 +306,13 @@ function toRecentChangeLabel(type: string): string {
     return '반납 완료';
   }
   return '상태 변경';
+}
+
+function formatStatCardCount(count: number | string, unit?: string): string {
+  if (typeof count === 'number') {
+    return `${count.toLocaleString()}${unit ?? ''}`;
+  }
+  return count;
 }
 
 export default function Home() {
@@ -631,12 +639,12 @@ export default function Home() {
       },
       {
         label: '단말 OFF',
-        count: 0,
+        count: '데이터 없음',
         bg: 'bg-orange-50',
         color: 'text-orange-600',
         icon: 'Signal',
         isPremium: true,
-        description: '단말 장착 차량만',
+        description: '단말 데이터 연동 예정',
         onClick: () => setShowPremiumModal(true),
       },
     ];
@@ -846,7 +854,9 @@ export default function Home() {
                       <span className="text-xs font-medium text-gray-400">Reservations</span>
                     </div>
                     <p className="text-sm font-medium text-[#4a5565]">{task.label}</p>
-                    <p className="mt-2 text-3xl font-bold text-[#101828]">{task.count.toLocaleString()}</p>
+                    <p className="mt-2 text-3xl font-bold text-[#101828]">
+                      {formatStatCardCount(task.count, task.unit)}
+                    </p>
                   </button>
                 );
               })}
@@ -880,7 +890,9 @@ export default function Home() {
                         </div>
                         <Lock className="h-3.5 w-3.5 text-gray-500" />
                       </div>
-                      <p className="mb-0.5 text-2xl font-bold text-[#101828]">{issue.count.toLocaleString()}</p>
+                      <p className="mb-0.5 text-2xl font-bold text-[#101828]">
+                        {formatStatCardCount(issue.count, issue.unit)}
+                      </p>
                       <p className="mb-1 text-xs text-[#4a5565]">{issue.label}</p>
                       <p className="text-[10px] leading-tight text-gray-500">{issue.description}</p>
                     </div>
@@ -899,8 +911,7 @@ export default function Home() {
                       </div>
                     </div>
                     <p className="mb-0.5 text-2xl font-bold text-[#101828]">
-                      {issue.count.toLocaleString()}
-                      {issue.unit ?? ''}
+                      {formatStatCardCount(issue.count, issue.unit)}
                     </p>
                     <p className="text-xs text-[#4a5565]">{issue.label}</p>
                   </div>
@@ -1184,7 +1195,7 @@ export default function Home() {
               <button
                 onClick={() => {
                   setShowPremiumModal(false);
-                  alert('프리미엄 문의: 1588-XXXX');
+                  navigateToPremiumInquiry(navigate, 'home-modal');
                 }}
                 className="flex-1 rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-3 font-bold text-white transition-shadow hover:shadow-lg"
               >

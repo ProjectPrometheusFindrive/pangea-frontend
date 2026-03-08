@@ -1,7 +1,7 @@
 ﻿# Prompt Library v1
 
-- Version: v1.2.45
-- Date: 2026-03-07
+- Version: v1.2.46
+- Date: 2026-03-08
 - Owner: Pangea Frontend Team
 - Tags: prompt-library,workflow,branch-policy,history-policy,commit-policy,pr-automation,jira-traceability,end-prompt-protocol,worktree-cleanup,jira-status-sync,jira-comment-sync,ac-evidence,mock-removal,reservations-write,reservations-mock-removal,ocr-flow,revenue-api,settings-api,payment-status-sync,home-api,home-summary,action-payment-mock-removal,support-center,rbac-permission-hardening,e2e-test-hardening,playwright-artifact-policy,device-installation-tenant-scope,authorization-loading-guard,auth-silent-refresh
 
@@ -84,6 +84,7 @@ End Prompt:
 - 怨좉컼?쇳꽣 UI/?곕룞 ?곗폆(BK-087/SCRUM-66 怨꾩뿴)? `prompt_history`??`/api/v2/support/categories`, `/api/v2/support/tickets`, `/api/v2/support/tickets/{ticketId}` ?곕룞 洹쇨굅, 移댄뀒怨좊━ loading/empty/吏곸젒?낅젰 遺꾧린, 臾몄쓽 submitting/以묐났 ?쒖텧 諛⑹?/?깃났 ticketId 蹂듦뎄, `400/401/403/5xx+network` 遺꾧린? Retry/沅뚰븳 ?≪뀡, 泥⑤??뚯씪 ?⑸웾 ?쒗븳 ?뺤콉 諛섏쁺 洹쇨굅瑜??④퍡 湲곕줉?쒕떎.
 - ??븷 湲곕컲 硫붾돱/沅뚰븳 ?섎뱶???곗폆(BK-076/SCRUM-58 怨꾩뿴)? `prompt_history`??`/api/v2/auth/me` + `/api/v2/permissions/me` 沅뚰븳 ?뚯뒪 ?듯빀 洹쇨굅, 硫붾돱/?쇱슦???≪뀡 沅뚰븳 ???쇨??? `401/403/5xx` 遺꾧린 ??deny-by-default ?뺤콉, role 蹂寃?沅뚰븳 罹먯떆 TTL/?뚮꼳???꾪솚 ???ы룊媛 洹쇨굅瑜??④퍡 湲곕줉?쒕떎.
 - FE E2E 蹂닿컯 ?곗폆(BK-091/SCRUM-69 怨꾩뿴)? `prompt_history`??login/assets/reservations/device-installation ?듭떖 ?뚮줈???뚯뒪??洹쇨굅, `loading->success` assertion, `401/403/5xx` 遺꾧린 assertion, flaky ?쒖뼱媛?retries/timeouts), ?ㅽ뙣 ?곗텧臾?trace/screenshot/video/report) ?섏쭛 ?뺤콉 諛?CI ?뚰겕?뚮줈???곌퀎 洹쇨굅瑜??④퍡 湲곕줉?쒕떎.
+- Premium CTA support follow-up tickets (SCRUM-184 series) must record prompt_history evidence for shared SupportCenter prefill routing across Home/Layout/VehicleDetailModal, preserved manual-category fallback when the prefetched category is not in the fetched list, and explicit no-data fallback for the `단말 OFF` card with a real CTA-based Playwright regression.
 - FE 沅뚰븳 怨꾩빟 ?뺣젹 ?꾩냽 ?곗폆(SCRUM-101~114 ?꾩냽 怨꾩뿴)? `prompt_history`??`/api/v2/permissions/me` 湲곕낯 怨꾩빟(404 誘몄궗?? role蹂?permission payload ?쒓났)怨?`deny-by-default` ?뺤콉 怨듭〈 洹쇨굅瑜??④퍡 湲곕줉?쒕떎.
 - 沅뚰븳 罹먯떆 ?섎뱶???꾩냽 ?곗폆(SCRUM-105 ?꾩냽 怨꾩뿴)? `prompt_history`??`Authorization cache` source瑜?`api`濡??쒗븳?섍퀬 罹먯떆 ??踰꾩쟾 濡ㅼ삤踰꾨줈 legacy `role-fallback` 罹먯떆瑜?臾댄슚?뷀븳 洹쇨굅瑜??④퍡 湲곕줉?쒕떎.
 - Device Installation 怨꾩빟 ?뺣젹 ?꾩냽 ?곗폆(SCRUM-101~114 ?꾩냽 怨꾩뿴)? `prompt_history`??紐⑸줉 議고쉶 mock 寃쎈줈媛 `/api/v2/device-installations/tasks` canonical 寃쎈줈? ?쇱튂?섎뒗吏 洹쇨굅瑜??④퍡 湲곕줉?쒕떎.
@@ -167,6 +168,7 @@ cp docs/prompt_history/_TEMPLATE.md docs/prompt_history/$(date +%Y%m%d)_SCRUM-12
 - Production push triggers auto tag (`vX.Y.Z`)
 
 ## Version History
+- v1.2.46 (2026-03-08, SCRUM-184): Add prompt_history evidence rule for premium CTA support-center routing follow-up (shared SupportCenter prefill helper, manual-category preservation, `단말 OFF` no-data fallback, and real CTA-based Playwright coverage).
 - v1.2.44 (2026-03-03, SCRUM-162): Add prompt_history evidence rule for auth/authorization silent-refresh UX hardening (initial bootstrap-only blocking, focus/visibility background refresh, and no full-screen auth fallback regression checks).
 - v1.2.43 (2026-03-03, SCRUM-73): Add prompt_history evidence rule for BK-095 observability baseline (FE `X-Request-Id` propagation via API client interceptor, request/response trace context capture, and Chrome DevTools MCP-based header verification evidence).
 - v1.2.45 (2026-03-07, SCRUM-183): Add prompt_history evidence rule for overdue/unpaid split on Home (`kpis.unpaidContracts`, Home->Reservations delinquent scope sync, and label-based Playwright regression coverage).

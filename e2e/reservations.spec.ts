@@ -482,7 +482,27 @@ test.describe('BK-091 Reservations E2E', () => {
 
     await loginViaUi(page, 'member', { returnUrl: '/reservations' });
     await expect.poll(() => new URL(page.url()).pathname).toBe('/login');
-    await expect.poll(() => new URL(page.url()).searchParams.get('returnUrl')).toBe('/reservations');
+    await expect.poll(() => {
+      const returnUrl = new URL(page.url()).searchParams.get('returnUrl');
+      if (!returnUrl) {
+        return null;
+      }
+      return new URL(returnUrl, 'http://127.0.0.1').pathname;
+    }).toBe('/reservations');
+    await expect.poll(() => {
+      const returnUrl = new URL(page.url()).searchParams.get('returnUrl');
+      if (!returnUrl) {
+        return null;
+      }
+      return new URL(returnUrl, 'http://127.0.0.1').searchParams.get('page');
+    }).toBe('1');
+    await expect.poll(() => {
+      const returnUrl = new URL(page.url()).searchParams.get('returnUrl');
+      if (!returnUrl) {
+        return null;
+      }
+      return new URL(returnUrl, 'http://127.0.0.1').searchParams.get('size');
+    }).toBe('20');
     await expect(page.getByTestId('login-user-id')).toBeVisible();
   });
 
