@@ -111,6 +111,12 @@ function toCurrencyDisplayFromInput(value: string): string {
   return toCurrencyValue(value);
 }
 
+function toCurrencyNumberFromInput(value: string): number {
+  const numericText = value.replace(/[^\d.-]/g, '');
+  const numericValue = Number(numericText);
+  return Number.isFinite(numericValue) ? numericValue : 0;
+}
+
 function toErrorFieldEntries(error: ApiError): Array<{ name: string; reason: string }> {
   const entries: Array<{ name: string; reason: string }> = [];
 
@@ -1416,6 +1422,10 @@ export default function Reservations() {
         plate: formValues.selectedVehicle,
         customerName: formValues.customerName.trim(),
         phone: formValues.customerPhone.trim(),
+        paymentMethod: formValues.paymentMethod,
+        paymentStatus: formValues.paymentStatus,
+        amount: toCurrencyNumberFromInput(formValues.amount),
+        deposit: toCurrencyNumberFromInput(formValues.deposit),
         memo: [
           `pickup=${formValues.pickupLocation.trim()}`,
           `return=${formValues.returnLocation.trim()}`,
