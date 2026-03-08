@@ -4,6 +4,7 @@ export interface Reservation {
   customer: string;
   startDate: number;
   endDate: number;
+  scheduledStartAt?: string;
   type: 'reservation' | 'rental' | 'return';
   issues?: string[];
   phone: string;
