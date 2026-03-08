@@ -1,6 +1,6 @@
 import { Layout } from '../components/Layout';
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { useNavigate } from 'react-router';
+import { useNavigate, useSearchParams } from 'react-router';
 import {
   Plus,
   MapPin,
@@ -545,6 +545,7 @@ function toReservationTypeLabel(value: unknown): string {
 }
 
 export default function Settings() {
+  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const { user } = useAuth();
   const { canPerformAction } = useAuthorization();
@@ -552,6 +553,10 @@ export default function Settings() {
 
   const canEditSettings = canPerformAction(ACTION_PERMISSIONS.settingsWrite);
   const canManageMemberRoles = canPerformAction(ACTION_PERMISSIONS.settingsMembersWrite);
+  const settingsCompanyId = useMemo(
+    () => normalizeTenantCompanyId(searchParams.get('companyId')) ?? normalizeTenantCompanyId(user?.companyId),
+    [searchParams, user?.companyId],
+  );
 
   const [activeTab, setActiveTab] = useState<TabType>('bulk');
   const [uploadType, setUploadType] = useState<UploadType>('vehicles');
@@ -636,9 +641,11 @@ export default function Settings() {
   }, [canManageMemberRoles]);
 
   const hydrateGeofencesOnly = useCallback(async () => {
-    const geofencesPayload = await listSettingsGeofences();
+    const geofencesPayload = await listSettingsGeofences({
+      companyId: settingsCompanyId ?? undefined,
+    });
     setGeofences(Array.isArray(geofencesPayload.items) ? geofencesPayload.items : []);
-  }, []);
+  }, [settingsCompanyId]);
 
   const refreshCurrentDataCounts = useCallback(async () => {
     try {
@@ -827,7 +834,7 @@ export default function Settings() {
   const requestSettingsHydration = useCallback(async (signal: AbortSignal): Promise<SettingsHydrationPayload> => {
     const [companyPayload, geofencesPayload, membersPayload, invitationsResult] = await Promise.all([
       getSettingsCompany({ signal }),
-      listSettingsGeofences({ signal }),
+      listSettingsGeofences({ signal, companyId: settingsCompanyId ?? undefined }),
       listSettingsMembers(undefined, { signal }),
       canManageMemberRoles
         ? listInvitations('pending', { signal })
@@ -853,7 +860,7 @@ export default function Settings() {
         : [],
       invitationLoadError: invitationsResult.error,
     };
-  }, [canManageMemberRoles]);
+  }, [canManageMemberRoles, settingsCompanyId]);
 
   const handleSettingsHydrationSuccess = useCallback((payload: SettingsHydrationPayload) => {
     const nextCompanyForm = toCompanyForm(payload.company);
@@ -1253,6 +1260,8 @@ export default function Settings() {
         },
         radiusMeter: radiusValue,
         active: geofenceForm.active,
+      }, {
+        companyId: settingsCompanyId ?? undefined,
       });
     } else {
       if (!editingGeofenceId || !selectedEditingGeofence) {
@@ -1287,7 +1296,9 @@ export default function Settings() {
         return;
       }
 
-      mutationTask = updateSettingsGeofence(editingGeofenceId, payload);
+      mutationTask = updateSettingsGeofence(editingGeofenceId, payload, {
+        companyId: settingsCompanyId ?? undefined,
+      });
     }
 
     setIsGeofenceSaving(true);
@@ -1373,6 +1384,7 @@ export default function Settings() {
     geofenceForm,
     hydrateGeofencesOnly,
     isGeofenceSaving,
+    settingsCompanyId,
     selectedEditingGeofence,
   ]);
 
@@ -1386,7 +1398,9 @@ export default function Settings() {
     setGeofenceRetryAction(null);
 
     try {
-      const updated = await updateSettingsGeofence(geofenceId, { active: nextActive });
+      const updated = await updateSettingsGeofence(geofenceId, { active: nextActive }, {
+        companyId: settingsCompanyId ?? undefined,
+      });
       setGeofences((prevItems) => prevItems.map((item) => (
         item.id === geofenceId ? updated : item
       )));
@@ -1414,7 +1428,7 @@ export default function Settings() {
     } finally {
       setActiveToggleTargetId(null);
     }
-  }, [canEditSettings, hydrateGeofencesOnly]);
+  }, [canEditSettings, hydrateGeofencesOnly, settingsCompanyId]);
 
   const handleGeofenceToggle = useCallback((geofence: SettingsGeofence) => {
     if (!canEditSettings || activeToggleTargetId !== null || isGeofenceSaving) {
@@ -1433,7 +1447,9 @@ export default function Settings() {
     setGeofenceRetryAction(null);
 
     try {
-      await deleteSettingsGeofence(geofenceId);
+      await deleteSettingsGeofence(geofenceId, {
+        companyId: settingsCompanyId ?? undefined,
+      });
       setGeofences((prevItems) => prevItems.filter((item) => item.id !== geofenceId));
       setGeofenceSaveSuccess('지오펜스가 삭제되었습니다.');
       if (editingGeofenceId === geofenceId) {
@@ -1466,7 +1482,7 @@ export default function Settings() {
     } finally {
       setDeletingGeofenceId(null);
     }
-  }, [canEditSettings, editingGeofenceId, hydrateGeofencesOnly]);
+  }, [canEditSettings, editingGeofenceId, hydrateGeofencesOnly, settingsCompanyId]);
 
   const handleGeofenceDelete = useCallback((geofenceId: string) => {
     if (!canEditSettings || deletingGeofenceId !== null || isGeofenceSaving) {

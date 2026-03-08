@@ -2,6 +2,7 @@ import { apiClient } from './api';
 
 export interface SettingsRequestOptions {
   signal?: AbortSignal;
+  companyId?: string;
 }
 
 export interface SettingsCompanyProfile {
@@ -102,6 +103,9 @@ export function listSettingsGeofences(options: SettingsRequestOptions = {}): Pro
   return apiClient.requestData<SettingsGeofenceListData>({
     path: '/api/v2/settings/geofences',
     method: 'GET',
+    query: {
+      companyId: options.companyId,
+    },
     signal: options.signal,
   });
 }
@@ -114,6 +118,9 @@ export function createSettingsGeofence(
     path: '/api/v2/settings/geofences',
     method: 'POST',
     body: payload,
+    query: {
+      companyId: options.companyId,
+    },
     signal: options.signal,
   });
 }
@@ -127,6 +134,9 @@ export function updateSettingsGeofence(
     path: `/api/v2/settings/geofences/${encodeURIComponent(geofenceId)}`,
     method: 'PUT',
     body: payload,
+    query: {
+      companyId: options.companyId,
+    },
     signal: options.signal,
   });
 }
@@ -135,6 +145,9 @@ export function deleteSettingsGeofence(geofenceId: string, options: SettingsRequ
   return apiClient.requestData<void>({
     path: `/api/v2/settings/geofences/${encodeURIComponent(geofenceId)}`,
     method: 'DELETE',
+    query: {
+      companyId: options.companyId,
+    },
     signal: options.signal,
   });
 }
