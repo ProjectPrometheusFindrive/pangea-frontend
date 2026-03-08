@@ -3,7 +3,7 @@
 - Version: v1.2.46
 - Date: 2026-03-08
 - Owner: Pangea Frontend Team
-- Tags: prompt-library,workflow,branch-policy,history-policy,commit-policy,pr-automation,jira-traceability,end-prompt-protocol,worktree-cleanup,jira-status-sync,jira-comment-sync,ac-evidence,mock-removal,reservations-write,reservations-mock-removal,ocr-flow,revenue-api,settings-api,payment-status-sync,home-api,home-summary,home-copy,i18n-regression,action-payment-mock-removal,support-center,rbac-permission-hardening,e2e-test-hardening,playwright-artifact-policy,device-installation-tenant-scope,authorization-loading-guard,auth-silent-refresh
+- Tags: prompt-library,workflow,branch-policy,history-policy,commit-policy,pr-automation,jira-traceability,end-prompt-protocol,worktree-cleanup,jira-status-sync,jira-comment-sync,ac-evidence,mock-removal,reservations-write,reservations-mock-removal,ocr-flow,revenue-api,revenue-trend-fallback,settings-api,payment-status-sync,home-api,home-summary,home-copy,i18n-regression,action-payment-mock-removal,support-center,rbac-permission-hardening,e2e-test-hardening,playwright-artifact-policy,device-installation-tenant-scope,authorization-loading-guard,auth-silent-refresh
 
 ## Context
 - 초기 세팅 작업에서 프롬프트 템플릿, 브랜치 정책, 문서화 절차를 반복 가능하게 표준화할 필요가 있음.
@@ -78,6 +78,7 @@ End Prompt:
 - Reservations 쓰기 연동 티켓(BK-053/SCRUM-44 계열)은 `prompt_history`에 create/return/accident API 연동, 제출 중/중복 제출 방지, 생성 성공 시 상세 ID 동기화, `400 필드/폼 오류·403 권한·409 상태충돌·5xx 재시도 토스트` 분기 근거를 함께 기록한다.
 - OCR 연동 티켓(BK-085/SCRUM-64 계열)은 `prompt_history`에 `assets/upload -> ocr/extract -> ocr/jobs/{jobId}` 흐름, polling 상태 전환(처리중/복귀), partial prefill 처리, re-upload 시 이전 OCR 제안 폐기, `400/413 파일 오류·5xx/timeout 재시도·수동 입력 fallback` 분기 근거를 함께 기록한다.
 - Revenue API 연동 티켓(BK-074/SCRUM-56 계열)은 `prompt_history`에 `/api/v2/revenue/summary(from,to,granularity)` 및 `/api/v2/revenue/trend(from,to)` 파라미터 동기화, 기간/단위 변경 시 loading 갱신, empty-state, `400/401/403/5xx+network` 분기와 Retry/이전 스냅샷 복원 근거를 함께 기록한다.
+- Revenue trend fallback bugfix tickets (SCRUM-193 series) must record evidence that summary success still renders page content when trend fails, page empty-state remains summary-driven, and the trend panel degrades to an inline retry state instead of a blocking page error.
 - Home API 연동 티켓(BK-073/SCRUM-55 계열)은 `prompt_history`에 `/api/v2/home/summary(from,to,tenantId)` 파라미터 동기화, 기간 필터 변경 재조회, `loading/empty/401/403/5xx+network` 분기, race-safe 요청 처리와 재조회 실패 시 이전 스냅샷 유지 근거, null-safe 기본값 렌더 및 Home 런타임 mock 경로 제거 근거를 함께 기록한다.
 - Home KPI 후속 티켓(SCRUM-183 계열)은 `prompt_history`에 `alerts.overdue`(반납 지연)와 `kpis.unpaidContracts`(미납/연체 계약) 분리 근거, Home -> Reservations 이동 시 `paymentScope=delinquent` 범위 동기화 근거, 라벨 기반 Playwright 회귀 검증 근거를 함께 기록한다.
 - Home copy/i18n regression tickets (SCRUM-185 series) must record the exact localized string replacement, the rendered surface where the copy changed, and regression evidence that the Korean label is shown instead of the legacy English text. If Playwright reuses a running dev server, record whether `127.0.0.1:4173` was free or an isolated-port workaround was required.
@@ -169,6 +170,7 @@ cp docs/prompt_history/_TEMPLATE.md docs/prompt_history/$(date +%Y%m%d)_SCRUM-12
 - Production push triggers auto tag (`vX.Y.Z`)
 
 ## Version History
+- v1.2.46 (2026-03-08, SCRUM-193): Add prompt_history evidence rule for Revenue trend fallback fixes (summary-first partial success, summary-driven empty-state, and trend-panel inline retry degradation).
 - v1.2.46 (2026-03-07, SCRUM-185): Add prompt_history evidence rule for Home heading localization regressions, including exact copy replacement and the Playwright reused-server caveat/workaround.
 - v1.2.46 (2026-03-08, SCRUM-184): Add prompt_history evidence rule for premium CTA support-center routing follow-up (shared SupportCenter prefill helper, manual-category preservation, `단말 OFF` no-data fallback, and real CTA-based Playwright coverage).
 - v1.2.44 (2026-03-03, SCRUM-162): Add prompt_history evidence rule for auth/authorization silent-refresh UX hardening (initial bootstrap-only blocking, focus/visibility background refresh, and no full-screen auth fallback regression checks).
