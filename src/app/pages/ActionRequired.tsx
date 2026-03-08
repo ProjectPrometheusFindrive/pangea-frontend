@@ -71,6 +71,11 @@ type ActionWriteKind = 'status' | 'memo' | 'resolve';
 
 const STATUS_OPTIONS = ['대기중', '진행중', '완료'] as const;
 const LIST_COLLECTION_KEYS = ['items', 'rows', 'list', 'actionRequired', 'actionItems'];
+const ACTION_PRIORITY_LABELS: Record<ActionItem['severity'], string> = {
+  High: '높음',
+  Medium: '보통',
+  Low: '낮음',
+};
 
 interface ActionWriteErrorState {
   kind: ActionWriteKind;
@@ -1222,9 +1227,9 @@ export default function ActionRequired() {
               className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
               <option value="all">우선순위 전체</option>
-              <option value="high">High</option>
-              <option value="medium">Medium</option>
-              <option value="low">Low</option>
+              <option value="high">{ACTION_PRIORITY_LABELS.High}</option>
+              <option value="medium">{ACTION_PRIORITY_LABELS.Medium}</option>
+              <option value="low">{ACTION_PRIORITY_LABELS.Low}</option>
             </select>
 
             <select
@@ -1435,7 +1440,7 @@ export default function ActionRequired() {
                       )}
                       <td className="px-6 py-4 whitespace-nowrap">
                         <span className={`px-2 py-1 text-xs font-medium rounded-full ${getSeverityColor(item.severity)}`}>
-                          {item.severity}
+                          {ACTION_PRIORITY_LABELS[item.severity]}
                         </span>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{item.status}</td>
@@ -1540,7 +1545,7 @@ export default function ActionRequired() {
                   <label className="text-sm font-semibold text-gray-600">심각도</label>
                   <p className="text-base text-gray-900 mt-1">
                     <span className={`px-2 py-1 text-xs font-medium rounded-full ${getSeverityColor(selectedItem.severity)}`}>
-                      {selectedItem.severity}
+                      {ACTION_PRIORITY_LABELS[selectedItem.severity]}
                     </span>
                   </p>
                 </div>
