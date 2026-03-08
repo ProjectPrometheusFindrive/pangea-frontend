@@ -140,7 +140,7 @@ test('reservation view model keeps all asset rows and real models when reservati
   assert.equal(idleVehicle?.status, '가용');
 });
 
-test('reservation view model excludes completed reservations from payment sync targets', async () => {
+test('reservation view model keeps completed reservations in payment sync targets', async () => {
   const module = await viteServer.ssrLoadModule('/src/app/pages/reservationsViewModel.ts');
 
   const targets = module.buildPaymentSyncTargets([
@@ -176,6 +176,10 @@ test('reservation view model excludes completed reservations from payment sync t
     {
       reservationId: 'R-1',
       fallbackStatus: '대기',
+    },
+    {
+      reservationId: 'R-2',
+      fallbackStatus: '완료',
     },
   ]);
 });

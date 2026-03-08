@@ -186,7 +186,6 @@ export function mergeVehicleRows(assetPayload: unknown, reservationRows: Reserva
 
 export function buildPaymentSyncTargets(reservations: Reservation[]): PaymentSyncTarget[] {
   return reservations
-    .filter((reservation) => reservation.type !== 'return')
     .map((reservation) => ({
       reservationId: reservation.id,
       fallbackStatus: reservation.paymentStatus,
