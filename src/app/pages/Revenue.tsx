@@ -19,6 +19,7 @@ import {
   handlePageErrorAction,
   type PageErrorKind,
 } from '../hooks/usePageEndpointState';
+import { resolveRevenueHydrationResult } from './revenueViewModel';
 
 type PeriodPreset = 'last7Days' | 'last30Days' | 'last365Days';
 
@@ -146,28 +147,6 @@ function calculateGrowthRate(buckets: RevenueSummaryBucket[]): number {
   return Math.round(((currentTotal - previousTotal) / previousTotal) * 100);
 }
 
-function isSnapshotEmpty(snapshot: RevenueSnapshot): boolean {
-  const hasSummaryData = snapshot.summary.buckets.some((bucket) => (
-    bucket.grossRevenue !== 0
-    || bucket.refundAmount !== 0
-    || bucket.netRevenue !== 0
-    || bucket.paidCount > 0
-    || bucket.refundCount > 0
-  ));
-
-  if (hasSummaryData) {
-    return false;
-  }
-
-  return !snapshot.trend.items.some((item) => (
-    item.grossRevenue !== 0
-    || item.refundAmount !== 0
-    || item.netRevenue !== 0
-    || item.paidCount > 0
-    || item.refundCount > 0
-  ));
-}
-
 function toPageErrorState(error: unknown): RevenuePageError {
   if (error instanceof ApiError) {
     const errorCode = typeof error.code === 'string' ? error.code : '';
@@ -239,6 +218,7 @@ export default function Revenue() {
   const [blockingErrorKind, setBlockingErrorKind] = useState<PageErrorKind | null>(null);
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [refreshErrorKind, setRefreshErrorKind] = useState<PageErrorKind | null>(null);
+  const [trendError, setTrendError] = useState<string | null>(null);
   const [isEmpty, setIsEmpty] = useState(false);
 
   const mountedRef = useRef(true);
@@ -271,11 +251,12 @@ export default function Revenue() {
     setBlockingErrorKind(null);
     setRefreshError(null);
     setRefreshErrorKind(null);
+    setTrendError(null);
 
     const { from, to } = resolveDateRange(filters.preset);
 
     try {
-      const [summary, trend] = await Promise.all([
+      const [summaryResult, trendResult] = await Promise.allSettled([
         getRevenueSummary({
           from,
           to,
@@ -297,15 +278,49 @@ export default function Revenue() {
         return;
       }
 
-      const nextSnapshot: RevenueSnapshot = {
-        summary,
-        trend,
+      const hydrationResult = resolveRevenueHydrationResult({
         filters,
-      };
+        from,
+        to,
+        summaryResult,
+        trendResult,
+      });
+
+      if (hydrationResult.kind === 'summary-error') {
+        const pageError = toPageErrorState(hydrationResult.summaryError);
+        const previousSnapshot = snapshotRef.current;
+
+        if (previousSnapshot) {
+          setRefreshError(pageError.message);
+          setRefreshErrorKind(pageError.kind);
+
+          if (
+            previousSnapshot.filters.preset !== filters.preset
+            || previousSnapshot.filters.granularity !== filters.granularity
+          ) {
+            skipNextAutoHydrateRef.current = true;
+            setSelectedPreset(previousSnapshot.filters.preset);
+            setSelectedGranularity(previousSnapshot.filters.granularity);
+          }
+        } else {
+          setBlockingError(pageError.message);
+          setBlockingErrorKind(pageError.kind);
+          setIsEmpty(false);
+        }
+
+        return;
+      }
+
+      const nextSnapshot: RevenueSnapshot = hydrationResult.snapshot;
 
       snapshotRef.current = nextSnapshot;
       setSnapshot(nextSnapshot);
-      setIsEmpty(isSnapshotEmpty(nextSnapshot));
+      setIsEmpty(hydrationResult.isEmpty);
+      setTrendError(
+        hydrationResult.trendError
+          ? toPageErrorState(hydrationResult.trendError).message
+          : null,
+      );
     } catch (requestError) {
       if (
         !mountedRef.current
@@ -331,6 +346,7 @@ export default function Revenue() {
           setSelectedGranularity(previousSnapshot.filters.granularity);
         }
       } else {
+        setTrendError(null);
         setBlockingError(pageError.message);
         setBlockingErrorKind(pageError.kind);
         setIsEmpty(false);
@@ -624,30 +640,45 @@ export default function Revenue() {
 
             <div className="rounded-xl bg-white p-5 shadow-sm">
               <h3 className="mb-4 text-base font-bold text-gray-900">일별 순매출 추이</h3>
-              <ResponsiveContainer width="100%" height={280}>
-                <LineChart data={trendChartData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                  <XAxis dataKey="label" tick={{ fontSize: 11 }} stroke="#9ca3af" />
-                  <YAxis tick={{ fontSize: 11 }} stroke="#9ca3af" tickFormatter={formatAxisCurrency} />
-                  <Tooltip
-                    formatter={(value: number) => [formatCurrency(value, summaryTotals.currency), '순매출']}
-                    contentStyle={{
-                      backgroundColor: 'white',
-                      border: '1px solid #e5e7eb',
-                      borderRadius: '8px',
-                      fontSize: '12px',
-                    }}
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="netRevenue"
-                    stroke="#2563eb"
-                    strokeWidth={2}
-                    dot={false}
-                    activeDot={{ r: 4 }}
-                  />
-                </LineChart>
-              </ResponsiveContainer>
+              {trendError ? (
+                <div className="flex h-[280px] flex-col items-center justify-center rounded-lg border border-dashed border-amber-200 bg-amber-50 px-6 text-center">
+                  <AlertCircle className="h-6 w-6 text-amber-700" />
+                  <p className="mt-3 text-sm font-medium text-amber-900">{trendError}</p>
+                  <p className="mt-1 text-xs text-amber-700">요약 데이터는 계속 표시됩니다.</p>
+                  <button
+                    type="button"
+                    onClick={handleRetry}
+                    className="mt-4 rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-amber-700"
+                  >
+                    다시 시도
+                  </button>
+                </div>
+              ) : (
+                <ResponsiveContainer width="100%" height={280}>
+                  <LineChart data={trendChartData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                    <XAxis dataKey="label" tick={{ fontSize: 11 }} stroke="#9ca3af" />
+                    <YAxis tick={{ fontSize: 11 }} stroke="#9ca3af" tickFormatter={formatAxisCurrency} />
+                    <Tooltip
+                      formatter={(value: number) => [formatCurrency(value, summaryTotals.currency), '순매출']}
+                      contentStyle={{
+                        backgroundColor: 'white',
+                        border: '1px solid #e5e7eb',
+                        borderRadius: '8px',
+                        fontSize: '12px',
+                      }}
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="netRevenue"
+                      stroke="#2563eb"
+                      strokeWidth={2}
+                      dot={false}
+                      activeDot={{ r: 4 }}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              )}
             </div>
           </div>
 
