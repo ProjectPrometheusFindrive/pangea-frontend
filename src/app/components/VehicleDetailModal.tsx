@@ -3,6 +3,7 @@ import { X, Activity, History, Info, Zap, AlertTriangle, Loader2 } from 'lucide-
 import type { VehicleAsset } from '../types/assets';
 import { useNavigate } from 'react-router';
 import type { AssetEditForm } from '../pages/assetsDetailForm';
+import { navigateToPremiumInquiry } from '../utils/premiumInquiry';
 
 interface AssetHistoryChange {
   field: string;
@@ -807,7 +808,7 @@ export function VehicleDetailModal({
 
                     <button
                       onClick={() => {
-                        alert('프리미엄 문의: 1588-XXXX\n\n담당자가 곧 연락드려 단말 설치 일정을 안내해 드리겠습니다.\n\n월 29,000원으로 차량당 프리미엄 서비스를 이용하실 수 있습니다.');
+                        navigateToPremiumInquiry(navigate, 'vehicle-detail-modal');
                       }}
                       className="w-full px-6 py-3 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-lg hover:from-purple-700 hover:to-blue-700 font-bold transition-all transform hover:scale-105"
                     >

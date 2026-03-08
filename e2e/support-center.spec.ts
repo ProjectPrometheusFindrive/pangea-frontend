@@ -1,6 +1,6 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 
-import { fulfillSuccess, installApiMocks } from './helpers/apiMock';
+import { buildMockUser, fulfillSuccess, installApiMocks } from './helpers/apiMock';
 import { loginViaUi } from './helpers/session';
 
 interface SupportTicketFixture {
@@ -50,8 +50,50 @@ function filterTickets(
   });
 }
 
+async function seedAuthorization(
+  page: Page,
+  role: 'admin' | 'super_admin',
+  permissions: string[],
+) {
+  const user = buildMockUser(role);
+  await page.addInitScript(
+    ({ key, value }: { key: string; value: string }) => {
+      window.localStorage.setItem(key, value);
+    },
+    {
+      key: 'pangea.authorization.v2',
+      value: JSON.stringify({
+        version: 2,
+        userId: user.userId,
+        companyId: user.companyId,
+        role: user.role,
+        source: 'api',
+        fetchedAt: Date.now(),
+        permissions,
+      }),
+    },
+  );
+}
+
 test.describe('Support Center super_admin management view', () => {
   test('loads all tickets by default, filters by tenant, and updates status with company scope', async ({ page }) => {
+    const permissions = [
+      'route.home',
+      'route.action-required',
+      'route.assets',
+      'route.reservations',
+      'route.revenue',
+      'route.support-center',
+      'route.settings',
+      'action.assets.write',
+      'action.reservations.write',
+      'action.action-required.write',
+      'action.revenue.write',
+      'action.payments.write',
+      'action.support.manage',
+      'action.settings.write',
+      'action.settings.members.write',
+    ];
     const tickets: SupportTicketFixture[] = [
       {
         id: 'SUP-0001',
@@ -99,6 +141,7 @@ test.describe('Support Center super_admin management view', () => {
       },
     ];
 
+    await seedAuthorization(page, 'super_admin', permissions);
     await installApiMocks(page, {
       user: {
         role: 'super_admin',
@@ -146,6 +189,19 @@ test.describe('Support Center super_admin management view', () => {
 
           await fulfillSuccess(route, { ticket: target });
         },
+        'GET /api/v2/notifications': async ({ route }) => {
+          await fulfillSuccess(route, {
+            items: [],
+            totalCount: 0,
+            unreadCount: 0,
+          });
+        },
+        'GET /api/v2/notifications/summary': async ({ route }) => {
+          await fulfillSuccess(route, {
+            totalCount: 0,
+            unreadCount: 0,
+          });
+        },
       },
     });
 
@@ -175,6 +231,25 @@ test.describe('Support Center super_admin management view', () => {
   });
 
   test('admin also sees the management view instead of the submit form', async ({ page }) => {
+    const permissions = [
+      'route.home',
+      'route.action-required',
+      'route.assets',
+      'route.reservations',
+      'route.revenue',
+      'route.support-center',
+      'route.settings',
+      'action.assets.write',
+      'action.reservations.write',
+      'action.action-required.write',
+      'action.revenue.write',
+      'action.payments.write',
+      'action.support.manage',
+      'action.settings.write',
+      'action.settings.members.write',
+    ];
+
+    await seedAuthorization(page, 'admin', permissions);
     await installApiMocks(page, {
       user: {
         role: 'admin',
@@ -185,6 +260,19 @@ test.describe('Support Center super_admin management view', () => {
             items: [],
             limit: 200,
             offset: 0,
+          });
+        },
+        'GET /api/v2/notifications': async ({ route }) => {
+          await fulfillSuccess(route, {
+            items: [],
+            totalCount: 0,
+            unreadCount: 0,
+          });
+        },
+        'GET /api/v2/notifications/summary': async ({ route }) => {
+          await fulfillSuccess(route, {
+            totalCount: 0,
+            unreadCount: 0,
           });
         },
       },

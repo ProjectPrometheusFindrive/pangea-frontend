@@ -14,6 +14,7 @@ import { useAuth } from '../context/AuthContext';
 import { useAuthorization } from '../context/AuthorizationContext';
 import { useCompany } from '../context/CompanyContext';
 import { resolveRoutePermissionForPath, ROUTE_PERMISSIONS } from '../authorization';
+import { navigateToPremiumInquiry } from '../utils/premiumInquiry';
 
 interface LayoutProps {
   children: ReactNode;
@@ -302,6 +303,10 @@ export function Layout({ children, title }: LayoutProps) {
     setShowPremiumBanner(false);
     sessionStorage.setItem('premiumBannerDismissed', 'true');
   };
+
+  const handlePremiumBannerClick = useCallback(() => {
+    navigateToPremiumInquiry(navigate, 'layout-banner');
+  }, [navigate]);
 
   const handleLogout = async () => {
     await logout({ silent: true, redirectToLogin: true });
@@ -789,7 +794,7 @@ export function Layout({ children, title }: LayoutProps) {
               
               <div className="relative z-10 flex items-center gap-3">
                 <button
-                  onClick={() => alert('프리미엄 문의: 1588-XXXX')}
+                  onClick={handlePremiumBannerClick}
                   className="px-5 py-2 bg-white text-blue-600 font-bold rounded-lg hover:bg-gray-100 transition-colors"
                 >
                   자세히 보기

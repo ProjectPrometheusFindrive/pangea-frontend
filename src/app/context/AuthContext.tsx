@@ -285,6 +285,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const refreshPromiseRef = useRef<Promise<AuthSession | null> | null>(null);
   const sessionExpiredHandledRef = useRef(false);
   const authRequestVersionRef = useRef(0);
+  const statusRef = useRef<AuthStatus>('checking');
+
+  useEffect(() => {
+    statusRef.current = status;
+  }, [status]);
 
   const applySession = useCallback((session: AuthSession) => {
     setToken(session.token);
@@ -406,7 +411,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
 
         if (!refreshedSession) {
-          if (isSilentRefresh || status === 'authenticated') {
+          if (isSilentRefresh || statusRef.current === 'authenticated') {
             handleSessionExpired();
           } else {
             handleBootstrapSessionExpired();
@@ -427,7 +432,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           if (isStaleRequest()) {
             return;
           }
-          if (isSilentRefresh || status === 'authenticated') {
+          if (isSilentRefresh || statusRef.current === 'authenticated') {
             handleSessionExpired();
           } else {
             handleBootstrapSessionExpired();
@@ -445,7 +450,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setIsLoading(false);
       setIsBootstrapping(false);
     }
-  }, [applySession, clearSession, handleBootstrapSessionExpired, handleSessionExpired, refreshAccessToken, status]);
+  }, [applySession, clearSession, handleBootstrapSessionExpired, handleSessionExpired, refreshAccessToken]);
 
   const login = useCallback(async (payload: AuthLoginPayload) => {
     authRequestVersionRef.current += 1;
