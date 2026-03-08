@@ -762,7 +762,7 @@ export default function Home() {
         <div className="space-y-5 p-6">
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-gray-200 bg-white p-4">
             <div className="space-y-1">
-              <h2 className="text-lg font-bold text-[#1e2939]">Home Summary</h2>
+              <h2 className="text-lg font-bold text-[#1e2939]">홈 요약</h2>
               <p className="text-xs text-gray-500">
                 {periodLabel ? `${periodLabel} · tenant: ${summary?.tenantId}` : '조회 기간을 선택해 주세요.'}
               </p>

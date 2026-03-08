@@ -406,7 +406,7 @@ test.describe('SCRUM-184 Home premium CTA E2E', () => {
     });
 
     await page.goto('/');
-    await expect(page.getByRole('heading', { name: 'Home Summary' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '홈 요약' })).toBeVisible();
     await page.getByRole('button', { name: '자세히 보기' }).click();
 
     await expect(page).toHaveURL(/\/support-center/);
@@ -532,8 +532,7 @@ test.describe('SCRUM-184 Home premium CTA E2E', () => {
     });
 
     await page.goto('/');
-    await expect(page.getByRole('heading', { name: 'Home Summary' })).toBeVisible();
-
+    await expect(page.getByRole('heading', { name: '홈 요약' })).toBeVisible();
     const deviceOffCard = getMetricCard(page, '단말 OFF');
 
     await expect(deviceOffCard).toBeVisible();
