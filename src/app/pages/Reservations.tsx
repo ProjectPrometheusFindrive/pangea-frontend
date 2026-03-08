@@ -2069,8 +2069,10 @@ export default function Reservations() {
           {/* 차량 필터 영역 */}
           <div className="flex items-center gap-3 px-3 py-2 bg-gray-50 border-b border-gray-200 shrink-0">
             <div className="flex items-center gap-2">
-              <label className="text-xs font-semibold text-gray-600">차종:</label>
+              <label htmlFor="reservations-model-filter" className="text-xs font-semibold text-gray-600">차종:</label>
               <select
+                id="reservations-model-filter"
+                name="modelFilter"
                 value={modelFilter}
                 onChange={(e) => setModelFilter(e.target.value)}
                 className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
@@ -2083,8 +2085,10 @@ export default function Reservations() {
             </div>
             
             <div className="flex items-center gap-2">
-              <label className="text-xs font-semibold text-gray-600">차량번호:</label>
+              <label htmlFor="reservations-vehicle-search-query" className="text-xs font-semibold text-gray-600">차량번호:</label>
               <input
+                id="reservations-vehicle-search-query"
+                name="vehicleSearchQuery"
                 type="text"
                 placeholder="차량번호 검색"
                 value={vehicleSearchQuery}
