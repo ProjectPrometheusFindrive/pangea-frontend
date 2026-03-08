@@ -1,7 +1,7 @@
 # Prompt Library v1
 
-- Version: v1.2.46
-- Date: 2026-03-08
+- Version: v1.2.48
+- Date: 2026-03-09
 - Owner: Pangea Frontend Team
 - Tags: prompt-library,workflow,branch-policy,history-policy,commit-policy,pr-automation,jira-traceability,end-prompt-protocol,worktree-cleanup,jira-status-sync,jira-comment-sync,ac-evidence,mock-removal,reservations-write,reservations-mock-removal,ocr-flow,revenue-api,revenue-trend-fallback,settings-api,payment-status-sync,home-api,home-summary,home-copy,i18n-regression,action-payment-mock-removal,support-center,rbac-permission-hardening,e2e-test-hardening,playwright-artifact-policy,device-installation-tenant-scope,authorization-loading-guard,auth-silent-refresh
 
@@ -170,6 +170,7 @@ cp docs/prompt_history/_TEMPLATE.md docs/prompt_history/$(date +%Y%m%d)_SCRUM-12
 - Production push triggers auto tag (`vX.Y.Z`)
 
 ## Version History
+- v1.2.48 (2026-03-09, Jira SCRUM-225): Record end_prompt evidence for 완료 상태 사고접수 UI 가드.
 - v1.2.46 (2026-03-08, SCRUM-193): Add prompt_history evidence rule for Revenue trend fallback fixes (summary-first partial success, summary-driven empty-state, and trend-panel inline retry degradation).
 - v1.2.46 (2026-03-07, SCRUM-185): Add prompt_history evidence rule for Home heading localization regressions, including exact copy replacement and the Playwright reused-server caveat/workaround.
 - v1.2.46 (2026-03-08, SCRUM-184): Add prompt_history evidence rule for premium CTA support-center routing follow-up (shared SupportCenter prefill helper, manual-category preservation, `단말 OFF` no-data fallback, and real CTA-based Playwright coverage).

@@ -242,6 +242,37 @@ function areIssueListsEqual(left: string[] | undefined, right: string[] | undefi
   return leftList.every((item, index) => item === rightList[index]);
 }
 
+const TERMINAL_CONTRACT_STATUSES = new Set(['완료']);
+
+function normalizeReservationContractStatus(value: string | null): string | null {
+  if (!value) {
+    return null;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) {
+    return null;
+  }
+  if (normalized === 'reservation' || normalized === 'reserved' || normalized === '예약' || normalized === '예약중') {
+    return '예약중';
+  }
+  if (normalized === 'rental' || normalized === 'in_use' || normalized === '대여중') {
+    return '대여중';
+  }
+  if (normalized === 'return' || normalized === 'returned' || normalized === '반납' || normalized === '반납완료' || normalized === '완료') {
+    return '완료';
+  }
+  return value.trim();
+}
+
+export function canReportAccidentForReservation(reservation: Reservation): boolean {
+  const currentContractStatus = normalizeReservationContractStatus(reservation.contractStatus ?? null);
+  if (currentContractStatus && TERMINAL_CONTRACT_STATUSES.has(currentContractStatus)) {
+    return false;
+  }
+  return reservation.type !== 'return';
+}
+
 function applySyncedPaymentStatusToReservation(
   reservation: Reservation,
   syncedPaymentStatus: PaymentStatusSnapshot,
@@ -590,6 +621,9 @@ function toReservationRow(row: unknown, index: number): Reservation | null {
   const endDateLabel = normalizeDateParam(toStringValue(endSource)) ?? toDateLabelFromOffset(endDateOffset);
   const issues = normalizeIssues(row.issues);
   const accidentReported = row.accidentReported === true || toStringValue(row.accidentReported)?.toLowerCase() === 'true';
+  const contractStatus = normalizeReservationContractStatus(
+    toStringValue(row.contractStatus) ?? toStringValue(row.status) ?? toStringValue(row.type),
+  );
   if (accidentReported && !issues.includes('사고 접수')) {
     issues.unshift('사고 접수');
   }
@@ -600,9 +634,8 @@ function toReservationRow(row: unknown, index: number): Reservation | null {
     customer,
     startDate: startDateOffset,
     endDate: endDateOffset,
-    type: normalizeReservationType(
-      toStringValue(row.type) ?? toStringValue(row.contractStatus) ?? toStringValue(row.status),
-    ),
+    contractStatus: contractStatus ?? undefined,
+    type: normalizeReservationType(contractStatus ?? toStringValue(row.type) ?? toStringValue(row.status)),
     issues,
     phone: (
       toStringValue(row.phone)
@@ -1394,6 +1427,7 @@ export default function Reservations() {
       customer: formValues.customerName.trim(),
       startDate: Math.min(startDateOffset, endDateOffset),
       endDate: Math.max(startDateOffset, endDateOffset),
+      contractStatus: '예약중',
       type: 'reservation',
       issues: [],
       phone: formValues.customerPhone.trim(),
@@ -1495,6 +1529,7 @@ export default function Reservations() {
       });
       const fallbackReservation: Reservation = {
         ...selectedReservation,
+        contractStatus: '대여중',
         type: 'rental',
       };
       const updatedReservation = toReservationDetail(payload, fallbackReservation);
@@ -1667,6 +1702,7 @@ export default function Reservations() {
       });
       const fallbackReservation: Reservation = {
         ...selectedReservation,
+        contractStatus: '완료',
         type: 'return',
       };
       const updatedReservation = toReservationDetail(payload, fallbackReservation);
@@ -2579,8 +2615,13 @@ export default function Reservations() {
                   차량 자산 상세보기
                 </button>
                 <button
-                  onClick={() => setShowAccidentModal(true)}
-                  disabled={!canWriteReservations}
+                  onClick={() => {
+                    if (!canReportAccidentForReservation(selectedReservation)) {
+                      return;
+                    }
+                    setShowAccidentModal(true);
+                  }}
+                  disabled={!canWriteReservations || !canReportAccidentForReservation(selectedReservation)}
                   className="flex-1 min-w-[200px] px-4 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   사고 등록
