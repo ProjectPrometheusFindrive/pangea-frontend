@@ -111,3 +111,59 @@ export function resolveRevenueHydrationResult<TFilters extends { preset: string;
     summaryError: null,
   };
 }
+
+function toSettledResult<T>(promise: Promise<T>): Promise<PromiseSettledResult<T>> {
+  return promise.then(
+    (value) => ({ status: 'fulfilled', value }),
+    (reason) => ({ status: 'rejected', reason }),
+  );
+}
+
+export async function settleRevenueHydration<TFilters extends { preset: string; granularity: string }>({
+  filters,
+  from,
+  to,
+  summaryPromise,
+  trendPromise,
+  hasPreviousSnapshot,
+  previousTrendError,
+}: {
+  filters: TFilters;
+  from: string;
+  to: string;
+  summaryPromise: Promise<RevenueSummaryResponse>;
+  trendPromise: Promise<RevenueTrendResponse>;
+  hasPreviousSnapshot: boolean;
+  previousTrendError: unknown | null;
+}) {
+  const trendResultPromise = toSettledResult(trendPromise);
+
+  try {
+    const summary = await summaryPromise;
+    const trendResult = await trendResultPromise;
+    const result = resolveRevenueHydrationResult({
+      filters,
+      from,
+      to,
+      summaryResult: {
+        status: 'fulfilled',
+        value: summary,
+      },
+      trendResult,
+    });
+
+    return {
+      ...result,
+      displayTrendError: result.trendError,
+    };
+  } catch (summaryError) {
+    return {
+      kind: 'summary-error' as const,
+      snapshot: null,
+      isEmpty: false,
+      trendError: null,
+      summaryError,
+      displayTrendError: hasPreviousSnapshot ? previousTrendError : null,
+    };
+  }
+}

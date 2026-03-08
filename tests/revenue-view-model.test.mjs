@@ -31,6 +31,16 @@ function createSummary(overrides = {}) {
   };
 }
 
+function createDeferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
 before(async () => {
   viteServer = await createServer({
     root: projectRoot,
@@ -226,4 +236,59 @@ test('revenue view model resolves summary failure as a page-level failure', asyn
   assert.equal(result.summaryError, summaryError);
   assert.equal(result.snapshot, null);
   assert.equal(result.trendError, null);
+});
+
+test('revenue view model settles summary failures without waiting for trend', async () => {
+  const module = await viteServer.ssrLoadModule('/src/app/pages/revenueViewModel.ts');
+  const trendDeferred = createDeferred();
+  const summaryError = new Error('summary failed first');
+
+  const raced = await Promise.race([
+    module.settleRevenueHydration({
+      filters: {
+        preset: 'last30Days',
+        granularity: 'week',
+      },
+      from: '2026-03-01',
+      to: '2026-03-08',
+      summaryPromise: Promise.reject(summaryError),
+      trendPromise: trendDeferred.promise,
+      hasPreviousSnapshot: false,
+      previousTrendError: null,
+    }).then((result) => ({ type: 'result', result })),
+    new Promise((resolve) => setTimeout(() => resolve({ type: 'timeout' }), 20)),
+  ]);
+
+  assert.equal(raced.type, 'result');
+  assert.equal(raced.result.kind, 'summary-error');
+  assert.equal(raced.result.summaryError, summaryError);
+
+  trendDeferred.reject(new Error('late trend failure'));
+  await Promise.resolve();
+});
+
+test('revenue view model preserves the previous trend error when summary refresh fails', async () => {
+  const module = await viteServer.ssrLoadModule('/src/app/pages/revenueViewModel.ts');
+  const summaryError = new Error('summary refresh failed');
+  const previousTrendError = new Error('trend failed earlier');
+  const trendDeferred = createDeferred();
+
+  const result = await module.settleRevenueHydration({
+    filters: {
+      preset: 'last30Days',
+      granularity: 'week',
+    },
+    from: '2026-03-01',
+    to: '2026-03-08',
+    summaryPromise: Promise.reject(summaryError),
+    trendPromise: trendDeferred.promise,
+    hasPreviousSnapshot: true,
+    previousTrendError,
+  });
+
+  assert.equal(result.kind, 'summary-error');
+  assert.equal(result.displayTrendError, previousTrendError);
+
+  trendDeferred.reject(new Error('late trend failure'));
+  await Promise.resolve();
 });

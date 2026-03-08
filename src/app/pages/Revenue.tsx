@@ -20,7 +20,7 @@ import {
   type PageErrorKind,
 } from '../hooks/usePageEndpointState';
 import {
-  resolveRevenueHydrationResult,
+  settleRevenueHydration,
 } from './revenueViewModel';
 
 type PeriodPreset = 'last7Days' | 'last30Days' | 'last365Days';
@@ -34,6 +34,7 @@ interface RevenueSnapshot {
   summary: RevenueSummaryResponse;
   trend: RevenueTrendResponse;
   filters: RevenueFilters;
+  trendErrorMessage: string | null;
 }
 
 interface RevenuePageError {
@@ -208,6 +209,16 @@ function toPageErrorState(error: unknown): RevenuePageError {
   };
 }
 
+function toTrendErrorMessage(displayTrendError: unknown | null): string | null {
+  if (typeof displayTrendError === 'string') {
+    return displayTrendError;
+  }
+
+  return displayTrendError
+    ? toPageErrorState(displayTrendError).message
+    : null;
+}
+
 export default function Revenue() {
   const navigate = useNavigate();
   const [selectedPreset, setSelectedPreset] = useState<PeriodPreset>('last30Days');
@@ -253,40 +264,36 @@ export default function Revenue() {
     setBlockingErrorKind(null);
     setRefreshError(null);
     setRefreshErrorKind(null);
-    setTrendError(null);
 
     const { from, to } = resolveDateRange(filters.preset);
 
     try {
-      const [summaryResult, trendResult] = await Promise.allSettled([
-        getRevenueSummary({
+      const hydrationResult = await settleRevenueHydration({
+        filters,
+        from,
+        to,
+        summaryPromise: getRevenueSummary({
           from,
           to,
           granularity: filters.granularity,
           signal: controller.signal,
         }),
-        getRevenueTrend({
+        trendPromise: getRevenueTrend({
           from,
           to,
           signal: controller.signal,
         }),
-      ]);
+        hasPreviousSnapshot: hasSnapshot,
+        previousTrendError: snapshotRef.current?.trendErrorMessage ?? null,
+      });
 
       if (
         !mountedRef.current
         || requestSequenceRef.current !== requestSequence
         || controller.signal.aborted
-        ) {
+      ) {
         return;
       }
-
-      const hydrationResult = resolveRevenueHydrationResult({
-        filters,
-        from,
-        to,
-        summaryResult,
-        trendResult,
-      });
 
       if (hydrationResult.kind === 'summary-error') {
         const pageError = toPageErrorState(hydrationResult.summaryError);
@@ -304,25 +311,27 @@ export default function Revenue() {
             setSelectedPreset(previousSnapshot.filters.preset);
             setSelectedGranularity(previousSnapshot.filters.granularity);
           }
+          setTrendError(previousSnapshot.trendErrorMessage);
         } else {
           setBlockingError(pageError.message);
           setBlockingErrorKind(pageError.kind);
           setIsEmpty(false);
+          setTrendError(null);
         }
 
         return;
       }
 
-      const nextSnapshot: RevenueSnapshot = hydrationResult.snapshot;
+      const nextTrendErrorMessage = toTrendErrorMessage(hydrationResult.displayTrendError);
+      const nextSnapshot: RevenueSnapshot = {
+        ...hydrationResult.snapshot,
+        trendErrorMessage: nextTrendErrorMessage,
+      };
 
       snapshotRef.current = nextSnapshot;
       setSnapshot(nextSnapshot);
       setIsEmpty(hydrationResult.isEmpty);
-      setTrendError(
-        hydrationResult.trendError
-          ? toPageErrorState(hydrationResult.trendError).message
-          : null,
-      );
+      setTrendError(nextTrendErrorMessage);
     } catch (requestError) {
       if (
         !mountedRef.current
@@ -347,6 +356,7 @@ export default function Revenue() {
           setSelectedPreset(previousSnapshot.filters.preset);
           setSelectedGranularity(previousSnapshot.filters.granularity);
         }
+        setTrendError(previousSnapshot.trendErrorMessage);
       } else {
         setTrendError(null);
         setBlockingError(pageError.message);
