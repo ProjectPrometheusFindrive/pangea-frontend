@@ -631,7 +631,7 @@ export default function Home() {
         color: 'text-orange-600',
         icon: 'Signal',
         description: '단말 데이터 연동 예정',
-        onClick: () => handleIssueClick('단말 OFF'),
+        onClick: () => setShowPremiumModal(true),
         testId: 'home-issue-card-device-off',
       },
     ];
