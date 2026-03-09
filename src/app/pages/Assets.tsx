@@ -107,7 +107,7 @@ interface CreateFormState {
 interface UploadedFiles {
   vehicleRegistration: File | null;
   insurance: File | null;
-  loanSchedule: File | null;
+  loanSchedule: File[];
 }
 
 interface OcrSuggestion {
@@ -127,6 +127,7 @@ interface OcrDocConfig {
   docType: OcrDocType;
   label: string;
   required: boolean;
+  allowsMultiple?: boolean;
 }
 
 const DEFAULT_PAGE = 1;
@@ -174,6 +175,7 @@ const OCR_DOC_CONFIGS: OcrDocConfig[] = [
     docType: 'amortizationSchedule',
     label: '상환계획서',
     required: false,
+    allowsMultiple: true,
   },
 ];
 const OCR_ALLOWED_CONTENT_TYPES = new Set([
@@ -255,6 +257,22 @@ function resolveOcrContentType(file: File): string | null {
   }
 
   return null;
+}
+
+function getFilesForOcrDoc(uploadedFiles: UploadedFiles, docConfig: OcrDocConfig): File[] {
+  if (docConfig.key === 'loanSchedule') {
+    return uploadedFiles.loanSchedule;
+  }
+
+  const file = uploadedFiles[docConfig.key];
+  return file ? [file] : [];
+}
+
+function getOcrDocLabel(docConfig: OcrDocConfig, fileIndex: number, totalFiles: number): string {
+  if (!docConfig.allowsMultiple || totalFiles <= 1) {
+    return docConfig.label;
+  }
+  return `${docConfig.label} ${fileIndex + 1}`;
 }
 
 function toReadableFileSize(size: number): string {
@@ -918,7 +936,7 @@ export default function Assets() {
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFiles>({
     vehicleRegistration: null,
     insurance: null,
-    loanSchedule: null,
+    loanSchedule: [],
   });
   const [assets, setAssets] = useState<Asset[]>([]);
   const [totalCount, setTotalCount] = useState<number | null>(null);
@@ -1050,7 +1068,7 @@ export default function Assets() {
     setUploadedFiles({
       vehicleRegistration: null,
       insurance: null,
-      loanSchedule: null,
+      loanSchedule: [],
     });
   }, [abortOcrProcessing, resetOcrFeedback]);
 
@@ -1517,25 +1535,37 @@ export default function Assets() {
     });
   }, []);
 
-  const handleDocumentFileSelect = useCallback((fileKey: UploadedFileKey, file: File | null) => {
-    if (!file) {
+  const handleDocumentFileSelect = useCallback((fileKey: UploadedFileKey, selectedFiles: File | File[] | null) => {
+    const nextFiles = Array.isArray(selectedFiles)
+      ? selectedFiles
+      : selectedFiles
+        ? [selectedFiles]
+        : [];
+
+    if (nextFiles.length === 0) {
       return;
     }
 
     const matchedDocConfig = OCR_DOC_CONFIGS.find((item) => item.key === fileKey);
-    const docLabel = matchedDocConfig?.label ?? '문서';
-    const contentType = resolveOcrContentType(file);
-
-    if (!contentType) {
-      setCreateSaveError(`${docLabel}: 지원하지 않는 파일 형식입니다. PDF/JPG/PNG/WebP 파일을 사용해 주세요.`);
+    if (!matchedDocConfig) {
       return;
     }
 
-    if (file.size > OCR_MAX_FILE_SIZE_BYTES) {
-      setCreateSaveError(
-        `${docLabel}: 파일 크기가 너무 큽니다. 현재 ${toReadableFileSize(file.size)} / 최대 ${toReadableFileSize(OCR_MAX_FILE_SIZE_BYTES)}까지 허용됩니다.`,
-      );
-      return;
+    for (const [index, file] of nextFiles.entries()) {
+      const docLabel = getOcrDocLabel(matchedDocConfig, index, nextFiles.length);
+      const contentType = resolveOcrContentType(file);
+
+      if (!contentType) {
+        setCreateSaveError(`${docLabel}: Unsupported file type. Use PDF/JPG/PNG/WebP files.`);
+        return;
+      }
+
+      if (file.size > OCR_MAX_FILE_SIZE_BYTES) {
+        setCreateSaveError(
+          `${docLabel}: File is too large. Current ${toReadableFileSize(file.size)} / max ${toReadableFileSize(OCR_MAX_FILE_SIZE_BYTES)}.`,
+        );
+        return;
+      }
     }
 
     abortOcrProcessing();
@@ -1558,7 +1588,26 @@ export default function Assets() {
     });
     setOcrAppliedValues({});
 
-    setUploadedFiles((previous) => ({ ...previous, [fileKey]: file }));
+    setUploadedFiles((previous) => {
+      if (fileKey === 'loanSchedule') {
+        return {
+          ...previous,
+          loanSchedule: [...previous.loanSchedule, ...nextFiles],
+        };
+      }
+
+      if (fileKey === 'vehicleRegistration') {
+        return {
+          ...previous,
+          vehicleRegistration: nextFiles[0] ?? null,
+        };
+      }
+
+      return {
+        ...previous,
+        insurance: nextFiles[0] ?? null,
+      };
+    });
   }, [abortOcrProcessing, ocrAppliedValues]);
 
   const handleStartOcrExtraction = useCallback(async () => {
@@ -1614,98 +1663,106 @@ export default function Assets() {
 
     try {
       for (const docConfig of OCR_DOC_CONFIGS) {
-        const file = uploadedFiles[docConfig.key];
-        if (!file) {
+        const files = getFilesForOcrDoc(uploadedFiles, docConfig);
+        if (files.length === 0) {
           continue;
         }
 
-        try {
-          const resolvedContentType = resolveOcrContentType(file);
-          if (!resolvedContentType) {
-            throw new ApiError('UNSUPPORTED_MEDIA_TYPE', '지원하지 않는 파일 형식입니다.', {
-              status: 415,
-            });
-          }
+        for (const [fileIndex, file] of files.entries()) {
+          const docLabel = getOcrDocLabel(docConfig, fileIndex, files.length);
 
-          if (file.size > OCR_MAX_FILE_SIZE_BYTES) {
-            throw new ApiError('PAYLOAD_TOO_LARGE', 'OCR 파일 크기 제한을 초과했습니다.', {
-              status: 413,
-            });
-          }
+          try {
+            const resolvedContentType = resolveOcrContentType(file);
+            if (!resolvedContentType) {
+              throw new ApiError('UNSUPPORTED_MEDIA_TYPE', 'Unsupported file type.', {
+                status: 415,
+              });
+            }
 
-          setOcrProgressMessage(`${docConfig.label} 업로드 URL 생성 중...`);
-          const signedUpload = await signAssetUpload({
-            fileName: file.name,
-            contentType: resolvedContentType,
-            fileSize: file.size,
-            folder: `company/${companyId}/docs`,
-          }, { signal: controller.signal });
-          if (controller.signal.aborted || requestSequence !== ocrRequestSequenceRef.current) {
-            return;
-          }
+            if (file.size > OCR_MAX_FILE_SIZE_BYTES) {
+              throw new ApiError('PAYLOAD_TOO_LARGE', 'OCR file size limit exceeded.', {
+                status: 413,
+              });
+            }
 
-          const uploadContentType = signedUpload.contentType?.trim() || resolvedContentType;
-          setOcrProgressMessage(`${docConfig.label} 업로드 중...`);
-          await uploadFileToSignedUrl(
-            signedUpload.uploadUrl,
-            file,
-            uploadContentType,
-            { signal: controller.signal },
-          );
-          if (controller.signal.aborted || requestSequence !== ocrRequestSequenceRef.current) {
-            return;
-          }
+            setOcrProgressMessage(`${docLabel} upload URL requested...`);
+            const signedUpload = await signAssetUpload({
+              fileName: file.name,
+              contentType: resolvedContentType,
+              fileSize: file.size,
+              folder: `company/${companyId}/docs`,
+            }, { signal: controller.signal });
+            if (controller.signal.aborted || requestSequence !== ocrRequestSequenceRef.current) {
+              return;
+            }
 
-          setOcrProgressMessage(`${docConfig.label} OCR 작업 생성 중...`);
-          let jobPayload = await submitOcrExtractJob({
-            docType: docConfig.docType,
-            objectName: signedUpload.objectName,
-            sourceName: file.name,
-            contentType: uploadContentType,
-          }, { signal: controller.signal });
-          if (controller.signal.aborted || requestSequence !== ocrRequestSequenceRef.current) {
-            return;
-          }
-
-          if (jobPayload.status === 'queued' || jobPayload.status === 'running') {
-            jobPayload = await pollOcrJobUntilTerminal(
-              jobPayload.jobId,
-              docConfig.label,
-              controller,
-              requestSequence,
+            const uploadContentType = signedUpload.contentType?.trim() || resolvedContentType;
+            setOcrProgressMessage(`${docLabel} uploading...`);
+            await uploadFileToSignedUrl(
+              signedUpload.uploadUrl,
+              file,
+              uploadContentType,
+              { signal: controller.signal },
             );
-          }
+            if (controller.signal.aborted || requestSequence !== ocrRequestSequenceRef.current) {
+              return;
+            }
 
-          if (jobPayload.status === 'failed') {
-            const errorType = jobPayload.error?.type ?? 'SERVER_ERROR';
-            const errorMessage = jobPayload.error?.message ?? 'OCR 작업이 실패했습니다.';
-            throw new ApiError(errorType, errorMessage, {
-              status: jobPayload.error?.httpStatus,
-              payload: jobPayload,
+            setOcrProgressMessage(`${docLabel} OCR job requested...`);
+            let jobPayload = await submitOcrExtractJob({
+              docType: docConfig.docType,
+              objectName: signedUpload.objectName,
+              sourceName: file.name,
+              contentType: uploadContentType,
+            }, { signal: controller.signal });
+            if (controller.signal.aborted || requestSequence !== ocrRequestSequenceRef.current) {
+              return;
+            }
+
+            if (jobPayload.status === "queued" || jobPayload.status === "running") {
+              jobPayload = await pollOcrJobUntilTerminal(
+                jobPayload.jobId,
+                docLabel,
+                controller,
+                requestSequence,
+              );
+            }
+
+            if (jobPayload.status === "failed") {
+              const errorType = jobPayload.error?.type ?? 'SERVER_ERROR';
+              const errorMessage = jobPayload.error?.message ?? 'OCR job failed.';
+              throw new ApiError(errorType, errorMessage, {
+                status: jobPayload.error?.httpStatus,
+                payload: jobPayload,
+              });
+            }
+
+            extractedItems.push({
+              docType: docConfig.docType,
+              fields: Array.isArray(jobPayload.extractedFields) ? jobPayload.extractedFields : [],
             });
-          }
+            if (Array.isArray(jobPayload.warnings)) {
+              for (const warning of jobPayload.warnings) {
+                warnings.push(`[${docLabel}] ${warning.message}`);
+              }
+            }
+          } catch (error) {
+            if (controller.signal.aborted || requestSequence !== ocrRequestSequenceRef.current) {
+              return;
+            }
 
-          extractedItems.push({
-            docType: docConfig.docType,
-            fields: Array.isArray(jobPayload.extractedFields) ? jobPayload.extractedFields : [],
-          });
-          if (Array.isArray(jobPayload.warnings)) {
-            for (const warning of jobPayload.warnings) {
-              warnings.push(`[${docConfig.label}] ${warning.message}`);
+            const failureMessage = toOcrFailureMessage(error, docLabel);
+            warnings.push(failureMessage);
+            shouldEnableRetry = shouldEnableRetry || isRetryableOcrError(error);
+            if (docConfig.required) {
+              requiredDocumentFailureMessage = failureMessage;
+              break;
             }
           }
-        } catch (error) {
-          if (controller.signal.aborted || requestSequence !== ocrRequestSequenceRef.current) {
-            return;
-          }
+        }
 
-          const failureMessage = toOcrFailureMessage(error, docConfig.label);
-          warnings.push(failureMessage);
-          shouldEnableRetry = shouldEnableRetry || isRetryableOcrError(error);
-          if (docConfig.required) {
-            requiredDocumentFailureMessage = failureMessage;
-            break;
-          }
+        if (requiredDocumentFailureMessage) {
+          break;
         }
       }
     } finally {
@@ -2413,15 +2470,22 @@ export default function Assets() {
                         <input
                           type="file"
                           accept="image/*,application/pdf"
+                          multiple
                           onChange={(event) => {
-                            handleDocumentFileSelect('loanSchedule', event.target.files?.[0] ?? null);
+                            handleDocumentFileSelect('loanSchedule', Array.from(event.target.files ?? []));
                             event.target.value = '';
                           }}
                           className="hidden"
                         />
                       </label>
-                      {uploadedFiles.loanSchedule && (
-                        <p className="text-xs text-green-600 mt-2">✓ {uploadedFiles.loanSchedule.name}</p>
+                      {uploadedFiles.loanSchedule.length > 0 && (
+                        <div className="mt-2 space-y-1">
+                          {uploadedFiles.loanSchedule.map((file, index) => (
+                            <p key={`${file.name}-${file.lastModified}-${index}`} className="text-xs text-green-600">
+                              - {file.name}
+                            </p>
+                          ))}
+                        </div>
                       )}
                     </div>
 

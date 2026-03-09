@@ -47,6 +47,7 @@ import {
   deleteSettingsGeofence,
   listSettingsMembers,
   patchSettingsMemberRole,
+  patchSettingsMemberStatus,
   type SettingsCompanyProfile,
   type SettingsCompanyUpdateRequest,
   type SettingsGeofence,
@@ -1733,6 +1734,80 @@ export default function Settings() {
     });
   }, []);
 
+  const runMemberStatusSave = useCallback(async (memberId: string, status: 'approved' | 'rejected') => {
+    if (!canManageMemberRoles) {
+      return;
+    }
+
+    setSavingMemberId(memberId);
+    setMemberFieldErrors((prevErrors) => {
+      const nextErrors = { ...prevErrors };
+      delete nextErrors[memberId];
+      return nextErrors;
+    });
+    setMemberSaveError(null);
+    setMemberSaveSuccess(null);
+    setMemberRetryAction(null);
+
+    try {
+      const payload = status === 'approved'
+        ? { status: 'approved' as const }
+        : { status: 'rejected' as const };
+      const updatedMember = await patchSettingsMemberStatus(memberId, payload, {
+        companyId: settingsCompanyId ?? undefined,
+      });
+      setMembers((prevMembers) => prevMembers.map((member) => (
+        member.userId === memberId ? updatedMember : member
+      )));
+      setMemberRoleDrafts((prevDrafts) => {
+        const nextDrafts = { ...prevDrafts };
+        delete nextDrafts[memberId];
+        return nextDrafts;
+      });
+
+      const successMessage = status === 'approved'
+        ? '가입 대기 계정을 승인했습니다.'
+        : '가입 대기 계정을 거절했습니다.';
+      setMemberSaveSuccess(successMessage);
+      toast.success(successMessage);
+    } catch (error) {
+      if (error instanceof ApiError) {
+        if (error.status === 400) {
+          const mappedErrors = mapFieldErrors<'status'>(toErrorFieldEntries(error), {
+            status: 'status',
+          });
+          const fieldMessage = mappedErrors.status ?? error.message ?? '입력값을 확인해 주세요.';
+          setMemberFieldErrors((prevErrors) => ({
+            ...prevErrors,
+            [memberId]: fieldMessage,
+          }));
+          setMemberSaveError(fieldMessage);
+          return;
+        }
+        if (error.status === 403) {
+          setMemberSaveError('가입 승인 상태를 변경할 권한이 없습니다.');
+          return;
+        }
+        if (error.status === 404 || error.status === 409) {
+          setMemberSaveError(error.message || '멤버 상태가 변경되어 최신 목록을 다시 불러옵니다.');
+          void hydrateMembersOnly();
+          return;
+        }
+        if (isRetryableMutationError(error)) {
+          setMemberSaveError('일시적인 오류로 가입 승인 처리에 실패했습니다. 다시 시도해 주세요.');
+          setMemberRetryAction(() => () => {
+            void runMemberStatusSave(memberId, status);
+          });
+          return;
+        }
+      }
+
+      setMemberSaveError(toErrorMessage(error, '멤버 상태 변경에 실패했습니다.'));
+    } finally {
+      setSavingMemberId(null);
+    }
+  }, [canManageMemberRoles, hydrateMembersOnly, settingsCompanyId]);
+
   const openInvitationEditor = useCallback(() => {
     if (!canManageMemberRoles || isInvitationSaving || resendingInvitationId !== null) {
       return;
@@ -2097,6 +2172,11 @@ export default function Settings() {
 
   // 파일 업로드 처리
   const handleFileUpload = (file: File) => {
+    if (!canEditSettings) {
+      toast.error('설정 CSV 검증 권한이 없습니다.');
+      return;
+    }
+
     if (!file.name.endsWith('.csv')) {
       alert('CSV 파일만 업로드 가능합니다');
       return;
@@ -2135,6 +2215,9 @@ export default function Settings() {
   // 드래그앤드롭
   const handleDragOver = (event: React.DragEvent) => {
     event.preventDefault();
+    if (!canEditSettings) {
+      return;
+    }
     setIsDragging(true);
   };
 
@@ -2146,6 +2229,11 @@ export default function Settings() {
     event.preventDefault();
     setIsDragging(false);
 
+    if (!canEditSettings) {
+      toast.error('설정 CSV 검증 권한이 없습니다.');
+      return;
+    }
+
     const files = Array.from(event.dataTransfer.files);
     if (files.length > 0) {
       handleFileUpload(files[0]);
@@ -2153,6 +2241,12 @@ export default function Settings() {
   };
 
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    if (!canEditSettings) {
+      toast.error('설정 CSV 검증 권한이 없습니다.');
+      event.target.value = '';
+      return;
+    }
+
     const files = event.target.files;
     if (files && files.length > 0) {
       handleFileUpload(files[0]);
@@ -2160,6 +2254,11 @@ export default function Settings() {
   };
 
   const handleUploadClick = () => {
+    if (!canEditSettings) {
+      toast.error('설정 CSV 검증 권한이 없습니다.');
+      return;
+    }
+
     if (uploadResult && uploadResult.valid > 0) {
       toast.info(CSV_VALIDATION_ONLY_NOTICE);
       setUploadResult(null);
@@ -2418,6 +2517,11 @@ export default function Settings() {
                 </div>
               ) : (
                 <div className="rounded-xl bg-white p-6 shadow-sm">
+                  {!canEditSettings && (
+                    <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                      현재 계정은 설정 CSV 검증을 실행할 수 없어 템플릿 다운로드만 가능합니다.
+                    </div>
+                  )}
                   <div className="mb-4 flex items-center justify-between">
                     <h2 className="text-base font-semibold text-[#1e2939]">{uploadType === 'vehicles' ? '차량 자산 CSV 검증' : '대여 예약 CSV 검증'}</h2>
                     <div className="flex gap-2">
@@ -2432,7 +2536,8 @@ export default function Settings() {
                       <button
                         type="button"
                         onClick={handleUploadClick}
-                        className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 font-medium text-white hover:bg-blue-700"
+                        disabled={!canEditSettings}
+                        className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300"
                       >
                         <Upload className="h-4 w-4" />
                         {uploadResult && uploadResult.valid > 0 ? '다른 파일 검증' : '파일 선택'}
@@ -2445,6 +2550,7 @@ export default function Settings() {
                     type="file"
                     accept=".csv"
                     onChange={handleFileSelect}
+                    disabled={!canEditSettings}
                     className="hidden"
                   />
 
@@ -2453,8 +2559,10 @@ export default function Settings() {
                     onDragLeave={handleDragLeave}
                     onDrop={handleDrop}
                     onClick={handleUploadClick}
-                    className={`flex h-[300px] w-full cursor-pointer items-center justify-center rounded-lg border-2 border-dashed transition-colors ${
-                      isDragging
+                    className={`flex h-[300px] w-full items-center justify-center rounded-lg border-2 border-dashed transition-colors ${
+                      !canEditSettings
+                        ? 'cursor-not-allowed border-gray-200 bg-gray-100'
+                        : isDragging
                         ? 'border-blue-500 bg-blue-50'
                         : uploadResult
                           ? uploadResult.success
@@ -3190,6 +3298,7 @@ export default function Settings() {
                           && member.status === 'approved'
                           && (member.role === 'admin' || member.role === 'member')
                         );
+                        const canReviewPendingMember = canManageMemberRoles && member.status === 'pending';
 
                         return (
                           <tr key={member.userId} className="hover:bg-gray-50">
@@ -3242,9 +3351,33 @@ export default function Settings() {
                                   </button>
                                 </div>
                               ) : (
-                                <span className="text-xs text-gray-400">
+                                <span className={canReviewPendingMember ? 'hidden text-xs text-gray-400' : 'text-xs text-gray-400'}>
                                   {canEditRowRole ? '-' : '권한 변경 불가'}
                                 </span>
+                              )}
+                              {canReviewPendingMember && (
+                                <div className="space-x-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      void runMemberStatusSave(member.userId, 'approved');
+                                    }}
+                                    disabled={isRowSaving}
+                                    className="font-medium text-green-600 hover:text-green-800 disabled:cursor-not-allowed disabled:opacity-50"
+                                  >
+                                    {isRowSaving ? '처리 중...' : '승인'}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      void runMemberStatusSave(member.userId, 'rejected');
+                                    }}
+                                    disabled={isRowSaving}
+                                    className="font-medium text-red-600 hover:text-red-800 disabled:cursor-not-allowed disabled:opacity-50"
+                                  >
+                                    {isRowSaving ? '처리 중...' : '거절'}
+                                  </button>
+                                </div>
                               )}
                               {memberFieldErrors[member.userId] && (
                                 <p className="mt-1 text-xs text-red-600">{memberFieldErrors[member.userId]}</p>

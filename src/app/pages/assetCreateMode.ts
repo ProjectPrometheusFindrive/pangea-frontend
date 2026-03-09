@@ -13,7 +13,7 @@ interface CreateFormState {
 interface UploadedFilesState {
   vehicleRegistration: File | null;
   insurance: File | null;
-  loanSchedule: File | null;
+  loanSchedule: File[];
 }
 
 function hasTextInput(form: CreateFormState): boolean {
@@ -31,7 +31,7 @@ function hasSelectedFiles(files: UploadedFilesState): boolean {
   return (
     files.vehicleRegistration !== null
     || files.insurance !== null
-    || files.loanSchedule !== null
+    || files.loanSchedule.length > 0
   );
 }
 

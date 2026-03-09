@@ -26,8 +26,9 @@ const AGREEMENT_DEFINITIONS: AgreementDefinition[] = [
     title: '개인정보 처리방침 동의',
     required: true,
     body: [
-      '회원가입 및 서비스 운영을 위해 이름, 연락처, 이메일, 회사정보 등 최소한의 정보를 수집합니다.',
-      '수집된 정보는 법령 및 내부 보안정책에 따라 보호되며, 목적 달성 후 관련 정책에 따라 파기됩니다.',
+      '서비스 회원가입 및 관리, 본인 확인, 계약 체결과 유지, 요금 정산을 위해 이름, 휴대전화번호, 이메일, 회사명, 사업자등록번호 등 필수 정보를 수집합니다.',
+      '차량 배차, 예약 운영, 고객 상담, 세금계산서 발행, 장애 대응을 위해 수집된 정보를 내부 운영 시스템과 고객 지원 채널에서 처리할 수 있습니다.',
+      '관련 법령 또는 회사 정책에서 정한 보관기간이 끝나면 지체 없이 파기하며, 분쟁 대응이나 법적 의무가 있는 경우에만 필요한 범위로 별도 보관합니다.',
     ],
   },
   {
@@ -35,8 +36,9 @@ const AGREEMENT_DEFINITIONS: AgreementDefinition[] = [
     title: '위치정보 이용약관 동의',
     required: true,
     body: [
-      '차량/단말 기반 서비스 제공을 위해 위치정보가 처리될 수 있습니다.',
-      '이용자는 관련 법령에서 정한 범위 내에서 위치정보 제공 동의를 철회할 수 있습니다.',
+      '차량 관제, 도난·분실 대응, 운행기록 분석, 사고 대응, 반납 위치 확인, 운영 품질 개선을 위해 차량 및 단말의 위치정보가 처리될 수 있습니다.',
+      '수집된 위치정보는 서비스 제공 목적 범위 안에서만 사용되며, 법령상 보존 의무 또는 고객 요청이 없는 경우 목적 달성 후 안전하게 삭제합니다.',
+      '이용자는 관계 법령이 허용하는 범위에서 위치정보 제공 동의를 철회하거나 열람을 요청할 수 있습니다.',
     ],
   },
   {
@@ -44,8 +46,9 @@ const AGREEMENT_DEFINITIONS: AgreementDefinition[] = [
     title: '마케팅 정보 수신 동의',
     required: false,
     body: [
-      '이벤트, 프로모션, 신규 기능 안내를 위한 메시지/이메일 수신 동의 항목입니다.',
-      '선택 약관이며, 동의하지 않아도 서비스 이용이 가능합니다.',
+      '프로모션, 이벤트, 신규 기능, 제휴 혜택, 운영 노하우, 상품 추천 안내를 이메일 또는 문자메시지로 받아보는 데 대한 동의입니다.',
+      '마케팅 정보 수신 동의 시 서비스와 관련된 개별 안내 채널의 마케팅 메시지 수신에도 함께 동의한 것으로 처리될 수 있습니다.',
+      '선택 항목이며 동의하지 않아도 서비스 이용은 가능하고, 수신 후에도 언제든지 수신 동의를 철회할 수 있습니다.',
     ],
   },
 ];
@@ -65,9 +68,9 @@ export default function TermsAgreement() {
     toEditableAgreements(loadSignupAgreementState()),
   );
 
-  const allRequiredChecked = useMemo(
-    () => agreements.privacy && agreements.location,
-    [agreements.privacy, agreements.location],
+  const allAgreed = useMemo(
+    () => agreements.privacy && agreements.location && agreements.marketing,
+    [agreements.location, agreements.marketing, agreements.privacy],
   );
 
   const canProceed = useMemo(
@@ -82,13 +85,14 @@ export default function TermsAgreement() {
     }));
   };
 
-  const toggleRequiredAll = () => {
+  const toggleAllAgreements = () => {
     setAgreements((previous) => {
-      const shouldCheck = !(previous.privacy && previous.location);
+      const shouldCheck = !(previous.privacy && previous.location && previous.marketing);
       return {
         ...previous,
         privacy: shouldCheck,
         location: shouldCheck,
+        marketing: shouldCheck,
       };
     });
   };
@@ -136,22 +140,15 @@ export default function TermsAgreement() {
             <div>
               <p className="text-sm font-medium text-blue-600">Step 1</p>
               <h2 className="text-2xl font-bold text-slate-900">약관 동의</h2>
-              <p className="mt-1 text-sm text-slate-500">필수 약관에 동의해야 다음 단계로 진행할 수 있습니다.</p>
+              <p className="mt-1 text-sm text-slate-500">필수 약관에 동의해야 다음 단계로 진행할 수 있으며, 전체 동의를 선택하면 마케팅 수신 동의까지 함께 적용됩니다.</p>
             </div>
             <div className="flex flex-wrap gap-2">
               <button
                 type="button"
-                onClick={toggleRequiredAll}
+                onClick={toggleAllAgreements}
                 className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-700 transition hover:bg-blue-100"
               >
-                {allRequiredChecked ? '필수 전체 해제' : '필수 전체 동의'}
-              </button>
-              <button
-                type="button"
-                onClick={() => toggleAgreement('marketing')}
-                className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-              >
-                선택 약관 {agreements.marketing ? '해제' : '동의'}
+                {allAgreed ? '전체 동의 해제' : '전체 동의'}
               </button>
             </div>
           </header>

@@ -11,6 +11,62 @@ interface LoginUiError {
   canRetry: boolean;
 }
 
+function LoginBrandIllustration() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 360 220"
+      className="h-auto w-full max-w-[360px]"
+    >
+      <defs>
+        <linearGradient id="login-road" x1="0%" y1="0%" x2="100%" y2="0%">
+          <stop offset="0%" stopColor="rgba(255,255,255,0.14)" />
+          <stop offset="100%" stopColor="rgba(255,255,255,0.28)" />
+        </linearGradient>
+      </defs>
+
+      <path
+        d="M24 162C88 150 188 148 336 162L336 198C228 184 122 184 24 198Z"
+        fill="url(#login-road)"
+      />
+      <path d="M38 177L56 175" stroke="rgba(255,255,255,0.24)" strokeWidth="3" strokeLinecap="round" />
+      <path d="M104 171L122 171" stroke="rgba(255,255,255,0.24)" strokeWidth="3" strokeLinecap="round" />
+      <path d="M170 170L188 171" stroke="rgba(255,255,255,0.24)" strokeWidth="3" strokeLinecap="round" />
+      <path d="M236 171L254 173" stroke="rgba(255,255,255,0.24)" strokeWidth="3" strokeLinecap="round" />
+      <path d="M302 174L320 176" stroke="rgba(255,255,255,0.24)" strokeWidth="3" strokeLinecap="round" />
+
+      <g transform="translate(92 98)">
+        <rect x="0" y="26" width="116" height="42" rx="10" fill="#f5f7fb" />
+        <path d="M18 26L34 8H86L102 26Z" fill="#d9e2f2" />
+        <rect x="18" y="13" width="30" height="22" rx="4" fill="#9eb5dc" />
+        <rect x="56" y="13" width="30" height="22" rx="4" fill="#9eb5dc" />
+        <circle cx="30" cy="70" r="17" fill="#45618d" />
+        <circle cx="30" cy="70" r="8" fill="#243851" />
+        <circle cx="92" cy="70" r="17" fill="#45618d" />
+        <circle cx="92" cy="70" r="8" fill="#243851" />
+        <rect x="2" y="42" width="10" height="7" rx="3.5" fill="#ff6b6b" />
+        <rect x="104" y="42" width="10" height="7" rx="3.5" fill="#f6c344" />
+      </g>
+
+      <g transform="translate(60 76)">
+        <circle cx="0" cy="0" r="8" fill="#9fbaf7" opacity="0.22" />
+        <path d="M0 8V28" stroke="rgba(255,255,255,0.28)" strokeWidth="2.5" strokeLinecap="round" />
+        <circle cx="0" cy="0" r="4" fill="#f6c344" />
+      </g>
+      <g transform="translate(228 54)">
+        <circle cx="0" cy="0" r="12" fill="#9fbaf7" opacity="0.22" />
+        <path d="M0 12V42" stroke="rgba(255,255,255,0.28)" strokeWidth="2.5" strokeLinecap="round" />
+        <circle cx="0" cy="0" r="6" fill="#f5f7fb" />
+      </g>
+      <g transform="translate(276 84)">
+        <circle cx="0" cy="0" r="10" fill="#9fbaf7" opacity="0.22" />
+        <path d="M0 10V32" stroke="rgba(255,255,255,0.28)" strokeWidth="2.5" strokeLinecap="round" />
+        <circle cx="0" cy="0" r="5" fill="#6fd4a6" />
+      </g>
+    </svg>
+  );
+}
+
 function normalizeReturnUrl(returnUrl: string | null): string {
   if (!returnUrl || !returnUrl.startsWith('/') || returnUrl.startsWith('//')) {
     return '/';
@@ -147,86 +203,123 @@ export default function Login() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-100 via-blue-50 to-indigo-100 px-4 py-10">
-      <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-7 shadow-xl">
-        <div className="mb-6">
-          <p className="text-sm font-medium text-blue-600">Pangea Console</p>
-          <h1 className="mt-1 text-2xl font-bold text-slate-900">로그인</h1>
-          <p className="mt-2 text-sm text-slate-500">
-            {returnUrl === '/' ? '로그인 후 대시보드로 이동합니다.' : '로그인 후 요청한 페이지로 이동합니다.'}
-          </p>
+    <div
+      data-testid="login-shell"
+      className="min-h-screen bg-[#eef2f6] lg:grid lg:grid-cols-[minmax(0,1.05fr)_minmax(420px,0.95fr)]"
+    >
+      <section
+        data-testid="login-brand-panel"
+        className="relative overflow-hidden bg-gradient-to-br from-[#0f56dd] via-[#1f4bb2] to-[#13265d] px-6 py-10 text-white sm:px-10 lg:flex lg:min-h-screen lg:items-center lg:px-16"
+      >
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_bottom,_rgba(255,255,255,0.08),_transparent_44%)]" />
+        <div className="relative mx-auto flex w-full max-w-[520px] flex-col items-center text-center lg:items-start lg:text-left">
+          <div>
+            <h1 className="text-5xl font-bold tracking-tight sm:text-6xl">Pangea</h1>
+            <p className="mt-3 text-base font-medium text-white/80 sm:text-lg">
+              차량 관리의 새로운 기준
+            </p>
+          </div>
+          <div className="mt-8 w-full lg:mt-14">
+            <LoginBrandIllustration />
+          </div>
         </div>
+      </section>
 
-        <form className="space-y-4" onSubmit={handleLogin}>
-          <div>
-            <label htmlFor="userId" className="mb-1 block text-sm font-medium text-slate-700">
-              아이디
-            </label>
-            <input
-              id="userId"
-              data-testid="login-user-id"
-              type="text"
-              value={userId}
-              onChange={(event) => setUserId(event.target.value)}
-              autoComplete="username"
-              className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-              disabled={isBusy}
-            />
+      <section
+        data-testid="login-form-panel"
+        className="flex min-h-[48vh] items-center justify-center px-4 py-8 sm:px-6 lg:min-h-screen lg:px-10"
+      >
+        <div className="w-full max-w-[440px] rounded-[32px] border border-white/80 bg-white/95 p-6 shadow-[0_24px_80px_rgba(15,23,42,0.12)] backdrop-blur sm:p-8">
+          <div className="text-center">
+            <h2 className="text-3xl font-bold text-slate-950">로그인</h2>
+            <p className="mt-3 text-sm text-slate-500">
+              {returnUrl === '/' ? '로그인 후 대시보드로 이동합니다.' : '로그인 후 요청한 페이지로 이동합니다.'}
+            </p>
           </div>
 
-          <div>
-            <label htmlFor="password" className="mb-1 block text-sm font-medium text-slate-700">
-              비밀번호
-            </label>
-            <input
-              id="password"
-              data-testid="login-password"
-              type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              autoComplete="current-password"
-              className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+          <form className="mt-8 space-y-4" onSubmit={handleLogin}>
+            <div>
+              <label htmlFor="userId" className="mb-2 block text-sm font-semibold text-slate-700">
+                아이디
+              </label>
+              <input
+                id="userId"
+                data-testid="login-user-id"
+                type="text"
+                value={userId}
+                onChange={(event) => setUserId(event.target.value)}
+                autoComplete="username"
+                placeholder="아이디"
+                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-100"
+                disabled={isBusy}
+              />
+            </div>
+
+            <div>
+              <label htmlFor="password" className="mb-2 block text-sm font-semibold text-slate-700">
+                비밀번호
+              </label>
+              <input
+                id="password"
+                data-testid="login-password"
+                type="password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                autoComplete="current-password"
+                placeholder="비밀번호"
+                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-100"
+                disabled={isBusy}
+              />
+            </div>
+
+            {errorMessage && (
+              <div data-testid="login-error" className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                {errorMessage}
+              </div>
+            )}
+
+            <button
+              type="submit"
+              data-testid="login-submit"
               disabled={isBusy}
-            />
+              className="flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-[#0f56dd] to-[#2247b9] px-4 py-3 text-sm font-semibold text-white shadow-[0_12px_24px_rgba(15,86,221,0.24)] transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isBusy && <Loader2 className="h-4 w-4 animate-spin" />}
+              로그인
+            </button>
+          </form>
+
+          <div className="mt-6 flex items-center gap-4 text-xs text-slate-400">
+            <div className="h-px flex-1 bg-slate-200" />
+            <span>또는</span>
+            <div className="h-px flex-1 bg-slate-200" />
           </div>
 
-          {errorMessage && (
-            <div data-testid="login-error" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-              {errorMessage}
+          <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
+            <Link
+              to="/terms"
+              className="inline-flex items-center justify-center rounded-2xl bg-[#e9eef9] px-5 py-3 text-sm font-semibold text-[#2247b9] transition hover:bg-[#dfe8fb]"
+            >
+              회원가입
+            </Link>
+          </div>
+
+          {uiError?.canRetry && (
+            <div className="mt-4 flex justify-center">
+              <button
+                type="button"
+                data-testid="login-retry"
+                onClick={handleRetry}
+                disabled={isBusy}
+                className="inline-flex items-center gap-1 text-sm font-medium text-blue-600 transition hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <RefreshCw className="h-4 w-4" />
+                다시 시도
+              </button>
             </div>
           )}
-
-          <button
-            type="submit"
-            data-testid="login-submit"
-            disabled={isBusy}
-            className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {isBusy && <Loader2 className="h-4 w-4 animate-spin" />}
-            로그인
-          </button>
-        </form>
-
-        <div className="mt-4 border-t border-slate-200 pt-4 text-sm text-slate-600">
-          계정이 없나요?{' '}
-          <Link to="/terms" className="font-semibold text-blue-600 transition hover:text-blue-700">
-            회원가입
-          </Link>
         </div>
-
-        {uiError?.canRetry && (
-          <button
-            type="button"
-            data-testid="login-retry"
-            onClick={handleRetry}
-            disabled={isBusy}
-            className="mt-3 inline-flex items-center gap-1 text-sm font-medium text-blue-600 transition hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <RefreshCw className="h-4 w-4" />
-            다시 시도
-          </button>
-        )}
-      </div>
+      </section>
     </div>
   );
 }
