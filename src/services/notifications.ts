@@ -1,4 +1,5 @@
 import { ApiError, apiClient } from './api';
+import { resolveNotificationPath } from './notificationNavigation.js';
 
 export type NotificationLevel = 'urgent' | 'warning' | 'info';
 
@@ -107,26 +108,6 @@ function translateNotificationText(
 ): string {
   return translations[value] ?? value;
 }
-
-function toNotificationPath(value: unknown): string {
-  const normalizedPath = toText(value);
-
-  if (!normalizedPath) {
-    return '/action-required';
-  }
-
-  if (normalizedPath.startsWith('/')) {
-    return normalizedPath;
-  }
-
-  try {
-    const parsedUrl = new URL(normalizedPath);
-    return `${parsedUrl.pathname}${parsedUrl.search}${parsedUrl.hash}` || '/action-required';
-  } catch {
-    return '/action-required';
-  }
-}
-
 function toNotificationLevel(value: unknown): NotificationLevel {
   const normalizedValue = toText(value).toLowerCase();
 
@@ -223,14 +204,7 @@ function normalizeNotification(payload: unknown, index: number): NotificationIte
       ?? payload.time,
     new Date().toISOString(),
   );
-  const path = toNotificationPath(
-    payload.path
-      ?? payload.route
-      ?? payload.link
-      ?? payload.url
-      ?? payload.actionUrl
-      ?? payload.deepLink,
-  );
+  const path = resolveNotificationPath(payload);
 
   const readAtValue = payload.readAt;
   const hasReadAt = (
