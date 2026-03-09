@@ -69,6 +69,7 @@ import {
   upsertPendingInvitation,
   validateInvitationDraft,
 } from './settingsInvitations';
+import { canAccessBulkOcr } from './settingsBulkOcr';
 
 type TabType = 'bulk' | 'company' | 'geofence' | 'accounts';
 type UploadType = 'vehicles' | 'reservations' | 'ocr';
@@ -624,7 +625,9 @@ export default function Settings() {
   const { refreshCompany } = useCompany();
 
   const canEditSettings = canPerformAction(ACTION_PERMISSIONS.settingsWrite);
+  const canWriteAssets = canPerformAction(ACTION_PERMISSIONS.assetsWrite);
   const canManageMemberRoles = canPerformAction(ACTION_PERMISSIONS.settingsMembersWrite);
+  const canUseBulkOcr = canAccessBulkOcr({ canEditSettings, canWriteAssets });
   const settingsCompanyId = useMemo(
     () => resolveSettingsCompanyScope(searchParams.get('companyId'), user?.companyId),
     [searchParams, user?.companyId],
@@ -764,8 +767,8 @@ export default function Settings() {
   }, []);
 
   const handleBulkOcrFileSelection = useCallback(async (files: File[]) => {
-    if (!canEditSettings) {
-      toast.error('설정 수정 권한이 없습니다.');
+    if (!canUseBulkOcr) {
+      toast.error('차량 자산 등록 권한이 없습니다.');
       return;
     }
     if (files.length === 0 || isBulkOcrProcessing) {
@@ -905,7 +908,7 @@ export default function Settings() {
         toast.success(`일괄 OCR 등록 완료: ${successCount}건 성공`);
       }
     }
-  }, [canEditSettings, isBulkOcrProcessing, pollBulkOcrJobUntilTerminal, refreshCurrentDataCounts, user?.companyId]);
+  }, [canUseBulkOcr, isBulkOcrProcessing, pollBulkOcrJobUntilTerminal, refreshCurrentDataCounts, user?.companyId]);
 
   const requestSettingsHydration = useCallback(async (signal: AbortSignal): Promise<SettingsHydrationPayload> => {
     const [companyPayload, geofencesPayload, membersPayload, invitationsResult] = await Promise.all([
