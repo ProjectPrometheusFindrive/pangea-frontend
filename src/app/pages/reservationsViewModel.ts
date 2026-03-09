@@ -108,7 +108,8 @@ function toVehicleAssetRow(row: unknown): VehicleAsset | null {
 
   const vehicleNumber = toStringValue(row.vehicleNumber)
     ?? toStringValue(row.plateNumber)
-    ?? toStringValue(row.plate);
+    ?? toStringValue(row.plate)
+    ?? toStringValue(row.vin);
   if (!vehicleNumber) {
     return null;
   }

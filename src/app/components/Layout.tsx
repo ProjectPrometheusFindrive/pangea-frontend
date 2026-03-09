@@ -9,6 +9,7 @@ import {
   markAllNotificationsAsRead,
   type NotificationItem,
 } from '../../services/notifications';
+import { NOTIFICATIONS_ROUTE } from '../../services/notificationNavigation.js';
 import { postWithdraw } from '../../services/auth';
 import { useAuth } from '../context/AuthContext';
 import { useAuthorization } from '../context/AuthorizationContext';
@@ -567,7 +568,7 @@ export function Layout({ children, title }: LayoutProps) {
                     <div className="px-4 py-3 border-t border-gray-200 bg-gray-50">
                       <button
                         onClick={() => {
-                          navigateWithRouteGuard('/action-required');
+                          navigateWithRouteGuard(NOTIFICATIONS_ROUTE);
                           setShowNotifications(false);
                         }}
                         className="w-full text-sm text-blue-600 hover:text-blue-700 font-medium"

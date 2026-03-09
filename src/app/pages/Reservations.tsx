@@ -111,6 +111,12 @@ function toCurrencyDisplayFromInput(value: string): string {
   return toCurrencyValue(value);
 }
 
+function toCurrencyNumberFromInput(value: string): number {
+  const numericText = value.replace(/[^\d.-]/g, '');
+  const numericValue = Number(numericText);
+  return Number.isFinite(numericValue) ? numericValue : 0;
+}
+
 function toErrorFieldEntries(error: ApiError): Array<{ name: string; reason: string }> {
   const entries: Array<{ name: string; reason: string }> = [];
 
@@ -240,6 +246,64 @@ function areIssueListsEqual(left: string[] | undefined, right: string[] | undefi
     return false;
   }
   return leftList.every((item, index) => item === rightList[index]);
+}
+
+const TERMINAL_CONTRACT_STATUSES = new Set(['완료']);
+
+function normalizeReservationContractStatus(value: string | null): string | null {
+  if (!value) {
+    return null;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) {
+    return null;
+  }
+  if (normalized === 'reservation' || normalized === 'reserved' || normalized === '예약' || normalized === '예약중') {
+    return '예약중';
+  }
+  if (normalized === 'rental' || normalized === 'in_use' || normalized === '대여중') {
+    return '대여중';
+  }
+  if (normalized === 'return' || normalized === 'returned' || normalized === '반납' || normalized === '반납완료' || normalized === '완료') {
+    return '완료';
+  }
+  return value.trim();
+}
+
+export function canReportAccidentForReservation(reservation: Reservation): boolean {
+  const currentContractStatus = normalizeReservationContractStatus(reservation.contractStatus ?? null);
+  if (currentContractStatus && TERMINAL_CONTRACT_STATUSES.has(currentContractStatus)) {
+    return false;
+  }
+  return reservation.type !== 'return';
+}
+
+function getReservationStartTimestamp(reservation: Reservation): number | null {
+  if (typeof reservation.scheduledStartAt === 'string' && reservation.scheduledStartAt.trim()) {
+    const parsed = Date.parse(reservation.scheduledStartAt);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  if (typeof reservation.startDateFull === 'string' && reservation.startDateFull.trim()) {
+    const parsed = Date.parse(reservation.startDateFull);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  return Number.isFinite(reservation.startDate) ? reservation.startDate : null;
+}
+
+function canStartReservationNow(reservation: Reservation, now = Date.now()): boolean {
+  if (reservation.type !== 'reservation') {
+    return false;
+  }
+  const startTimestamp = getReservationStartTimestamp(reservation);
+  if (startTimestamp === null) {
+    return true;
+  }
+  return startTimestamp <= now;
 }
 
 function applySyncedPaymentStatusToReservation(
@@ -570,7 +634,12 @@ function toReservationRow(row: unknown, index: number): Reservation | null {
   }
 
   const vehicleNumber = toStringValue(row.vehicleNumber) ?? toStringValue(row.plateNumber) ?? toStringValue(row.plate);
-  if (!vehicleNumber) {
+  const fallbackVehicleNumber = vehicleNumber
+    ?? toStringValue(row.vin)
+    ?? toStringValue(row.reservationId)
+    ?? toStringValue(row.rentalId)
+    ?? toStringValue(row.id);
+  if (!fallbackVehicleNumber) {
     return null;
   }
 
@@ -590,19 +659,24 @@ function toReservationRow(row: unknown, index: number): Reservation | null {
   const endDateLabel = normalizeDateParam(toStringValue(endSource)) ?? toDateLabelFromOffset(endDateOffset);
   const issues = normalizeIssues(row.issues);
   const accidentReported = row.accidentReported === true || toStringValue(row.accidentReported)?.toLowerCase() === 'true';
+  const contractStatus = normalizeReservationContractStatus(
+    toStringValue(row.contractStatus) ?? toStringValue(row.status) ?? toStringValue(row.type),
+  );
   if (accidentReported && !issues.includes('사고 접수')) {
     issues.unshift('사고 접수');
   }
 
   return {
     id: reservationId,
-    vehicleNumber,
+    vehicleNumber: fallbackVehicleNumber,
     customer,
     startDate: startDateOffset,
     endDate: endDateOffset,
-    type: normalizeReservationType(
-      toStringValue(row.type) ?? toStringValue(row.contractStatus) ?? toStringValue(row.status),
-    ),
+    contractStatus: contractStatus ?? undefined,
+    type: normalizeReservationType(contractStatus ?? toStringValue(row.type) ?? toStringValue(row.status)),
+    scheduledStartAt: toStringValue(startSource) ?? undefined,
+    contractStatus: contractStatus ?? undefined,
+    type: normalizeReservationType(contractStatus ?? toStringValue(row.type) ?? toStringValue(row.status)),
     issues,
     phone: (
       toStringValue(row.phone)
@@ -1394,6 +1468,9 @@ export default function Reservations() {
       customer: formValues.customerName.trim(),
       startDate: Math.min(startDateOffset, endDateOffset),
       endDate: Math.max(startDateOffset, endDateOffset),
+      contractStatus: '예약중',
+      scheduledStartAt: startAt,
+      contractStatus: '예약중',
       type: 'reservation',
       issues: [],
       phone: formValues.customerPhone.trim(),
@@ -1416,6 +1493,10 @@ export default function Reservations() {
         plate: formValues.selectedVehicle,
         customerName: formValues.customerName.trim(),
         phone: formValues.customerPhone.trim(),
+        paymentMethod: formValues.paymentMethod,
+        paymentStatus: formValues.paymentStatus,
+        amount: toCurrencyNumberFromInput(formValues.amount),
+        deposit: toCurrencyNumberFromInput(formValues.deposit),
         memo: [
           `pickup=${formValues.pickupLocation.trim()}`,
           `return=${formValues.returnLocation.trim()}`,
@@ -1484,6 +1565,10 @@ export default function Reservations() {
     if (!selectedReservation || selectedReservation.type !== 'reservation' || activeReservationAction) {
       return;
     }
+    if (!canStartReservationNow(selectedReservation)) {
+      setReservationActionError('예약 시작 시각 이후에만 차량 인수 처리가 가능합니다.');
+      return;
+    }
 
     setActiveReservationAction('start');
     setReservationActionError(null);
@@ -1495,6 +1580,7 @@ export default function Reservations() {
       });
       const fallbackReservation: Reservation = {
         ...selectedReservation,
+        contractStatus: '대여중',
         type: 'rental',
       };
       const updatedReservation = toReservationDetail(payload, fallbackReservation);
@@ -1564,7 +1650,7 @@ export default function Reservations() {
   ]);
 
   const handleCancelReservation = useCallback(async () => {
-    if (!canWriteReservations) {
+    if (!canTransitionReservations) {
       setReservationActionError('예약 취소 권한이 없습니다. 관리자에게 권한을 요청해 주세요.');
       return;
     }
@@ -1623,7 +1709,7 @@ export default function Reservations() {
     }
   }, [
     activeReservationAction,
-    canWriteReservations,
+    canTransitionReservations,
     closeReservationDetail,
     hydrateReservationDetail,
     refreshReservationsAfterMutation,
@@ -1667,6 +1753,7 @@ export default function Reservations() {
       });
       const fallbackReservation: Reservation = {
         ...selectedReservation,
+        contractStatus: '완료',
         type: 'return',
       };
       const updatedReservation = toReservationDetail(payload, fallbackReservation);
@@ -2069,8 +2156,10 @@ export default function Reservations() {
           {/* 차량 필터 영역 */}
           <div className="flex items-center gap-3 px-3 py-2 bg-gray-50 border-b border-gray-200 shrink-0">
             <div className="flex items-center gap-2">
-              <label className="text-xs font-semibold text-gray-600">차종:</label>
+              <label htmlFor="reservations-model-filter" className="text-xs font-semibold text-gray-600">차종:</label>
               <select
+                id="reservations-model-filter"
+                name="modelFilter"
                 value={modelFilter}
                 onChange={(e) => setModelFilter(e.target.value)}
                 className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
@@ -2083,8 +2172,10 @@ export default function Reservations() {
             </div>
             
             <div className="flex items-center gap-2">
-              <label className="text-xs font-semibold text-gray-600">차량번호:</label>
+              <label htmlFor="reservations-vehicle-search-query" className="text-xs font-semibold text-gray-600">차량번호:</label>
               <input
+                id="reservations-vehicle-search-query"
+                name="vehicleSearchQuery"
                 type="text"
                 placeholder="차량번호 검색"
                 value={vehicleSearchQuery}
@@ -2579,8 +2670,13 @@ export default function Reservations() {
                   차량 자산 상세보기
                 </button>
                 <button
-                  onClick={() => setShowAccidentModal(true)}
-                  disabled={!canWriteReservations}
+                  onClick={() => {
+                    if (!canReportAccidentForReservation(selectedReservation)) {
+                      return;
+                    }
+                    setShowAccidentModal(true);
+                  }}
+                  disabled={!canWriteReservations || !canReportAccidentForReservation(selectedReservation)}
                   className="flex-1 min-w-[200px] px-4 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   사고 등록
@@ -2598,7 +2694,7 @@ export default function Reservations() {
                 >
                   이 차량의 조치항목 보기
                 </button>
-                {selectedReservation.type === 'reservation' && canTransitionReservations && (
+                {selectedReservation.type === 'reservation' && canTransitionReservations && canStartReservationNow(selectedReservation) && (
                   <button
                     onClick={() => {
                       void handleStartReservation();
@@ -2610,13 +2706,13 @@ export default function Reservations() {
                     {activeReservationAction === 'start' ? '처리 중...' : '차량 인수 처리'}
                   </button>
                 )}
-                {selectedReservation.type === 'reservation' && (
+                {selectedReservation.type === 'reservation' && canTransitionReservations && (
                   <button
                     onClick={() => {
                       void handleCancelReservation();
                     }}
                     data-testid="reservation-cancel-button"
-                    disabled={!canWriteReservations || activeReservationAction !== null}
+                    disabled={!canTransitionReservations || activeReservationAction !== null}
                     className="flex-1 min-w-[200px] px-4 py-3 bg-gray-600 text-white rounded-lg hover:bg-gray-700 font-medium disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     {activeReservationAction === 'cancel' ? '처리 중...' : '예약 취소'}
