@@ -140,7 +140,7 @@ test('reservation view model keeps all asset rows and real models when reservati
   assert.equal(idleVehicle?.status, '가용');
 });
 
-test('reservation view model keeps completed reservations in payment sync targets', async () => {
+test('reservation view model keeps completed reservations out of list payment sync targets', async () => {
   const module = await viteServer.ssrLoadModule('/src/app/pages/reservationsViewModel.ts');
 
   const targets = module.buildPaymentSyncTargets([
@@ -171,6 +171,48 @@ test('reservation view model keeps completed reservations in payment sync target
       paymentStatus: '완료',
     },
   ]);
+
+  assert.deepEqual(targets, [
+    {
+      reservationId: 'R-1',
+      fallbackStatus: '대기',
+    },
+  ]);
+});
+
+test('reservation view model adds the selected completed reservation back for detail payment sync', async () => {
+  const module = await viteServer.ssrLoadModule('/src/app/pages/reservationsViewModel.ts');
+
+  const completedReservation = {
+    id: 'R-2',
+    vehicleNumber: '34나5678',
+    customer: '박고객',
+    startDate: 2,
+    endDate: 3,
+    type: 'return',
+    phone: '010-3333-4444',
+    paymentMethod: '카드',
+    amount: '180,000원',
+    deposit: '30,000원',
+    paymentStatus: '완료',
+  };
+
+  const targets = module.buildPaymentSyncTargets([
+    {
+      id: 'R-1',
+      vehicleNumber: '12가3456',
+      customer: '김고객',
+      startDate: 0,
+      endDate: 1,
+      type: 'reservation',
+      phone: '010-1111-2222',
+      paymentMethod: '카드',
+      amount: '250,000원',
+      deposit: '50,000원',
+      paymentStatus: '대기',
+    },
+    completedReservation,
+  ], completedReservation);
 
   assert.deepEqual(targets, [
     {
