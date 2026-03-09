@@ -146,6 +146,7 @@ const BULK_OCR_MAX_FILE_SIZE_BYTES = 25 * 1024 * 1024;
 const BULK_OCR_POLL_INTERVAL_MS = 1000;
 const BULK_OCR_POLL_TIMEOUT_MS = 90_000;
 const INVALID_COMPANY_IDS = new Set(['0000000000', '__global__', 'company-local', 'null', 'none']);
+const CSV_VALIDATION_ONLY_NOTICE = '현재는 CSV 검증만 지원합니다. 저장은 지원되지 않으니 검증 결과를 확인한 뒤 다른 등록 경로를 이용해 주세요.';
 
 const DEFAULT_COMPANY_FORM_STATE: CompanyFormState = {
   name: '',
@@ -2160,9 +2161,10 @@ export default function Settings() {
 
   const handleUploadClick = () => {
     if (uploadResult && uploadResult.valid > 0) {
-      alert(`${uploadResult.valid}건의 데이터가 업로드되었습니다!`);
+      toast.info(CSV_VALIDATION_ONLY_NOTICE);
       setUploadResult(null);
       setPreviewData([]);
+      fileInputRef.current?.click();
       return;
     }
     fileInputRef.current?.click();
@@ -2417,7 +2419,7 @@ export default function Settings() {
               ) : (
                 <div className="rounded-xl bg-white p-6 shadow-sm">
                   <div className="mb-4 flex items-center justify-between">
-                    <h2 className="text-base font-semibold text-[#1e2939]">{uploadType === 'vehicles' ? '차량 자산' : '대여 예약'} 업로드</h2>
+                    <h2 className="text-base font-semibold text-[#1e2939]">{uploadType === 'vehicles' ? '차량 자산 CSV 검증' : '대여 예약 CSV 검증'}</h2>
                     <div className="flex gap-2">
                       <button
                         type="button"
@@ -2433,7 +2435,7 @@ export default function Settings() {
                         className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 font-medium text-white hover:bg-blue-700"
                       >
                         <Upload className="h-4 w-4" />
-                        {uploadResult && uploadResult.valid > 0 ? '데이터 업로드' : '파일 선택'}
+                        {uploadResult && uploadResult.valid > 0 ? '다른 파일 검증' : '파일 선택'}
                       </button>
                     </div>
                   </div>
@@ -2450,7 +2452,7 @@ export default function Settings() {
                     onDragOver={handleDragOver}
                     onDragLeave={handleDragLeave}
                     onDrop={handleDrop}
-                    onClick={() => fileInputRef.current?.click()}
+                    onClick={handleUploadClick}
                     className={`flex h-[300px] w-full cursor-pointer items-center justify-center rounded-lg border-2 border-dashed transition-colors ${
                       isDragging
                         ? 'border-blue-500 bg-blue-50'
@@ -2470,9 +2472,12 @@ export default function Settings() {
                             <XCircle className="mx-auto mb-3 h-16 w-16 text-red-600" />
                           )}
                           <p className={`mb-2 font-semibold ${uploadResult.success ? 'text-green-900' : 'text-red-900'}`}>
-                            {uploadResult.success ? '검증 성공!' : '검증 실패'}
+                            {uploadResult.success ? '검증 완료 (저장되지 않음)' : '검증 실패'}
                           </p>
                           <p className="mb-3 text-sm text-gray-600">전체 {uploadResult.total}건 중 {uploadResult.valid}건 유효</p>
+                          {uploadResult.success && (
+                            <p className="mb-3 text-sm text-amber-700">{CSV_VALIDATION_ONLY_NOTICE}</p>
+                          )}
                           {uploadResult.errors.length > 0 && (
                             <div className="mx-auto max-w-md rounded-lg bg-white p-4 text-left">
                               <p className="mb-2 text-sm font-semibold text-red-900">오류 목록:</p>
@@ -2487,7 +2492,7 @@ export default function Settings() {
                       ) : (
                         <>
                           <FileSpreadsheet className="mx-auto mb-3 h-16 w-16 text-gray-400" />
-                          <p className="mb-1 font-medium text-gray-600">CSV 파일을 드래그하거나 클릭하여 업로드</p>
+                          <p className="mb-1 font-medium text-gray-600">CSV 파일을 드래그하거나 클릭하여 검증</p>
                           <p className="text-sm text-gray-500">최대 1,000건까지 한번에 업로드 가능</p>
                         </>
                       )}
