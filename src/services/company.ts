@@ -15,6 +15,7 @@ export type CompanyUpdateRequest = Partial<Omit<Company, 'id'>>;
 
 interface SettingsCompanyPayload {
   companyId?: string;
+  id?: string;
   name?: string;
   businessNumber?: string;
   bizRegNo?: string;
@@ -28,7 +29,7 @@ interface SettingsCompanyPayload {
 
 function toCompany(payload: SettingsCompanyPayload): Company {
   return {
-    id: String(payload.companyId ?? '').trim() || 'company-local',
+    id: String(payload.companyId ?? payload.id ?? '').trim() || 'company-local',
     name: String(payload.name ?? '').trim(),
     businessNumber: String(payload.businessNumber ?? payload.bizRegNo ?? '').trim(),
     contactName: String(payload.contactName ?? '').trim() || undefined,
