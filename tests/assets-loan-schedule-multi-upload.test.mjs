@@ -21,4 +21,10 @@ test('asset create modal keeps loan schedule uploads as a multi-file collection'
   assert.match(source, /previous\.loanSchedule/u);
   assert.match(source, /uploadedFiles\.loanSchedule\.length > 0/u);
   assert.match(source, /uploadedFiles\.loanSchedule\.map\(/u);
+  assert.match(source, /mode:\s*'append'\s*\|\s*'replace'/u);
+  assert.match(source, /loanSchedule:\s*mode === 'replace'\s*\?\s*nextFiles\s*:\s*\[\.\.\.previous\.loanSchedule,\s*\.\.\.nextFiles\]/u);
+  assert.match(source, /uploadedFiles\.loanSchedule\.filter\(\(_file,\s*index\)\s*=>\s*index !== targetIndex\)/u);
+  assert.match(source, /loanScheduleReplaceInputRef/u);
+  assert.match(source, /전체 교체/u);
+  assert.match(source, />삭제</u);
 });

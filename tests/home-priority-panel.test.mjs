@@ -21,3 +21,12 @@ test('home keeps today tasks in a left column and issue-matched cards in the pri
   assert.match(source, /home-issue-card-device-off/u);
   assert.match(source, /premiumVehiclePreviewCount = Math\.max\(1, kpis\.totalAssets\)/u);
 });
+
+test('device-off card keeps premium placeholder copy aligned with premium-modal behavior', () => {
+  const source = readProjectFile('src/app/pages/Home.tsx');
+
+  assert.match(source, /label:\s*'단말 OFF'/u);
+  assert.match(source, /description:\s*'단말 데이터 연동 예정'/u);
+  assert.match(source, /onClick:\s*\(\)\s*=>\s*setShowPremiumModal\(true\)/u);
+  assert.doesNotMatch(source, /handleIssueClick\('단말 OFF'\)/u);
+});

@@ -958,6 +958,7 @@ export default function Assets() {
   const historyAbortControllerRef = useRef<AbortController | null>(null);
   const ocrRequestSequenceRef = useRef(0);
   const ocrAbortControllerRef = useRef<AbortController | null>(null);
+  const loanScheduleReplaceInputRef = useRef<HTMLInputElement | null>(null);
 
   const updateAssetsSearchParams = useCallback((
     mutator: (params: URLSearchParams) => void,
@@ -1535,7 +1536,11 @@ export default function Assets() {
     });
   }, []);
 
-  const handleDocumentFileSelect = useCallback((fileKey: UploadedFileKey, selectedFiles: File | File[] | null) => {
+  const handleDocumentFileSelect = useCallback((
+    fileKey: UploadedFileKey,
+    selectedFiles: File | File[] | null,
+    mode: 'append' | 'replace' = 'append',
+  ) => {
     const nextFiles = Array.isArray(selectedFiles)
       ? selectedFiles
       : selectedFiles
@@ -1592,7 +1597,7 @@ export default function Assets() {
       if (fileKey === 'loanSchedule') {
         return {
           ...previous,
-          loanSchedule: [...previous.loanSchedule, ...nextFiles],
+          loanSchedule: mode === 'replace' ? nextFiles : [...previous.loanSchedule, ...nextFiles],
         };
       }
 
@@ -1609,6 +1614,13 @@ export default function Assets() {
       };
     });
   }, [abortOcrProcessing, ocrAppliedValues]);
+
+  const handleRemoveLoanScheduleFile = useCallback((targetIndex: number) => {
+    setUploadedFiles((uploadedFiles) => ({
+      ...uploadedFiles,
+      loanSchedule: uploadedFiles.loanSchedule.filter((_file, index) => index !== targetIndex),
+    }));
+  }, []);
 
   const handleStartOcrExtraction = useCallback(async () => {
     if (!canWriteAssets) {
@@ -2479,11 +2491,40 @@ export default function Assets() {
                         />
                       </label>
                       {uploadedFiles.loanSchedule.length > 0 && (
-                        <div className="mt-2 space-y-1">
+                        <div className="mt-2 space-y-2">
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="text-xs text-gray-500">추가 업로드 또는 전체 교체로 파일 목록을 관리할 수 있습니다.</p>
+                            <button
+                              type="button"
+                              onClick={() => loanScheduleReplaceInputRef.current?.click()}
+                              className="rounded-md border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                            >
+                              전체 교체
+                            </button>
+                            <input
+                              ref={loanScheduleReplaceInputRef}
+                              type="file"
+                              accept="image/*,application/pdf"
+                              multiple
+                              onChange={(event) => {
+                                handleDocumentFileSelect('loanSchedule', Array.from(event.target.files ?? []), 'replace');
+                                event.target.value = '';
+                              }}
+                              className="hidden"
+                            />
+                          </div>
                           {uploadedFiles.loanSchedule.map((file, index) => (
-                            <p key={`${file.name}-${file.lastModified}-${index}`} className="text-xs text-green-600">
-                              - {file.name}
-                            </p>
+                            <div
+                              key={`${file.name}-${file.lastModified}-${index}`}
+                              className="flex items-center justify-between gap-3 rounded-lg border border-green-100 bg-green-50 px-3 py-2 text-xs text-green-700"
+                            >
+                              <span className="min-w-0 truncate">{file.name}</span>
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveLoanScheduleFile(index)}
+                                className="shrink-0 rounded-md border border-green-200 bg-white px-2 py-1 font-medium text-green-700 hover:bg-green-100"
+                              >삭제</button>
+                            </div>
                           ))}
                         </div>
                       )}
