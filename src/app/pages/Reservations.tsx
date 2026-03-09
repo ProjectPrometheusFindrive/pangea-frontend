@@ -242,6 +242,33 @@ function areIssueListsEqual(left: string[] | undefined, right: string[] | undefi
   return leftList.every((item, index) => item === rightList[index]);
 }
 
+function getReservationStartTimestamp(reservation: Reservation): number | null {
+  if (typeof reservation.scheduledStartAt === 'string' && reservation.scheduledStartAt.trim()) {
+    const parsed = Date.parse(reservation.scheduledStartAt);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  if (typeof reservation.startDateFull === 'string' && reservation.startDateFull.trim()) {
+    const parsed = Date.parse(reservation.startDateFull);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  return Number.isFinite(reservation.startDate) ? reservation.startDate : null;
+}
+
+function canStartReservationNow(reservation: Reservation, now = Date.now()): boolean {
+  if (reservation.type !== 'reservation') {
+    return false;
+  }
+  const startTimestamp = getReservationStartTimestamp(reservation);
+  if (startTimestamp === null) {
+    return true;
+  }
+  return startTimestamp <= now;
+}
+
 function applySyncedPaymentStatusToReservation(
   reservation: Reservation,
   syncedPaymentStatus: PaymentStatusSnapshot,
@@ -605,6 +632,7 @@ function toReservationRow(row: unknown, index: number): Reservation | null {
     customer,
     startDate: startDateOffset,
     endDate: endDateOffset,
+    scheduledStartAt: toStringValue(startSource) ?? undefined,
     type: normalizeReservationType(
       toStringValue(row.type) ?? toStringValue(row.contractStatus) ?? toStringValue(row.status),
     ),
@@ -1399,6 +1427,7 @@ export default function Reservations() {
       customer: formValues.customerName.trim(),
       startDate: Math.min(startDateOffset, endDateOffset),
       endDate: Math.max(startDateOffset, endDateOffset),
+      scheduledStartAt: startAt,
       type: 'reservation',
       issues: [],
       phone: formValues.customerPhone.trim(),
@@ -1487,6 +1516,10 @@ export default function Reservations() {
     }
 
     if (!selectedReservation || selectedReservation.type !== 'reservation' || activeReservationAction) {
+      return;
+    }
+    if (!canStartReservationNow(selectedReservation)) {
+      setReservationActionError('예약 시작 시각 이후에만 차량 인수 처리가 가능합니다.');
       return;
     }
 
@@ -2607,7 +2640,7 @@ export default function Reservations() {
                 >
                   이 차량의 조치항목 보기
                 </button>
-                {selectedReservation.type === 'reservation' && canTransitionReservations && (
+                {selectedReservation.type === 'reservation' && canTransitionReservations && canStartReservationNow(selectedReservation) && (
                   <button
                     onClick={() => {
                       void handleStartReservation();
