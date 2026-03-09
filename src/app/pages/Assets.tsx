@@ -2026,8 +2026,14 @@ export default function Assets() {
         <div className="mb-6 mt-4 space-y-4">
           {/* 검색창 */}
           <div className="relative">
+            <label htmlFor="assets-search-query" className="sr-only">
+              자산 검색
+            </label>
             <input
+              id="assets-search-query"
+              name="queryKeyword"
               type="text"
+              aria-label="자산 검색"
               placeholder="차량번호 또는 차종으로 검색..."
               value={queryKeyword}
               onChange={(e) => handleKeywordChange(e.target.value)}
