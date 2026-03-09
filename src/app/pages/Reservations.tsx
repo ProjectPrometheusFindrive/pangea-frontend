@@ -570,7 +570,12 @@ function toReservationRow(row: unknown, index: number): Reservation | null {
   }
 
   const vehicleNumber = toStringValue(row.vehicleNumber) ?? toStringValue(row.plateNumber) ?? toStringValue(row.plate);
-  if (!vehicleNumber) {
+  const fallbackVehicleNumber = vehicleNumber
+    ?? toStringValue(row.vin)
+    ?? toStringValue(row.reservationId)
+    ?? toStringValue(row.rentalId)
+    ?? toStringValue(row.id);
+  if (!fallbackVehicleNumber) {
     return null;
   }
 
@@ -596,7 +601,7 @@ function toReservationRow(row: unknown, index: number): Reservation | null {
 
   return {
     id: reservationId,
-    vehicleNumber,
+    vehicleNumber: fallbackVehicleNumber,
     customer,
     startDate: startDateOffset,
     endDate: endDateOffset,
