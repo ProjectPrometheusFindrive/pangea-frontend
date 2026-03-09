@@ -2,6 +2,7 @@ import { apiClient } from './api';
 
 export interface InvitationRequestOptions {
   signal?: AbortSignal;
+  companyId?: string;
 }
 
 export type InvitationRole = 'admin' | 'member';
@@ -54,7 +55,10 @@ export function listInvitations(
   return apiClient.requestData<InvitationListData>({
     path: '/api/v2/invitations',
     method: 'GET',
-    query: { status },
+    query: {
+      status,
+      companyId: options.companyId,
+    },
     signal: options.signal,
   });
 }
@@ -66,7 +70,10 @@ export function createInvitation(
   return apiClient.requestData<Invitation>({
     path: '/api/v2/invitations',
     method: 'POST',
-    body: payload,
+    body: {
+      ...payload,
+      companyId: payload.companyId ?? options.companyId,
+    },
     signal: options.signal,
   });
 }
@@ -78,6 +85,9 @@ export function resendInvitation(
   return apiClient.requestData<Invitation>({
     path: `/api/v2/invitations/${encodeURIComponent(invitationId)}/resend`,
     method: 'POST',
+    query: {
+      companyId: options.companyId,
+    },
     signal: options.signal,
   });
 }
