@@ -170,6 +170,7 @@ cp docs/prompt_history/_TEMPLATE.md docs/prompt_history/$(date +%Y%m%d)_SCRUM-12
 - Production push triggers auto tag (`vX.Y.Z`)
 
 ## Version History
+- v1.2.48 (2026-03-09, Jira SCRUM-228): Record end_prompt evidence for super_admin 지오펜스 company scope 정렬.
 - v1.2.48 (2026-03-09, Jira SCRUM-227): Record end_prompt evidence for 설정 CSV 저장 동작 정리.
 - v1.2.48 (2026-03-09, Jira SCRUM-226): Record end_prompt evidence for 벌크 OCR 자산 쓰기 권한 정렬.
 - v1.2.48 (2026-03-09, Jira SCRUM-225): Record end_prompt evidence for 완료 상태 사고접수 UI 가드.
