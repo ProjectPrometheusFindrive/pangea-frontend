@@ -1077,6 +1077,12 @@ export default function Settings() {
   );
 
   useEffect(() => {
+    if (searchParams.get('tab') === 'company') {
+      setActiveTab('company');
+    }
+  }, [searchParams]);
+
+  useEffect(() => {
     if ((!hasUnsavedChanges && !isAnySaving) || typeof window === 'undefined') {
       return;
     }
