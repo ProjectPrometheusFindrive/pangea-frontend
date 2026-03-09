@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import Papa from 'papaparse';
 import { toast } from 'sonner';
+import { KakaoGeofenceInput, type KakaoGeofenceShape } from '../components/KakaoGeofenceInput';
 import { PageStateBoundary } from '../components/PageStateBoundary';
 import {
   getCollectionFromPayload,
@@ -49,6 +50,7 @@ import {
   type SettingsCompanyProfile,
   type SettingsCompanyUpdateRequest,
   type SettingsGeofence,
+  type SettingsGeofencePoint,
   type SettingsMember,
 } from '../../services/settings';
 import {
@@ -71,7 +73,7 @@ type TabType = 'bulk' | 'company' | 'geofence' | 'accounts';
 type UploadType = 'vehicles' | 'reservations' | 'ocr';
 type CurrentDataType = Extract<UploadType, 'vehicles' | 'reservations'>;
 type CompanyField = 'name' | 'businessNumber' | 'phone' | 'email' | 'address';
-type GeofenceField = 'name' | 'lat' | 'lng' | 'radiusMeter';
+type GeofenceField = 'name' | 'lat' | 'lng' | 'radiusMeter' | 'pointsText';
 type MemberRoleField = 'role';
 type InvitationField = 'email' | 'role';
 type FieldErrorMap<TField extends string> = Partial<Record<TField, string>>;
@@ -100,9 +102,11 @@ interface CompanyFormState {
 
 interface GeofenceFormState {
   name: string;
+  shape: KakaoGeofenceShape;
   lat: string;
   lng: string;
   radiusMeter: string;
+  pointsText: string;
   active: boolean;
 }
 
@@ -151,9 +155,11 @@ const DEFAULT_COMPANY_FORM_STATE: CompanyFormState = {
 
 const DEFAULT_GEOFENCE_FORM_STATE: GeofenceFormState = {
   name: '',
+  shape: 'circle',
   lat: '',
   lng: '',
   radiusMeter: '',
+  pointsText: '',
   active: true,
 };
 
@@ -375,13 +381,78 @@ function toCompanyForm(profile: SettingsCompanyProfile): CompanyFormState {
 }
 
 function toGeofenceForm(geofence: SettingsGeofence): GeofenceFormState {
+  const hasPolygonPoints = Array.isArray(geofence.points) && geofence.points.length >= 3;
   return {
     name: geofence.name,
+    shape: hasPolygonPoints ? 'polygon' : 'circle',
     lat: String(geofence.center.lat),
     lng: String(geofence.center.lng),
-    radiusMeter: String(geofence.radiusMeter),
+    radiusMeter: hasPolygonPoints && geofence.radiusMeter <= 0 ? '' : String(geofence.radiusMeter),
+    pointsText: hasPolygonPoints
+      ? geofence.points.map((point) => `${point.lat},${point.lng}`).join('\n')
+      : '',
     active: geofence.active,
   };
+}
+
+function parseGeofencePolygonPoints(pointsText: string): {
+  points: SettingsGeofencePoint[];
+  error: string | null;
+} {
+  const lines = pointsText
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  if (lines.length < 3) {
+    return {
+      points: [],
+      error: '꼭짓점 좌표는 최소 3개가 필요합니다.',
+    };
+  }
+
+  const points: SettingsGeofencePoint[] = [];
+  for (const [index, line] of lines.entries()) {
+    const tokens = line.split(',').map((token) => token.trim());
+    if (tokens.length !== 2) {
+      return {
+        points: [],
+        error: `${index + 1}번째 줄은 lat,lng 형식이어야 합니다.`,
+      };
+    }
+
+    const lat = toNumberValue(tokens[0]);
+    const lng = toNumberValue(tokens[1]);
+    if (lat === null || lng === null) {
+      return {
+        points: [],
+        error: `${index + 1}번째 줄 좌표를 숫자로 입력해 주세요.`,
+      };
+    }
+
+    points.push({ lat, lng });
+  }
+
+  return {
+    points,
+    error: null,
+  };
+}
+
+function areGeofencePointsEqual(
+  left: SettingsGeofencePoint[] | undefined,
+  right: SettingsGeofencePoint[] | undefined,
+): boolean {
+  const normalizedLeft = Array.isArray(left) ? left : [];
+  const normalizedRight = Array.isArray(right) ? right : [];
+  if (normalizedLeft.length !== normalizedRight.length) {
+    return false;
+  }
+
+  return normalizedLeft.every((point, index) => (
+    point.lat === normalizedRight[index]?.lat
+    && point.lng === normalizedRight[index]?.lng
+  ));
 }
 
 function formatUpdatedAt(value: string | null): string {
@@ -941,9 +1012,11 @@ export default function Settings() {
     if (geofenceEditorMode === 'create') {
       return (
         Boolean(geofenceForm.name.trim())
+        || geofenceForm.shape !== DEFAULT_GEOFENCE_FORM_STATE.shape
         || Boolean(geofenceForm.lat.trim())
         || Boolean(geofenceForm.lng.trim())
         || Boolean(geofenceForm.radiusMeter.trim())
+        || Boolean(geofenceForm.pointsText.trim())
         || geofenceForm.active !== DEFAULT_GEOFENCE_FORM_STATE.active
       );
     }
@@ -954,9 +1027,12 @@ export default function Settings() {
 
     const baseline = toGeofenceForm(selectedEditingGeofence);
     return (
+      geofenceForm.shape !== baseline.shape
+      ||
       geofenceForm.lat.trim() !== baseline.lat.trim()
       || geofenceForm.lng.trim() !== baseline.lng.trim()
       || geofenceForm.radiusMeter.trim() !== baseline.radiusMeter.trim()
+      || geofenceForm.pointsText.trim() !== baseline.pointsText.trim()
       || geofenceForm.active !== baseline.active
     );
   }, [geofenceEditorMode, geofenceForm, isGeofenceEditorOpen, selectedEditingGeofence]);
@@ -1217,17 +1293,23 @@ export default function Settings() {
     const latValue = toNumberValue(geofenceForm.lat.trim());
     const lngValue = toNumberValue(geofenceForm.lng.trim());
     const radiusValue = toNumberValue(geofenceForm.radiusMeter.trim());
+    const parsedPolygon = geofenceForm.shape === 'polygon'
+      ? parseGeofencePolygonPoints(geofenceForm.pointsText)
+      : { points: [], error: null };
+    if (geofenceForm.shape === 'polygon' && parsedPolygon.error) {
+      fieldErrors.pointsText = parsedPolygon.error;
+    }
 
     if (geofenceEditorMode === 'create' && !trimmedName) {
       fieldErrors.name = '지오펜스 이름을 입력해 주세요.';
     }
-    if (latValue === null) {
+    if (geofenceForm.shape !== 'polygon' && latValue === null) {
       fieldErrors.lat = '위도 값을 입력해 주세요.';
     }
-    if (lngValue === null) {
+    if (geofenceForm.shape !== 'polygon' && lngValue === null) {
       fieldErrors.lng = '경도 값을 입력해 주세요.';
     }
-    if (radiusValue === null || !Number.isInteger(radiusValue) || radiusValue <= 0) {
+    if (geofenceForm.shape !== 'polygon' && (radiusValue === null || !Number.isInteger(radiusValue) || radiusValue <= 0)) {
       fieldErrors.radiusMeter = '반경은 1 이상의 정수(m)로 입력해 주세요.';
     }
 
@@ -1239,21 +1321,27 @@ export default function Settings() {
       return;
     }
 
-    if (latValue === null || lngValue === null || radiusValue === null) {
+    if (geofenceForm.shape !== 'polygon' && (latValue === null || lngValue === null || radiusValue === null)) {
       return;
     }
 
     let mutationTask: Promise<SettingsGeofence>;
     if (geofenceEditorMode === 'create') {
-      mutationTask = createSettingsGeofence({
-        name: trimmedName,
-        center: {
-          lat: latValue,
-          lng: lngValue,
-        },
-        radiusMeter: radiusValue,
-        active: geofenceForm.active,
-      });
+      mutationTask = geofenceForm.shape === 'polygon'
+        ? createSettingsGeofence({
+          name: trimmedName,
+          points: parsedPolygon.points,
+          active: geofenceForm.active,
+        })
+        : createSettingsGeofence({
+          name: trimmedName,
+          center: {
+            lat: latValue!,
+            lng: lngValue!,
+          },
+          radiusMeter: radiusValue!,
+          active: geofenceForm.active,
+        });
     } else {
       if (!editingGeofenceId || !selectedEditingGeofence) {
         setGeofenceSaveError('편집 대상을 찾을 수 없습니다. 목록을 새로고침해 주세요.');
@@ -1263,20 +1351,27 @@ export default function Settings() {
       const payload: {
         center?: { lat: number; lng: number };
         radiusMeter?: number;
+        points?: SettingsGeofencePoint[];
         active?: boolean;
       } = {};
+      if (geofenceForm.shape === 'polygon' && !areGeofencePointsEqual(selectedEditingGeofence.points, parsedPolygon.points)) {
+        payload.points = parsedPolygon.points;
+      }
 
       if (
-        selectedEditingGeofence.center.lat !== latValue
-        || selectedEditingGeofence.center.lng !== lngValue
+        geofenceForm.shape !== 'polygon'
+        && (
+          selectedEditingGeofence.center.lat !== latValue
+          || selectedEditingGeofence.center.lng !== lngValue
+        )
       ) {
         payload.center = {
-          lat: latValue,
-          lng: lngValue,
+          lat: latValue!,
+          lng: lngValue!,
         };
       }
-      if (selectedEditingGeofence.radiusMeter !== radiusValue) {
-        payload.radiusMeter = radiusValue;
+      if (geofenceForm.shape !== 'polygon' && selectedEditingGeofence.radiusMeter !== radiusValue) {
+        payload.radiusMeter = radiusValue!;
       }
       if (selectedEditingGeofence.active !== geofenceForm.active) {
         payload.active = geofenceForm.active;
@@ -1336,6 +1431,7 @@ export default function Settings() {
             'center.lng': 'lng',
             lng: 'lng',
             radiusMeter: 'radiusMeter',
+            points: 'pointsText',
           });
           if (Object.keys(mappedErrors).length > 0) {
             setGeofenceFieldErrors(mappedErrors);
@@ -2675,13 +2771,50 @@ export default function Settings() {
                       />
                       {geofenceFieldErrors.name && <p className="mt-1 text-xs text-red-600">{geofenceFieldErrors.name}</p>}
                     </div>
+                    <div className="md:col-span-2">
+                      <KakaoGeofenceInput
+                        shape={geofenceForm.shape}
+                        shapeLocked={geofenceEditorMode === 'edit'}
+                        lat={geofenceForm.lat}
+                        lng={geofenceForm.lng}
+                        radiusMeter={geofenceForm.radiusMeter}
+                        pointsText={geofenceForm.pointsText}
+                        disabled={!canEditSettings || isGeofenceSaving}
+                        errors={{
+                          lat: geofenceFieldErrors.lat,
+                          lng: geofenceFieldErrors.lng,
+                          radiusMeter: geofenceFieldErrors.radiusMeter,
+                          pointsText: geofenceFieldErrors.pointsText,
+                        }}
+                        onShapeChange={(shape) => {
+                          setGeofenceForm((prevState) => ({ ...prevState, shape }));
+                          setGeofenceFieldErrors((prevErrors) => ({
+                            ...prevErrors,
+                            lat: undefined,
+                            lng: undefined,
+                            radiusMeter: undefined,
+                            pointsText: undefined,
+                          }));
+                          setGeofenceSaveError(null);
+                          setGeofenceSaveSuccess(null);
+                          setGeofenceRetryAction(null);
+                        }}
+                        onPointsTextChange={(value) => {
+                          setGeofenceForm((prevState) => ({ ...prevState, pointsText: value }));
+                          setGeofenceFieldErrors((prevErrors) => ({ ...prevErrors, pointsText: undefined }));
+                          setGeofenceSaveError(null);
+                          setGeofenceSaveSuccess(null);
+                          setGeofenceRetryAction(null);
+                        }}
+                      />
+                    </div>
                     <div>
                       <label className="mb-1 block text-sm font-medium text-blue-900">반경 (m) *</label>
                       <input
                         type="number"
                         min={1}
                         value={geofenceForm.radiusMeter}
-                        disabled={!canEditSettings || isGeofenceSaving}
+                        disabled={geofenceForm.shape === 'polygon' || !canEditSettings || isGeofenceSaving}
                         onChange={(event) => {
                           setGeofenceForm((prevState) => ({ ...prevState, radiusMeter: event.target.value }));
                           setGeofenceFieldErrors((prevErrors) => ({ ...prevErrors, radiusMeter: undefined }));
@@ -2701,7 +2834,7 @@ export default function Settings() {
                         type="number"
                         step="0.000001"
                         value={geofenceForm.lat}
-                        disabled={!canEditSettings || isGeofenceSaving}
+                        disabled={geofenceForm.shape === 'polygon' || !canEditSettings || isGeofenceSaving}
                         onChange={(event) => {
                           setGeofenceForm((prevState) => ({ ...prevState, lat: event.target.value }));
                           setGeofenceFieldErrors((prevErrors) => ({ ...prevErrors, lat: undefined }));
@@ -2719,7 +2852,7 @@ export default function Settings() {
                         type="number"
                         step="0.000001"
                         value={geofenceForm.lng}
-                        disabled={!canEditSettings || isGeofenceSaving}
+                        disabled={geofenceForm.shape === 'polygon' || !canEditSettings || isGeofenceSaving}
                         onChange={(event) => {
                           setGeofenceForm((prevState) => ({ ...prevState, lng: event.target.value }));
                           setGeofenceFieldErrors((prevErrors) => ({ ...prevErrors, lng: undefined }));
@@ -2804,7 +2937,7 @@ export default function Settings() {
                             {geofence.center.lat.toFixed(6)}, {geofence.center.lng.toFixed(6)}
                           </td>
                           <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-600">
-                            {geofence.radiusMeter}m
+                            {geofence.points?.length ? `polygon ${geofence.points?.length}pts` : `${geofence.radiusMeter}m`}
                           </td>
                           <td className="whitespace-nowrap px-6 py-4">
                             <label className="relative inline-flex cursor-pointer items-center">
