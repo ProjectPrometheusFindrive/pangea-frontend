@@ -50,3 +50,19 @@ test('asset create readiness allows saved company profiles', async () => {
     },
   );
 });
+
+test('asset create readiness does not block while company profile is still unresolved', async () => {
+  const module = await loadProjectModule('src/app/pages/assetCreateReadiness.js');
+
+  assert.deepEqual(
+    module.getAssetCreateReadiness({
+      tenantCompanyId: 'company-123',
+      company: null,
+    }),
+    {
+      isReady: true,
+      message: null,
+      settingsPath: null,
+    },
+  );
+});

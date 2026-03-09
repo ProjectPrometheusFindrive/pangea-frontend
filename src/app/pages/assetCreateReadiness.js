@@ -31,6 +31,14 @@ export function getAssetCreateReadiness({ tenantCompanyId, company }) {
     };
   }
 
+  if (company == null) {
+    return {
+      isReady: true,
+      message: null,
+      settingsPath: null,
+    };
+  }
+
   const companyName = normalizeText(company?.name);
   const companyId = normalizeText(company?.id);
   if (!hasValidCompanyId(companyId) || !companyName) {
