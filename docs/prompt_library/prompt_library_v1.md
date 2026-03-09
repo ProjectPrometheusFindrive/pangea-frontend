@@ -170,6 +170,7 @@ cp docs/prompt_history/_TEMPLATE.md docs/prompt_history/$(date +%Y%m%d)_SCRUM-12
 - Production push triggers auto tag (`vX.Y.Z`)
 
 ## Version History
+- v1.2.48 (2026-03-09, Jira SCRUM-241): Record end_prompt evidence for 알림 전체보기 페이지 연결.
 - v1.2.48 (2026-03-09, Jira SCRUM-240): Record end_prompt evidence for 알림 딥링크 fallback 정리.
 - v1.2.48 (2026-03-09, Jira SCRUM-239): Record end_prompt evidence for favicon 404 방지.
 - v1.2.48 (2026-03-09, Jira SCRUM-238): Record end_prompt evidence for 멤버 예약 취소 버튼 숨김.
