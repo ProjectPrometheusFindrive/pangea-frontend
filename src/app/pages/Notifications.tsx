@@ -8,7 +8,7 @@ import {
   markNotificationAsRead,
   type NotificationItem,
 } from '../../services/notifications';
-import Layout from '../components/Layout';
+import { Layout } from '../components/Layout';
 import { resolveRoutePermissionForPath } from '../authorization';
 import { useAuthorization } from '../context/AuthorizationContext';
 
