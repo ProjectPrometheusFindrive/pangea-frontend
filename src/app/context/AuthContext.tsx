@@ -140,7 +140,9 @@ function redirectToLogin(reason: 'manual' | 'expired'): void {
 
   const targetUrl = new URL(LOGIN_PATH, window.location.origin);
   targetUrl.searchParams.set('reason', reason);
-  window.location.assign(`${targetUrl.pathname}${targetUrl.search}`);
+  const nextPath = `${targetUrl.pathname}${targetUrl.search}`;
+  window.history.replaceState(window.history.state, '', nextPath);
+  window.dispatchEvent(new PopStateEvent('popstate'));
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
