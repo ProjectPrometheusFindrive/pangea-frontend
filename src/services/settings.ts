@@ -33,31 +33,42 @@ export interface SettingsGeofence {
     lng: number;
   };
   radiusMeter: number;
+  points?: SettingsGeofencePoint[];
   active: boolean;
+}
+
+export interface SettingsGeofencePoint {
+  lat: number;
+  lng: number;
 }
 
 export interface SettingsGeofenceListData {
   items: SettingsGeofence[];
 }
 
-export interface SettingsGeofenceCreateRequest {
-  name: string;
+interface SettingsGeofenceCircleInput {
   center: {
     lat: number;
     lng: number;
   };
   radiusMeter: number;
-  active?: boolean;
 }
 
-export interface SettingsGeofenceUpdateRequest {
-  center?: {
-    lat: number;
-    lng: number;
-  };
-  radiusMeter?: number;
-  active?: boolean;
+interface SettingsGeofencePolygonInput {
+  points: SettingsGeofencePoint[];
 }
+
+export type SettingsGeofenceCreateRequest = {
+  name: string;
+  active?: boolean;
+} & (SettingsGeofenceCircleInput | SettingsGeofencePolygonInput);
+
+export type SettingsGeofenceUpdateRequest = Partial<
+  SettingsGeofenceCircleInput & SettingsGeofencePolygonInput
+> & {
+  points?: SettingsGeofencePoint[];
+  active?: boolean;
+};
 
 export type SettingsMemberRole = 'admin' | 'member' | string;
 export type SettingsMemberStatus = 'approved' | 'pending' | 'rejected' | 'withdrawn' | string;

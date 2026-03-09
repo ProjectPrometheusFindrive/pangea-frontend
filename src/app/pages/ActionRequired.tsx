@@ -1186,20 +1186,29 @@ export default function ActionRequired() {
   return (
     <Layout title="조치 필요 항목">
       <div className="p-6">
-        <div className="mb-6 space-y-4">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
-            <input
-              type="text"
-              placeholder="차량번호 또는 고객명 검색..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
+          <div className="mb-6 space-y-4">
+            <div className="relative">
+              <label htmlFor="action-required-search-query" className="sr-only">
+                조치 필요 검색
+              </label>
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
+              <input
+                id="action-required-search-query"
+                name="searchQuery"
+                type="text"
+                aria-label="조치 필요 검색"
+                placeholder="차량번호 또는 고객명 검색..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
           </div>
 
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
             <select
+              id="action-required-status-filter"
+              name="statusFilter"
+              aria-label="상태 필터"
               value={statusFilter}
               onChange={(e) => {
                 setStatusFilter(e.target.value as ActionStatusFilter);
@@ -1214,6 +1223,9 @@ export default function ActionRequired() {
             </select>
 
             <select
+              id="action-required-priority-filter"
+              name="priorityFilter"
+              aria-label="우선순위 필터"
               value={priorityFilter}
               onChange={(e) => {
                 setPriorityFilter(e.target.value as ActionPriorityFilter);
@@ -1228,6 +1240,9 @@ export default function ActionRequired() {
             </select>
 
             <select
+              id="action-required-assignee-filter"
+              name="assigneeFilter"
+              aria-label="담당자 필터"
               value={assigneeFilter}
               onChange={(e) => {
                 setAssigneeFilter(e.target.value);
@@ -1244,6 +1259,9 @@ export default function ActionRequired() {
             </select>
 
             <select
+              id="action-required-page-size"
+              name="pageSize"
+              aria-label="페이지 크기"
               value={String(pageSize)}
               onChange={(e) => {
                 const nextSize = Number(e.target.value);
