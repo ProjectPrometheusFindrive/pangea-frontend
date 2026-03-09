@@ -1,6 +1,6 @@
 import { Layout } from '../components/Layout';
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { useNavigate } from 'react-router';
+import { useNavigate, useSearchParams } from 'react-router';
 import {
   Plus,
   MapPin,
@@ -63,6 +63,7 @@ import {
 import {
   buildInvitationCreatePayload,
   getInvitationStatusBadgeColor,
+  resolveSettingsCompanyScope,
   toInvitationRoleLabel,
   toInvitationStatusLabel,
   upsertPendingInvitation,
@@ -616,6 +617,7 @@ function toReservationTypeLabel(value: unknown): string {
 }
 
 export default function Settings() {
+  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const { user } = useAuth();
   const { canPerformAction } = useAuthorization();
@@ -623,6 +625,10 @@ export default function Settings() {
 
   const canEditSettings = canPerformAction(ACTION_PERMISSIONS.settingsWrite);
   const canManageMemberRoles = canPerformAction(ACTION_PERMISSIONS.settingsMembersWrite);
+  const settingsCompanyId = useMemo(
+    () => resolveSettingsCompanyScope(searchParams.get('companyId'), user?.companyId),
+    [searchParams, user?.companyId],
+  );
 
   const [activeTab, setActiveTab] = useState<TabType>('bulk');
   const [uploadType, setUploadType] = useState<UploadType>('vehicles');
@@ -685,11 +691,13 @@ export default function Settings() {
   );
 
   const hydrateMembersOnly = useCallback(async () => {
-    const membersPayload = await listSettingsMembers();
+    const membersPayload = await listSettingsMembers(undefined, {
+      companyId: settingsCompanyId ?? undefined,
+    });
     setMembers(Array.isArray(membersPayload.items) ? membersPayload.items : []);
     setMemberRoleDrafts({});
     setMemberFieldErrors({});
-  }, []);
+  }, [settingsCompanyId]);
 
   const hydrateInvitationsOnly = useCallback(async () => {
     if (!canManageMemberRoles) {
@@ -698,18 +706,22 @@ export default function Settings() {
     }
 
     try {
-      const invitationsPayload = await listInvitations('pending');
+      const invitationsPayload = await listInvitations('pending', {
+        companyId: settingsCompanyId ?? undefined,
+      });
       const invitationItems = Array.isArray(invitationsPayload.items) ? invitationsPayload.items : [];
       setInvitations(invitationItems.reduce<Invitation[]>((items, invitation) => upsertPendingInvitation(items, invitation), []));
     } catch (error) {
       setInvitationSaveError(toErrorMessage(error, '초대 목록을 다시 불러오지 못했습니다.'));
     }
-  }, [canManageMemberRoles]);
+  }, [canManageMemberRoles, settingsCompanyId]);
 
   const hydrateGeofencesOnly = useCallback(async () => {
-    const geofencesPayload = await listSettingsGeofences();
+    const geofencesPayload = await listSettingsGeofences({
+      companyId: settingsCompanyId ?? undefined,
+    });
     setGeofences(Array.isArray(geofencesPayload.items) ? geofencesPayload.items : []);
-  }, []);
+  }, [settingsCompanyId]);
 
   const refreshCurrentDataCounts = useCallback(async () => {
     try {
@@ -897,11 +909,11 @@ export default function Settings() {
 
   const requestSettingsHydration = useCallback(async (signal: AbortSignal): Promise<SettingsHydrationPayload> => {
     const [companyPayload, geofencesPayload, membersPayload, invitationsResult] = await Promise.all([
-      getSettingsCompany({ signal }),
-      listSettingsGeofences({ signal }),
-      listSettingsMembers(undefined, { signal }),
+      getSettingsCompany({ signal, companyId: settingsCompanyId ?? undefined }),
+      listSettingsGeofences({ signal, companyId: settingsCompanyId ?? undefined }),
+      listSettingsMembers(undefined, { signal, companyId: settingsCompanyId ?? undefined }),
       canManageMemberRoles
-        ? listInvitations('pending', { signal })
+        ? listInvitations('pending', { signal, companyId: settingsCompanyId ?? undefined })
             .then((payload) => ({ payload, error: null as string | null }))
             .catch((error: unknown) => {
               if (error instanceof DOMException && error.name === 'AbortError') {
@@ -924,7 +936,7 @@ export default function Settings() {
         : [],
       invitationLoadError: invitationsResult.error,
     };
-  }, [canManageMemberRoles]);
+  }, [canManageMemberRoles, settingsCompanyId]);
 
   const handleSettingsHydrationSuccess = useCallback((payload: SettingsHydrationPayload) => {
     const nextCompanyForm = toCompanyForm(payload.company);
@@ -1164,7 +1176,9 @@ export default function Settings() {
     setCompanyRetryAction(null);
 
     try {
-      const updatedCompany = await putSettingsCompany(payload);
+      const updatedCompany = await putSettingsCompany(payload, {
+        companyId: settingsCompanyId ?? undefined,
+      });
       const nextForm = toCompanyForm(updatedCompany);
       setCompanyForm(nextForm);
       setCompanyBaseline(nextForm);
@@ -1221,6 +1235,7 @@ export default function Settings() {
     hydrateSettings,
     isCompanySaving,
     refreshCompany,
+    settingsCompanyId,
     toCompanyPatchPayload,
   ]);
 
@@ -1332,15 +1347,19 @@ export default function Settings() {
           name: trimmedName,
           points: parsedPolygon.points,
           active: geofenceForm.active,
+        }, {
+          companyId: settingsCompanyId ?? undefined,
         })
         : createSettingsGeofence({
           name: trimmedName,
           center: {
-            lat: latValue!,
-            lng: lngValue!,
+          lat: latValue!,
+          lng: lngValue!,
           },
           radiusMeter: radiusValue!,
           active: geofenceForm.active,
+        }, {
+          companyId: settingsCompanyId ?? undefined,
         });
     } else {
       if (!editingGeofenceId || !selectedEditingGeofence) {
@@ -1382,7 +1401,9 @@ export default function Settings() {
         return;
       }
 
-      mutationTask = updateSettingsGeofence(editingGeofenceId, payload);
+      mutationTask = updateSettingsGeofence(editingGeofenceId, payload, {
+        companyId: settingsCompanyId ?? undefined,
+      });
     }
 
     setIsGeofenceSaving(true);
@@ -1469,6 +1490,7 @@ export default function Settings() {
     geofenceForm,
     hydrateGeofencesOnly,
     isGeofenceSaving,
+    settingsCompanyId,
     selectedEditingGeofence,
   ]);
 
@@ -1482,7 +1504,9 @@ export default function Settings() {
     setGeofenceRetryAction(null);
 
     try {
-      const updated = await updateSettingsGeofence(geofenceId, { active: nextActive });
+      const updated = await updateSettingsGeofence(geofenceId, { active: nextActive }, {
+        companyId: settingsCompanyId ?? undefined,
+      });
       setGeofences((prevItems) => prevItems.map((item) => (
         item.id === geofenceId ? updated : item
       )));
@@ -1510,7 +1534,7 @@ export default function Settings() {
     } finally {
       setActiveToggleTargetId(null);
     }
-  }, [canEditSettings, hydrateGeofencesOnly]);
+  }, [canEditSettings, hydrateGeofencesOnly, settingsCompanyId]);
 
   const handleGeofenceToggle = useCallback((geofence: SettingsGeofence) => {
     if (!canEditSettings || activeToggleTargetId !== null || isGeofenceSaving) {
@@ -1529,7 +1553,9 @@ export default function Settings() {
     setGeofenceRetryAction(null);
 
     try {
-      await deleteSettingsGeofence(geofenceId);
+      await deleteSettingsGeofence(geofenceId, {
+        companyId: settingsCompanyId ?? undefined,
+      });
       setGeofences((prevItems) => prevItems.filter((item) => item.id !== geofenceId));
       setGeofenceSaveSuccess('지오펜스가 삭제되었습니다.');
       if (editingGeofenceId === geofenceId) {
@@ -1562,7 +1588,7 @@ export default function Settings() {
     } finally {
       setDeletingGeofenceId(null);
     }
-  }, [canEditSettings, editingGeofenceId, hydrateGeofencesOnly]);
+  }, [canEditSettings, editingGeofenceId, hydrateGeofencesOnly, settingsCompanyId]);
 
   const handleGeofenceDelete = useCallback((geofenceId: string) => {
     if (!canEditSettings || deletingGeofenceId !== null || isGeofenceSaving) {
@@ -1610,7 +1636,9 @@ export default function Settings() {
     setMemberRetryAction(null);
 
     try {
-      const updatedMember = await patchSettingsMemberRole(memberId, { role });
+      const updatedMember = await patchSettingsMemberRole(memberId, { role }, {
+        companyId: settingsCompanyId ?? undefined,
+      });
       setMembers((prevMembers) => prevMembers.map((member) => (
         member.userId === memberId ? updatedMember : member
       )));
@@ -1657,7 +1685,7 @@ export default function Settings() {
     } finally {
       setSavingMemberId(null);
     }
-  }, [canManageMemberRoles, hydrateMembersOnly]);
+  }, [canManageMemberRoles, hydrateMembersOnly, settingsCompanyId]);
 
   const handleMemberRoleSave = useCallback((memberId: string) => {
     const originalMember = members.find((member) => member.userId === memberId);
@@ -1744,7 +1772,12 @@ export default function Settings() {
     setInvitationRetryAction(null);
 
     try {
-      const createdInvitation = await createInvitation(buildInvitationCreatePayload(draft));
+      const createdInvitation = await createInvitation(
+        buildInvitationCreatePayload(draft, settingsCompanyId),
+        {
+          companyId: settingsCompanyId ?? undefined,
+        },
+      );
       setInvitations((prevInvitations) => upsertPendingInvitation(prevInvitations, createdInvitation));
       setInvitationForm(DEFAULT_INVITATION_FORM_STATE);
       setIsInvitationEditorOpen(false);
@@ -1787,7 +1820,7 @@ export default function Settings() {
     } finally {
       setIsInvitationSaving(false);
     }
-  }, [canManageMemberRoles, hydrateInvitationsOnly]);
+  }, [canManageMemberRoles, hydrateInvitationsOnly, settingsCompanyId]);
 
   const handleInvitationCreate = useCallback(() => {
     const validationErrors = validateInvitationDraft(invitationForm);
@@ -1810,7 +1843,9 @@ export default function Settings() {
     setInvitationRetryAction(null);
 
     try {
-      const resentInvitation = await resendInvitation(invitationId);
+      const resentInvitation = await resendInvitation(invitationId, {
+        companyId: settingsCompanyId ?? undefined,
+      });
       setInvitations((prevInvitations) => upsertPendingInvitation(prevInvitations, resentInvitation));
       setInvitationSaveSuccess('초대를 재발송했습니다.');
       toast.success('초대를 재발송했습니다.');
@@ -1838,7 +1873,7 @@ export default function Settings() {
     } finally {
       setResendingInvitationId(null);
     }
-  }, [canManageMemberRoles, hydrateInvitationsOnly]);
+  }, [canManageMemberRoles, hydrateInvitationsOnly, settingsCompanyId]);
 
   const handleInvitationResend = useCallback((invitationId: string) => {
     if (isInvitationSaving || resendingInvitationId !== null) {
