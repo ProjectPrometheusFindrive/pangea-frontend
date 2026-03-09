@@ -1,4 +1,5 @@
 import { ApiError, apiClient } from './api';
+import { resolveNotificationPath } from './notificationNavigation.js';
 
 export type NotificationLevel = 'urgent' | 'warning' | 'info';
 
@@ -85,25 +86,28 @@ function toBoolean(value: unknown, fallback = false): boolean {
   return fallback;
 }
 
-function toNotificationPath(value: unknown): string {
-  const normalizedPath = toText(value);
+const NOTIFICATION_TITLE_TRANSLATIONS = {
+  'New reservation created': '새 예약이 생성되었습니다.',
+  'Reservation status changed': '예약 상태가 변경되었습니다.',
+  'Reservation returned': '예약이 반납 처리되었습니다.',
+  'Accident reported': '사고가 접수되었습니다.',
+  'Action item status changed': '조치 필요 항목 상태가 변경되었습니다.',
+  'Action item memo added': '조치 필요 항목 메모가 추가되었습니다.',
+  'New support ticket': '새 문의가 접수되었습니다.',
+  'Support ticket status changed': '문의 상태가 변경되었습니다.',
+  'Domain event notification': '도메인 이벤트 알림',
+} as const;
 
-  if (!normalizedPath) {
-    return '/action-required';
-  }
+const NOTIFICATION_MESSAGE_TRANSLATIONS = {
+  'Reservation R-1 has been created.': '예약 R-1이 생성되었습니다.',
+} as const;
 
-  if (normalizedPath.startsWith('/')) {
-    return normalizedPath;
-  }
-
-  try {
-    const parsedUrl = new URL(normalizedPath);
-    return `${parsedUrl.pathname}${parsedUrl.search}${parsedUrl.hash}` || '/action-required';
-  } catch {
-    return '/action-required';
-  }
+function translateNotificationText(
+  value: string,
+  translations: Readonly<Record<string, string>>,
+): string {
+  return translations[value] ?? value;
 }
-
 function toNotificationLevel(value: unknown): NotificationLevel {
   const normalizedValue = toText(value).toLowerCase();
 
@@ -200,14 +204,7 @@ function normalizeNotification(payload: unknown, index: number): NotificationIte
       ?? payload.time,
     new Date().toISOString(),
   );
-  const path = toNotificationPath(
-    payload.path
-      ?? payload.route
-      ?? payload.link
-      ?? payload.url
-      ?? payload.actionUrl
-      ?? payload.deepLink,
-  );
+  const path = resolveNotificationPath(payload);
 
   const readAtValue = payload.readAt;
   const hasReadAt = (
@@ -223,15 +220,15 @@ function normalizeNotification(payload: unknown, index: number): NotificationIte
       ?? title,
   );
 
-  return {
-    id,
-    level,
-    title,
-    message,
-    isRead,
-    path,
-    createdAt,
-  };
+      return {
+        id,
+        level,
+        title: translateNotificationText(title, NOTIFICATION_TITLE_TRANSLATIONS),
+        message: translateNotificationText(message, NOTIFICATION_MESSAGE_TRANSLATIONS),
+        isRead,
+        path,
+        createdAt,
+      };
 }
 
 function normalizeNotificationList(payload: unknown): NotificationListData {
