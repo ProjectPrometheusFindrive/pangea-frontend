@@ -142,6 +142,40 @@ function normalizeSeverity(rawValue: string | null): ActionItem['severity'] {
   return 'Low';
 }
 
+function normalizeActionItemType(rawValue: string | null, hasPaymentInfo: boolean): string | null {
+  if (!rawValue) {
+    return hasPaymentInfo ? '미납/결제 문제' : null;
+  }
+
+  const normalized = rawValue.replace(/\s+/g, '').toLowerCase();
+  if (normalized.includes('정기점검')) {
+    return '정기점검 만료 임박';
+  }
+  if (normalized.includes('미납') || normalized.includes('결제') || normalized.includes('연체')) {
+    return '미납/결제 문제';
+  }
+  if (normalized.includes('반납지연')) {
+    return '반납 지연';
+  }
+  if (normalized.includes('단말') && normalized.includes('off')) {
+    return '단말 OFF';
+  }
+  if (normalized.includes('도난')) {
+    return '도난 의심';
+  }
+  if (normalized.includes('사고')) {
+    return '사고 접수';
+  }
+  if (normalized.includes('차량이상')) {
+    return '차량이상';
+  }
+  if (normalized.includes('보험만료')) {
+    return '보험 만료 임박';
+  }
+
+  return rawValue;
+}
+
 function normalizeStatusLabel(rawValue: string | null): string {
   if (!rawValue) {
     return '대기중';
@@ -406,7 +440,10 @@ function toActionItem(row: unknown, index: number, fallbackId?: string): ActionI
   const paymentInfo = toPaymentInfo(row);
   const reservationId = pickString(row, ['reservationId', 'rentalId']) ?? paymentInfo?.reservationId;
   const paymentId = pickString(row, ['paymentId']) ?? paymentInfo?.paymentId;
-  const type = pickString(row, ['type', 'category', 'issueType', 'issue', 'title']) ?? (paymentInfo ? '미납/결제 문제' : null);
+  const type = normalizeActionItemType(
+    pickString(row, ['type', 'category', 'issueType', 'issue', 'title']),
+    Boolean(paymentInfo),
+  );
   const vehicleNumber = pickString(row, ['vehicleNumber', 'plateNumber', 'vehicleNo', 'plate']);
 
   if (!type || !vehicleNumber) {
@@ -579,7 +616,7 @@ export default function ActionRequired() {
     '미납/결제 문제',
     '단말 OFF',
     '도난 의심',
-    '정기점검',
+    '정기점검 만료 임박',
     '차량이상',
     '보험 만료 임박',
   ];

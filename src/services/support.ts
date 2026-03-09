@@ -56,6 +56,7 @@ export interface CreateSupportTicketPayload {
   category: string;
   title: string;
   content: string;
+  companyId?: string;
   contactPhone?: string;
   attachments?: CreateSupportTicketAttachmentPayload[];
 }
@@ -444,6 +445,7 @@ export async function createSupportTicket(payload: CreateSupportTicketPayload): 
       category,
       title,
       content,
+      companyId: toStringValue(payload.companyId) ?? undefined,
       contactPhone: contactPhone || undefined,
       attachments: payload.attachments ?? [],
     },

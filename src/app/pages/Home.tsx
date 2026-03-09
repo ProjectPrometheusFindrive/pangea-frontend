@@ -10,7 +10,6 @@ import {
   Clock,
   DollarSign,
   FileText,
-  Lock,
   MessageSquare,
   RefreshCw,
   Shield,
@@ -60,6 +59,15 @@ interface DashboardDistributionItem {
   unit: '건' | '대';
 }
 
+interface HomeTodayTaskCard {
+  label: string;
+  count: number | string;
+  icon: string;
+  filter: 'pickup' | 'return' | 'overdue';
+  testId: string;
+  unit?: string;
+}
+
 interface HomeStatCard {
   label: string;
   count: number | string;
@@ -67,8 +75,8 @@ interface HomeStatCard {
   bg: string;
   color: string;
   onClick: () => void;
+  testId: string;
   description?: string;
-  isPremium?: boolean;
   unit?: string;
 }
 
@@ -550,31 +558,33 @@ export default function Home() {
     );
   }, [navigateWithRoutePermission]);
 
-  const todayStats = useMemo(() => {
+  const todayStats = useMemo<HomeTodayTaskCard[]>(() => {
     return [
       {
         label: '오늘 인수 예정',
         count: today.pickupDueCount,
         icon: 'Calendar',
         filter: 'pickup' as const,
+        testId: 'home-today-card-pickup',
       },
       {
         label: '오늘 반납 예정',
         count: today.returnDueCount,
         icon: 'FileText',
         filter: 'return' as const,
+        testId: 'home-today-card-return',
       },
       {
         label: '기간 초과 미반납',
         count: today.overdueCount,
         icon: 'AlertCircle',
         filter: 'overdue' as const,
+        testId: 'home-today-card-overdue',
       },
     ];
   }, [today.overdueCount, today.pickupDueCount, today.returnDueCount]);
 
   const actionItemsForHome = useMemo<HomeStatCard[]>(() => {
-    const operatingAssets = sumByKeys(managementStageCounts, ['운영중']);
     const maintenanceAssets = sumByKeys(managementStageCounts, ['점검대기', '정비중']);
 
     return [
@@ -585,47 +595,25 @@ export default function Home() {
         color: 'text-red-600',
         icon: 'AlertCircle',
         onClick: () => handleIssueClick('반납 지연'),
+        testId: 'home-issue-card-overdue',
       },
       {
-        label: '미납/연체 계약',
+        label: '미납/결제 문제',
         count: kpis.unpaidContracts,
         bg: 'bg-yellow-50',
         color: 'text-yellow-600',
         icon: 'DollarSign',
-        onClick: () => handleContractClick('home-unpaid'),
+        onClick: () => handleIssueClick('미납/결제 문제'),
+        testId: 'home-issue-card-unpaid',
       },
       {
-        label: '운영중 자산',
-        count: operatingAssets,
-        bg: 'bg-blue-50',
-        color: 'text-blue-600',
-        icon: 'Shield',
-        onClick: () => handleAssetClick('rental'),
-      },
-      {
-        label: '점검 대상 자산',
+        label: '정기점검 만료 임박',
         count: maintenanceAssets,
         bg: 'bg-blue-50',
         color: 'text-blue-600',
         icon: 'ClipboardCheck',
-        onClick: () => handleAssetClick('maintenance'),
-      },
-      {
-        label: '총 계약',
-        count: kpis.totalContracts,
-        bg: 'bg-indigo-50',
-        color: 'text-indigo-600',
-        icon: 'FileText',
-        onClick: () => handleContractClick('all'),
-      },
-      {
-        label: '활용률',
-        count: toPercent(kpis.utilizationRate),
-        bg: 'bg-green-50',
-        color: 'text-green-600',
-        icon: 'TrendingUp',
-        unit: '%',
-        onClick: () => {},
+        onClick: () => handleIssueClick('정기점검 만료 임박'),
+        testId: 'home-issue-card-maintenance',
       },
       {
         label: '도난 의심',
@@ -633,9 +621,8 @@ export default function Home() {
         bg: 'bg-orange-50',
         color: 'text-orange-600',
         icon: 'AlertOctagon',
-        isPremium: true,
-        description: '단말 장착 차량만',
-        onClick: () => setShowPremiumModal(true),
+        onClick: () => handleIssueClick('도난 의심'),
+        testId: 'home-issue-card-stolen',
       },
       {
         label: '단말 OFF',
@@ -643,12 +630,12 @@ export default function Home() {
         bg: 'bg-orange-50',
         color: 'text-orange-600',
         icon: 'Signal',
-        isPremium: true,
         description: '단말 데이터 연동 예정',
         onClick: () => setShowPremiumModal(true),
+        testId: 'home-issue-card-device-off',
       },
     ];
-  }, [alerts.overdue, alerts.stolen, handleAssetClick, handleContractClick, handleIssueClick, kpis.totalContracts, kpis.unpaidContracts, kpis.utilizationRate, managementStageCounts]);
+  }, [alerts.overdue, alerts.stolen, handleIssueClick, kpis.unpaidContracts, managementStageCounts]);
 
   const assetData = useMemo<DashboardDistributionItem[]>(() => {
     const palette = ['#1e3a8a', '#60a5fa', '#22c55e', '#f59e0b'];
@@ -760,8 +747,8 @@ export default function Home() {
         className="m-6 min-h-[320px]"
       >
         <div className="space-y-5 p-6">
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-gray-200 bg-white p-4">
-            <div className="space-y-1">
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <div className="hidden">
               <h2 className="text-lg font-bold text-[#1e2939]">홈 요약</h2>
               <p className="text-xs text-gray-500">
                 {periodLabel ? `${periodLabel} · tenant: ${summary?.tenantId}` : '조회 기간을 선택해 주세요.'}
@@ -826,98 +813,100 @@ export default function Home() {
             </div>
           )}
 
-          <div className="rounded-xl bg-white p-5 shadow-sm">
-            <div className="mb-4 flex items-center justify-between gap-3">
-              <div>
-                <h2 className="text-lg font-bold text-[#1e2939]">오늘 할 일</h2>
-                <p className="mt-1 text-xs text-gray-500">오늘 기준 인수, 반납, 미반납 현황입니다.</p>
+          <div
+            data-testid="home-priority-panel"
+            className="grid gap-4 lg:grid-cols-[280px_minmax(0,1fr)] lg:items-stretch"
+          >
+            <section
+              data-testid="home-today-column"
+              className="flex h-full flex-col rounded-xl bg-white p-5 shadow-sm"
+            >
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-lg font-bold text-[#1e2939]">오늘 할 일</h2>
+                  <p className="mt-1 text-xs text-gray-500">오늘 기준 인수, 반납, 미반납 현황입니다.</p>
+                </div>
+                <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">
+                  Today
+                </span>
               </div>
-              <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">
-                실시간 today summary
-              </span>
-            </div>
 
-            <div className="grid gap-3 md:grid-cols-3">
-              {todayStats.map((task, index) => {
-                const Icon = iconMap[task.icon];
-                return (
-                  <button
-                    key={index}
-                    type="button"
-                    onClick={() => handleTaskClick(task.filter)}
-                    className="rounded-xl border border-gray-200 bg-gradient-to-br from-white to-slate-50 p-4 text-left transition hover:border-blue-200 hover:shadow-sm"
-                  >
-                    <div className="mb-3 flex items-start justify-between">
-                      <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-50">
-                        <Icon className="h-5 w-5 text-blue-600" />
-                      </div>
-                      <span className="text-xs font-medium text-gray-400">Reservations</span>
-                    </div>
-                    <p className="text-sm font-medium text-[#4a5565]">{task.label}</p>
-                    <p className="mt-2 text-3xl font-bold text-[#101828]">
-                      {formatStatCardCount(task.count, task.unit)}
-                    </p>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="rounded-xl bg-white p-5 shadow-sm">
-            <div className="mb-4 flex items-center justify-between gap-3">
-              <div>
-                <h2 className="text-lg font-bold text-[#1e2939]">기간 핵심 지표</h2>
-                <p className="mt-1 text-xs text-gray-500">
-                  {periodLabel ? `${periodLabel} 기준 운영 핵심 지표` : '조회 기간을 선택해 주세요.'}
-                </p>
-              </div>
-            </div>
-
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-              {actionItemsForHome.map((issue, index) => {
-                const Icon = iconMap[issue.icon];
-
-                if (issue.isPremium) {
+              <div className="mt-4 grid flex-1 auto-rows-fr gap-3">
+                {todayStats.map((task) => {
+                  const Icon = iconMap[task.icon];
                   return (
-                    <div
-                      key={index}
-                      onClick={issue.onClick}
-                      className={`${issue.bg} relative cursor-pointer rounded-xl p-3 transition-shadow hover:shadow-md`}
+                    <button
+                      key={task.testId}
+                      type="button"
+                      data-testid={task.testId}
+                      onClick={() => handleTaskClick(task.filter)}
+                      className="h-full rounded-xl border border-gray-200 bg-gradient-to-br from-white to-slate-50 p-4 text-left transition hover:border-blue-200 hover:shadow-sm"
                     >
-                      <div className="mb-2 flex items-start justify-between">
-                        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-white">
-                          <Icon className={`h-4 w-4 ${issue.color}`} />
+                      <div className="mb-3 flex items-start justify-between">
+                        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-50">
+                          <Icon className="h-5 w-5 text-blue-600" />
                         </div>
-                        <Lock className="h-3.5 w-3.5 text-gray-500" />
+                        <span className="text-xs font-medium text-gray-400">Today</span>
                       </div>
-                      <p className="mb-0.5 text-2xl font-bold text-[#101828]">
+                      <p className="text-sm font-medium text-[#4a5565]">{task.label}</p>
+                      <p className="mt-2 text-3xl font-bold text-[#101828]">
+                        {formatStatCardCount(task.count, task.unit)}
+                      </p>
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+
+            <section
+              data-testid="home-issue-grid"
+              className="flex h-full flex-col rounded-xl bg-white p-5 shadow-sm"
+            >
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-lg font-bold text-[#1e2939]">관리해야 할 이슈</h2>
+                  <p className="mt-1 text-xs text-gray-500">
+                    {periodLabel ? `${periodLabel} 기준 조치 필요 항목과 동일한 기준입니다.` : '조회 기간을 선택해 주세요.'}
+                  </p>
+                </div>
+                <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
+                  Action required
+                </span>
+              </div>
+
+              <div className="mt-4 grid flex-1 auto-rows-fr gap-3 md:grid-cols-2 xl:grid-cols-3">
+                {actionItemsForHome.map((issue) => {
+                  const Icon = iconMap[issue.icon];
+                  return (
+                    <button
+                      key={issue.testId}
+                      type="button"
+                      data-testid={issue.testId}
+                      onClick={issue.onClick}
+                      className={`${issue.bg} h-full rounded-xl p-4 text-left transition hover:-translate-y-0.5 hover:shadow-md`}
+                    >
+                      <div className="mb-3 flex items-start justify-between gap-3">
+                        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/80">
+                          <Icon className={`h-5 w-5 ${issue.color}`} />
+                        </div>
+                        <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+                          Issue
+                        </span>
+                      </div>
+                      <p className="text-sm font-medium text-[#4a5565]">{issue.label}</p>
+                      <p className="mt-2 text-3xl font-bold text-[#101828]">
                         {formatStatCardCount(issue.count, issue.unit)}
                       </p>
-                      <p className="mb-1 text-xs text-[#4a5565]">{issue.label}</p>
-                      <p className="text-[10px] leading-tight text-gray-500">{issue.description}</p>
-                    </div>
+                      {issue.description && (
+                        <p className="mt-2 text-xs leading-relaxed text-slate-500">
+                          {issue.description}
+                        </p>
+                      )}
+                    </button>
                   );
-                }
-
-                return (
-                  <div
-                    key={index}
-                    onClick={issue.onClick}
-                    className={`${issue.bg} cursor-pointer rounded-xl p-3 transition-shadow hover:shadow-md`}
-                  >
-                    <div className="mb-2 flex items-start justify-between">
-                      <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-white">
-                        <Icon className={`h-4 w-4 ${issue.color}`} />
-                      </div>
-                    </div>
-                    <p className="mb-0.5 text-2xl font-bold text-[#101828]">
-                      {formatStatCardCount(issue.count, issue.unit)}
-                    </p>
-                    <p className="text-xs text-[#4a5565]">{issue.label}</p>
-                  </div>
-                );
-              })}
-            </div>
+                })}
+              </div>
+            </section>
           </div>
 
           <div>

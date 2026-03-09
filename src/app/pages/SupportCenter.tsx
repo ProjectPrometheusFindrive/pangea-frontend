@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
-import { useLocation, useNavigate } from 'react-router';
+import { useLocation, useNavigate, useSearchParams } from 'react-router';
 import { CheckCircle2, Loader2, Paperclip, RefreshCw, Search, Send } from 'lucide-react';
 
 import { Layout } from '../components/Layout';
 import { useAuthorization } from '../context/AuthorizationContext';
+import { useAuth } from '../context/AuthContext';
 import { ACTION_PERMISSIONS } from '../authorization';
 import {
   getPageErrorActionLabel,
@@ -24,7 +25,7 @@ import {
 } from '../../services/support';
 import type { SupportCenterLocationState, SupportPrefillState } from '../utils/premiumInquiry';
 
-type SupportField = 'category' | 'title' | 'content' | 'contactPhone' | 'attachments';
+type SupportField = 'companyId' | 'category' | 'title' | 'content' | 'contactPhone' | 'attachments';
 type SupportFieldErrors = Partial<Record<SupportField, string>>;
 
 interface SupportErrorState {
@@ -35,6 +36,7 @@ interface SupportErrorState {
 
 interface StoredSupportReceipt {
   id: string;
+  companyId?: string;
   category: string;
   title: string;
   status: SupportTicketStatus;
@@ -223,6 +225,8 @@ function toErrorFieldEntries(error: ApiError): Array<{ name: string; reason: str
 
 function mapSupportFieldErrors(entries: Array<{ name: string; reason: string }>): SupportFieldErrors {
   const fieldMap: Record<string, SupportField> = {
+    companyId: 'companyId',
+    company_id: 'companyId',
     category: 'category',
     title: 'title',
     content: 'content',
@@ -322,6 +326,7 @@ function toSupportErrorState(error: unknown, fallbackMessage: string): SupportEr
 function toSupportTicketReceipt(ticket: SupportTicket): StoredSupportReceipt {
   return {
     id: ticket.id,
+    companyId: ticket.companyId,
     category: ticket.category,
     title: ticket.title,
     status: ticket.status,
@@ -370,6 +375,7 @@ function readSupportReceipt(): StoredSupportReceipt | null {
 
     return {
       id,
+      companyId: toStringValue(parsedValue.companyId) ?? undefined,
       category,
       title,
       status: normalizeSupportStatus(toStringValue(parsedValue.status) ?? 'RECEIVED'),
@@ -384,6 +390,7 @@ function readSupportReceipt(): StoredSupportReceipt | null {
 function restoreTicketFromReceipt(receipt: StoredSupportReceipt): SupportTicket {
   return {
     id: receipt.id,
+    companyId: receipt.companyId,
     category: receipt.category,
     title: receipt.title,
     content: '',
@@ -396,6 +403,7 @@ function restoreTicketFromReceipt(receipt: StoredSupportReceipt): SupportTicket 
 }
 
 function buildSubmitFingerprint(payload: {
+  companyId: string;
   category: string;
   title: string;
   content: string;
@@ -403,6 +411,7 @@ function buildSubmitFingerprint(payload: {
   attachments: File[];
 }): string {
   return JSON.stringify({
+    companyId: payload.companyId,
     category: payload.category,
     title: payload.title,
     content: payload.content,
@@ -423,7 +432,48 @@ function toSupportTicketRowTestId(ticket: SupportTicket): string {
   return `support-admin-ticket-row-${ticket.companyId ?? 'unknown'}-${ticket.id}`.replace(/[^a-zA-Z0-9_-]/g, '-');
 }
 
-function SupportAdminManagementView() {
+function SupportAttachmentList({
+  attachments,
+  title = '첨부파일',
+}: {
+  attachments: SupportTicket['attachments'];
+  title?: string;
+}) {
+  if (attachments.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="rounded-xl border border-gray-200 bg-white p-4">
+      <h4 className="text-sm font-semibold text-gray-900">{title}</h4>
+      <ul className="mt-3 space-y-2">
+        {attachments.map((attachment, index) => (
+          <li
+            key={`${attachment.fileName}-${attachment.sizeBytes ?? 0}-${index}`}
+            className="flex flex-wrap items-center gap-2 rounded-lg border border-gray-100 bg-gray-50 px-3 py-2 text-sm text-gray-700"
+          >
+            <Paperclip className="h-3.5 w-3.5 text-gray-400" />
+            <span className="font-medium text-gray-900">{attachment.fileName}</span>
+            {typeof attachment.sizeBytes === 'number' && (
+              <span className="text-xs text-gray-500">({formatBytes(attachment.sizeBytes)})</span>
+            )}
+            {attachment.contentType && (
+              <span className="rounded bg-white px-2 py-0.5 text-xs text-gray-500">{attachment.contentType}</span>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function SupportAdminManagementView({
+  canUpdateStatus,
+  onOpenSubmitView,
+}: {
+  canUpdateStatus: boolean;
+  onOpenSubmitView?: () => void;
+}) {
   const navigate = useNavigate();
   const [draftFilters, setDraftFilters] = useState(DEFAULT_SUPPORT_ADMIN_FILTERS);
   const [appliedFilters, setAppliedFilters] = useState(DEFAULT_SUPPORT_ADMIN_FILTERS);
@@ -445,8 +495,11 @@ function SupportAdminManagementView() {
   const isShowingStaleTickets = Boolean(ticketsError) && tickets.length > 0;
 
   const availableStatusTransitions = useMemo<SupportTicketStatus[]>(() => {
+    if (!canUpdateStatus) {
+      return [];
+    }
     return SUPPORT_STATUS_TRANSITIONS[normalizeSupportStatus(selectedTicket?.status ?? 'RECEIVED')] ?? [];
-  }, [selectedTicket]);
+  }, [canUpdateStatus, selectedTicket]);
 
   useEffect(() => {
     if (!selectedTicket) {
@@ -590,7 +643,7 @@ function SupportAdminManagementView() {
   }, [detailError, navigate]);
 
   const submitStatusUpdate = useCallback(async () => {
-    if (!selectedTicket || availableStatusTransitions.length === 0 || isStatusUpdating) {
+    if (!canUpdateStatus || !selectedTicket || availableStatusTransitions.length === 0 || isStatusUpdating) {
       return;
     }
 
@@ -623,7 +676,7 @@ function SupportAdminManagementView() {
     } finally {
       setIsStatusUpdating(false);
     }
-  }, [availableStatusTransitions.length, isStatusUpdating, selectedTicket, statusDraft, statusNote]);
+  }, [availableStatusTransitions.length, canUpdateStatus, isStatusUpdating, selectedTicket, statusDraft, statusNote]);
 
   const ticketsErrorActionLabel = getPageErrorActionLabel(ticketsError?.kind ?? null);
   const detailErrorActionLabel = getPageErrorActionLabel(detailError?.kind ?? null);
@@ -638,6 +691,19 @@ function SupportAdminManagementView() {
             전체 테넌트 문의를 조회하고 상태를 업데이트할 수 있습니다.
           </p>
         </div>
+
+        {onOpenSubmitView && (
+          <div className="flex justify-end">
+            <button
+              type="button"
+              data-testid="support-admin-open-submit"
+              onClick={() => navigate('?mode=submit')}
+              className="inline-flex items-center justify-center rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-100"
+            >
+              臾몄쓽 ?깅줉
+            </button>
+          </div>
+        )}
 
         <form onSubmit={handleAdminFilterSubmit} className="rounded-lg bg-white p-5 shadow-sm">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
@@ -960,9 +1026,16 @@ function SupportAdminManagementView() {
                   </dl>
                 </div>
 
+                {selectedTicket.attachments.length > 0 && (
+                  <SupportAttachmentList attachments={selectedTicket.attachments} />
+                )}
+
                 <div className="rounded-xl border border-gray-200 bg-white p-4">
+                  {!canUpdateStatus && (
+                    <p className="mb-2 text-sm text-gray-500">테넌트 관리자 계정은 문의 상태를 변경할 수 없습니다. 상세 조회만 가능합니다.</p>
+                  )}
                   <h4 className="text-sm font-semibold text-gray-900">상태 변경</h4>
-                  {availableStatusTransitions.length === 0 ? (
+                  {!canUpdateStatus ? null : availableStatusTransitions.length === 0 ? (
                     <p className="mt-2 text-sm text-gray-500">현재 상태에서는 추가 전이가 없습니다.</p>
                   ) : (
                     <>
@@ -1058,13 +1131,20 @@ function SupportAdminManagementView() {
   );
 }
 
-function SupportTicketSubmitView() {
+function SupportTicketSubmitView({
+  canManageSupport,
+  isSuperAdmin,
+}: {
+  canManageSupport: boolean;
+  isSuperAdmin: boolean;
+}) {
   const location = useLocation();
   const navigate = useNavigate();
 
   const [categories, setCategories] = useState<SupportCategory[]>([]);
   const [manualCategoryMode, setManualCategoryMode] = useState(false);
 
+  const [companyId, setCompanyId] = useState('');
   const [category, setCategory] = useState('');
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
@@ -1089,6 +1169,7 @@ function SupportTicketSubmitView() {
     () => (supportPrefill ? JSON.stringify(supportPrefill) : null),
     [supportPrefill],
   );
+  const normalizedCompanyId = companyId.trim();
 
   useEffect(() => {
     const storedReceipt = readSupportReceipt();
@@ -1100,6 +1181,7 @@ function SupportTicketSubmitView() {
     setReceiptTicket(restoredTicket);
     setLookupTicket(restoredTicket);
     setLookupTicketId(restoredTicket.id);
+    setCompanyId((previousValue) => previousValue || restoredTicket.companyId || '');
     setSubmitSuccessMessage(`최근 접수 내역(${restoredTicket.id})을 복구했습니다.`);
   }, []);
 
@@ -1232,6 +1314,9 @@ function SupportTicketSubmitView() {
     const normalizedContactPhone = contactPhone.trim();
 
     const nextFieldErrors: SupportFieldErrors = {};
+    if (isSuperAdmin && !normalizedCompanyId) {
+      nextFieldErrors.companyId = '회사 ID를 입력해 주세요.';
+    }
     if (!normalizedCategory) {
       nextFieldErrors.category = '문의 카테고리를 선택하거나 입력해 주세요.';
     }
@@ -1284,6 +1369,7 @@ function SupportTicketSubmitView() {
 
     try {
       const createdTicket = await createSupportTicket({
+        companyId: normalizedCompanyId || undefined,
         category: normalizedCategory,
         title: normalizedTitle,
         content: normalizedContent,
@@ -1298,6 +1384,7 @@ function SupportTicketSubmitView() {
       setReceiptTicket(createdTicket);
       setLookupTicket(createdTicket);
       setLookupTicketId(createdTicket.id);
+      setCompanyId((previousValue) => previousValue || createdTicket.companyId || normalizedCompanyId);
       setSubmitSuccessMessage(`문의가 접수되었습니다. 접수번호 ${createdTicket.id}`);
       saveSupportReceipt(createdTicket);
 
@@ -1312,13 +1399,24 @@ function SupportTicketSubmitView() {
     } finally {
       setIsSubmitting(false);
     }
-  }, [attachments, category, contactPhone, content, isSubmitting, title]);
+  }, [attachments, category, contactPhone, content, isSubmitting, isSuperAdmin, normalizedCompanyId, title]);
 
   const refreshTicketStatus = useCallback(async (inputTicketId?: string) => {
     const targetTicketId = (inputTicketId ?? lookupTicketId).trim();
+    const lookupCompanyId = isSuperAdmin
+      ? (normalizedCompanyId || lookupTicket?.companyId || receiptTicket?.companyId || '')
+      : undefined;
     if (!targetTicketId) {
       setLookupError({
         message: '조회할 접수번호를 입력해 주세요.',
+        kind: 'unknown',
+        fieldErrors: {},
+      });
+      return;
+    }
+    if (isSuperAdmin && !lookupCompanyId) {
+      setLookupError({
+        message: '최고 관리자는 조회할 회사 ID를 입력해 주세요.',
         kind: 'unknown',
         fieldErrors: {},
       });
@@ -1329,9 +1427,12 @@ function SupportTicketSubmitView() {
     setIsLookupLoading(true);
 
     try {
-      const detailedTicket = await getSupportTicketDetail(targetTicketId);
+      const detailedTicket = await getSupportTicketDetail(targetTicketId, {
+        companyId: lookupCompanyId || undefined,
+      });
       setLookupTicket(detailedTicket);
       setLookupTicketId(detailedTicket.id);
+      setCompanyId((previousValue) => previousValue || detailedTicket.companyId || lookupCompanyId);
 
       if (receiptTicket && receiptTicket.id.toUpperCase() === detailedTicket.id.toUpperCase()) {
         setReceiptTicket(detailedTicket);
@@ -1344,7 +1445,7 @@ function SupportTicketSubmitView() {
     } finally {
       setIsLookupLoading(false);
     }
-  }, [lookupTicketId, receiptTicket]);
+  }, [isSuperAdmin, lookupTicket?.companyId, lookupTicketId, normalizedCompanyId, receiptTicket]);
 
   const handleLookupErrorAction = useCallback(() => {
     if (!lookupError) {
@@ -1382,6 +1483,16 @@ function SupportTicketSubmitView() {
                 첨부파일은 최대 {MAX_ATTACHMENT_COUNT}개, 파일당 {formatBytes(MAX_ATTACHMENT_BYTES)}까지 가능합니다.
               </p>
             </div>
+            {canManageSupport && !supportPrefill && (
+              <button
+                type="button"
+                data-testid="support-submit-open-manage"
+                onClick={() => navigate('/support-center?mode=manage')}
+                className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+              >
+                관리 화면으로
+              </button>
+            )}
             {categories.length > 0 && (
               <button
                 type="button"
@@ -1474,6 +1585,30 @@ function SupportTicketSubmitView() {
             }}
             className="space-y-4"
           >
+              {isSuperAdmin && (
+                <div>
+                  <label htmlFor="support-company-id" className="mb-1 block text-sm font-semibold text-gray-700">
+                    회사 ID <span className="text-red-600">*</span>
+                  </label>
+                  <input
+                    id="support-company-id"
+                    data-testid="support-company-id"
+                    type="text"
+                    value={companyId}
+                    onChange={(event) => {
+                      setCompanyId(event.target.value);
+                      clearFieldError('companyId');
+                    }}
+                    placeholder="예: C1"
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                  />
+                  <p className="mt-1 text-xs text-gray-500">최고 관리자는 접수 및 조회 대상 회사를 직접 지정해야 합니다.</p>
+                  {fieldErrors.companyId && (
+                    <p className="mt-1 text-xs text-red-600">{fieldErrors.companyId}</p>
+                  )}
+                </div>
+              )}
+
               <div>
                 <label htmlFor="support-category" className="mb-1 block text-sm font-semibold text-gray-700">
                   문의 카테고리 <span className="text-red-600">*</span>
@@ -1746,6 +1881,12 @@ function SupportTicketSubmitView() {
                 </div>
               </dl>
 
+              {lookupTicket.attachments.length > 0 && (
+                <div className="mt-3">
+                  <SupportAttachmentList attachments={lookupTicket.attachments} title="첨부파일" />
+                </div>
+              )}
+
               {lookupTicket.statusHistory.length > 0 && (
                 <div className="mt-3">
                   <p className="text-xs font-semibold text-gray-500">상태 이력</p>
@@ -1790,14 +1931,25 @@ function SupportTicketSubmitView() {
 }
 
 export default function SupportCenter() {
+  const { user } = useAuth();
   const { canPerformAction } = useAuthorization();
   const location = useLocation();
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const canManageSupport = canPerformAction(ACTION_PERMISSIONS.supportManage);
+  const isSuperAdmin = user?.role === 'super_admin';
   const supportPrefill = useMemo(() => readSupportPrefillState(location.state), [location.state]);
+  const requestedMode = searchParams.get('mode');
+  const isSubmitMode = requestedMode === 'submit';
 
-  if (canManageSupport && !supportPrefill) {
-    return <SupportAdminManagementView />;
+  if (canManageSupport && !supportPrefill && !isSubmitMode) {
+    return (
+      <SupportAdminManagementView
+        canUpdateStatus={isSuperAdmin}
+        onOpenSubmitView={() => navigate('?mode=submit')}
+      />
+    );
   }
 
-  return <SupportTicketSubmitView />;
+  return <SupportTicketSubmitView canManageSupport={canManageSupport} isSuperAdmin={isSuperAdmin} />;
 }

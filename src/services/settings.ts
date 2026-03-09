@@ -90,6 +90,11 @@ export interface SettingsMemberRolePatchRequest {
   role: 'admin' | 'member';
 }
 
+export interface SettingsMemberStatusPatchRequest {
+  status: 'approved' | 'rejected';
+  reason?: string;
+}
+
 export function getSettingsCompany(options: SettingsRequestOptions = {}): Promise<SettingsCompanyProfile> {
   return apiClient.requestData<SettingsCompanyProfile>({
     path: '/api/v2/settings/company',
@@ -191,6 +196,22 @@ export function patchSettingsMemberRole(
 ): Promise<SettingsMember> {
   return apiClient.requestData<SettingsMember>({
     path: `/api/v2/settings/members/${encodeURIComponent(userId)}/role`,
+    method: 'PATCH',
+    body: payload,
+    query: {
+      companyId: options.companyId,
+    },
+    signal: options.signal,
+  });
+}
+
+export function patchSettingsMemberStatus(
+  userId: string,
+  payload: SettingsMemberStatusPatchRequest,
+  options: SettingsRequestOptions = {},
+): Promise<SettingsMember> {
+  return apiClient.requestData<SettingsMember>({
+    path: `/api/v2/settings/members/${encodeURIComponent(userId)}/status`,
     method: 'PATCH',
     body: payload,
     query: {
