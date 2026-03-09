@@ -8,6 +8,7 @@ import DeviceInstallation from './pages/DeviceInstallation';
 import Forbidden from './pages/Forbidden';
 import Home from './pages/Home';
 import Login from './pages/Login';
+import Notifications from './pages/Notifications';
 import Reservations from './pages/Reservations';
 import Revenue from './pages/Revenue';
 import Settings from './pages/Settings';
@@ -69,6 +70,10 @@ export const router = createBrowserRouter([
           {
             path: '/revenue',
             Component: Revenue,
+          },
+          {
+            path: '/notifications',
+            Component: Notifications,
           },
           {
             path: '/settings',
