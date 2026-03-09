@@ -171,6 +171,20 @@ cp docs/prompt_history/_TEMPLATE.md docs/prompt_history/$(date +%Y%m%d)_SCRUM-12
 
 ## Version History
 - v1.2.48 (2026-03-09, Jira SCRUM-235): Record end_prompt evidence for 멤버 예약 취소 버튼 숨김.
+- v1.2.48 (2026-03-09, Jira SCRUM-234): Record end_prompt evidence for 로그아웃 후 로그인 경로 404 방지.
+- v1.2.48 (2026-03-09, Jira SCRUM-233): Record end_prompt evidence for 관리자 화면 한국어 카피 정렬.
+- v1.2.48 (2026-03-09, Jira SCRUM-231): Record end_prompt evidence for 로그아웃 후 로그인 경로 404 방지.
+- v1.2.48 (2026-03-09, Jira SCRUM-230): Record end_prompt evidence for 관리자 화면 한국어 카피 정렬.
+- v1.2.48 (2026-03-09, Jira SCRUM-228): Record end_prompt evidence for super_admin 지오펜스 company scope 정렬.
+- v1.2.48 (2026-03-09, Jira SCRUM-227): Record end_prompt evidence for 설정 CSV 저장 동작 정리.
+- v1.2.48 (2026-03-09, Jira SCRUM-226): Record end_prompt evidence for 벌크 OCR 자산 쓰기 권한 정렬.
+- v1.2.48 (2026-03-09, Jira SCRUM-225): Record end_prompt evidence for 완료 상태 사고접수 UI 가드.
+- v1.2.48 (2026-03-09, Jira SCRUM-224): Record end_prompt evidence for 회사 정보 readiness 안내 정리.
+- v1.2.48 (2026-03-09, Jira SCRUM-223): Record end_prompt evidence for 예약 조기 시작 차단 UI 가드.
+- v1.2.48 (2026-03-09, Jira SCRUM-222): Record end_prompt evidence for 설정 페이지 tenant scope 정렬.
+- v1.2.48 (2026-03-09, Jira SCRUM-220): Record end_prompt evidence for 예약 목록 VIN fallback 정렬.
+- v1.2.48 (2026-03-09, Jira SCRUM-219): Record end_prompt evidence for 관리자 필터 폼 접근성 정렬.
+- v1.2.48 (2026-03-09, Jira SCRUM-218): Record end_prompt evidence for 지오펜스 폴리곤 에디터 연동.
 - v1.2.46 (2026-03-08, SCRUM-193): Add prompt_history evidence rule for Revenue trend fallback fixes (summary-first partial success, summary-driven empty-state, and trend-panel inline retry degradation).
 - v1.2.46 (2026-03-07, SCRUM-185): Add prompt_history evidence rule for Home heading localization regressions, including exact copy replacement and the Playwright reused-server caveat/workaround.
 - v1.2.46 (2026-03-08, SCRUM-184): Add prompt_history evidence rule for premium CTA support-center routing follow-up (shared SupportCenter prefill helper, manual-category preservation, `단말 OFF` no-data fallback, and real CTA-based Playwright coverage).

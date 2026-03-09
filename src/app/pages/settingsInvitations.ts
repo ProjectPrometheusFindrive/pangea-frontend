@@ -8,9 +8,21 @@ export interface InvitationDraft {
 export type InvitationDraftErrors = Partial<Record<keyof InvitationDraft, string>>;
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const INVALID_COMPANY_IDS = new Set(['0000000000', '__global__', 'company-local', 'null', 'none']);
 
 function normalizeInvitationEmail(value: string): string {
   return value.trim().toLowerCase();
+}
+
+function normalizeSettingsCompanyId(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const normalizedValue = value.trim();
+  if (!normalizedValue) {
+    return null;
+  }
+  return INVALID_COMPANY_IDS.has(normalizedValue.toLowerCase()) ? null : normalizedValue;
 }
 
 function invitationSortKey(invitation: Pick<Invitation, 'updatedAt' | 'invitedAt'>): number {
@@ -36,11 +48,24 @@ export function validateInvitationDraft(draft: InvitationDraft): InvitationDraft
   return errors;
 }
 
-export function buildInvitationCreatePayload(draft: InvitationDraft): InvitationCreateRequest {
-  return {
+export function resolveSettingsCompanyScope(explicitCompanyId: unknown, authCompanyId: unknown): string | null {
+  return normalizeSettingsCompanyId(explicitCompanyId) ?? normalizeSettingsCompanyId(authCompanyId);
+}
+
+export function buildInvitationCreatePayload(
+  draft: InvitationDraft,
+  companyId?: string | null,
+): InvitationCreateRequest {
+  const payload: InvitationCreateRequest = {
     email: normalizeInvitationEmail(draft.email),
     role: draft.role,
   };
+
+  const resolvedCompanyId = normalizeSettingsCompanyId(companyId);
+  if (resolvedCompanyId) {
+    payload.companyId = resolvedCompanyId;
+  }
+  return payload;
 }
 
 export function upsertPendingInvitation(existing: Invitation[], next: Invitation): Invitation[] {
