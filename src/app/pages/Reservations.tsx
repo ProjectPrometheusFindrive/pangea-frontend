@@ -884,8 +884,8 @@ export default function Reservations() {
   const [dragSelection, setDragSelection] = useState<DragSelection>(null);
 
   const paymentSyncTargets = useMemo(
-    () => buildPaymentSyncTargets(reservationsData),
-    [reservationsData],
+    () => buildPaymentSyncTargets(reservationsData, selectedReservation),
+    [reservationsData, selectedReservation],
   );
 
   const {

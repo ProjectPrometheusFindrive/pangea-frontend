@@ -185,11 +185,30 @@ export function mergeVehicleRows(assetPayload: unknown, reservationRows: Reserva
   return Array.from(vehicleMap.values());
 }
 
-export function buildPaymentSyncTargets(reservations: Reservation[]): PaymentSyncTarget[] {
-  return reservations
+export function buildPaymentSyncTargets(
+  reservations: Reservation[],
+  selectedReservation: Reservation | null = null,
+): PaymentSyncTarget[] {
+  const targets = reservations
     .filter((reservation) => reservation.type !== 'return')
     .map((reservation) => ({
       reservationId: reservation.id,
       fallbackStatus: reservation.paymentStatus,
     }));
+
+  if (!selectedReservation?.id) {
+    return targets;
+  }
+
+  if (targets.some((target) => target.reservationId === selectedReservation.id)) {
+    return targets;
+  }
+
+  return [
+    ...targets,
+    {
+      reservationId: selectedReservation.id,
+      fallbackStatus: selectedReservation.paymentStatus,
+    },
+  ];
 }

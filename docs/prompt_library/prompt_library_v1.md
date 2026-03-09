@@ -170,6 +170,7 @@ cp docs/prompt_history/_TEMPLATE.md docs/prompt_history/$(date +%Y%m%d)_SCRUM-12
 - Production push triggers auto tag (`vX.Y.Z`)
 
 ## Version History
+- v1.2.48 (2026-03-09, Jira SCRUM-243): Record end_prompt evidence for 예약 상세 결제 상태 동기화.
 - v1.2.48 (2026-03-09, Jira SCRUM-242): Record end_prompt evidence for 예약 생성 결제 필드 보존.
 - v1.2.48 (2026-03-09, Jira SCRUM-241): Record end_prompt evidence for 알림 전체보기 페이지 연결.
 - v1.2.48 (2026-03-09, Jira SCRUM-240): Record end_prompt evidence for 알림 딥링크 fallback 정리.
