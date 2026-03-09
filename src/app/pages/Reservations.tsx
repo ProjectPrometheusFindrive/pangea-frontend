@@ -1640,7 +1640,7 @@ export default function Reservations() {
   ]);
 
   const handleCancelReservation = useCallback(async () => {
-    if (!canWriteReservations) {
+    if (!canTransitionReservations) {
       setReservationActionError('예약 취소 권한이 없습니다. 관리자에게 권한을 요청해 주세요.');
       return;
     }
@@ -1699,7 +1699,7 @@ export default function Reservations() {
     }
   }, [
     activeReservationAction,
-    canWriteReservations,
+    canTransitionReservations,
     closeReservationDetail,
     hydrateReservationDetail,
     refreshReservationsAfterMutation,
@@ -2696,13 +2696,13 @@ export default function Reservations() {
                     {activeReservationAction === 'start' ? '처리 중...' : '차량 인수 처리'}
                   </button>
                 )}
-                {selectedReservation.type === 'reservation' && (
+                {selectedReservation.type === 'reservation' && canTransitionReservations && (
                   <button
                     onClick={() => {
                       void handleCancelReservation();
                     }}
                     data-testid="reservation-cancel-button"
-                    disabled={!canWriteReservations || activeReservationAction !== null}
+                    disabled={!canTransitionReservations || activeReservationAction !== null}
                     className="flex-1 min-w-[200px] px-4 py-3 bg-gray-600 text-white rounded-lg hover:bg-gray-700 font-medium disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     {activeReservationAction === 'cancel' ? '처리 중...' : '예약 취소'}
