@@ -273,6 +273,33 @@ export function canReportAccidentForReservation(reservation: Reservation): boole
   return reservation.type !== 'return';
 }
 
+function getReservationStartTimestamp(reservation: Reservation): number | null {
+  if (typeof reservation.scheduledStartAt === 'string' && reservation.scheduledStartAt.trim()) {
+    const parsed = Date.parse(reservation.scheduledStartAt);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  if (typeof reservation.startDateFull === 'string' && reservation.startDateFull.trim()) {
+    const parsed = Date.parse(reservation.startDateFull);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  return Number.isFinite(reservation.startDate) ? reservation.startDate : null;
+}
+
+function canStartReservationNow(reservation: Reservation, now = Date.now()): boolean {
+  if (reservation.type !== 'reservation') {
+    return false;
+  }
+  const startTimestamp = getReservationStartTimestamp(reservation);
+  if (startTimestamp === null) {
+    return true;
+  }
+  return startTimestamp <= now;
+}
+
 function applySyncedPaymentStatusToReservation(
   reservation: Reservation,
   syncedPaymentStatus: PaymentStatusSnapshot,
@@ -601,7 +628,12 @@ function toReservationRow(row: unknown, index: number): Reservation | null {
   }
 
   const vehicleNumber = toStringValue(row.vehicleNumber) ?? toStringValue(row.plateNumber) ?? toStringValue(row.plate);
-  if (!vehicleNumber) {
+  const fallbackVehicleNumber = vehicleNumber
+    ?? toStringValue(row.vin)
+    ?? toStringValue(row.reservationId)
+    ?? toStringValue(row.rentalId)
+    ?? toStringValue(row.id);
+  if (!fallbackVehicleNumber) {
     return null;
   }
 
@@ -630,10 +662,13 @@ function toReservationRow(row: unknown, index: number): Reservation | null {
 
   return {
     id: reservationId,
-    vehicleNumber,
+    vehicleNumber: fallbackVehicleNumber,
     customer,
     startDate: startDateOffset,
     endDate: endDateOffset,
+    contractStatus: contractStatus ?? undefined,
+    type: normalizeReservationType(contractStatus ?? toStringValue(row.type) ?? toStringValue(row.status)),
+    scheduledStartAt: toStringValue(startSource) ?? undefined,
     contractStatus: contractStatus ?? undefined,
     type: normalizeReservationType(contractStatus ?? toStringValue(row.type) ?? toStringValue(row.status)),
     issues,
@@ -1428,6 +1463,8 @@ export default function Reservations() {
       startDate: Math.min(startDateOffset, endDateOffset),
       endDate: Math.max(startDateOffset, endDateOffset),
       contractStatus: '예약중',
+      scheduledStartAt: startAt,
+      contractStatus: '예약중',
       type: 'reservation',
       issues: [],
       phone: formValues.customerPhone.trim(),
@@ -1516,6 +1553,10 @@ export default function Reservations() {
     }
 
     if (!selectedReservation || selectedReservation.type !== 'reservation' || activeReservationAction) {
+      return;
+    }
+    if (!canStartReservationNow(selectedReservation)) {
+      setReservationActionError('예약 시작 시각 이후에만 차량 인수 처리가 가능합니다.');
       return;
     }
 
@@ -2105,8 +2146,10 @@ export default function Reservations() {
           {/* 차량 필터 영역 */}
           <div className="flex items-center gap-3 px-3 py-2 bg-gray-50 border-b border-gray-200 shrink-0">
             <div className="flex items-center gap-2">
-              <label className="text-xs font-semibold text-gray-600">차종:</label>
+              <label htmlFor="reservations-model-filter" className="text-xs font-semibold text-gray-600">차종:</label>
               <select
+                id="reservations-model-filter"
+                name="modelFilter"
                 value={modelFilter}
                 onChange={(e) => setModelFilter(e.target.value)}
                 className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
@@ -2119,8 +2162,10 @@ export default function Reservations() {
             </div>
             
             <div className="flex items-center gap-2">
-              <label className="text-xs font-semibold text-gray-600">차량번호:</label>
+              <label htmlFor="reservations-vehicle-search-query" className="text-xs font-semibold text-gray-600">차량번호:</label>
               <input
+                id="reservations-vehicle-search-query"
+                name="vehicleSearchQuery"
                 type="text"
                 placeholder="차량번호 검색"
                 value={vehicleSearchQuery}
@@ -2639,7 +2684,7 @@ export default function Reservations() {
                 >
                   이 차량의 조치항목 보기
                 </button>
-                {selectedReservation.type === 'reservation' && canTransitionReservations && (
+                {selectedReservation.type === 'reservation' && canTransitionReservations && canStartReservationNow(selectedReservation) && (
                   <button
                     onClick={() => {
                       void handleStartReservation();

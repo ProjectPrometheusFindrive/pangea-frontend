@@ -33,6 +33,10 @@ function formatDateTimeOffset(offsetDays: number, time: string): string {
   return `${formatDateOffset(offsetDays)}T${time}`;
 }
 
+function formatStartableDateTimeToday(): string {
+  return formatDateTimeOffset(0, '00:00:00');
+}
+
 function buildVehicleAsset() {
   return {
     vehicleNumber: '12가3456',
@@ -123,6 +127,7 @@ test.describe('BK-091 Reservations E2E', () => {
             id: 'R-1001',
             customerName: '테스트고객',
             phone: '010-2222-3333',
+            startAt: formatStartableDateTimeToday(),
           });
           reservations.splice(0, reservations.length, created);
           await fulfillSuccess(route, created, 201);
@@ -139,6 +144,7 @@ test.describe('BK-091 Reservations E2E', () => {
             id: 'R-1001',
             customerName: '테스트고객',
             phone: '010-2222-3333',
+            startAt: formatStartableDateTimeToday(),
             contractStatus: '대여중',
           });
           reservations.splice(0, reservations.length, transitionedReservation);
@@ -150,6 +156,7 @@ test.describe('BK-091 Reservations E2E', () => {
             id: 'R-1001',
             customerName: '테스트고객',
             phone: '010-2222-3333',
+            startAt: formatStartableDateTimeToday(),
             contractStatus: '완료',
           });
           reservations.splice(0, reservations.length, returnedReservation);
@@ -344,7 +351,9 @@ test.describe('BK-091 Reservations E2E', () => {
   });
 
   test('대여 시작 409 충돌 시 최신 상태를 다시 반영한다', async ({ page }) => {
-    let currentReservation = buildReservationRow();
+    let currentReservation = buildReservationRow({
+      startAt: formatStartableDateTimeToday(),
+    });
 
     await installApiMocks(page, {
       user: {
@@ -367,7 +376,10 @@ test.describe('BK-091 Reservations E2E', () => {
           expect(JSON.parse(request.postData() ?? '{}')).toMatchObject({
             to: '대여중',
           });
-          currentReservation = buildReservationRow({ contractStatus: '대여중' });
+          currentReservation = buildReservationRow({
+            startAt: formatStartableDateTimeToday(),
+            contractStatus: '대여중',
+          });
           await fulfillError(route, 409, 'CONFLICT', 'transition version mismatch');
         },
       },
