@@ -32,6 +32,10 @@ import {
   type UploadStep,
 } from './assetCreateMode';
 import {
+  COMPANY_PROFILE_SETTINGS_PATH as COMPANY_PROFILE_SETTINGS_ROUTE,
+  getAssetCreateReadiness,
+} from './assetCreateReadiness.js';
+import {
   getCollectionFromPayload,
   getPageErrorActionLabel,
   handlePageErrorAction,
@@ -40,6 +44,7 @@ import {
 } from '../hooks/usePageEndpointState';
 import { useAuth } from '../context/AuthContext';
 import { useAuthorization } from '../context/AuthorizationContext';
+import { useCompany } from '../context/CompanyContext';
 import { ACTION_PERMISSIONS } from '../authorization';
 import type { VehicleAsset } from '../types/assets';
 import { ApiError } from '../../services/api';
@@ -192,6 +197,7 @@ const OCR_POLL_INTERVAL_MS = 1500;
 const OCR_HIDDEN_POLL_INTERVAL_MS = 3000;
 const OCR_POLL_TIMEOUT_MS = 90_000;
 const INVALID_COMPANY_IDS = new Set(['0000000000', '__global__', 'company-local', 'null', 'none']);
+const COMPANY_PROFILE_REQUIRED_MESSAGE = '회사 정보가 비어 있습니다. 설정 > 회사 정보에서 회사명을 먼저 저장한 뒤 다시 시도해 주세요.';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
@@ -882,6 +888,7 @@ export default function Assets() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const { canPerformAction } = useAuthorization();
+  const { company } = useCompany();
   const canWriteAssets = canPerformAction(ACTION_PERMISSIONS.assetsWrite);
 
   const page = toPositiveInteger(searchParams.get('page'), DEFAULT_PAGE);
@@ -1794,8 +1801,12 @@ export default function Assets() {
     }
 
     const companyId = normalizeTenantCompanyId(user?.companyId);
-    if (!companyId) {
-      setCreateSaveError('회사 정보가 없어 차량 자산을 저장할 수 없습니다. 다시 로그인 후 시도해 주세요.');
+    const createReadiness = getAssetCreateReadiness({
+      tenantCompanyId: companyId,
+      company,
+    });
+    if (!createReadiness.isReady || !companyId) {
+      setCreateSaveError(createReadiness.message);
       return;
     }
 
@@ -1852,7 +1863,7 @@ export default function Assets() {
     } finally {
       setIsCreateSaving(false);
     }
-  }, [canWriteAssets, createForm, hydrateAssets, isCreateSaving, resetCreateModalState, updateAssetsSearchParams, user?.companyId]);
+  }, [canWriteAssets, company, createForm, hydrateAssets, isCreateSaving, resetCreateModalState, updateAssetsSearchParams, user?.companyId]);
 
   const handleDeleteAsset = useCallback(async () => {
     if (!canWriteAssets) {
@@ -2015,8 +2026,14 @@ export default function Assets() {
         <div className="mb-6 mt-4 space-y-4">
           {/* 검색창 */}
           <div className="relative">
+            <label htmlFor="assets-search-query" className="sr-only">
+              자산 검색
+            </label>
             <input
+              id="assets-search-query"
+              name="queryKeyword"
               type="text"
+              aria-label="자산 검색"
               placeholder="차량번호 또는 차종으로 검색..."
               value={queryKeyword}
               onChange={(e) => handleKeywordChange(e.target.value)}
@@ -2288,7 +2305,19 @@ export default function Assets() {
 
                 {createSaveError && (
                   <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                    {createSaveError}
+                    <p>{createSaveError}</p>
+                    {createSaveError === COMPANY_PROFILE_REQUIRED_MESSAGE && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowModal(false);
+                          navigate(COMPANY_PROFILE_SETTINGS_ROUTE);
+                        }}
+                        className="mt-3 inline-flex items-center rounded-md bg-white px-3 py-2 text-xs font-semibold text-red-700 shadow-sm ring-1 ring-inset ring-red-200 hover:bg-red-100"
+                      >
+                        회사 정보 설정으로 이동
+                      </button>
+                    )}
                   </div>
                 )}
 
