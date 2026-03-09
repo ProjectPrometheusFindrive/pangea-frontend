@@ -1,6 +1,6 @@
 import { Layout } from '../components/Layout';
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { useNavigate } from 'react-router';
+import { useNavigate, useSearchParams } from 'react-router';
 import {
   Plus,
   MapPin,
@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import Papa from 'papaparse';
 import { toast } from 'sonner';
+import { KakaoGeofenceInput, type KakaoGeofenceShape } from '../components/KakaoGeofenceInput';
 import { PageStateBoundary } from '../components/PageStateBoundary';
 import {
   getCollectionFromPayload,
@@ -49,6 +50,7 @@ import {
   type SettingsCompanyProfile,
   type SettingsCompanyUpdateRequest,
   type SettingsGeofence,
+  type SettingsGeofencePoint,
   type SettingsMember,
 } from '../../services/settings';
 import {
@@ -61,17 +63,19 @@ import {
 import {
   buildInvitationCreatePayload,
   getInvitationStatusBadgeColor,
+  resolveSettingsCompanyScope,
   toInvitationRoleLabel,
   toInvitationStatusLabel,
   upsertPendingInvitation,
   validateInvitationDraft,
 } from './settingsInvitations';
+import { canAccessBulkOcr } from './settingsBulkOcr';
 
 type TabType = 'bulk' | 'company' | 'geofence' | 'accounts';
 type UploadType = 'vehicles' | 'reservations' | 'ocr';
 type CurrentDataType = Extract<UploadType, 'vehicles' | 'reservations'>;
 type CompanyField = 'name' | 'businessNumber' | 'phone' | 'email' | 'address';
-type GeofenceField = 'name' | 'lat' | 'lng' | 'radiusMeter';
+type GeofenceField = 'name' | 'lat' | 'lng' | 'radiusMeter' | 'pointsText';
 type MemberRoleField = 'role';
 type InvitationField = 'email' | 'role';
 type FieldErrorMap<TField extends string> = Partial<Record<TField, string>>;
@@ -100,9 +104,11 @@ interface CompanyFormState {
 
 interface GeofenceFormState {
   name: string;
+  shape: KakaoGeofenceShape;
   lat: string;
   lng: string;
   radiusMeter: string;
+  pointsText: string;
   active: boolean;
 }
 
@@ -152,9 +158,11 @@ const DEFAULT_COMPANY_FORM_STATE: CompanyFormState = {
 
 const DEFAULT_GEOFENCE_FORM_STATE: GeofenceFormState = {
   name: '',
+  shape: 'circle',
   lat: '',
   lng: '',
   radiusMeter: '',
+  pointsText: '',
   active: true,
 };
 
@@ -376,13 +384,78 @@ function toCompanyForm(profile: SettingsCompanyProfile): CompanyFormState {
 }
 
 function toGeofenceForm(geofence: SettingsGeofence): GeofenceFormState {
+  const hasPolygonPoints = Array.isArray(geofence.points) && geofence.points.length >= 3;
   return {
     name: geofence.name,
+    shape: hasPolygonPoints ? 'polygon' : 'circle',
     lat: String(geofence.center.lat),
     lng: String(geofence.center.lng),
-    radiusMeter: String(geofence.radiusMeter),
+    radiusMeter: hasPolygonPoints && geofence.radiusMeter <= 0 ? '' : String(geofence.radiusMeter),
+    pointsText: hasPolygonPoints
+      ? geofence.points.map((point) => `${point.lat},${point.lng}`).join('\n')
+      : '',
     active: geofence.active,
   };
+}
+
+function parseGeofencePolygonPoints(pointsText: string): {
+  points: SettingsGeofencePoint[];
+  error: string | null;
+} {
+  const lines = pointsText
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  if (lines.length < 3) {
+    return {
+      points: [],
+      error: '꼭짓점 좌표는 최소 3개가 필요합니다.',
+    };
+  }
+
+  const points: SettingsGeofencePoint[] = [];
+  for (const [index, line] of lines.entries()) {
+    const tokens = line.split(',').map((token) => token.trim());
+    if (tokens.length !== 2) {
+      return {
+        points: [],
+        error: `${index + 1}번째 줄은 lat,lng 형식이어야 합니다.`,
+      };
+    }
+
+    const lat = toNumberValue(tokens[0]);
+    const lng = toNumberValue(tokens[1]);
+    if (lat === null || lng === null) {
+      return {
+        points: [],
+        error: `${index + 1}번째 줄 좌표를 숫자로 입력해 주세요.`,
+      };
+    }
+
+    points.push({ lat, lng });
+  }
+
+  return {
+    points,
+    error: null,
+  };
+}
+
+function areGeofencePointsEqual(
+  left: SettingsGeofencePoint[] | undefined,
+  right: SettingsGeofencePoint[] | undefined,
+): boolean {
+  const normalizedLeft = Array.isArray(left) ? left : [];
+  const normalizedRight = Array.isArray(right) ? right : [];
+  if (normalizedLeft.length !== normalizedRight.length) {
+    return false;
+  }
+
+  return normalizedLeft.every((point, index) => (
+    point.lat === normalizedRight[index]?.lat
+    && point.lng === normalizedRight[index]?.lng
+  ));
 }
 
 function formatUpdatedAt(value: string | null): string {
@@ -546,13 +619,20 @@ function toReservationTypeLabel(value: unknown): string {
 }
 
 export default function Settings() {
+  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const { user } = useAuth();
   const { canPerformAction } = useAuthorization();
   const { refreshCompany } = useCompany();
 
   const canEditSettings = canPerformAction(ACTION_PERMISSIONS.settingsWrite);
+  const canWriteAssets = canPerformAction(ACTION_PERMISSIONS.assetsWrite);
   const canManageMemberRoles = canPerformAction(ACTION_PERMISSIONS.settingsMembersWrite);
+  const canUseBulkOcr = canAccessBulkOcr({ canEditSettings, canWriteAssets });
+  const settingsCompanyId = useMemo(
+    () => resolveSettingsCompanyScope(searchParams.get('companyId'), user?.companyId),
+    [searchParams, user?.companyId],
+  );
 
   const [activeTab, setActiveTab] = useState<TabType>('bulk');
   const [uploadType, setUploadType] = useState<UploadType>('vehicles');
@@ -615,11 +695,13 @@ export default function Settings() {
   );
 
   const hydrateMembersOnly = useCallback(async () => {
-    const membersPayload = await listSettingsMembers();
+    const membersPayload = await listSettingsMembers(undefined, {
+      companyId: settingsCompanyId ?? undefined,
+    });
     setMembers(Array.isArray(membersPayload.items) ? membersPayload.items : []);
     setMemberRoleDrafts({});
     setMemberFieldErrors({});
-  }, []);
+  }, [settingsCompanyId]);
 
   const hydrateInvitationsOnly = useCallback(async () => {
     if (!canManageMemberRoles) {
@@ -628,18 +710,22 @@ export default function Settings() {
     }
 
     try {
-      const invitationsPayload = await listInvitations('pending');
+      const invitationsPayload = await listInvitations('pending', {
+        companyId: settingsCompanyId ?? undefined,
+      });
       const invitationItems = Array.isArray(invitationsPayload.items) ? invitationsPayload.items : [];
       setInvitations(invitationItems.reduce<Invitation[]>((items, invitation) => upsertPendingInvitation(items, invitation), []));
     } catch (error) {
       setInvitationSaveError(toErrorMessage(error, '초대 목록을 다시 불러오지 못했습니다.'));
     }
-  }, [canManageMemberRoles]);
+  }, [canManageMemberRoles, settingsCompanyId]);
 
   const hydrateGeofencesOnly = useCallback(async () => {
-    const geofencesPayload = await listSettingsGeofences();
+    const geofencesPayload = await listSettingsGeofences({
+      companyId: settingsCompanyId ?? undefined,
+    });
     setGeofences(Array.isArray(geofencesPayload.items) ? geofencesPayload.items : []);
-  }, []);
+  }, [settingsCompanyId]);
 
   const refreshCurrentDataCounts = useCallback(async () => {
     try {
@@ -682,8 +768,8 @@ export default function Settings() {
   }, []);
 
   const handleBulkOcrFileSelection = useCallback(async (files: File[]) => {
-    if (!canEditSettings) {
-      toast.error('설정 수정 권한이 없습니다.');
+    if (!canUseBulkOcr) {
+      toast.error('차량 자산 등록 권한이 없습니다.');
       return;
     }
     if (files.length === 0 || isBulkOcrProcessing) {
@@ -823,15 +909,15 @@ export default function Settings() {
         toast.success(`일괄 OCR 등록 완료: ${successCount}건 성공`);
       }
     }
-  }, [canEditSettings, isBulkOcrProcessing, pollBulkOcrJobUntilTerminal, refreshCurrentDataCounts, user?.companyId]);
+  }, [canUseBulkOcr, isBulkOcrProcessing, pollBulkOcrJobUntilTerminal, refreshCurrentDataCounts, user?.companyId]);
 
   const requestSettingsHydration = useCallback(async (signal: AbortSignal): Promise<SettingsHydrationPayload> => {
     const [companyPayload, geofencesPayload, membersPayload, invitationsResult] = await Promise.all([
-      getSettingsCompany({ signal }),
-      listSettingsGeofences({ signal }),
-      listSettingsMembers(undefined, { signal }),
+      getSettingsCompany({ signal, companyId: settingsCompanyId ?? undefined }),
+      listSettingsGeofences({ signal, companyId: settingsCompanyId ?? undefined }),
+      listSettingsMembers(undefined, { signal, companyId: settingsCompanyId ?? undefined }),
       canManageMemberRoles
-        ? listInvitations('pending', { signal })
+        ? listInvitations('pending', { signal, companyId: settingsCompanyId ?? undefined })
             .then((payload) => ({ payload, error: null as string | null }))
             .catch((error: unknown) => {
               if (error instanceof DOMException && error.name === 'AbortError') {
@@ -854,7 +940,7 @@ export default function Settings() {
         : [],
       invitationLoadError: invitationsResult.error,
     };
-  }, [canManageMemberRoles]);
+  }, [canManageMemberRoles, settingsCompanyId]);
 
   const handleSettingsHydrationSuccess = useCallback((payload: SettingsHydrationPayload) => {
     const nextCompanyForm = toCompanyForm(payload.company);
@@ -942,9 +1028,11 @@ export default function Settings() {
     if (geofenceEditorMode === 'create') {
       return (
         Boolean(geofenceForm.name.trim())
+        || geofenceForm.shape !== DEFAULT_GEOFENCE_FORM_STATE.shape
         || Boolean(geofenceForm.lat.trim())
         || Boolean(geofenceForm.lng.trim())
         || Boolean(geofenceForm.radiusMeter.trim())
+        || Boolean(geofenceForm.pointsText.trim())
         || geofenceForm.active !== DEFAULT_GEOFENCE_FORM_STATE.active
       );
     }
@@ -955,9 +1043,12 @@ export default function Settings() {
 
     const baseline = toGeofenceForm(selectedEditingGeofence);
     return (
+      geofenceForm.shape !== baseline.shape
+      ||
       geofenceForm.lat.trim() !== baseline.lat.trim()
       || geofenceForm.lng.trim() !== baseline.lng.trim()
       || geofenceForm.radiusMeter.trim() !== baseline.radiusMeter.trim()
+      || geofenceForm.pointsText.trim() !== baseline.pointsText.trim()
       || geofenceForm.active !== baseline.active
     );
   }, [geofenceEditorMode, geofenceForm, isGeofenceEditorOpen, selectedEditingGeofence]);
@@ -988,6 +1079,12 @@ export default function Settings() {
     || hasPendingMemberRoleChanges
     || (isInvitationEditorOpen && isInvitationEditorDirty)
   );
+
+  useEffect(() => {
+    if (searchParams.get('tab') === 'company') {
+      setActiveTab('company');
+    }
+  }, [searchParams]);
 
   useEffect(() => {
     if ((!hasUnsavedChanges && !isAnySaving) || typeof window === 'undefined') {
@@ -1089,7 +1186,9 @@ export default function Settings() {
     setCompanyRetryAction(null);
 
     try {
-      const updatedCompany = await putSettingsCompany(payload);
+      const updatedCompany = await putSettingsCompany(payload, {
+        companyId: settingsCompanyId ?? undefined,
+      });
       const nextForm = toCompanyForm(updatedCompany);
       setCompanyForm(nextForm);
       setCompanyBaseline(nextForm);
@@ -1146,6 +1245,7 @@ export default function Settings() {
     hydrateSettings,
     isCompanySaving,
     refreshCompany,
+    settingsCompanyId,
     toCompanyPatchPayload,
   ]);
 
@@ -1218,17 +1318,23 @@ export default function Settings() {
     const latValue = toNumberValue(geofenceForm.lat.trim());
     const lngValue = toNumberValue(geofenceForm.lng.trim());
     const radiusValue = toNumberValue(geofenceForm.radiusMeter.trim());
+    const parsedPolygon = geofenceForm.shape === 'polygon'
+      ? parseGeofencePolygonPoints(geofenceForm.pointsText)
+      : { points: [], error: null };
+    if (geofenceForm.shape === 'polygon' && parsedPolygon.error) {
+      fieldErrors.pointsText = parsedPolygon.error;
+    }
 
     if (geofenceEditorMode === 'create' && !trimmedName) {
       fieldErrors.name = '지오펜스 이름을 입력해 주세요.';
     }
-    if (latValue === null) {
+    if (geofenceForm.shape !== 'polygon' && latValue === null) {
       fieldErrors.lat = '위도 값을 입력해 주세요.';
     }
-    if (lngValue === null) {
+    if (geofenceForm.shape !== 'polygon' && lngValue === null) {
       fieldErrors.lng = '경도 값을 입력해 주세요.';
     }
-    if (radiusValue === null || !Number.isInteger(radiusValue) || radiusValue <= 0) {
+    if (geofenceForm.shape !== 'polygon' && (radiusValue === null || !Number.isInteger(radiusValue) || radiusValue <= 0)) {
       fieldErrors.radiusMeter = '반경은 1 이상의 정수(m)로 입력해 주세요.';
     }
 
@@ -1240,21 +1346,31 @@ export default function Settings() {
       return;
     }
 
-    if (latValue === null || lngValue === null || radiusValue === null) {
+    if (geofenceForm.shape !== 'polygon' && (latValue === null || lngValue === null || radiusValue === null)) {
       return;
     }
 
     let mutationTask: Promise<SettingsGeofence>;
     if (geofenceEditorMode === 'create') {
-      mutationTask = createSettingsGeofence({
-        name: trimmedName,
-        center: {
-          lat: latValue,
-          lng: lngValue,
-        },
-        radiusMeter: radiusValue,
-        active: geofenceForm.active,
-      });
+      mutationTask = geofenceForm.shape === 'polygon'
+        ? createSettingsGeofence({
+          name: trimmedName,
+          points: parsedPolygon.points,
+          active: geofenceForm.active,
+        }, {
+          companyId: settingsCompanyId ?? undefined,
+        })
+        : createSettingsGeofence({
+          name: trimmedName,
+          center: {
+          lat: latValue!,
+          lng: lngValue!,
+          },
+          radiusMeter: radiusValue!,
+          active: geofenceForm.active,
+        }, {
+          companyId: settingsCompanyId ?? undefined,
+        });
     } else {
       if (!editingGeofenceId || !selectedEditingGeofence) {
         setGeofenceSaveError('편집 대상을 찾을 수 없습니다. 목록을 새로고침해 주세요.');
@@ -1264,20 +1380,27 @@ export default function Settings() {
       const payload: {
         center?: { lat: number; lng: number };
         radiusMeter?: number;
+        points?: SettingsGeofencePoint[];
         active?: boolean;
       } = {};
+      if (geofenceForm.shape === 'polygon' && !areGeofencePointsEqual(selectedEditingGeofence.points, parsedPolygon.points)) {
+        payload.points = parsedPolygon.points;
+      }
 
       if (
-        selectedEditingGeofence.center.lat !== latValue
-        || selectedEditingGeofence.center.lng !== lngValue
+        geofenceForm.shape !== 'polygon'
+        && (
+          selectedEditingGeofence.center.lat !== latValue
+          || selectedEditingGeofence.center.lng !== lngValue
+        )
       ) {
         payload.center = {
-          lat: latValue,
-          lng: lngValue,
+          lat: latValue!,
+          lng: lngValue!,
         };
       }
-      if (selectedEditingGeofence.radiusMeter !== radiusValue) {
-        payload.radiusMeter = radiusValue;
+      if (geofenceForm.shape !== 'polygon' && selectedEditingGeofence.radiusMeter !== radiusValue) {
+        payload.radiusMeter = radiusValue!;
       }
       if (selectedEditingGeofence.active !== geofenceForm.active) {
         payload.active = geofenceForm.active;
@@ -1288,7 +1411,9 @@ export default function Settings() {
         return;
       }
 
-      mutationTask = updateSettingsGeofence(editingGeofenceId, payload);
+      mutationTask = updateSettingsGeofence(editingGeofenceId, payload, {
+        companyId: settingsCompanyId ?? undefined,
+      });
     }
 
     setIsGeofenceSaving(true);
@@ -1337,6 +1462,7 @@ export default function Settings() {
             'center.lng': 'lng',
             lng: 'lng',
             radiusMeter: 'radiusMeter',
+            points: 'pointsText',
           });
           if (Object.keys(mappedErrors).length > 0) {
             setGeofenceFieldErrors(mappedErrors);
@@ -1374,6 +1500,7 @@ export default function Settings() {
     geofenceForm,
     hydrateGeofencesOnly,
     isGeofenceSaving,
+    settingsCompanyId,
     selectedEditingGeofence,
   ]);
 
@@ -1387,7 +1514,9 @@ export default function Settings() {
     setGeofenceRetryAction(null);
 
     try {
-      const updated = await updateSettingsGeofence(geofenceId, { active: nextActive });
+      const updated = await updateSettingsGeofence(geofenceId, { active: nextActive }, {
+        companyId: settingsCompanyId ?? undefined,
+      });
       setGeofences((prevItems) => prevItems.map((item) => (
         item.id === geofenceId ? updated : item
       )));
@@ -1415,7 +1544,7 @@ export default function Settings() {
     } finally {
       setActiveToggleTargetId(null);
     }
-  }, [canEditSettings, hydrateGeofencesOnly]);
+  }, [canEditSettings, hydrateGeofencesOnly, settingsCompanyId]);
 
   const handleGeofenceToggle = useCallback((geofence: SettingsGeofence) => {
     if (!canEditSettings || activeToggleTargetId !== null || isGeofenceSaving) {
@@ -1434,7 +1563,9 @@ export default function Settings() {
     setGeofenceRetryAction(null);
 
     try {
-      await deleteSettingsGeofence(geofenceId);
+      await deleteSettingsGeofence(geofenceId, {
+        companyId: settingsCompanyId ?? undefined,
+      });
       setGeofences((prevItems) => prevItems.filter((item) => item.id !== geofenceId));
       setGeofenceSaveSuccess('지오펜스가 삭제되었습니다.');
       if (editingGeofenceId === geofenceId) {
@@ -1467,7 +1598,7 @@ export default function Settings() {
     } finally {
       setDeletingGeofenceId(null);
     }
-  }, [canEditSettings, editingGeofenceId, hydrateGeofencesOnly]);
+  }, [canEditSettings, editingGeofenceId, hydrateGeofencesOnly, settingsCompanyId]);
 
   const handleGeofenceDelete = useCallback((geofenceId: string) => {
     if (!canEditSettings || deletingGeofenceId !== null || isGeofenceSaving) {
@@ -1515,7 +1646,9 @@ export default function Settings() {
     setMemberRetryAction(null);
 
     try {
-      const updatedMember = await patchSettingsMemberRole(memberId, { role });
+      const updatedMember = await patchSettingsMemberRole(memberId, { role }, {
+        companyId: settingsCompanyId ?? undefined,
+      });
       setMembers((prevMembers) => prevMembers.map((member) => (
         member.userId === memberId ? updatedMember : member
       )));
@@ -1562,7 +1695,7 @@ export default function Settings() {
     } finally {
       setSavingMemberId(null);
     }
-  }, [canManageMemberRoles, hydrateMembersOnly]);
+  }, [canManageMemberRoles, hydrateMembersOnly, settingsCompanyId]);
 
   const handleMemberRoleSave = useCallback((memberId: string) => {
     const originalMember = members.find((member) => member.userId === memberId);
@@ -1649,7 +1782,12 @@ export default function Settings() {
     setInvitationRetryAction(null);
 
     try {
-      const createdInvitation = await createInvitation(buildInvitationCreatePayload(draft));
+      const createdInvitation = await createInvitation(
+        buildInvitationCreatePayload(draft, settingsCompanyId),
+        {
+          companyId: settingsCompanyId ?? undefined,
+        },
+      );
       setInvitations((prevInvitations) => upsertPendingInvitation(prevInvitations, createdInvitation));
       setInvitationForm(DEFAULT_INVITATION_FORM_STATE);
       setIsInvitationEditorOpen(false);
@@ -1692,7 +1830,7 @@ export default function Settings() {
     } finally {
       setIsInvitationSaving(false);
     }
-  }, [canManageMemberRoles, hydrateInvitationsOnly]);
+  }, [canManageMemberRoles, hydrateInvitationsOnly, settingsCompanyId]);
 
   const handleInvitationCreate = useCallback(() => {
     const validationErrors = validateInvitationDraft(invitationForm);
@@ -1715,7 +1853,9 @@ export default function Settings() {
     setInvitationRetryAction(null);
 
     try {
-      const resentInvitation = await resendInvitation(invitationId);
+      const resentInvitation = await resendInvitation(invitationId, {
+        companyId: settingsCompanyId ?? undefined,
+      });
       setInvitations((prevInvitations) => upsertPendingInvitation(prevInvitations, resentInvitation));
       setInvitationSaveSuccess('초대를 재발송했습니다.');
       toast.success('초대를 재발송했습니다.');
@@ -1743,7 +1883,7 @@ export default function Settings() {
     } finally {
       setResendingInvitationId(null);
     }
-  }, [canManageMemberRoles, hydrateInvitationsOnly]);
+  }, [canManageMemberRoles, hydrateInvitationsOnly, settingsCompanyId]);
 
   const handleInvitationResend = useCallback((invitationId: string) => {
     if (isInvitationSaving || resendingInvitationId !== null) {
@@ -2680,13 +2820,50 @@ export default function Settings() {
                       />
                       {geofenceFieldErrors.name && <p className="mt-1 text-xs text-red-600">{geofenceFieldErrors.name}</p>}
                     </div>
+                    <div className="md:col-span-2">
+                      <KakaoGeofenceInput
+                        shape={geofenceForm.shape}
+                        shapeLocked={geofenceEditorMode === 'edit'}
+                        lat={geofenceForm.lat}
+                        lng={geofenceForm.lng}
+                        radiusMeter={geofenceForm.radiusMeter}
+                        pointsText={geofenceForm.pointsText}
+                        disabled={!canEditSettings || isGeofenceSaving}
+                        errors={{
+                          lat: geofenceFieldErrors.lat,
+                          lng: geofenceFieldErrors.lng,
+                          radiusMeter: geofenceFieldErrors.radiusMeter,
+                          pointsText: geofenceFieldErrors.pointsText,
+                        }}
+                        onShapeChange={(shape) => {
+                          setGeofenceForm((prevState) => ({ ...prevState, shape }));
+                          setGeofenceFieldErrors((prevErrors) => ({
+                            ...prevErrors,
+                            lat: undefined,
+                            lng: undefined,
+                            radiusMeter: undefined,
+                            pointsText: undefined,
+                          }));
+                          setGeofenceSaveError(null);
+                          setGeofenceSaveSuccess(null);
+                          setGeofenceRetryAction(null);
+                        }}
+                        onPointsTextChange={(value) => {
+                          setGeofenceForm((prevState) => ({ ...prevState, pointsText: value }));
+                          setGeofenceFieldErrors((prevErrors) => ({ ...prevErrors, pointsText: undefined }));
+                          setGeofenceSaveError(null);
+                          setGeofenceSaveSuccess(null);
+                          setGeofenceRetryAction(null);
+                        }}
+                      />
+                    </div>
                     <div>
                       <label className="mb-1 block text-sm font-medium text-blue-900">반경 (m) *</label>
                       <input
                         type="number"
                         min={1}
                         value={geofenceForm.radiusMeter}
-                        disabled={!canEditSettings || isGeofenceSaving}
+                        disabled={geofenceForm.shape === 'polygon' || !canEditSettings || isGeofenceSaving}
                         onChange={(event) => {
                           setGeofenceForm((prevState) => ({ ...prevState, radiusMeter: event.target.value }));
                           setGeofenceFieldErrors((prevErrors) => ({ ...prevErrors, radiusMeter: undefined }));
@@ -2706,7 +2883,7 @@ export default function Settings() {
                         type="number"
                         step="0.000001"
                         value={geofenceForm.lat}
-                        disabled={!canEditSettings || isGeofenceSaving}
+                        disabled={geofenceForm.shape === 'polygon' || !canEditSettings || isGeofenceSaving}
                         onChange={(event) => {
                           setGeofenceForm((prevState) => ({ ...prevState, lat: event.target.value }));
                           setGeofenceFieldErrors((prevErrors) => ({ ...prevErrors, lat: undefined }));
@@ -2724,7 +2901,7 @@ export default function Settings() {
                         type="number"
                         step="0.000001"
                         value={geofenceForm.lng}
-                        disabled={!canEditSettings || isGeofenceSaving}
+                        disabled={geofenceForm.shape === 'polygon' || !canEditSettings || isGeofenceSaving}
                         onChange={(event) => {
                           setGeofenceForm((prevState) => ({ ...prevState, lng: event.target.value }));
                           setGeofenceFieldErrors((prevErrors) => ({ ...prevErrors, lng: undefined }));
@@ -2809,7 +2986,7 @@ export default function Settings() {
                             {geofence.center.lat.toFixed(6)}, {geofence.center.lng.toFixed(6)}
                           </td>
                           <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-600">
-                            {geofence.radiusMeter}m
+                            {geofence.points?.length ? `polygon ${geofence.points?.length}pts` : `${geofence.radiusMeter}m`}
                           </td>
                           <td className="whitespace-nowrap px-6 py-4">
                             <label className="relative inline-flex cursor-pointer items-center">
