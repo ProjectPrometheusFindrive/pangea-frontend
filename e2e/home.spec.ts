@@ -4,9 +4,7 @@ import { buildMockUser, fulfillSuccess, installApiMocks } from './helpers/apiMoc
 import { seedAuthSession } from './helpers/session';
 
 function getMetricCard(page: Page, label: string) {
-  return page
-    .getByText(label, { exact: true })
-    .locator('xpath=ancestor::div[contains(@class,"cursor-pointer")][1]');
+  return page.getByRole('button', { name: new RegExp(label) });
 }
 
 test.describe('SCRUM-183 Home E2E', () => {
@@ -123,15 +121,15 @@ test.describe('SCRUM-183 Home E2E', () => {
     await page.goto('/');
 
     const overdueCard = getMetricCard(page, '반납 지연');
-    const unpaidCard = getMetricCard(page, '미납/연체 계약');
+    const unpaidCard = getMetricCard(page, '미납/결제 문제');
 
     await expect(overdueCard).toBeVisible();
-    await expect(overdueCard.locator('p').first()).toHaveText('3');
-    await expect(unpaidCard.locator('p').first()).toHaveText('1');
-    await expect(page.getByRole('button', { name: /미납\/연체.*1건/ })).toBeVisible();
+    await expect(overdueCard).toContainText('3');
+    await expect(unpaidCard).toContainText('1');
+    await expect(unpaidCard).toContainText('미납/결제 문제');
 
     await Promise.all([
-      page.waitForURL(/\/reservations\?filter=unpaid&paymentScope=delinquent/),
+      page.waitForURL(/\/action-required\?filter=/),
       unpaidCard.click(),
     ]);
   });
@@ -406,7 +404,7 @@ test.describe('SCRUM-184 Home premium CTA E2E', () => {
     });
 
     await page.goto('/');
-    await expect(page.getByRole('heading', { name: '홈 요약' })).toBeVisible();
+    await expect(page.getByRole('button', { name: '자세히 보기' })).toBeVisible();
     await page.getByRole('button', { name: '자세히 보기' }).click();
 
     await expect(page).toHaveURL(/\/support-center/);
@@ -532,7 +530,7 @@ test.describe('SCRUM-184 Home premium CTA E2E', () => {
     });
 
     await page.goto('/');
-    await expect(page.getByRole('heading', { name: '홈 요약' })).toBeVisible();
+    await expect(page.getByRole('button', { name: '자세히 보기' })).toBeVisible();
     const deviceOffCard = getMetricCard(page, '단말 OFF');
 
     await expect(deviceOffCard).toBeVisible();
