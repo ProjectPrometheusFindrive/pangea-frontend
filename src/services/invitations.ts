@@ -39,7 +39,7 @@ export interface InvitationAcceptRequest {
   password: string;
   name: string;
   phone: string;
-  position: string;
+  position?: string;
 }
 
 export interface InvitationAcceptData {
