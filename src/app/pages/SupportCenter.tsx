@@ -21,6 +21,7 @@ import {
   type SupportCategory,
   type SupportTicket,
   type SupportTicketStatus,
+  uploadSupportTicketAttachment,
   updateSupportTicketStatus,
 } from '../../services/support';
 import type { SupportCenterLocationState, SupportPrefillState } from '../utils/premiumInquiry';
@@ -460,6 +461,25 @@ function SupportAttachmentList({
             {attachment.contentType && (
               <span className="rounded bg-white px-2 py-0.5 text-xs text-gray-500">{attachment.contentType}</span>
             )}
+            {attachment.url ? (
+              <>
+                <a
+                  href={attachment.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="rounded bg-white px-2 py-0.5 text-xs font-medium text-blue-600 hover:text-blue-700"
+                >
+                  열기
+                </a>
+                <a
+                  href={attachment.url}
+                  download={attachment.fileName}
+                  className="rounded bg-white px-2 py-0.5 text-xs font-medium text-blue-600 hover:text-blue-700"
+                >
+                  다운로드
+                </a>
+              </>
+            ) : null}
           </li>
         ))}
       </ul>
@@ -1140,6 +1160,7 @@ function SupportTicketSubmitView({
 }) {
   const location = useLocation();
   const navigate = useNavigate();
+  const { user } = useAuth();
 
   const [categories, setCategories] = useState<SupportCategory[]>([]);
   const [manualCategoryMode, setManualCategoryMode] = useState(false);
@@ -1170,6 +1191,9 @@ function SupportTicketSubmitView({
     [supportPrefill],
   );
   const normalizedCompanyId = companyId.trim();
+  const attachmentCompanyId = isSuperAdmin
+    ? normalizedCompanyId
+    : (user?.companyId?.trim() ?? normalizedCompanyId);
 
   useEffect(() => {
     const storedReceipt = readSupportReceipt();
@@ -1368,17 +1392,16 @@ function SupportTicketSubmitView({
     setFieldErrors({});
 
     try {
+      const uploadedAttachments = await Promise.all(
+        attachments.map((file) => uploadSupportTicketAttachment(file, attachmentCompanyId)),
+      );
       const createdTicket = await createSupportTicket({
         companyId: normalizedCompanyId || undefined,
         category: normalizedCategory,
         title: normalizedTitle,
         content: normalizedContent,
         contactPhone: normalizedContactPhone || undefined,
-        attachments: attachments.map((file) => ({
-          fileName: file.name,
-          sizeBytes: file.size,
-          contentType: file.type || undefined,
-        })),
+        attachments: uploadedAttachments,
       });
 
       setReceiptTicket(createdTicket);
@@ -1399,7 +1422,7 @@ function SupportTicketSubmitView({
     } finally {
       setIsSubmitting(false);
     }
-  }, [attachments, category, contactPhone, content, isSubmitting, isSuperAdmin, normalizedCompanyId, title]);
+  }, [attachmentCompanyId, attachments, category, contactPhone, content, isSubmitting, isSuperAdmin, normalizedCompanyId, title]);
 
   const refreshTicketStatus = useCallback(async (inputTicketId?: string) => {
     const targetTicketId = (inputTicketId ?? lookupTicketId).trim();

@@ -648,7 +648,7 @@ export default function ActionRequired() {
 
   const requestActionItems = useCallback((signal: AbortSignal) => getActionRequiredList({
     page,
-    size: pageSize,
+    pageSize,
     status: statusFilter === 'all' ? undefined : statusFilter,
     priority: priorityFilter === 'all' ? undefined : priorityFilter,
     assignee: assigneeFilter === 'all' ? undefined : assigneeFilter,

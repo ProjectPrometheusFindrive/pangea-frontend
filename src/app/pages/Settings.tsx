@@ -78,7 +78,7 @@ type CurrentDataType = Extract<UploadType, 'vehicles' | 'reservations'>;
 type CompanyField = 'name' | 'businessNumber' | 'phone' | 'email' | 'address';
 type GeofenceField = 'name' | 'lat' | 'lng' | 'radiusMeter' | 'pointsText';
 type MemberRoleField = 'role';
-type InvitationField = 'email' | 'role';
+type InvitationField = 'email' | 'role' | 'companyId';
 type InvitationStatusFilter = 'pending' | 'accepted' | 'expired' | 'revoked' | 'all';
 type FieldErrorMap<TField extends string> = Partial<Record<TField, string>>;
 
@@ -494,6 +494,8 @@ function getRoleBadgeColor(role: string): string {
       return 'bg-purple-100 text-purple-700';
     case 'member':
       return 'bg-blue-100 text-blue-700';
+    case 'installer':
+      return 'bg-amber-100 text-amber-700';
     default:
       return 'bg-gray-100 text-gray-700';
   }
@@ -506,7 +508,30 @@ function toRoleLabel(role: string): string {
   if (role === 'member') {
     return '운영자';
   }
+  if (role === 'installer') {
+    return '설치 기사';
+  }
   return role || '미지정';
+}
+
+function canReviewPendingMemberStatus(
+  member: Pick<SettingsMember, 'role' | 'status'>,
+  actorRole: string | null | undefined,
+  canManageMemberRoles: boolean,
+): boolean {
+  if (!canManageMemberRoles) {
+    return false;
+  }
+
+  if (member.status === 'pending') {
+    if (member.role === 'installer') {
+      return actorRole === 'super_admin';
+    }
+
+    return true;
+  }
+
+  return false;
 }
 
 function toMemberStatusLabel(status: string): string {
@@ -646,6 +671,7 @@ export default function Settings() {
   const canWriteAssets = canPerformAction(ACTION_PERMISSIONS.assetsWrite);
   const canManageMemberRoles = canPerformAction(ACTION_PERMISSIONS.settingsMembersWrite);
   const canUseBulkOcr = canAccessBulkOcr({ canEditSettings, canWriteAssets });
+  const isSuperAdmin = (user?.role ?? '').trim().toLowerCase() === 'super_admin';
   const settingsCompanyId = useMemo(
     () => resolveSettingsCompanyScope(searchParams.get('companyId'), user?.companyId),
     [searchParams, user?.companyId],
@@ -1897,6 +1923,7 @@ export default function Settings() {
           const mappedErrors = mapFieldErrors<InvitationField>(toErrorFieldEntries(error), {
             email: 'email',
             role: 'role',
+            companyId: 'companyId',
           });
           setInvitationFieldErrors(mappedErrors);
           setInvitationSaveError(error.message ?? '입력값을 확인해 주세요.');
@@ -1931,14 +1958,17 @@ export default function Settings() {
   }, [canManageMemberRoles, hydrateInvitationsOnly, invitationStatusFilter, settingsCompanyId]);
 
   const handleInvitationCreate = useCallback(() => {
-    const validationErrors = validateInvitationDraft(invitationForm);
+    const validationErrors = validateInvitationDraft(invitationForm, {
+      isSuperAdmin,
+      companyId: settingsCompanyId,
+    });
     if (Object.keys(validationErrors).length > 0) {
       setInvitationFieldErrors(validationErrors);
       return;
     }
 
     void runInvitationCreate(invitationForm);
-  }, [invitationForm, runInvitationCreate]);
+  }, [invitationForm, isSuperAdmin, runInvitationCreate, settingsCompanyId]);
 
   const runInvitationResend = useCallback(async (invitationId: string) => {
     if (!canManageMemberRoles) {
@@ -3268,9 +3298,15 @@ export default function Settings() {
                         >
                           <option value="member">운영자</option>
                           <option value="admin">관리자</option>
+                          {isSuperAdmin && (
+                            <option value="installer">장착 기사</option>
+                          )}
                         </select>
                         {invitationFieldErrors.role && (
                           <p className="mt-1 text-xs text-red-600">{invitationFieldErrors.role}</p>
+                        )}
+                        {invitationFieldErrors.companyId && (
+                          <p className="mt-1 text-xs text-red-600">{invitationFieldErrors.companyId}</p>
                         )}
                       </div>
                     </div>
@@ -3325,7 +3361,7 @@ export default function Settings() {
                           && member.status === 'approved'
                           && (member.role === 'admin' || member.role === 'member')
                         );
-                        const canReviewPendingMember = canManageMemberRoles && member.status === 'pending';
+                        const canReviewPendingMember = canReviewPendingMemberStatus(member, user?.role, canManageMemberRoles);
 
                         return (
                           <tr key={member.userId} className="hover:bg-gray-50">
