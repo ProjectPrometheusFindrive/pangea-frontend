@@ -5,6 +5,11 @@ export interface SettingsRequestOptions {
   companyId?: string;
 }
 
+export interface SettingsCompanyOption {
+  companyId: string;
+  name: string;
+}
+
 export interface SettingsCompanyProfile {
   companyId: string;
   name: string;
