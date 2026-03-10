@@ -697,7 +697,6 @@ export default function Settings() {
   const canWriteAssets = canPerformAction(ACTION_PERMISSIONS.assetsWrite);
   const canManageMemberRoles = canPerformAction(ACTION_PERMISSIONS.settingsMembersWrite);
   const canUseBulkOcr = canAccessBulkOcr({ canEditSettings, canWriteAssets });
-  const isSuperAdmin = (user?.role ?? '').trim().toLowerCase() === 'super_admin';
   const settingsCompanyId = useMemo(
     () => resolveSettingsCompanyScope(searchParams.get('companyId'), user?.companyId),
     [searchParams, user?.companyId],
