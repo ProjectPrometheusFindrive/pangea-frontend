@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router';
+import { useNavigate, useSearchParams } from 'react-router';
 import {
   AlertCircle,
   AlertOctagon,
@@ -23,6 +23,7 @@ import { toast } from 'sonner';
 
 import { ApiError } from '../../services/api';
 import { getHomeSummary, type HomeSummaryResponse } from '../../services/home';
+import { listSettingsCompanies } from '../../services/settings';
 import { ROUTE_PERMISSIONS, type AppRoutePermission } from '../authorization';
 import { Layout } from '../components/Layout';
 import { PageStateBoundary } from '../components/PageStateBoundary';
@@ -34,11 +35,18 @@ import {
   handlePageErrorAction,
   type PageErrorKind,
 } from '../hooks/usePageEndpointState';
+import {
+  normalizeDashboardCompanyOptions,
+  resolveDashboardCompanyScope,
+  shouldShowDashboardCompanySelector,
+  updateDashboardSearchParams,
+} from './dashboardCompanyScope';
 
 type PeriodPreset = 'last7Days' | 'last30Days' | 'last90Days';
 
 interface HomeFilters {
   preset: PeriodPreset;
+  companyId: string | null;
 }
 
 interface HomeSnapshot {
@@ -92,6 +100,8 @@ const PERIOD_DAYS_BY_PRESET: Record<PeriodPreset, number> = {
   last90Days: 90,
 };
 
+const DEFAULT_PERIOD_PRESET: PeriodPreset = 'last30Days';
+
 const DEFAULT_ALERTS = {
   overdue: 0,
   stolen: 0,
@@ -136,6 +146,12 @@ function resolveDateRange(preset: PeriodPreset): { from: string; to: string } {
     from: toIsoDate(fromDate),
     to: toIsoDate(toDate),
   };
+}
+
+function normalizePeriodPreset(value: string | null): PeriodPreset {
+  return PERIOD_OPTIONS.some((option) => option.value === value)
+    ? value as PeriodPreset
+    : DEFAULT_PERIOD_PRESET;
 }
 
 function toPercent(value: number): number {
@@ -324,11 +340,14 @@ function formatStatCardCount(count: number | string, unit?: string): string {
 }
 
 export default function Home() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const { user } = useAuth();
   const { canAccessRoute } = useAuthorization();
   const [showPremiumModal, setShowPremiumModal] = useState(false);
-  const [selectedPreset, setSelectedPreset] = useState<PeriodPreset>('last30Days');
+  const [companyOptions, setCompanyOptions] = useState<Array<{ companyId: string; name: string }>>([]);
+  const [isCompanyOptionsLoading, setIsCompanyOptionsLoading] = useState(false);
+  const [companyOptionsError, setCompanyOptionsError] = useState<string | null>(null);
 
   const [snapshot, setSnapshot] = useState<HomeSnapshot | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -345,12 +364,100 @@ export default function Home() {
   const snapshotRef = useRef<HomeSnapshot | null>(null);
   const skipNextAutoHydrateRef = useRef(false);
 
-  const tenantId = user?.companyId?.trim() ?? '';
+  const selectedPreset = useMemo(
+    () => normalizePeriodPreset(searchParams.get('preset')),
+    [searchParams],
+  );
+  const selectedCompanyId = useMemo(
+    () => resolveDashboardCompanyScope(searchParams.get('companyId'), user?.companyId, user?.role),
+    [searchParams, user?.companyId, user?.role],
+  );
+  const isSuperAdmin = shouldShowDashboardCompanySelector(user?.role);
+  const effectiveCompanyId = isSuperAdmin && companyOptionsError ? null : selectedCompanyId;
+
+  const updateHomeSearchParams = useCallback((
+    updates: {
+      preset?: string | null;
+      companyId?: string | null;
+    },
+    replace = false,
+  ) => {
+    const nextParams = updateDashboardSearchParams(searchParams, updates);
+    setSearchParams(nextParams, { replace });
+  }, [searchParams, setSearchParams]);
 
   useEffect(() => () => {
     mountedRef.current = false;
     controllerRef.current?.abort();
   }, []);
+
+  useEffect(() => {
+    const nextParams = updateDashboardSearchParams(searchParams, {
+      preset: selectedPreset,
+      companyId: selectedCompanyId,
+    });
+    if (!nextParams.get('preset')) {
+      nextParams.set('preset', selectedPreset);
+    }
+
+    if (nextParams.toString() === searchParams.toString()) {
+      return;
+    }
+
+    setSearchParams(nextParams, { replace: true });
+  }, [searchParams, selectedCompanyId, selectedPreset, setSearchParams]);
+
+  useEffect(() => {
+    if (!isSuperAdmin) {
+      setCompanyOptions([]);
+      setCompanyOptionsError(null);
+      setIsCompanyOptionsLoading(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    setIsCompanyOptionsLoading(true);
+    setCompanyOptionsError(null);
+
+    listSettingsCompanies({ signal: controller.signal })
+      .then((items) => {
+        if (controller.signal.aborted) {
+          return;
+        }
+
+        const normalizedOptions = normalizeDashboardCompanyOptions(items);
+        setCompanyOptions(normalizedOptions);
+
+        if (selectedCompanyId && !normalizedOptions.some((item) => item.companyId === selectedCompanyId)) {
+          updateHomeSearchParams({ companyId: null }, true);
+        }
+      })
+      .catch((error) => {
+        if (controller.signal.aborted) {
+          return;
+        }
+
+        setCompanyOptions([]);
+        setCompanyOptionsError(
+          error instanceof Error && error.message
+            ? error.message
+            : '회사 목록을 불러오지 못해 전체 회사 기준으로 표시합니다.',
+        );
+
+        if (selectedCompanyId !== null) {
+          updateHomeSearchParams({ companyId: null }, true);
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          setIsCompanyOptionsLoading(false);
+        }
+      });
+
+    return () => {
+      controller.abort();
+    };
+  }, [isSuperAdmin, selectedCompanyId, updateHomeSearchParams]);
 
   const hydrateHome = useCallback(async (filters: HomeFilters) => {
     const requestSequence = requestSequenceRef.current + 1;
@@ -372,7 +479,7 @@ export default function Home() {
     setRefreshError(null);
     setRefreshErrorKind(null);
 
-    if (!tenantId) {
+    if (!isSuperAdmin && !filters.companyId) {
       const pageError: HomePageError = {
         kind: 'unknown',
         message: '회사(tenant) 정보가 없어 홈 요약을 조회할 수 없습니다. 다시 로그인해 주세요.',
@@ -396,7 +503,7 @@ export default function Home() {
       const summary = await getHomeSummary({
         from,
         to,
-        tenantId,
+        companyId: filters.companyId ?? undefined,
         signal: controller.signal,
       });
 
@@ -432,9 +539,15 @@ export default function Home() {
         setRefreshError(pageError.message);
         setRefreshErrorKind(pageError.kind);
 
-        if (previousSnapshot.filters.preset !== filters.preset) {
+        if (
+          previousSnapshot.filters.preset !== filters.preset
+          || previousSnapshot.filters.companyId !== filters.companyId
+        ) {
           skipNextAutoHydrateRef.current = true;
-          setSelectedPreset(previousSnapshot.filters.preset);
+          updateHomeSearchParams({
+            preset: previousSnapshot.filters.preset,
+            companyId: previousSnapshot.filters.companyId,
+          }, true);
         }
       } else {
         setBlockingError(pageError.message);
@@ -449,7 +562,7 @@ export default function Home() {
       setIsLoading(false);
       setIsRefreshing(false);
     }
-  }, [tenantId]);
+  }, [isSuperAdmin, updateHomeSearchParams]);
 
   useEffect(() => {
     if (skipNextAutoHydrateRef.current) {
@@ -459,14 +572,16 @@ export default function Home() {
 
     void hydrateHome({
       preset: selectedPreset,
+      companyId: effectiveCompanyId,
     });
-  }, [hydrateHome, selectedPreset]);
+  }, [effectiveCompanyId, hydrateHome, selectedPreset]);
 
   const handleRetry = useCallback(() => {
     void hydrateHome({
       preset: selectedPreset,
+      companyId: effectiveCompanyId,
     });
-  }, [hydrateHome, selectedPreset]);
+  }, [effectiveCompanyId, hydrateHome, selectedPreset]);
 
   const handleBlockingErrorAction = useCallback(() => {
     handlePageErrorAction(blockingErrorKind, navigate);
@@ -747,19 +862,39 @@ export default function Home() {
         className="m-6 min-h-[320px]"
       >
         <div className="space-y-5 p-6">
-          <div className="flex flex-wrap items-center justify-end gap-2">
+          <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="hidden">
               <h2 className="text-lg font-bold text-[#1e2939]">홈 요약</h2>
               <p className="text-xs text-gray-500">
                 {periodLabel ? `${periodLabel} · tenant: ${summary?.tenantId}` : '조회 기간을 선택해 주세요.'}
               </p>
             </div>
+            {isSuperAdmin && (
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs font-semibold text-gray-500">회사 범위</span>
+                <select
+                  value={selectedCompanyId ?? ''}
+                  onChange={(event) => {
+                    updateHomeSearchParams({ companyId: event.target.value || null });
+                  }}
+                  disabled={isRefreshing || isCompanyOptionsLoading || companyOptionsError !== null}
+                  className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 disabled:bg-gray-100 disabled:text-gray-400"
+                >
+                  <option value="">전체 회사</option>
+                  {companyOptions.map((option) => (
+                    <option key={option.companyId} value={option.companyId}>
+                      {option.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
             <div className="flex items-center gap-2">
               {PERIOD_OPTIONS.map((option) => (
                 <button
                   key={option.value}
                   type="button"
-                  onClick={() => setSelectedPreset(option.value)}
+                  onClick={() => updateHomeSearchParams({ preset: option.value })}
                   className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${
                     option.value === selectedPreset
                       ? 'bg-blue-600 text-white'
@@ -779,6 +914,12 @@ export default function Home() {
               </button>
             </div>
           </div>
+
+          {companyOptionsError && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+              {companyOptionsError}
+            </div>
+          )}
 
           {(isRefreshing || refreshError) && (
             <div className={`flex items-center justify-between gap-3 rounded-lg border px-3 py-2 text-xs ${
