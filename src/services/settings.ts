@@ -5,6 +5,11 @@ export interface SettingsRequestOptions {
   companyId?: string;
 }
 
+export interface SettingsCompanyOption {
+  companyId: string;
+  name: string;
+}
+
 export interface SettingsCompanyProfile {
   companyId: string;
   name: string;
@@ -75,7 +80,7 @@ export type SettingsGeofenceUpdateRequest = Partial<
   active?: boolean;
 };
 
-export type SettingsMemberRole = 'admin' | 'member' | string;
+export type SettingsMemberRole = 'admin' | 'member' | 'installer' | string;
 export type SettingsMemberStatus = 'approved' | 'pending' | 'rejected' | 'withdrawn' | string;
 
 export interface SettingsMember {

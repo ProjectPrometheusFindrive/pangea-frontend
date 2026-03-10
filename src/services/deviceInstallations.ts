@@ -1,6 +1,7 @@
 import { ApiError, apiClient } from './api';
 
 export type DeviceInstallationStatus = 'scheduled' | 'in_progress' | 'completed' | 'cancelled';
+export type DeviceInstallationStatusMutation = 'in_progress' | 'completed' | 'cancelled';
 
 export interface DeviceInstallationItem {
   id: string;
@@ -55,12 +56,12 @@ export interface CreateDeviceInstallationOptions {
   signal?: AbortSignal;
 }
 
-export interface PatchDeviceInstallationStatusPayload {
-  status: Exclude<DeviceInstallationStatus, 'cancelled'> | 'cancelled';
+export interface DeviceInstallationStatusPatchRequest {
+  status: DeviceInstallationStatusMutation;
   installedAt?: string;
-  memo?: string;
   deviceSerial?: string;
   photos?: string[];
+  memo?: string;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -281,21 +282,23 @@ export async function getDeviceInstallation(
   return getInstallationFromPath(`/api/v2/device-installations/${encodedInstallationId}`, options);
 }
 
-async function cancelFromStatusPath(installationId: string): Promise<DeviceInstallationItem | null> {
-  return patchDeviceInstallationStatus(installationId, { status: 'cancelled' });
-}
-
 export async function patchDeviceInstallationStatus(
   installationId: string,
-  payload: PatchDeviceInstallationStatusPayload,
+  payload: DeviceInstallationStatusPatchRequest,
 ): Promise<DeviceInstallationItem | null> {
-  const statusPayload = await apiClient.requestData<unknown>({
+  const response = await apiClient.requestData<unknown>({
     path: `/api/v2/device-installations/${encodeURIComponent(installationId)}/status`,
     method: 'PATCH',
-    body: payload,
+    body: {
+      status: payload.status,
+      installedAt: payload.installedAt,
+      deviceSerial: payload.deviceSerial,
+      photos: payload.photos,
+      memo: payload.memo,
+    },
   });
 
-  return toInstallation(statusPayload);
+  return toInstallation(response);
 }
 
 export async function cancelDeviceInstallation(installationId: string): Promise<DeviceInstallationItem | null> {
@@ -304,5 +307,5 @@ export async function cancelDeviceInstallation(installationId: string): Promise<
     throw new ApiError('VALIDATION_ERROR', 'installationId is required', { status: 400 });
   }
 
-  return cancelFromStatusPath(normalizedId);
+  return patchDeviceInstallationStatus(normalizedId, { status: 'cancelled' });
 }

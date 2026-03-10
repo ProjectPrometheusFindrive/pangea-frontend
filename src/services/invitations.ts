@@ -5,7 +5,7 @@ export interface InvitationRequestOptions {
   companyId?: string;
 }
 
-export type InvitationRole = 'admin' | 'member';
+export type InvitationRole = 'admin' | 'member' | 'installer';
 export type InvitationStatus = 'pending' | 'accepted' | 'expired' | 'revoked' | string;
 
 export interface Invitation {
@@ -39,7 +39,7 @@ export interface InvitationAcceptRequest {
   password: string;
   name: string;
   phone: string;
-  position: string;
+  position?: string;
 }
 
 export interface InvitationAcceptData {

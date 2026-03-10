@@ -29,8 +29,11 @@ export interface NotificationRequestOptions {
 }
 
 export interface NotificationListRequestOptions extends NotificationRequestOptions {
-  limit?: number;
+  page?: number;
+  pageSize?: number;
 }
+
+export const NOTIFICATION_STATE_UPDATED_EVENT = 'pangea:notifications-updated';
 
 interface NotificationMutationRequest {
   path: string;
@@ -314,7 +317,8 @@ export async function getNotifications(options: NotificationListRequestOptions =
     path: '/api/v2/notifications',
     method: 'GET',
     query: {
-      limit: options.limit,
+      page: options.page,
+      pageSize: options.pageSize,
     },
     signal: options.signal,
   });
@@ -377,4 +381,12 @@ export async function markAllNotificationsAsRead(options: NotificationRequestOpt
       signal: options.signal,
     },
   ]);
+}
+
+export function dispatchNotificationStateUpdatedEvent(): void {
+  if (typeof window === 'undefined' || typeof window.dispatchEvent !== 'function') {
+    return;
+  }
+
+  window.dispatchEvent(new Event(NOTIFICATION_STATE_UPDATED_EVENT));
 }

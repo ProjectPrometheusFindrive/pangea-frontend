@@ -40,6 +40,7 @@ import {
 } from '../../services/assetOcr';
 import {
   getSettingsCompany,
+  listSettingsCompanies,
   putSettingsCompany,
   listSettingsGeofences,
   createSettingsGeofence,
@@ -48,6 +49,7 @@ import {
   listSettingsMembers,
   patchSettingsMemberRole,
   patchSettingsMemberStatus,
+  type SettingsCompanyOption,
   type SettingsCompanyProfile,
   type SettingsCompanyUpdateRequest,
   type SettingsGeofence,
@@ -78,7 +80,7 @@ type CurrentDataType = Extract<UploadType, 'vehicles' | 'reservations'>;
 type CompanyField = 'name' | 'businessNumber' | 'phone' | 'email' | 'address';
 type GeofenceField = 'name' | 'lat' | 'lng' | 'radiusMeter' | 'pointsText';
 type MemberRoleField = 'role';
-type InvitationField = 'email' | 'role';
+type InvitationField = 'email' | 'role' | 'companyId';
 type FieldErrorMap<TField extends string> = Partial<Record<TField, string>>;
 
 interface UploadResult {
@@ -172,6 +174,25 @@ const DEFAULT_INVITATION_FORM_STATE: InvitationFormState = {
   role: 'member',
 };
 
+function createEmptySettingsHydrationPayload(): SettingsHydrationPayload {
+  return {
+    company: {
+      companyId: '',
+      name: '',
+      businessNumber: null,
+      phone: null,
+      email: null,
+      address: null,
+      updatedAt: null,
+      schemaVersion: DEFAULT_SETTINGS_SCHEMA_VERSION,
+    },
+    geofences: [],
+    members: [],
+    invitations: [],
+    invitationLoadError: null,
+  };
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
@@ -250,6 +271,26 @@ function normalizeTenantCompanyId(value: unknown): string | null {
     return null;
   }
   return INVALID_COMPANY_IDS.has(companyId.toLowerCase()) ? null : companyId;
+}
+
+function normalizeSettingsCompanyOptions(items: SettingsCompanyOption[]): SettingsCompanyOption[] {
+  const optionsByCompanyId = new Map<string, SettingsCompanyOption>();
+
+  for (const item of items) {
+    const companyId = normalizeTenantCompanyId(item.companyId);
+    if (!companyId) {
+      continue;
+    }
+    const name = toStringValue(item.name) ?? companyId;
+    optionsByCompanyId.set(companyId, {
+      companyId,
+      name,
+    });
+  }
+
+  return Array.from(optionsByCompanyId.values()).sort((left, right) => (
+    `${left.name}\u0000${left.companyId}`.localeCompare(`${right.name}\u0000${right.companyId}`)
+  ));
 }
 
 function toBulkOcrCreatePayload(
@@ -478,6 +519,8 @@ function getRoleBadgeColor(role: string): string {
       return 'bg-purple-100 text-purple-700';
     case 'member':
       return 'bg-blue-100 text-blue-700';
+    case 'installer':
+      return 'bg-amber-100 text-amber-700';
     default:
       return 'bg-gray-100 text-gray-700';
   }
@@ -490,7 +533,30 @@ function toRoleLabel(role: string): string {
   if (role === 'member') {
     return '운영자';
   }
+  if (role === 'installer') {
+    return '설치 기사';
+  }
   return role || '미지정';
+}
+
+function canReviewPendingMemberStatus(
+  member: Pick<SettingsMember, 'role' | 'status'>,
+  actorRole: string | null | undefined,
+  canManageMemberRoles: boolean,
+): boolean {
+  if (!canManageMemberRoles) {
+    return false;
+  }
+
+  if (member.status === 'pending') {
+    if (member.role === 'installer') {
+      return actorRole === 'super_admin';
+    }
+
+    return true;
+  }
+
+  return false;
 }
 
 function toMemberStatusLabel(status: string): string {
@@ -620,22 +686,32 @@ function toReservationTypeLabel(value: unknown): string {
 }
 
 export default function Settings() {
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const { user } = useAuth();
   const { canPerformAction } = useAuthorization();
   const { refreshCompany } = useCompany();
 
+  const isSuperAdmin = (user?.role ?? '').trim().toLowerCase() === 'super_admin';
   const canEditSettings = canPerformAction(ACTION_PERMISSIONS.settingsWrite);
   const canWriteAssets = canPerformAction(ACTION_PERMISSIONS.assetsWrite);
   const canManageMemberRoles = canPerformAction(ACTION_PERMISSIONS.settingsMembersWrite);
   const canUseBulkOcr = canAccessBulkOcr({ canEditSettings, canWriteAssets });
+  const isSuperAdmin = (user?.role ?? '').trim().toLowerCase() === 'super_admin';
   const settingsCompanyId = useMemo(
     () => resolveSettingsCompanyScope(searchParams.get('companyId'), user?.companyId),
     [searchParams, user?.companyId],
   );
+  const selectedCompanyId = settingsCompanyId;
+  const settingsScope = useMemo(() => ({
+    selectedCompanyId: settingsCompanyId,
+  }), [settingsCompanyId]);
+  const shouldBlockSettingsSelection = isSuperAdmin && !settingsCompanyId;
 
   const [activeTab, setActiveTab] = useState<TabType>('bulk');
+  const [companyOptions, setCompanyOptions] = useState<SettingsCompanyOption[]>([]);
+  const [isCompanyOptionsLoading, setIsCompanyOptionsLoading] = useState(false);
+  const [companyOptionsError, setCompanyOptionsError] = useState<string | null>(null);
   const [uploadType, setUploadType] = useState<UploadType>('vehicles');
   const [uploadResult, setUploadResult] = useState<UploadResult | null>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -694,6 +770,72 @@ export default function Settings() {
     () => geofences.find((item) => item.id === editingGeofenceId) ?? null,
     [editingGeofenceId, geofences],
   );
+
+  const updateSettingsCompanyScope = useCallback((companyId: string | null, replace = false) => {
+    const normalizedCompanyId = normalizeTenantCompanyId(companyId);
+    setSearchParams((previousParams) => {
+      const nextParams = new URLSearchParams(previousParams);
+      if (normalizedCompanyId) {
+        nextParams.set('companyId', normalizedCompanyId);
+      } else {
+        nextParams.delete('companyId');
+      }
+      return nextParams;
+    }, { replace });
+  }, [setSearchParams]);
+
+  useEffect(() => {
+    if (!isSuperAdmin) {
+      setCompanyOptions([]);
+      setCompanyOptionsError(null);
+      setIsCompanyOptionsLoading(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    setIsCompanyOptionsLoading(true);
+    setCompanyOptionsError(null);
+
+    listSettingsCompanies({ signal: controller.signal })
+      .then((items) => {
+        if (controller.signal.aborted) {
+          return;
+        }
+
+        const normalizedItems = normalizeSettingsCompanyOptions(items);
+        setCompanyOptions(normalizedItems);
+
+        if (selectedCompanyId && !normalizedItems.some((item) => item.companyId === selectedCompanyId)) {
+          updateSettingsCompanyScope(null, true);
+        }
+      })
+      .catch((error) => {
+        if (controller.signal.aborted) {
+          return;
+        }
+
+        setCompanyOptions([]);
+        setCompanyOptionsError(
+          error instanceof Error && error.message
+            ? error.message
+            : '회사 목록을 불러오지 못했습니다.',
+        );
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          setIsCompanyOptionsLoading(false);
+        }
+      });
+
+    return () => controller.abort();
+  }, [isSuperAdmin, selectedCompanyId, updateSettingsCompanyScope]);
+
+  useEffect(() => {
+    if (isSuperAdmin && !settingsCompanyId) {
+      setCompanySaveError(null);
+      setCompanySaveSuccess(null);
+    }
+  }, [isSuperAdmin, settingsCompanyId]);
 
   const hydrateMembersOnly = useCallback(async () => {
     const membersPayload = await listSettingsMembers(undefined, {
@@ -994,20 +1136,30 @@ export default function Settings() {
   });
 
   useEffect(() => {
+    if (isSuperAdmin && !settingsCompanyId) {
+      handleSettingsHydrationSuccess(createEmptySettingsHydrationPayload());
+      return;
+    }
     void hydrateSettings();
-  }, [hydrateSettings]);
+  }, [handleSettingsHydrationSuccess, hydrateSettings, isSuperAdmin, settingsCompanyId]);
 
   useEffect(() => {
+    if (shouldBlockSettingsSelection) {
+      return;
+    }
     void refreshCurrentDataCounts();
-  }, [refreshCurrentDataCounts]);
+  }, [refreshCurrentDataCounts, shouldBlockSettingsSelection]);
 
   useEffect(() => () => {
     bulkOcrAbortControllerRef.current?.abort();
   }, []);
 
   const handleSettingsRetry = useCallback(() => {
+    if (isSuperAdmin && !settingsCompanyId) {
+      return;
+    }
     void hydrateSettings();
-  }, [hydrateSettings]);
+  }, [hydrateSettings, isSuperAdmin, settingsCompanyId]);
 
   const handleSettingsErrorAction = useCallback(() => {
     handlePageErrorAction(settingsErrorKind, navigate);
@@ -1874,6 +2026,7 @@ export default function Settings() {
           const mappedErrors = mapFieldErrors<InvitationField>(toErrorFieldEntries(error), {
             email: 'email',
             role: 'role',
+            companyId: 'companyId',
           });
           setInvitationFieldErrors(mappedErrors);
           setInvitationSaveError(error.message ?? '입력값을 확인해 주세요.');
@@ -1908,14 +2061,17 @@ export default function Settings() {
   }, [canManageMemberRoles, hydrateInvitationsOnly, settingsCompanyId]);
 
   const handleInvitationCreate = useCallback(() => {
-    const validationErrors = validateInvitationDraft(invitationForm);
+    const validationErrors = validateInvitationDraft(invitationForm, {
+      isSuperAdmin,
+      companyId: settingsCompanyId,
+    });
     if (Object.keys(validationErrors).length > 0) {
       setInvitationFieldErrors(validationErrors);
       return;
     }
 
     void runInvitationCreate(invitationForm);
-  }, [invitationForm, runInvitationCreate]);
+  }, [invitationForm, isSuperAdmin, runInvitationCreate, settingsCompanyId]);
 
   const runInvitationResend = useCallback(async (invitationId: string) => {
     if (!canManageMemberRoles) {
@@ -2271,6 +2427,42 @@ export default function Settings() {
 
   return (
     <Layout title="설정">
+      {isSuperAdmin && (
+        <div className="px-6 pt-6">
+          <div className="rounded-xl border border-slate-200 bg-white px-5 py-4 shadow-sm">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div>
+                <h2 className="text-sm font-semibold text-slate-900">회사 범위</h2>
+                <p className="mt-1 text-sm text-slate-600">회사를 선택해 주세요. 선택한 범위로 설정 데이터가 다시 조회됩니다.</p>
+              </div>
+              <div className="flex min-w-[240px] flex-col gap-2">
+                <select
+                  value={settingsCompanyId ?? ''}
+                  onChange={(event) => updateSettingsCompanyScope(event.target.value || null)}
+                  disabled={isCompanyOptionsLoading}
+                  className="rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-100"
+                >
+                  <option value="">회사를 선택해 주세요</option>
+                  {companyOptions.map((item) => (
+                    <option key={item.companyId} value={item.companyId}>
+                      {item.name}
+                    </option>
+                  ))}
+                </select>
+                {companyOptionsError && (
+                  <p className="text-xs text-red-600">{companyOptionsError}</p>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {shouldBlockSettingsSelection ? (
+        <div className="m-6 rounded-2xl border border-dashed border-slate-300 bg-white px-6 py-12 text-center shadow-sm">
+          <p className="text-base font-semibold text-slate-900">회사를 선택해 주세요</p>
+          <p className="mt-2 text-sm text-slate-600">super_admin은 회사를 선택한 뒤 회사 정보, 지오펜스, 계정관리 데이터를 조회할 수 있습니다.</p>
+        </div>
+      ) : (
       <PageStateBoundary
         isLoading={isSettingsLoading}
         error={settingsError}
@@ -3241,9 +3433,15 @@ export default function Settings() {
                         >
                           <option value="member">운영자</option>
                           <option value="admin">관리자</option>
+                          {isSuperAdmin && (
+                            <option value="installer">장착 기사</option>
+                          )}
                         </select>
                         {invitationFieldErrors.role && (
                           <p className="mt-1 text-xs text-red-600">{invitationFieldErrors.role}</p>
+                        )}
+                        {invitationFieldErrors.companyId && (
+                          <p className="mt-1 text-xs text-red-600">{invitationFieldErrors.companyId}</p>
                         )}
                       </div>
                     </div>
@@ -3298,7 +3496,7 @@ export default function Settings() {
                           && member.status === 'approved'
                           && (member.role === 'admin' || member.role === 'member')
                         );
-                        const canReviewPendingMember = canManageMemberRoles && member.status === 'pending';
+                        const canReviewPendingMember = canReviewPendingMemberStatus(member, user?.role, canManageMemberRoles);
 
                         return (
                           <tr key={member.userId} className="hover:bg-gray-50">
@@ -3470,6 +3668,7 @@ export default function Settings() {
           )}
         </div>
       </PageStateBoundary>
+      )}
     </Layout>
   );
 }

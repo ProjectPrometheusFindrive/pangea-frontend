@@ -18,7 +18,7 @@ import {
   validateInvitationAwareSignUpForm,
 } from './signupInvitationMode';
 
-type PositionType = '대표' | '직원' | '';
+type PositionType = string;
 
 interface SignUpFormState {
   userId: string;
@@ -149,7 +149,11 @@ export default function SignUp() {
   const invitationToken = useMemo(() => extractInvitationToken(location.search), [location.search]);
   const invitationClaims = useMemo(() => decodeInvitationToken(invitationToken), [invitationToken]);
   const invitationEmail = invitationClaims.email ? normalizeEmail(invitationClaims.email) : null;
+  const invitationRole = invitationClaims.role ?? null;
   const isInvitationMode = Boolean(invitationToken && invitationEmail);
+  const isInstallerInvitation = isInvitationMode && invitationClaims.role === 'installer';
+  const invitationCompanyName = invitationClaims.companyName || invitationClaims.companyId || '';
+  const invitationRoleValue = invitationClaims.role || '';
   const normalizedUserId = useMemo(() => normalizeEmail(form.userId), [form.userId]);
 
   useEffect(() => {
@@ -170,7 +174,7 @@ export default function SignUp() {
       ...previous,
       userId: invitationEmail,
       email: invitationEmail,
-      company: previous.company || invitationClaims.companyId || '',
+      company: previous.company || invitationClaims.companyName || invitationClaims.companyId || '',
     }));
     setUserIdCheck({
       checking: false,
@@ -178,7 +182,7 @@ export default function SignUp() {
       available: true,
       message: null,
     });
-  }, [invitationClaims.companyId, invitationEmail, isInvitationMode]);
+  }, [invitationClaims.companyId, invitationClaims.companyName, invitationEmail, isInvitationMode]);
 
   useEffect(() => {
     if (isInvitationMode || !userIdCheck.checkedUserId) {
@@ -197,13 +201,13 @@ export default function SignUp() {
     if (form.name.trim()) count += 1;
     if (PHONE_REGEX.test(form.phone)) count += 1;
     if ((isInvitationMode && invitationEmail) || /.+@.+\..+/.test(normalizeEmail(form.email))) count += 1;
-    if (form.position) count += 1;
+    if (!isInstallerInvitation && form.position) count += 1;
     if (!isInvitationMode && form.company.trim()) count += 1;
     if (!isInvitationMode && normalizeBizRegNoDigits(form.bizRegNo).length === 10) count += 1;
     return count;
-  }, [form, invitationEmail, isInvitationMode, normalizedUserId]);
+  }, [form, invitationEmail, isInstallerInvitation, isInvitationMode, normalizedUserId]);
 
-  const totalProgressFields = isInvitationMode ? 6 : 9;
+  const totalProgressFields = isInstallerInvitation ? 5 : isInvitationMode ? 6 : 9;
   const progress = Math.round((completedFields / totalProgressFields) * 100);
 
   const handleFieldChange = (field: SignUpField, value: string) => {
@@ -224,7 +228,7 @@ export default function SignUp() {
 
     if (field === 'bizRegNo') {
       setTouched((previous) => ({ ...previous, bizRegNo: true }));
-      const bizRegNoError = validateInvitationAwareSignUpForm(nextForm, { invitationEmail }).bizRegNo;
+      const bizRegNoError = validateInvitationAwareSignUpForm(nextForm, { invitationEmail, invitationRole }).bizRegNo;
       setErrors((previous) => ({
         ...previous,
         bizRegNo: bizRegNoError,
@@ -242,7 +246,7 @@ export default function SignUp() {
 
   const handleBlur = (field: SignUpField) => {
     setTouched((previous) => ({ ...previous, [field]: true }));
-    const validationErrors = validateInvitationAwareSignUpForm(form, { invitationEmail });
+    const validationErrors = validateInvitationAwareSignUpForm(form, { invitationEmail, invitationRole });
     setErrors((previous) => ({
       ...previous,
       [field]: validationErrors[field],
@@ -262,7 +266,7 @@ export default function SignUp() {
     if (isInvitationMode) {
       return;
     }
-    const userIdError = validateInvitationAwareSignUpForm(form, { invitationEmail }).userId;
+    const userIdError = validateInvitationAwareSignUpForm(form, { invitationEmail, invitationRole }).userId;
     setTouched((previous) => ({ ...previous, userId: true }));
 
     if (userIdError) {
@@ -312,7 +316,7 @@ export default function SignUp() {
     event.preventDefault();
     setServerError(null);
 
-    const validationErrors = validateInvitationAwareSignUpForm(form, { invitationEmail });
+    const validationErrors = validateInvitationAwareSignUpForm(form, { invitationEmail, invitationRole });
     setErrors(validationErrors);
     setTouched(buildTouchedAll());
     if (Object.keys(validationErrors).length > 0) {
@@ -458,8 +462,8 @@ export default function SignUp() {
             <div className="mb-5 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
               <p className="font-semibold">초대 정보</p>
               <p className="mt-1">이메일: {invitationEmail}</p>
-              <p className="mt-1">회사: {invitationClaims.companyId || '-'}</p>
-              <p className="mt-1">역할: {invitationClaims.role === 'admin' ? '관리자' : invitationClaims.role === 'member' ? '운영자' : '-'}</p>
+              <p className="mt-1">회사: {invitationCompanyName || '-'}</p>
+              <p className="mt-1">역할: {invitationRoleValue || '-'}</p>
             </div>
           )}
 
@@ -587,32 +591,76 @@ export default function SignUp() {
               </div>
 
               <div>
-                <p className="mb-1 block text-sm font-medium text-slate-700">직위</p>
-                <div className="flex gap-4 rounded-lg border border-slate-300 px-3 py-2.5">
-                  <label className="inline-flex items-center gap-2 text-sm text-slate-700">
-                    <input
-                      type="radio"
-                      name="position"
-                      value="대표"
-                      checked={form.position === '대표'}
-                      onChange={(event) => handleFieldChange('position', event.target.value)}
-                    />
-                    대표
-                  </label>
-                  <label className="inline-flex items-center gap-2 text-sm text-slate-700">
-                    <input
-                      type="radio"
-                      name="position"
-                      value="직원"
-                      checked={form.position === '직원'}
-                      onChange={(event) => handleFieldChange('position', event.target.value)}
-                    />
-                    직원
-                  </label>
-                </div>
+                <label htmlFor="signup-position" className="mb-1 block text-sm font-medium text-slate-700">
+                  {isInstallerInvitation ? '직책 (선택)' : '직위'}
+                </label>
+                {isInstallerInvitation ? (
+                  <input
+                    id="signup-position"
+                    type="text"
+                    value={form.position}
+                    onChange={(event) => handleFieldChange('position', event.target.value)}
+                    onBlur={() => handleBlur('position')}
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                    placeholder="예: 장착 기사"
+                  />
+                ) : (
+                  <div className="flex gap-4 rounded-lg border border-slate-300 px-3 py-2.5">
+                    <label className="inline-flex items-center gap-2 text-sm text-slate-700">
+                      <input
+                        type="radio"
+                        name="position"
+                        value="대표"
+                        checked={form.position === '대표'}
+                        onChange={(event) => handleFieldChange('position', event.target.value)}
+                      />
+                      대표
+                    </label>
+                    <label className="inline-flex items-center gap-2 text-sm text-slate-700">
+                      <input
+                        type="radio"
+                        name="position"
+                        value="직원"
+                        checked={form.position === '직원'}
+                        onChange={(event) => handleFieldChange('position', event.target.value)}
+                      />
+                      직원
+                    </label>
+                  </div>
+                )}
                 {touched.position && errors.position && <p className="mt-1 text-sm text-red-600">{errors.position}</p>}
               </div>
             </div>
+
+            {isInstallerInvitation && (
+              <div className="grid gap-4 md:grid-cols-2">
+                <div>
+                  <label htmlFor="signup-invitation-company" className="mb-1 block text-sm font-medium text-slate-700">
+                    회사명
+                  </label>
+                  <input
+                    id="signup-invitation-company"
+                    type="text"
+                    value={invitationCompanyName}
+                    readOnly
+                    className="w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2.5 text-sm text-slate-600"
+                  />
+                </div>
+
+                <div>
+                  <label htmlFor="signup-invitation-role" className="mb-1 block text-sm font-medium text-slate-700">
+                    권한
+                  </label>
+                  <input
+                    id="signup-invitation-role"
+                    type="text"
+                    value={invitationRoleValue}
+                    readOnly
+                    className="w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2.5 text-sm text-slate-600"
+                  />
+                </div>
+              </div>
+            )}
 
             {!isInvitationMode && (
               <div className="grid gap-4 md:grid-cols-2">

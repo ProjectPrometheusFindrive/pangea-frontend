@@ -79,6 +79,13 @@ export function toViewRole(role: string | null | undefined): AuthViewRole | null
   return null;
 }
 
+export function resolveDefaultLandingPath(viewRole: AuthViewRole | null | undefined): string {
+  if (viewRole === 'device-installer') {
+    return '/device-installation';
+  }
+  return '/';
+}
+
 export function postLogin(payload: AuthLoginPayload): Promise<AuthLoginData> {
   return apiClient.requestData<AuthLoginData>({
     path: '/api/v2/auth/login',

@@ -4,7 +4,9 @@ import { useNavigate } from 'react-router';
 
 import { ApiError } from '../../services/api';
 import {
+  dispatchNotificationStateUpdatedEvent,
   getNotifications,
+  markAllNotificationsAsRead,
   markNotificationAsRead,
   type NotificationItem,
 } from '../../services/notifications';
@@ -43,11 +45,17 @@ function toRelativeTimeLabel(value: string): string {
   return parsedDate.toLocaleDateString('ko-KR');
 }
 
+const PAGE_SIZE = 20;
+
 export default function Notifications() {
   const navigate = useNavigate();
   const { canAccessRoute } = useAuthorization();
   const [items, setItems] = useState<NotificationItem[]>([]);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalCount, setTotalCount] = useState(0);
+  const [unreadCount, setUnreadCount] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
+  const [isMarkAllPending, setIsMarkAllPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const loadNotifications = useCallback(async (signal?: AbortSignal) => {
@@ -55,11 +63,13 @@ export default function Notifications() {
     setError(null);
 
     try {
-      const payload = await getNotifications({ limit: 100, signal });
+      const payload = await getNotifications({ page: currentPage, pageSize: PAGE_SIZE, signal });
       if (signal?.aborted) {
         return;
       }
       setItems(payload.items);
+      setTotalCount(payload.totalCount);
+      setUnreadCount(payload.unreadCount);
     } catch (nextError) {
       if (!signal?.aborted) {
         setError(toNotificationErrorMessage(nextError));
@@ -69,7 +79,7 @@ export default function Notifications() {
         setIsLoading(false);
       }
     }
-  }, []);
+  }, [currentPage]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -79,6 +89,8 @@ export default function Notifications() {
       controller.abort();
     };
   }, [loadNotifications]);
+
+  const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
 
   const handleNotificationClick = useCallback(async (notification: NotificationItem) => {
     const routePermission = resolveRoutePermissionForPath(notification.path);
@@ -90,6 +102,7 @@ export default function Notifications() {
     if (!notification.isRead) {
       try {
         await markNotificationAsRead(notification.id);
+        dispatchNotificationStateUpdatedEvent();
       } catch {
         // Keep navigation responsive even if read-state persistence fails.
       }
@@ -97,6 +110,31 @@ export default function Notifications() {
 
     navigate(notification.path);
   }, [canAccessRoute, navigate]);
+
+  const handleMarkAllAsRead = useCallback(async () => {
+    if (isMarkAllPending || unreadCount <= 0) {
+      return;
+    }
+
+    const previousItems = items;
+    const previousUnreadCount = unreadCount;
+
+    setIsMarkAllPending(true);
+    setItems((previousItemsState) => previousItemsState.map((entry) => ({ ...entry, isRead: true })));
+    setUnreadCount(0);
+
+    try {
+      await markAllNotificationsAsRead();
+      dispatchNotificationStateUpdatedEvent();
+      await loadNotifications();
+    } catch (nextError) {
+      setItems(previousItems);
+      setUnreadCount(previousUnreadCount);
+      setError(toNotificationErrorMessage(nextError));
+    } finally {
+      setIsMarkAllPending(false);
+    }
+  }, [isMarkAllPending, items, loadNotifications, unreadCount]);
 
   return (
     <Layout title="모든 알림">
@@ -114,6 +152,23 @@ export default function Notifications() {
         </div>
 
         <div className="rounded-2xl border border-gray-200 bg-white shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 px-6 py-4">
+            <div className="text-sm text-gray-500">
+              <span>총 {totalCount.toLocaleString()}건</span>
+              <span className="mx-2 text-gray-300">|</span>
+              <span>읽지 않음 {unreadCount.toLocaleString()}건</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                void handleMarkAllAsRead();
+              }}
+              disabled={isMarkAllPending || unreadCount <= 0}
+              className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:border-gray-200 disabled:text-gray-400"
+            >
+              {isMarkAllPending ? '처리 중...' : '모두 읽음'}
+            </button>
+          </div>
           {isLoading ? (
             <div className="flex items-center justify-center gap-3 px-6 py-12 text-sm text-gray-500">
               <Loader2 className="h-5 w-5 animate-spin text-blue-500" />
@@ -157,6 +212,33 @@ export default function Notifications() {
                   <span className="shrink-0 text-xs text-gray-400">{toRelativeTimeLabel(notification.createdAt)}</span>
                 </button>
               ))}
+            </div>
+          )}
+          {totalPages > 1 && !isLoading && !error && (
+            <div className="flex items-center justify-between border-t border-gray-100 px-6 py-4 text-sm text-gray-500">
+              <span>{currentPage} / {totalPages} 페이지</span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCurrentPage((previousPage) => Math.max(1, previousPage - 1));
+                  }}
+                  disabled={currentPage <= 1}
+                  className="rounded-lg border border-gray-300 px-3 py-1.5 font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:border-gray-200 disabled:text-gray-400"
+                >
+                  이전
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCurrentPage((previousPage) => Math.min(totalPages, previousPage + 1));
+                  }}
+                  disabled={currentPage >= totalPages}
+                  className="rounded-lg border border-gray-300 px-3 py-1.5 font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:border-gray-200 disabled:text-gray-400"
+                >
+                  다음
+                </button>
+              </div>
             </div>
           )}
         </div>

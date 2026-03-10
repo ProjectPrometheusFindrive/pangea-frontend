@@ -126,11 +126,15 @@ function getStatusBadge(status: DeviceInstallationStatus) {
   }
 }
 
-function toActionErrorMessage(action: 'create' | 'cancel', error: unknown): string {
+function toActionErrorMessage(action: 'create' | 'cancel' | 'start' | 'complete', error: unknown): string {
   if (error instanceof ApiError) {
     if (error.status === 400) {
       return action === 'create'
         ? '입력 값을 확인해 주세요. VIN/예약 시간/사진 형식이 올바른지 확인이 필요합니다.'
+        : action === 'start'
+          ? '작업 시작 요청 값이 유효하지 않습니다.'
+          : action === 'complete'
+            ? '작업 완료 요청 값이 유효하지 않습니다.'
         : '취소 요청 값이 유효하지 않습니다.';
     }
     if (error.status === 401) {
@@ -145,6 +149,10 @@ function toActionErrorMessage(action: 'create' | 'cancel', error: unknown): stri
     if (error.status === 409) {
       return action === 'create'
         ? '이미 처리 중인 장착 작업입니다. 최신 목록으로 다시 확인해 주세요.'
+        : action === 'start'
+          ? '이미 시작되었거나 진행할 수 없는 작업입니다. 최신 목록을 확인해 주세요.'
+          : action === 'complete'
+            ? '이미 완료되었거나 완료 처리할 수 없는 작업입니다. 최신 목록을 확인해 주세요.'
         : '이미 취소되었거나 완료된 작업입니다. 최신 상태로 새로고침합니다.';
     }
     if (error.status !== undefined && error.status >= 500) {
@@ -166,6 +174,14 @@ function toActionErrorMessage(action: 'create' | 'cancel', error: unknown): stri
 
 function isCancellable(status: DeviceInstallationStatus): boolean {
   return status === 'scheduled' || status === 'in_progress';
+}
+
+function isStartable(status: DeviceInstallationStatus): boolean {
+  return status === 'scheduled';
+}
+
+function isCompletable(status: DeviceInstallationStatus): boolean {
+  return status === 'in_progress';
 }
 
 function readFileAsDataUrl(file: File): Promise<string> {
@@ -210,7 +226,7 @@ export default function DeviceInstallation() {
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [cancellingInstallationId, setCancellingInstallationId] = useState<string | null>(null);
-  const [startingTaskId, setStartingTaskId] = useState<string | null>(null);
+  const [transitioningInstallationId, setTransitioningInstallationId] = useState<string | null>(null);
 
   useEffect(() => () => {
     if (installationPhotoPreview) {
@@ -274,8 +290,7 @@ export default function DeviceInstallation() {
           ? currentTaskId
           : null
       ));
-    } catch (error) {
-      console.error(error);
+    } catch {
       setScheduledTaskOptions([]);
       setSelectedTaskId(null);
     }
@@ -485,13 +500,19 @@ export default function DeviceInstallation() {
   }, [canWriteDeviceInstallation, refreshAll]);
 
   const handleStartSelectedTask = useCallback(async () => {
-    if (!canWriteDeviceInstallation || !selectedTask) {
+    if (!selectedTask) {
+      return;
+    }
+
+    if (!canWriteDeviceInstallation) {
+      setActionError('단말 장착 작업 시작 권한이 없습니다.');
+      setActionMessage(null);
       return;
     }
 
     setActionError(null);
     setActionMessage(null);
-    setStartingTaskId(selectedTask.id);
+    setTransitioningInstallationId(selectedTask.id);
 
     try {
       await patchDeviceInstallationStatus(selectedTask.id, { status: 'in_progress' });
@@ -500,14 +521,69 @@ export default function DeviceInstallation() {
       setPage(1);
       await refreshAll();
     } catch (error) {
-      setActionError(toActionErrorMessage('cancel', error));
+      setActionError(toActionErrorMessage('start', error));
       if (error instanceof ApiError && (error.status === 404 || error.status === 409)) {
         await refreshAll();
       }
     } finally {
-      setStartingTaskId(null);
+      setTransitioningInstallationId(null);
     }
   }, [canWriteDeviceInstallation, refreshAll, selectedTask]);
+
+  const handleStartInstallation = useCallback(async (installationId: string) => {
+    if (!canWriteDeviceInstallation) {
+      setActionError('단말 장착 작업 시작 권한이 없습니다.');
+      setActionMessage(null);
+      return;
+    }
+
+    setActionError(null);
+    setActionMessage(null);
+    setTransitioningInstallationId(installationId);
+
+    try {
+      await patchDeviceInstallationStatus(installationId, {
+        status: 'in_progress',
+      });
+      setActionMessage('장착 작업을 시작했습니다.');
+      await refreshAll();
+    } catch (error) {
+      setActionError(toActionErrorMessage('start', error));
+      if (error instanceof ApiError && (error.status === 404 || error.status === 409)) {
+        await refreshAll();
+      }
+    } finally {
+      setTransitioningInstallationId(null);
+    }
+  }, [canWriteDeviceInstallation, refreshAll]);
+
+  const handleCompleteInstallation = useCallback(async (installationId: string) => {
+    if (!canWriteDeviceInstallation) {
+      setActionError('단말 장착 작업 완료 권한이 없습니다.');
+      setActionMessage(null);
+      return;
+    }
+
+    setActionError(null);
+    setActionMessage(null);
+    setTransitioningInstallationId(installationId);
+
+    try {
+      await patchDeviceInstallationStatus(installationId, {
+        status: 'completed',
+        installedAt: new Date().toISOString(),
+      });
+      setActionMessage('장착 작업을 완료했습니다.');
+      await refreshAll();
+    } catch (error) {
+      setActionError(toActionErrorMessage('complete', error));
+      if (error instanceof ApiError && (error.status === 404 || error.status === 409)) {
+        await refreshAll();
+      }
+    } finally {
+      setTransitioningInstallationId(null);
+    }
+  }, [canWriteDeviceInstallation, refreshAll]);
 
   const totalPages = useMemo(() => Math.max(1, Math.ceil(totalCount / PAGE_SIZE)), [totalCount]);
 
@@ -644,10 +720,10 @@ export default function DeviceInstallation() {
                     onClick={() => {
                       void handleStartSelectedTask();
                     }}
-                    disabled={!canWriteDeviceInstallation || startingTaskId === selectedTask.id}
+                    disabled={!canWriteDeviceInstallation || transitioningInstallationId === selectedTask.id}
                     className="rounded-md bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300"
                   >
-                    {startingTaskId === selectedTask.id ? '작업 시작 중...' : '선택한 작업 시작'}
+                    {transitioningInstallationId === selectedTask.id ? '작업 시작 중...' : '선택한 작업 시작'}
                   </button>
                 </div>
               )}
@@ -970,15 +1046,43 @@ export default function DeviceInstallation() {
 
                       <td className="px-4 py-3">
                         {isCancellable(installation.status) ? (
-                          <button
-                            onClick={() => {
-                              void handleCancelInstallation(installation.id);
-                            }}
-                            disabled={!canWriteDeviceInstallation || cancellingInstallationId === installation.id}
-                            className="rounded-md border border-red-200 px-2 py-1 text-xs text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
-                          >
-                            {cancellingInstallationId === installation.id ? '취소 중...' : '취소'}
-                          </button>
+                          <div className="flex flex-wrap items-center gap-2">
+                            {isStartable(installation.status) && (
+                              <button
+                                onClick={() => {
+                                  void handleStartInstallation(installation.id);
+                                }}
+                                disabled={!canWriteDeviceInstallation || transitioningInstallationId === installation.id}
+                                className="rounded-md border border-blue-200 px-2 py-1 text-xs text-blue-700 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                {transitioningInstallationId === installation.id ? '처리 중...' : '작업 시작'}
+                              </button>
+                            )}
+                            {isCompletable(installation.status) && (
+                              <button
+                                onClick={() => {
+                                  void handleCompleteInstallation(installation.id);
+                                }}
+                                disabled={!canWriteDeviceInstallation || transitioningInstallationId === installation.id}
+                                className="rounded-md border border-emerald-200 px-2 py-1 text-xs text-emerald-700 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                {transitioningInstallationId === installation.id ? '처리 중...' : '작업 완료'}
+                              </button>
+                            )}
+                            <button
+                              onClick={() => {
+                                void handleCancelInstallation(installation.id);
+                              }}
+                              disabled={
+                                !canWriteDeviceInstallation
+                                || cancellingInstallationId === installation.id
+                                || transitioningInstallationId === installation.id
+                              }
+                              className="rounded-md border border-red-200 px-2 py-1 text-xs text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              {cancellingInstallationId === installation.id ? '취소 중...' : '취소'}
+                            </button>
+                          </div>
                         ) : (
                           <span className="text-xs text-gray-400">-</span>
                         )}
