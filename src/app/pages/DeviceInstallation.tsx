@@ -16,6 +16,7 @@ import {
   cancelDeviceInstallation,
   createDeviceInstallation,
   getDeviceInstallationList,
+  patchDeviceInstallationStatus,
   type DeviceInstallationItem,
   type DeviceInstallationStatus,
 } from '../../services/deviceInstallations';
@@ -39,11 +40,11 @@ const EMPTY_SUMMARY: DeviceInstallationSummary = {
 };
 
 const FILTER_OPTIONS: { value: DeviceInstallationStatusFilter; label: string }[] = [
-  { value: 'all', label: '전체' },
-  { value: 'scheduled', label: '대기' },
-  { value: 'in_progress', label: '진행중' },
-  { value: 'completed', label: '완료' },
-  { value: 'cancelled', label: '취소' },
+  { value: 'all', label: '?꾩껜' },
+  { value: 'scheduled', label: '?湲? },
+  { value: 'in_progress', label: '吏꾪뻾以? },
+  { value: 'completed', label: '?꾨즺' },
+  { value: 'cancelled', label: '痍⑥냼' },
 ];
 
 function formatDateTime(value?: string): string {
@@ -84,21 +85,21 @@ function getStatusBadge(status: DeviceInstallationStatus) {
       return (
         <span className="flex items-center gap-1 rounded-full bg-green-100 px-2 py-1 text-xs font-medium text-green-700">
           <CheckCircle className="h-3 w-3" />
-          완료
+          ?꾨즺
         </span>
       );
     case 'in_progress':
       return (
         <span className="flex items-center gap-1 rounded-full bg-blue-100 px-2 py-1 text-xs font-medium text-blue-700">
           <Loader2 className="h-3 w-3 animate-spin" />
-          진행중
+          吏꾪뻾以?
         </span>
       );
     case 'cancelled':
       return (
         <span className="flex items-center gap-1 rounded-full bg-gray-200 px-2 py-1 text-xs font-medium text-gray-700">
           <XCircle className="h-3 w-3" />
-          취소
+          痍⑥냼
         </span>
       );
     case 'scheduled':
@@ -106,61 +107,77 @@ function getStatusBadge(status: DeviceInstallationStatus) {
       return (
         <span className="flex items-center gap-1 rounded-full bg-yellow-100 px-2 py-1 text-xs font-medium text-yellow-700">
           <AlertCircle className="h-3 w-3" />
-          대기
+          ?湲?
         </span>
       );
   }
 }
 
-function toActionErrorMessage(action: 'create' | 'cancel', error: unknown): string {
+function toActionErrorMessage(action: 'create' | 'cancel' | 'start' | 'complete', error: unknown): string {
   if (error instanceof ApiError) {
     if (error.status === 400) {
       return action === 'create'
-        ? '입력 값을 확인해 주세요. VIN/예약 시간/사진 형식이 올바른지 확인이 필요합니다.'
-        : '취소 요청 값이 유효하지 않습니다.';
+        ? '?낅젰 媛믪쓣 ?뺤씤??二쇱꽭?? VIN/?덉빟 ?쒓컙/?ъ쭊 ?뺤떇???щ컮瑜몄? ?뺤씤???꾩슂?⑸땲??'
+        : action === 'start'
+          ? '?묒뾽 ?쒖옉 ?붿껌 媛믪쓣 ?ㅼ떆 ?뺤씤??二쇱꽭??'
+          : action === 'complete'
+            ? '?묒뾽 ?꾨즺 ?붿껌 媛믪쓣 ?ㅼ떆 ?뺤씤??二쇱꽭??'
+        : '痍⑥냼 ?붿껌 媛믪씠 ?좏슚?섏? ?딆뒿?덈떎.';
     }
     if (error.status === 401) {
-      return '세션이 만료되었습니다. 다시 로그인해 주세요.';
+      return '?몄뀡??留뚮즺?섏뿀?듬땲?? ?ㅼ떆 濡쒓렇?명빐 二쇱꽭??';
     }
     if (error.status === 403) {
-      return '권한이 없어 요청을 처리할 수 없습니다.';
+      return '沅뚰븳???놁뼱 ?붿껌??泥섎━?????놁뒿?덈떎.';
     }
     if (error.status === 404) {
-      return '요청한 장착 작업을 찾을 수 없습니다.';
+      return '?붿껌???μ갑 ?묒뾽??李얠쓣 ???놁뒿?덈떎.';
     }
     if (error.status === 409) {
       return action === 'create'
-        ? '이미 처리 중인 장착 작업입니다. 최신 목록으로 다시 확인해 주세요.'
-        : '이미 취소되었거나 완료된 작업입니다. 최신 상태로 새로고침합니다.';
+        ? '?대? 泥섎━ 以묒씤 ?μ갑 ?묒뾽?낅땲?? 理쒖떊 紐⑸줉?쇰줈 ?ㅼ떆 ?뺤씤??二쇱꽭??'
+        : action === 'start'
+          ? '?대? ?쒖옉?섏뿀嫄곕굹 ???댁긽 ?쒖옉?????녿뒗 ?묒뾽?낅땲?? 理쒖떊 紐⑸줉?쇰줈 媛깆떊?⑸땲??'
+          : action === 'complete'
+            ? '?대? ?꾨즺?섏뿀嫄곕굹 ???댁긽 ?꾨즺?????녿뒗 ?묒뾽?낅땲?? 理쒖떊 紐⑸줉?쇰줈 媛깆떊?⑸땲??'
+        : '?대? 痍⑥냼?섏뿀嫄곕굹 ?꾨즺???묒뾽?낅땲?? 理쒖떊 ?곹깭濡??덈줈怨좎묠?⑸땲??';
     }
     if (error.status !== undefined && error.status >= 500) {
-      return '서버 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.';
+      return '?쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎. ?좎떆 ???ㅼ떆 ?쒕룄??二쇱꽭??';
     }
     if (error.code === 'NETWORK_ERROR' || error.code === 'TIMEOUT' || error.code === 'ABORTED') {
-      return '네트워크 오류가 발생했습니다. 연결 상태를 확인한 뒤 다시 시도해 주세요.';
+      return '?ㅽ듃?뚰겕 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎. ?곌껐 ?곹깭瑜??뺤씤?????ㅼ떆 ?쒕룄??二쇱꽭??';
     }
 
-    return error.message || '요청 처리 중 오류가 발생했습니다.';
+    return error.message || '?붿껌 泥섎━ 以??ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.';
   }
 
   if (error instanceof Error && error.message) {
     return error.message;
   }
 
-  return '요청 처리 중 오류가 발생했습니다.';
+  return '?붿껌 泥섎━ 以??ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.';
 }
 
 function isCancellable(status: DeviceInstallationStatus): boolean {
   return status === 'scheduled' || status === 'in_progress';
 }
 
+function isStartable(status: DeviceInstallationStatus): boolean {
+  return status === 'scheduled';
+}
+
+function isCompletable(status: DeviceInstallationStatus): boolean {
+  return status === 'in_progress';
+}
+
 function readFileAsDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onerror = () => reject(new Error('사진 파일을 읽는 중 오류가 발생했습니다.'));
+    reader.onerror = () => reject(new Error('?ъ쭊 ?뚯씪???쎈뒗 以??ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.'));
     reader.onload = () => {
       if (typeof reader.result !== 'string' || !reader.result) {
-        reject(new Error('사진 파일을 읽는 중 오류가 발생했습니다.'));
+        reject(new Error('?ъ쭊 ?뚯씪???쎈뒗 以??ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.'));
         return;
       }
       resolve(reader.result);
@@ -194,6 +211,8 @@ export default function DeviceInstallation() {
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [cancellingInstallationId, setCancellingInstallationId] = useState<string | null>(null);
+  const [startingInstallationId, setStartingInstallationId] = useState<string | null>(null);
+  const [completingInstallationId, setCompletingInstallationId] = useState<string | null>(null);
 
   useEffect(() => () => {
     if (installationPhotoPreview) {
@@ -220,7 +239,7 @@ export default function DeviceInstallation() {
 
     if (payload.items.length === 0 && payload.total > 0 && page > 1) {
       setPage((prevPage) => Math.max(1, prevPage - 1));
-      setPageNotice('현재 페이지에 항목이 없어 이전 페이지로 이동합니다.');
+      setPageNotice('?꾩옱 ?섏씠吏????ぉ???놁뼱 ?댁쟾 ?섏씠吏濡??대룞?⑸땲??');
     }
   }, [page]);
 
@@ -259,7 +278,7 @@ export default function DeviceInstallation() {
       });
     } catch (error) {
       console.error(error);
-      setSummaryError('집계 데이터를 불러오지 못했습니다.');
+      setSummaryError('吏묎퀎 ?곗씠?곕? 遺덈윭?ㅼ? 紐삵뻽?듬땲??');
     }
   }, []);
 
@@ -324,7 +343,7 @@ export default function DeviceInstallation() {
 
   const handleCreateInstallation = useCallback(async () => {
     if (!canWriteDeviceInstallation) {
-      setActionError('단말 장착 신청 권한이 없습니다.');
+      setActionError('?⑤쭚 ?μ갑 ?좎껌 沅뚰븳???놁뒿?덈떎.');
       setActionMessage(null);
       return;
     }
@@ -336,13 +355,13 @@ export default function DeviceInstallation() {
     const normalizedDeviceSerial = deviceSerial.trim().toUpperCase();
 
     if (!normalizedVin || !scheduledAt || !normalizedDeviceSerial || !installationPhotoFile || !serialPhotoFile) {
-      setActionError('VIN, 예약 시간, 단말 시리얼, 장착/시리얼 사진을 모두 입력해 주세요.');
+      setActionError('VIN, ?덉빟 ?쒓컙, ?⑤쭚 ?쒕━?? ?μ갑/?쒕━???ъ쭊??紐⑤몢 ?낅젰??二쇱꽭??');
       return;
     }
 
     const scheduledAtIso = toIsoDateTime(scheduledAt);
     if (!scheduledAtIso) {
-      setActionError('예약 시간 형식이 올바르지 않습니다.');
+      setActionError('?덉빟 ?쒓컙 ?뺤떇???щ컮瑜댁? ?딆뒿?덈떎.');
       return;
     }
 
@@ -365,7 +384,7 @@ export default function DeviceInstallation() {
       ]);
 
       if (scheduledTasks.total > 0 || inProgressTasks.total > 0) {
-        setActionError('이미 진행 중인 장착 작업이 있습니다. 기존 작업을 완료/취소한 뒤 다시 시도해 주세요.');
+        setActionError('?대? 吏꾪뻾 以묒씤 ?μ갑 ?묒뾽???덉뒿?덈떎. 湲곗〈 ?묒뾽???꾨즺/痍⑥냼?????ㅼ떆 ?쒕룄??二쇱꽭??');
         return;
       }
 
@@ -382,7 +401,7 @@ export default function DeviceInstallation() {
         photos: [installationPhotoDataUrl, serialPhotoDataUrl],
       });
 
-      setActionMessage('장착 신청이 등록되었습니다. 상태가 대기로 반영됩니다.');
+      setActionMessage('?μ갑 ?좎껌???깅줉?섏뿀?듬땲?? ?곹깭媛 ?湲곕줈 諛섏쁺?⑸땲??');
       resetForm();
       setPage(1);
       await refreshAll();
@@ -408,7 +427,7 @@ export default function DeviceInstallation() {
 
   const handleCancelInstallation = useCallback(async (installationId: string) => {
     if (!canWriteDeviceInstallation) {
-      setActionError('단말 장착 취소 권한이 없습니다.');
+      setActionError('?⑤쭚 ?μ갑 痍⑥냼 沅뚰븳???놁뒿?덈떎.');
       setActionMessage(null);
       return;
     }
@@ -419,11 +438,11 @@ export default function DeviceInstallation() {
 
     try {
       await cancelDeviceInstallation(installationId);
-      setActionMessage('장착 작업이 취소되었습니다.');
+      setActionMessage('?μ갑 ?묒뾽??痍⑥냼?섏뿀?듬땲??');
       await refreshAll();
     } catch (error) {
       if (error instanceof ApiError && error.status === 404) {
-        setActionError('이미 삭제되었거나 존재하지 않는 작업입니다. 최신 목록으로 갱신합니다.');
+        setActionError('?대? ??젣?섏뿀嫄곕굹 議댁옱?섏? ?딅뒗 ?묒뾽?낅땲?? 理쒖떊 紐⑸줉?쇰줈 媛깆떊?⑸땲??');
         await refreshAll();
         return;
       }
@@ -437,22 +456,77 @@ export default function DeviceInstallation() {
     }
   }, [canWriteDeviceInstallation, refreshAll]);
 
+  const handleStartInstallation = useCallback(async (installationId: string) => {
+    if (!canWriteDeviceInstallation) {
+      setActionError('작업 시작 권한이 없습니다.');
+      setActionMessage(null);
+      return;
+    }
+
+    setActionError(null);
+    setActionMessage(null);
+    setStartingInstallationId(installationId);
+
+    try {
+      await patchDeviceInstallationStatus(installationId, {
+        status: 'in_progress',
+      });
+      setActionMessage('작업을 시작했습니다.');
+      await refreshAll();
+    } catch (error) {
+      setActionError(toActionErrorMessage('start', error));
+      if (error instanceof ApiError && (error.status === 404 || error.status === 409)) {
+        await refreshAll();
+      }
+    } finally {
+      setStartingInstallationId(null);
+    }
+  }, [canWriteDeviceInstallation, refreshAll]);
+
+  const handleCompleteInstallation = useCallback(async (installationId: string) => {
+    if (!canWriteDeviceInstallation) {
+      setActionError('작업 완료 권한이 없습니다.');
+      setActionMessage(null);
+      return;
+    }
+
+    setActionError(null);
+    setActionMessage(null);
+    setCompletingInstallationId(installationId);
+
+    try {
+      await patchDeviceInstallationStatus(installationId, {
+        status: 'completed',
+        installedAt: new Date().toISOString(),
+      });
+      setActionMessage('작업을 완료 처리했습니다.');
+      await refreshAll();
+    } catch (error) {
+      setActionError(toActionErrorMessage('complete', error));
+      if (error instanceof ApiError && (error.status === 404 || error.status === 409)) {
+        await refreshAll();
+      }
+    } finally {
+      setCompletingInstallationId(null);
+    }
+  }, [canWriteDeviceInstallation, refreshAll]);
+
   const totalPages = useMemo(() => Math.max(1, Math.ceil(totalCount / PAGE_SIZE)), [totalCount]);
 
   return (
-    <Layout title="단말 장착/관리">
+    <Layout title="?⑤쭚 ?μ갑/愿由?>
       <div className="p-6">
         <div className="bg-gradient-to-r from-purple-600 to-blue-600 rounded-lg p-4 mb-4 text-white">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Zap className="w-6 h-6" />
-              <h2 className="text-lg font-bold">단말 장착 작업</h2>
+              <h2 className="text-lg font-bold">?⑤쭚 ?μ갑 ?묒뾽</h2>
             </div>
             <div className="flex items-center gap-4 text-sm">
-              <span>대기: <strong>{summary.scheduled}</strong>건</span>
-              <span>진행중: <strong>{summary.inProgress}</strong>건</span>
-              <span>완료: <strong>{summary.completed}</strong>건</span>
-              <span>취소: <strong>{summary.cancelled}</strong>건</span>
+              <span>?湲? <strong>{summary.scheduled}</strong>嫄?/span>
+              <span>吏꾪뻾以? <strong>{summary.inProgress}</strong>嫄?/span>
+              <span>?꾨즺: <strong>{summary.completed}</strong>嫄?/span>
+              <span>痍⑥냼: <strong>{summary.cancelled}</strong>嫄?/span>
             </div>
           </div>
           {summaryError && (
@@ -474,7 +548,7 @@ export default function DeviceInstallation() {
 
           {!canWriteDeviceInstallation && (
             <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
-              현재 계정은 단말 장착 신청/취소 작업을 수행할 수 없습니다.
+              ?꾩옱 怨꾩젙? ?⑤쭚 ?μ갑 ?좎껌/痍⑥냼 ?묒뾽???섑뻾?????놁뒿?덈떎.
             </div>
           )}
 
@@ -502,7 +576,7 @@ export default function DeviceInstallation() {
 
             <div className="flex-shrink-0" style={{ width: '180px' }}>
               <label className="block text-xs font-semibold text-gray-700 mb-1">
-                단말 시리얼 번호
+                ?⑤쭚 ?쒕━??踰덊샇
               </label>
               <input
                 data-testid="device-installation-serial-input"
@@ -517,7 +591,7 @@ export default function DeviceInstallation() {
 
             <div className="flex-shrink-0" style={{ width: '220px' }}>
               <label className="block text-xs font-semibold text-gray-700 mb-1">
-                예약 일시 <span className="text-red-600">*</span>
+                ?덉빟 ?쇱떆 <span className="text-red-600">*</span>
               </label>
               <input
                 data-testid="device-installation-scheduled-at-input"
@@ -531,7 +605,7 @@ export default function DeviceInstallation() {
 
             <div className="flex-shrink-0" style={{ width: '140px' }}>
               <label className="block text-xs font-semibold text-gray-700 mb-1">
-                장착 사진 <span className="text-red-600">*</span>
+                ?μ갑 ?ъ쭊 <span className="text-red-600">*</span>
               </label>
               <div className="relative">
                 <input
@@ -563,12 +637,12 @@ export default function DeviceInstallation() {
                   {installationPhotoFile ? (
                     <>
                       <CheckCircle className="w-4 h-4" />
-                      <span>첨부됨</span>
+                      <span>泥⑤???/span>
                     </>
                   ) : (
                     <>
                       <Camera className="w-4 h-4" />
-                      <span>촬영</span>
+                      <span>珥ъ쁺</span>
                     </>
                   )}
                 </label>
@@ -586,7 +660,7 @@ export default function DeviceInstallation() {
                 >
                   <img
                     src={installationPhotoPreview}
-                    alt="장착사진"
+                    alt="?μ갑?ъ쭊"
                     className="w-full h-full object-cover"
                   />
                 </div>
@@ -595,7 +669,7 @@ export default function DeviceInstallation() {
 
             <div className="flex-shrink-0" style={{ width: '140px' }}>
               <label className="block text-xs font-semibold text-gray-700 mb-1">
-                시리얼 사진 <span className="text-red-600">*</span>
+                ?쒕━???ъ쭊 <span className="text-red-600">*</span>
               </label>
               <div className="relative">
                 <input
@@ -627,12 +701,12 @@ export default function DeviceInstallation() {
                   {serialPhotoFile ? (
                     <>
                       <CheckCircle className="w-4 h-4" />
-                      <span>첨부됨</span>
+                      <span>泥⑤???/span>
                     </>
                   ) : (
                     <>
                       <Camera className="w-4 h-4" />
-                      <span>촬영</span>
+                      <span>珥ъ쁺</span>
                     </>
                   )}
                 </label>
@@ -650,7 +724,7 @@ export default function DeviceInstallation() {
                 >
                   <img
                     src={serialPhotoPreview}
-                    alt="시리얼사진"
+                    alt="?쒕━?쇱궗吏?
                     className="w-full h-full object-cover"
                   />
                 </div>
@@ -671,7 +745,7 @@ export default function DeviceInstallation() {
                 ) : (
                   <Zap className="w-4 h-4" />
                 )}
-                장착 신청
+                ?μ갑 ?좎껌
               </button>
             </div>
           </div>
@@ -680,7 +754,7 @@ export default function DeviceInstallation() {
         <div className="mb-3 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <label htmlFor="installation-status-filter" className="text-xs font-semibold text-gray-700">
-              상태 필터
+              ?곹깭 ?꾪꽣
             </label>
             <select
               id="installation-status-filter"
@@ -700,7 +774,7 @@ export default function DeviceInstallation() {
           </div>
 
           <div className="text-xs text-gray-600">
-            총 {totalCount}건 · 페이지 {page}/{totalPages}
+            珥?{totalCount}嫄?쨌 ?섏씠吏 {page}/{totalPages}
           </div>
         </div>
 
@@ -708,9 +782,9 @@ export default function DeviceInstallation() {
           isLoading={isInstallationsLoading}
           error={installationsError}
           isEmpty={isInstallationsEmpty}
-          errorDescription="장착 작업 목록을 불러오는 중 문제가 발생했습니다."
-          emptyTitle="장착 작업이 없습니다"
-          emptyDescription="장착 신청을 등록하면 목록에 표시됩니다."
+          errorDescription="?μ갑 ?묒뾽 紐⑸줉??遺덈윭?ㅻ뒗 以?臾몄젣媛 諛쒖깮?덉뒿?덈떎."
+          emptyTitle="?μ갑 ?묒뾽???놁뒿?덈떎"
+          emptyDescription="?μ갑 ?좎껌???깅줉?섎㈃ 紐⑸줉???쒖떆?⑸땲??"
           onRetry={handleRetry}
           errorActionLabel={getPageErrorActionLabel(installationsErrorKind)}
           onErrorAction={handleInstallationsErrorAction}
@@ -718,22 +792,22 @@ export default function DeviceInstallation() {
         >
           <div className="bg-white rounded-lg shadow-sm overflow-hidden">
             <div className="px-4 py-3 border-b border-gray-200 bg-gray-50">
-              <h3 className="text-sm font-bold text-gray-900">장착 작업 리스트</h3>
+              <h3 className="text-sm font-bold text-gray-900">?μ갑 ?묒뾽 由ъ뒪??/h3>
             </div>
 
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead className="bg-gray-50 border-b border-gray-200">
                   <tr>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">상태</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">작업ID</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">?곹깭</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">?묒뾽ID</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">VIN</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">단말 시리얼</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">작업자</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">예약 일시</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">완료 일시</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">사진</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">작업</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">?⑤쭚 ?쒕━??/th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">?묒뾽??/th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">?덉빟 ?쇱떆</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">?꾨즺 ?쇱떆</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">?ъ쭊</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">?묒뾽</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
@@ -789,7 +863,7 @@ export default function DeviceInstallation() {
                                 onClick={() => window.open(photo, '_blank', 'noopener,noreferrer')}
                                 className="text-blue-600 hover:text-blue-700 text-xs underline text-left"
                               >
-                                사진 {index + 1}
+                                ?ъ쭊 {index + 1}
                               </button>
                             ))}
                           </div>
@@ -799,16 +873,57 @@ export default function DeviceInstallation() {
                       </td>
 
                       <td className="px-4 py-3">
-                        {isCancellable(installation.status) ? (
-                          <button
-                            onClick={() => {
-                              void handleCancelInstallation(installation.id);
-                            }}
-                            disabled={!canWriteDeviceInstallation || cancellingInstallationId === installation.id}
-                            className="rounded-md border border-red-200 px-2 py-1 text-xs text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
-                          >
-                            {cancellingInstallationId === installation.id ? '취소 중...' : '취소'}
-                          </button>
+                        {isStartable(installation.status) || isCompletable(installation.status) || isCancellable(installation.status) ? (
+                          <div className="flex flex-wrap gap-2">
+                            {isStartable(installation.status) && (
+                              <button
+                                onClick={() => {
+                                  void handleStartInstallation(installation.id);
+                                }}
+                                disabled={
+                                  !canWriteDeviceInstallation
+                                  || startingInstallationId === installation.id
+                                  || completingInstallationId === installation.id
+                                  || cancellingInstallationId === installation.id
+                                }
+                                className="rounded-md border border-blue-200 px-2 py-1 text-xs text-blue-700 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                {startingInstallationId === installation.id ? '?묒뾽 ?쒖옉 以?..' : '?묒뾽 ?쒖옉'}
+                              </button>
+                            )}
+                            {isCompletable(installation.status) && (
+                              <button
+                                onClick={() => {
+                                  void handleCompleteInstallation(installation.id);
+                                }}
+                                disabled={
+                                  !canWriteDeviceInstallation
+                                  || startingInstallationId === installation.id
+                                  || completingInstallationId === installation.id
+                                  || cancellingInstallationId === installation.id
+                                }
+                                className="rounded-md border border-green-200 px-2 py-1 text-xs text-green-700 hover:bg-green-50 disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                {completingInstallationId === installation.id ? '?묒뾽 ?꾨즺 以?..' : '?묒뾽 ?꾨즺'}
+                              </button>
+                            )}
+                            {isCancellable(installation.status) && (
+                              <button
+                                onClick={() => {
+                                  void handleCancelInstallation(installation.id);
+                                }}
+                                disabled={
+                                  !canWriteDeviceInstallation
+                                  || startingInstallationId === installation.id
+                                  || completingInstallationId === installation.id
+                                  || cancellingInstallationId === installation.id
+                                }
+                                className="rounded-md border border-red-200 px-2 py-1 text-xs text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                {cancellingInstallationId === installation.id ? '痍⑥냼 以?..' : '痍⑥냼'}
+                              </button>
+                            )}
+                          </div>
                         ) : (
                           <span className="text-xs text-gray-400">-</span>
                         )}
@@ -825,7 +940,7 @@ export default function DeviceInstallation() {
                 disabled={page <= 1 || isInstallationsLoading}
                 className="rounded-md border border-gray-300 px-3 py-1 text-xs text-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                이전
+                ?댁쟾
               </button>
               <span className="text-xs text-gray-600">
                 {page} / {totalPages}
@@ -835,7 +950,7 @@ export default function DeviceInstallation() {
                 disabled={page >= totalPages || isInstallationsLoading}
                 className="rounded-md border border-gray-300 px-3 py-1 text-xs text-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                다음
+                ?ㅼ쓬
               </button>
             </div>
           </div>
