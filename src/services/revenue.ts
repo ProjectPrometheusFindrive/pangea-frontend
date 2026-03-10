@@ -60,11 +60,13 @@ export interface RevenueSummaryRequestParams extends RevenueRequestOptions {
   from: string;
   to: string;
   granularity: RevenueGranularity;
+  companyId?: string;
 }
 
 export interface RevenueTrendRequestParams extends RevenueRequestOptions {
   from: string;
   to: string;
+  companyId?: string;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -236,6 +238,7 @@ export async function getRevenueSummary({
   from,
   to,
   granularity,
+  companyId,
   signal,
 }: RevenueSummaryRequestParams): Promise<RevenueSummaryResponse> {
   const payload = await apiClient.requestData<unknown>({
@@ -245,6 +248,7 @@ export async function getRevenueSummary({
       from,
       to,
       granularity,
+      companyId,
     },
     signal,
   });
@@ -259,6 +263,7 @@ export async function getRevenueSummary({
 export async function getRevenueTrend({
   from,
   to,
+  companyId,
   signal,
 }: RevenueTrendRequestParams): Promise<RevenueTrendResponse> {
   const payload = await apiClient.requestData<unknown>({
@@ -267,6 +272,7 @@ export async function getRevenueTrend({
     query: {
       from,
       to,
+      companyId,
     },
     signal,
   });
