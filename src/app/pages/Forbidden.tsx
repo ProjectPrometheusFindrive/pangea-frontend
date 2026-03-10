@@ -1,7 +1,12 @@
 import { Link } from 'react-router';
 import { ShieldAlert } from 'lucide-react';
 
+import { useAuth } from '../context/AuthContext';
+import { resolveDefaultLandingPath } from '../../services/auth';
+
 export default function Forbidden() {
+  const { viewRole } = useAuth();
+
   return (
     <div className="flex min-h-screen items-center justify-center bg-slate-50 px-4 py-10">
       <div className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
@@ -14,7 +19,7 @@ export default function Forbidden() {
         </p>
         <div className="mt-6 flex justify-center">
           <Link
-            to="/"
+            to={resolveDefaultLandingPath(viewRole)}
             className="inline-flex items-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700"
           >
             홈으로 이동
