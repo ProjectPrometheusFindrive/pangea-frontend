@@ -1,6 +1,7 @@
 export interface Reservation {
   id: string;
   vehicleNumber: string;
+  vin?: string;
   customer: string;
   startDate: number;
   endDate: number;
