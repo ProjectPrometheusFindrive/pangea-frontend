@@ -1,7 +1,7 @@
 # Prompt Library v1
 
-- Version: v1.2.50
-- Date: 2026-03-09
+- Version: v1.2.66
+- Date: 2026-03-10
 - Owner: Pangea Frontend Team
 - Tags: prompt-library,workflow,branch-policy,history-policy,commit-policy,pr-automation,jira-traceability,end-prompt-protocol,worktree-cleanup,jira-status-sync,jira-comment-sync,ac-evidence,mock-removal,reservations-write,reservations-mock-removal,ocr-flow,revenue-api,revenue-trend-fallback,settings-api,payment-status-sync,home-api,home-summary,home-copy,i18n-regression,action-payment-mock-removal,support-center,rbac-permission-hardening,e2e-test-hardening,playwright-artifact-policy,device-installation-tenant-scope,authorization-loading-guard,auth-silent-refresh,review-followup,loan-schedule-replace-remove,home-placeholder-premium-modal
 
@@ -170,6 +170,7 @@ cp docs/prompt_history/_TEMPLATE.md docs/prompt_history/$(date +%Y%m%d)_SCRUM-12
 - Production push triggers auto tag (`vX.Y.Z`)
 
 ## Version History
+- v1.2.66 (2026-03-10, Jira SCRUM-286): Record end_prompt evidence for skipping installer company/notification bootstrap calls that only produced 403 noise.
 - v1.2.50 (2026-03-09, Jira SCRUM-267/269): Record review-follow-up evidence for loan-schedule append/replace/remove UX and premium-placeholder handling on the device-off home card.
 - v1.2.49 (2026-03-09, Jira SCRUM-244/249/253/254/255/256/258/259/260/265/266/267/268/269): Record end_prompt evidence for support-center RBAC and company scoping, settings pending-member actions, terms/login/home/assets follow-ups, and SPA rewrite coverage.
 - v1.2.48 (2026-03-09, Jira SCRUM-243): Record end_prompt evidence for 예약 상세 결제 상태 동기화.
