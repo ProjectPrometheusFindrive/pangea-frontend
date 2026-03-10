@@ -16,7 +16,6 @@ export type NewContractField =
   | 'endTime'
   | 'customerName'
   | 'customerPhone'
-  | 'customerSSN'
   | 'customerLicense'
   | 'customerAddress'
   | 'pickupLocation'
@@ -33,7 +32,6 @@ export interface NewContractFormValues {
   endTime: string;
   customerName: string;
   customerPhone: string;
-  customerSSN: string;
   customerLicense: string;
   customerAddress: string;
   pickupLocation: string;
@@ -66,6 +64,7 @@ function createTodayBaseDate(): Date {
 }
 
 const CALENDAR_BASE_DATE = createTodayBaseDate();
+const PHONE_REGEX = /^010-\d{4}-\d{4}$/;
 
 function hasTextValue(value: string): boolean {
   return value.trim().length > 0;
@@ -94,7 +93,6 @@ export function NewContractModal({
   const [endTime, setEndTime] = useState('18:00');
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
-  const [customerSSN, setCustomerSSN] = useState('');
   const [customerLicense, setCustomerLicense] = useState('');
   const [customerAddress, setCustomerAddress] = useState('');
   const [pickupLocation, setPickupLocation] = useState('');
@@ -163,7 +161,6 @@ export function NewContractModal({
     setEndTime('18:00');
     setCustomerName('');
     setCustomerPhone('');
-    setCustomerSSN('');
     setCustomerLicense('');
     setCustomerAddress('');
     setPickupLocation('');
@@ -233,9 +230,8 @@ export function NewContractModal({
     }
     if (!hasTextValue(customerPhone)) {
       nextErrors.customerPhone = '연락처를 입력해 주세요.';
-    }
-    if (!hasTextValue(customerSSN)) {
-      nextErrors.customerSSN = '주민번호를 입력해 주세요.';
+    } else if (!PHONE_REGEX.test(customerPhone.trim())) {
+      nextErrors.customerPhone = '전화번호는 010-0000-0000 형식으로 입력해 주세요.';
     }
     if (!hasTextValue(customerLicense)) {
       nextErrors.customerLicense = '면허번호를 입력해 주세요.';
@@ -293,7 +289,6 @@ export function NewContractModal({
         endTime,
         customerName,
         customerPhone,
-        customerSSN,
         customerLicense,
         customerAddress,
         pickupLocation,
@@ -631,25 +626,6 @@ export function NewContractModal({
                   disabled={isSubmitting}
                 />
                 {fieldErrors.customerPhone && <p className="mt-1 text-xs text-red-600">{fieldErrors.customerPhone}</p>}
-              </div>
-
-              <div>
-                <label className="block text-sm font-semibold text-gray-600 mb-2">
-                  주민번호 <span className="text-red-600">*</span>
-                </label>
-                <input
-                  data-testid="new-contract-customer-ssn-input"
-                  type="text"
-                  value={customerSSN}
-                  onChange={(event) => {
-                    setCustomerSSN(event.target.value);
-                    clearFieldError('customerSSN');
-                  }}
-                  placeholder="123456-1234567"
-                  className={fieldInputClass('customerSSN')}
-                  disabled={isSubmitting}
-                />
-                {fieldErrors.customerSSN && <p className="mt-1 text-xs text-red-600">{fieldErrors.customerSSN}</p>}
               </div>
 
               <div>

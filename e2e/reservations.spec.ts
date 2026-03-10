@@ -85,7 +85,6 @@ async function fillContractStep1(page: Page): Promise<void> {
 async function fillContractStep2(page: Page): Promise<void> {
   await page.getByTestId('new-contract-customer-name-input').fill('테스트고객');
   await page.getByTestId('new-contract-customer-phone-input').fill('010-2222-3333');
-  await page.getByTestId('new-contract-customer-ssn-input').fill('900101-1234567');
   await page.getByTestId('new-contract-customer-license-input').fill('11-22-333333-44');
   await page.getByTestId('new-contract-customer-address-input').fill('서울특별시 강남구');
   await page.getByTestId('new-contract-pickup-location-input').fill('강남지점');
