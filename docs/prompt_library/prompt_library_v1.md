@@ -171,6 +171,7 @@ cp docs/prompt_history/_TEMPLATE.md docs/prompt_history/$(date +%Y%m%d)_SCRUM-12
 
 ## Version History
 - v1.2.52 (2026-03-10, Jira SCRUM-271): Record end_prompt evidence for reservation create phone validation and removal of unsupported SSN input on the FE modal flow.
+- v1.2.51 (2026-03-10, Jira SCRUM-270): Record end_prompt evidence for super_admin dashboard company scope alignment across Home, Revenue, and settings-backed company selection.
 - v1.2.50 (2026-03-09, Jira SCRUM-267/269): Record review-follow-up evidence for loan-schedule append/replace/remove UX and premium-placeholder handling on the device-off home card.
 - v1.2.49 (2026-03-09, Jira SCRUM-244/249/253/254/255/256/258/259/260/265/266/267/268/269): Record end_prompt evidence for support-center RBAC and company scoping, settings pending-member actions, terms/login/home/assets follow-ups, and SPA rewrite coverage.
 - v1.2.48 (2026-03-09, Jira SCRUM-243): Record end_prompt evidence for 예약 상세 결제 상태 동기화.
