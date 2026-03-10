@@ -81,6 +81,7 @@ type CompanyField = 'name' | 'businessNumber' | 'phone' | 'email' | 'address';
 type GeofenceField = 'name' | 'lat' | 'lng' | 'radiusMeter' | 'pointsText';
 type MemberRoleField = 'role';
 type InvitationField = 'email' | 'role' | 'companyId';
+type InvitationStatusFilter = 'pending' | 'accepted' | 'expired' | 'revoked' | 'all';
 type FieldErrorMap<TField extends string> = Partial<Record<TField, string>>;
 
 interface UploadResult {
@@ -173,6 +174,21 @@ const DEFAULT_INVITATION_FORM_STATE: InvitationFormState = {
   email: '',
   role: 'member',
 };
+const DEFAULT_INVITATION_STATUS_FILTER: InvitationStatusFilter = 'pending';
+
+function toInvitationStatusQuery(
+  invitationStatusFilter: InvitationStatusFilter,
+): Exclude<InvitationStatusFilter, 'all'> | undefined {
+  return invitationStatusFilter === 'all' ? undefined : invitationStatusFilter;
+}
+
+function sortInvitations(items: Invitation[]): Invitation[] {
+  return items.reduce<Invitation[]>((results, invitation) => upsertPendingInvitation(results, invitation), []);
+}
+
+function invitationMatchesStatusFilter(invitation: Invitation, invitationStatusFilter: InvitationStatusFilter): boolean {
+  return invitationStatusFilter === 'all' || invitation.status === invitationStatusFilter;
+}
 
 function createEmptySettingsHydrationPayload(): SettingsHydrationPayload {
   return {
@@ -762,6 +778,7 @@ export default function Settings() {
   const [invitationRetryAction, setInvitationRetryAction] = useState<(() => void) | null>(null);
   const [isInvitationSaving, setIsInvitationSaving] = useState(false);
   const [resendingInvitationId, setResendingInvitationId] = useState<string | null>(null);
+  const [invitationStatusFilter, setInvitationStatusFilter] = useState<InvitationStatusFilter>(DEFAULT_INVITATION_STATUS_FILTER);
   const [currentVehicleCount, setCurrentVehicleCount] = useState<number | null>(null);
   const [currentReservationCount, setCurrentReservationCount] = useState<number | null>(null);
   const [activeCurrentDownloadType, setActiveCurrentDownloadType] = useState<CurrentDataType | null>(null);
@@ -846,22 +863,23 @@ export default function Settings() {
     setMemberFieldErrors({});
   }, [settingsCompanyId]);
 
-  const hydrateInvitationsOnly = useCallback(async () => {
+  const hydrateInvitationsOnly = useCallback(async (statusFilter: InvitationStatusFilter = invitationStatusFilter) => {
     if (!canManageMemberRoles) {
       setInvitations([]);
       return;
     }
 
     try {
-      const invitationsPayload = await listInvitations('pending', {
+      const invitationStatusFilterQuery = toInvitationStatusQuery(statusFilter);
+      const invitationsPayload = await listInvitations(invitationStatusFilterQuery, {
         companyId: settingsCompanyId ?? undefined,
       });
       const invitationItems = Array.isArray(invitationsPayload.items) ? invitationsPayload.items : [];
-      setInvitations(invitationItems.reduce<Invitation[]>((items, invitation) => upsertPendingInvitation(items, invitation), []));
+      setInvitations(sortInvitations(invitationItems));
     } catch (error) {
       setInvitationSaveError(toErrorMessage(error, '초대 목록을 다시 불러오지 못했습니다.'));
     }
-  }, [canManageMemberRoles, settingsCompanyId]);
+  }, [canManageMemberRoles, invitationStatusFilter, settingsCompanyId]);
 
   const hydrateGeofencesOnly = useCallback(async () => {
     const geofencesPayload = await listSettingsGeofences({
@@ -1055,12 +1073,13 @@ export default function Settings() {
   }, [canUseBulkOcr, isBulkOcrProcessing, pollBulkOcrJobUntilTerminal, refreshCurrentDataCounts, user?.companyId]);
 
   const requestSettingsHydration = useCallback(async (signal: AbortSignal): Promise<SettingsHydrationPayload> => {
+    const invitationStatusFilterQuery = toInvitationStatusQuery(invitationStatusFilter);
     const [companyPayload, geofencesPayload, membersPayload, invitationsResult] = await Promise.all([
       getSettingsCompany({ signal, companyId: settingsCompanyId ?? undefined }),
       listSettingsGeofences({ signal, companyId: settingsCompanyId ?? undefined }),
       listSettingsMembers(undefined, { signal, companyId: settingsCompanyId ?? undefined }),
       canManageMemberRoles
-        ? listInvitations('pending', { signal, companyId: settingsCompanyId ?? undefined })
+        ? listInvitations(invitationStatusFilterQuery, { signal, companyId: settingsCompanyId ?? undefined })
             .then((payload) => ({ payload, error: null as string | null }))
             .catch((error: unknown) => {
               if (error instanceof DOMException && error.name === 'AbortError') {
@@ -1079,11 +1098,11 @@ export default function Settings() {
       geofences: Array.isArray(geofencesPayload.items) ? geofencesPayload.items : [],
       members: Array.isArray(membersPayload.items) ? membersPayload.items : [],
       invitations: Array.isArray(invitationsResult.payload.items)
-        ? invitationsResult.payload.items.reduce<Invitation[]>((items, invitation) => upsertPendingInvitation(items, invitation), [])
+        ? sortInvitations(invitationsResult.payload.items)
         : [],
       invitationLoadError: invitationsResult.error,
     };
-  }, [canManageMemberRoles, settingsCompanyId]);
+  }, [canManageMemberRoles, invitationStatusFilter, settingsCompanyId]);
 
   const handleSettingsHydrationSuccess = useCallback((payload: SettingsHydrationPayload) => {
     const nextCompanyForm = toCompanyForm(payload.company);
@@ -2015,7 +2034,11 @@ export default function Settings() {
           companyId: settingsCompanyId ?? undefined,
         },
       );
-      setInvitations((prevInvitations) => upsertPendingInvitation(prevInvitations, createdInvitation));
+      setInvitations((prevInvitations) => (
+        invitationMatchesStatusFilter(createdInvitation, invitationStatusFilter)
+          ? upsertPendingInvitation(prevInvitations, createdInvitation)
+          : prevInvitations.filter((item) => item.id !== createdInvitation.id)
+      ));
       setInvitationForm(DEFAULT_INVITATION_FORM_STATE);
       setIsInvitationEditorOpen(false);
       setInvitationSaveSuccess('초대 메일을 발송했습니다.');
@@ -2058,7 +2081,7 @@ export default function Settings() {
     } finally {
       setIsInvitationSaving(false);
     }
-  }, [canManageMemberRoles, hydrateInvitationsOnly, settingsCompanyId]);
+  }, [canManageMemberRoles, hydrateInvitationsOnly, invitationStatusFilter, settingsCompanyId]);
 
   const handleInvitationCreate = useCallback(() => {
     const validationErrors = validateInvitationDraft(invitationForm, {
@@ -2087,7 +2110,11 @@ export default function Settings() {
       const resentInvitation = await resendInvitation(invitationId, {
         companyId: settingsCompanyId ?? undefined,
       });
-      setInvitations((prevInvitations) => upsertPendingInvitation(prevInvitations, resentInvitation));
+      setInvitations((prevInvitations) => (
+        invitationMatchesStatusFilter(resentInvitation, invitationStatusFilter)
+          ? upsertPendingInvitation(prevInvitations, resentInvitation)
+          : prevInvitations.filter((item) => item.id !== resentInvitation.id)
+      ));
       setInvitationSaveSuccess('초대를 재발송했습니다.');
       toast.success('초대를 재발송했습니다.');
     } catch (error) {
@@ -2114,7 +2141,7 @@ export default function Settings() {
     } finally {
       setResendingInvitationId(null);
     }
-  }, [canManageMemberRoles, hydrateInvitationsOnly, settingsCompanyId]);
+  }, [canManageMemberRoles, hydrateInvitationsOnly, invitationStatusFilter, settingsCompanyId]);
 
   const handleInvitationResend = useCallback((invitationId: string) => {
     if (isInvitationSaving || resendingInvitationId !== null) {
@@ -3600,8 +3627,29 @@ export default function Settings() {
 
               <div className="overflow-hidden rounded-xl bg-white shadow-sm">
                 <div className="border-b border-gray-200 px-6 py-4">
-                  <h2 className="text-base font-semibold text-[#1e2939]">초대 대기 목록</h2>
-                  <p className="mt-1 text-sm text-gray-600">아직 가입을 완료하지 않은 초대만 표시됩니다.</p>
+                  <h2 className="text-base font-semibold text-[#1e2939]">초대 이력</h2>
+                  <p className="mt-1 text-sm text-gray-600">상태별 초대 이력과 수락 정보를 함께 확인합니다.</p>
+                </div>
+
+                <div className="border-b border-gray-100 bg-gray-50 px-6 py-4">
+                  <label className="flex items-center gap-2 text-sm text-gray-600">
+                    <span className="font-medium text-gray-700">상태</span>
+                    <select
+                      value={invitationStatusFilter}
+                      onChange={(event) => {
+                        setInvitationStatusFilter(event.target.value as InvitationStatusFilter);
+                        void hydrateInvitationsOnly(event.target.value as InvitationStatusFilter);
+                      }}
+                      disabled={!canManageMemberRoles || isInvitationSaving || resendingInvitationId !== null}
+                      className="rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-800 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-gray-100"
+                    >
+                      <option value="pending">대기 중</option>
+                      <option value="accepted">수락됨</option>
+                      <option value="expired">만료됨</option>
+                      <option value="revoked">취소됨</option>
+                      <option value="all">전체</option>
+                    </select>
+                  </label>
                 </div>
 
                 <div className="overflow-x-auto">
@@ -3613,6 +3661,8 @@ export default function Settings() {
                         <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">상태</th>
                         <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">초대 시각</th>
                         <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">만료 시각</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">수락 시각</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">수락 사용자</th>
                         <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">재발송</th>
                         <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">액션</th>
                       </tr>
@@ -3620,8 +3670,8 @@ export default function Settings() {
                     <tbody className="divide-y divide-gray-200">
                       {invitations.length === 0 && (
                         <tr>
-                          <td colSpan={7} className="px-6 py-10 text-center text-sm text-gray-500">
-                            대기 중인 초대가 없습니다.
+                          <td colSpan={9} className="px-6 py-10 text-center text-sm text-gray-500">
+                            선택한 상태의 초대가 없습니다.
                           </td>
                         </tr>
                       )}
@@ -3645,18 +3695,28 @@ export default function Settings() {
                             {formatUpdatedAt(invitation.expiresAt)}
                           </td>
                           <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-600">
+                            {invitation.acceptedAt ? formatUpdatedAt(invitation.acceptedAt) : '-'}
+                          </td>
+                          <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-600">
+                            {invitation.acceptedUserId ?? '-'}
+                          </td>
+                          <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-600">
                             {invitation.resendCount}회
                             {invitation.resentAt ? ` / 최근 ${formatUpdatedAt(invitation.resentAt)}` : ''}
                           </td>
                           <td className="px-6 py-4 text-sm">
-                            <button
-                              type="button"
-                              onClick={() => handleInvitationResend(invitation.id)}
-                              disabled={!canManageMemberRoles || isInvitationSaving || resendingInvitationId === invitation.id}
-                              className="font-medium text-blue-600 hover:text-blue-800 disabled:cursor-not-allowed disabled:opacity-50"
-                            >
-                              {resendingInvitationId === invitation.id ? '재발송 중...' : '재발송'}
-                            </button>
+                            {invitation.status === 'pending' ? (
+                              <button
+                                type="button"
+                                onClick={() => handleInvitationResend(invitation.id)}
+                                disabled={!canManageMemberRoles || isInvitationSaving || resendingInvitationId === invitation.id}
+                                className="font-medium text-blue-600 hover:text-blue-800 disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                {resendingInvitationId === invitation.id ? '재발송 중...' : '재발송'}
+                              </button>
+                            ) : (
+                              <span className="text-xs text-gray-400">-</span>
+                            )}
                           </td>
                         </tr>
                       ))}
