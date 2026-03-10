@@ -2,7 +2,7 @@ import { apiClient } from './api';
 
 export interface ActionRequiredListRequestOptions {
   page?: number;
-  size?: number;
+  pageSize?: number;
   status?: string;
   priority?: string;
   assignee?: string;
@@ -25,14 +25,14 @@ export interface ActionRequiredMemoPatchOptions {
 }
 
 export function getActionRequiredList(options: ActionRequiredListRequestOptions = {}): Promise<unknown> {
-  const { page, size, status, priority, assignee, signal } = options;
+  const { page, pageSize, status, priority, assignee, signal } = options;
 
   return apiClient.requestData<unknown>({
     path: '/api/v2/action-items',
     method: 'GET',
     query: {
       page,
-      size,
+      pageSize,
       status,
       priority,
       assignee,
