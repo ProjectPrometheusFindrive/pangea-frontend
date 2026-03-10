@@ -55,6 +55,14 @@ export interface CreateDeviceInstallationOptions {
   signal?: AbortSignal;
 }
 
+export interface PatchDeviceInstallationStatusPayload {
+  status: Exclude<DeviceInstallationStatus, 'cancelled'> | 'cancelled';
+  installedAt?: string;
+  memo?: string;
+  deviceSerial?: string;
+  photos?: string[];
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
@@ -274,15 +282,20 @@ export async function getDeviceInstallation(
 }
 
 async function cancelFromStatusPath(installationId: string): Promise<DeviceInstallationItem | null> {
-  const payload = await apiClient.requestData<unknown>({
+  return patchDeviceInstallationStatus(installationId, { status: 'cancelled' });
+}
+
+export async function patchDeviceInstallationStatus(
+  installationId: string,
+  payload: PatchDeviceInstallationStatusPayload,
+): Promise<DeviceInstallationItem | null> {
+  const statusPayload = await apiClient.requestData<unknown>({
     path: `/api/v2/device-installations/${encodeURIComponent(installationId)}/status`,
     method: 'PATCH',
-    body: {
-      status: 'cancelled',
-    },
+    body: payload,
   });
 
-  return toInstallation(payload);
+  return toInstallation(statusPayload);
 }
 
 export async function cancelDeviceInstallation(installationId: string): Promise<DeviceInstallationItem | null> {
