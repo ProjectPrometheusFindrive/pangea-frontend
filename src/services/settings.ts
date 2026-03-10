@@ -16,6 +16,11 @@ export interface SettingsCompanyProfile {
   schemaVersion?: string | null;
 }
 
+export interface SettingsCompanyOption {
+  companyId: string;
+  name: string;
+}
+
 export interface SettingsCompanyUpdateRequest {
   name?: string;
   businessNumber?: string;
@@ -104,6 +109,17 @@ export function getSettingsCompany(options: SettingsRequestOptions = {}): Promis
     },
     signal: options.signal,
   });
+}
+
+export function listSettingsCompanies(options: SettingsRequestOptions = {}): Promise<SettingsCompanyOption[]> {
+  return apiClient.requestData<SettingsCompanyOption[]>({
+    path: '/api/v2/settings/companies',
+    method: 'GET',
+    query: {
+      companyId: options.companyId,
+    },
+    signal: options.signal,
+  }).then((payload) => (Array.isArray(payload) ? payload : []));
 }
 
 export function putSettingsCompany(
