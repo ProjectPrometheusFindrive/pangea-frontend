@@ -147,7 +147,7 @@ const BULK_OCR_MAX_FILE_SIZE_BYTES = 25 * 1024 * 1024;
 const BULK_OCR_POLL_INTERVAL_MS = 1000;
 const BULK_OCR_POLL_TIMEOUT_MS = 90_000;
 const INVALID_COMPANY_IDS = new Set(['0000000000', '__global__', 'company-local', 'null', 'none']);
-const CSV_VALIDATION_ONLY_NOTICE = '?꾩옱??CSV 寃利앸쭔 吏?먰빀?덈떎. ??μ? 吏?먮릺吏 ?딆쑝??寃利?寃곌낵瑜??뺤씤?????ㅻⅨ ?깅줉 寃쎈줈瑜??댁슜??二쇱꽭??';
+const CSV_VALIDATION_ONLY_NOTICE = '현재는 CSV 검증만 지원합니다. 저장은 지원되지 않으니 검증 결과를 확인한 뒤 다른 등록 경로를 이용해 주세요.';
 
 const DEFAULT_COMPANY_FORM_STATE: CompanyFormState = {
   name: '',
@@ -306,6 +306,7 @@ function isRetryableMutationError(error: ApiError): boolean {
     || error.code === 'SERVER_ERROR'
   );
 }
+
 function toErrorFieldEntries(error: ApiError): Array<{ name: string; reason: string }> {
   const entries: Array<{ name: string; reason: string }> = [];
 
@@ -410,7 +411,7 @@ function parseGeofencePolygonPoints(pointsText: string): {
   if (lines.length < 3) {
     return {
       points: [],
-      error: '瑗?쭞??醫뚰몴??理쒖냼 3媛쒓? ?꾩슂?⑸땲??',
+      error: '꼭짓점 좌표는 최소 3개가 필요합니다.',
     };
   }
 
@@ -420,7 +421,7 @@ function parseGeofencePolygonPoints(pointsText: string): {
     if (tokens.length !== 2) {
       return {
         points: [],
-        error: `${index + 1}踰덉㎏ 以꾩? lat,lng ?뺤떇?댁뼱???⑸땲??`,
+        error: `${index + 1}번째 줄은 lat,lng 형식이어야 합니다.`,
       };
     }
 
@@ -429,7 +430,7 @@ function parseGeofencePolygonPoints(pointsText: string): {
     if (lat === null || lng === null) {
       return {
         points: [],
-        error: `${index + 1}踰덉㎏ 以?醫뚰몴瑜??レ옄濡??낅젰??二쇱꽭??`,
+        error: `${index + 1}번째 줄 좌표를 숫자로 입력해 주세요.`,
       };
     }
 
@@ -484,26 +485,26 @@ function getRoleBadgeColor(role: string): string {
 
 function toRoleLabel(role: string): string {
   if (role === 'admin') {
-    return '愿由ъ옄';
+    return '관리자';
   }
   if (role === 'member') {
-    return '?댁쁺??;
+    return '운영자';
   }
-  return role || '誘몄???;
+  return role || '미지정';
 }
 
 function toMemberStatusLabel(status: string): string {
   switch (status) {
     case 'approved':
-      return '?쒖꽦';
+      return '활성';
     case 'pending':
-      return '?뱀씤 ?湲?;
+      return '승인 대기';
     case 'rejected':
-      return '?뱀씤 嫄곗젅';
+      return '승인 거절';
     case 'withdrawn':
-      return '?덊눜';
+      return '탈퇴';
     default:
-      return status || '誘명솗??;
+      return status || '미확인';
   }
 }
 
@@ -600,20 +601,20 @@ function toReservationTypeLabel(value: unknown): string {
   if (!normalizedValue) {
     return '';
   }
-  if (normalizedValue === 'rental' || normalizedValue === '??? || normalizedValue === '??ъ쨷' || normalizedValue === 'in_use') {
-    return '??ъ쨷';
+  if (normalizedValue === 'rental' || normalizedValue === '대여' || normalizedValue === '대여중' || normalizedValue === 'in_use') {
+    return '대여중';
   }
-  if (normalizedValue === 'reservation' || normalizedValue === 'reserved' || normalizedValue === '?덉빟' || normalizedValue === '?덉빟以?) {
-    return '?덉빟';
+  if (normalizedValue === 'reservation' || normalizedValue === 'reserved' || normalizedValue === '예약' || normalizedValue === '예약중') {
+    return '예약';
   }
   if (
     normalizedValue === 'return'
     || normalizedValue === 'returned'
-    || normalizedValue === '諛섎궔'
-    || normalizedValue === '諛섎궔?꾨즺'
-    || normalizedValue === '?꾨즺'
+    || normalizedValue === '반납'
+    || normalizedValue === '반납완료'
+    || normalizedValue === '완료'
   ) {
-    return '諛섎궔?꾨즺';
+    return '반납완료';
   }
   return toStringValue(value) ?? '';
 }
@@ -628,8 +629,8 @@ export default function Settings() {
   const canEditSettings = canPerformAction(ACTION_PERMISSIONS.settingsWrite);
   const canWriteAssets = canPerformAction(ACTION_PERMISSIONS.assetsWrite);
   const canManageMemberRoles = canPerformAction(ACTION_PERMISSIONS.settingsMembersWrite);
-  const isSuperAdmin = (user?.role ?? '').trim().toLowerCase() === 'super_admin';
   const canUseBulkOcr = canAccessBulkOcr({ canEditSettings, canWriteAssets });
+  const isSuperAdmin = (user?.role ?? '').trim().toLowerCase() === 'super_admin';
   const settingsCompanyId = useMemo(
     () => resolveSettingsCompanyScope(searchParams.get('companyId'), user?.companyId),
     [searchParams, user?.companyId],
@@ -717,7 +718,7 @@ export default function Settings() {
       const invitationItems = Array.isArray(invitationsPayload.items) ? invitationsPayload.items : [];
       setInvitations(invitationItems.reduce<Invitation[]>((items, invitation) => upsertPendingInvitation(items, invitation), []));
     } catch (error) {
-      setInvitationSaveError(toErrorMessage(error, '珥덈? 紐⑸줉???ㅼ떆 遺덈윭?ㅼ? 紐삵뻽?듬땲??'));
+      setInvitationSaveError(toErrorMessage(error, '초대 목록을 다시 불러오지 못했습니다.'));
     }
   }, [canManageMemberRoles, settingsCompanyId]);
 
@@ -763,14 +764,14 @@ export default function Settings() {
       return jobPayload;
     }
 
-    throw new ApiError('TIMEOUT', 'OCR 泥섎━ ?쒓컙??珥덇낵?섏뿀?듬땲??', {
+    throw new ApiError('TIMEOUT', 'OCR 처리 시간이 초과되었습니다.', {
       status: 504,
     });
   }, []);
 
   const handleBulkOcrFileSelection = useCallback(async (files: File[]) => {
     if (!canUseBulkOcr) {
-      toast.error('李⑤웾 ?먯궛 ?깅줉 沅뚰븳???놁뒿?덈떎.');
+      toast.error('차량 자산 등록 권한이 없습니다.');
       return;
     }
     if (files.length === 0 || isBulkOcrProcessing) {
@@ -784,10 +785,10 @@ export default function Settings() {
         {
           fileName: files[0].name,
           status: 'error',
-          message: '?뚯궗 ?뺣낫媛 ?놁뼱 ?쇨큵 OCR ?낅줈?쒕? ?쒖옉?????놁뒿?덈떎. ?ㅼ떆 濡쒓렇?????쒕룄??二쇱꽭??',
+          message: '회사 정보가 없어 일괄 OCR 업로드를 시작할 수 없습니다. 다시 로그인 후 시도해 주세요.',
         },
       ]);
-      toast.error('?뚯궗 ?뺣낫媛 ?놁뼱 ?쇨큵 OCR ?낅줈?쒕? ?쒖옉?????놁뒿?덈떎.');
+      toast.error('회사 정보가 없어 일괄 OCR 업로드를 시작할 수 없습니다.');
       return;
     }
 
@@ -798,7 +799,7 @@ export default function Settings() {
     setBulkOcrSelectedFiles(files.map((file) => file.name));
     setBulkOcrResults([]);
     setIsBulkOcrProcessing(true);
-    setBulkOcrProgressMessage(`0 / ${files.length} ?뚯씪 以鍮?以?);
+    setBulkOcrProgressMessage(`0 / ${files.length} 파일 준비 중`);
 
     const nextResults: BulkOcrResult[] = [];
     let successCount = 0;
@@ -812,17 +813,17 @@ export default function Settings() {
         try {
           const resolvedContentType = resolveBulkOcrContentType(file);
           if (!resolvedContentType) {
-            throw new ApiError('UNSUPPORTED_MEDIA_TYPE', '吏?먰븯吏 ?딅뒗 ?뚯씪 ?뺤떇?낅땲?? PDF/JPG/PNG/WebP ?뚯씪???ъ슜??二쇱꽭??', {
+            throw new ApiError('UNSUPPORTED_MEDIA_TYPE', '지원하지 않는 파일 형식입니다. PDF/JPG/PNG/WebP 파일을 사용해 주세요.', {
               status: 415,
             });
           }
           if (file.size > BULK_OCR_MAX_FILE_SIZE_BYTES) {
-            throw new ApiError('PAYLOAD_TOO_LARGE', 'OCR ?뚯씪 ?ш린 ?쒗븳(25MB)??珥덇낵?덉뒿?덈떎.', {
+            throw new ApiError('PAYLOAD_TOO_LARGE', 'OCR 파일 크기 제한(25MB)을 초과했습니다.', {
               status: 413,
             });
           }
 
-          setBulkOcrProgressMessage(`${index + 1} / ${files.length} ?낅줈??以? ${file.name}`);
+          setBulkOcrProgressMessage(`${index + 1} / ${files.length} 업로드 중: ${file.name}`);
           const signedUpload = await signAssetUpload({
             fileName: file.name,
             contentType: resolvedContentType,
@@ -838,7 +839,7 @@ export default function Settings() {
             { signal: controller.signal },
           );
 
-          setBulkOcrProgressMessage(`${index + 1} / ${files.length} OCR 遺꾩꽍 以? ${file.name}`);
+          setBulkOcrProgressMessage(`${index + 1} / ${files.length} OCR 분석 중: ${file.name}`);
           let jobPayload = await submitOcrExtractJob({
             docType: 'registrationDoc',
             objectName: signedUpload.objectName,
@@ -853,7 +854,7 @@ export default function Settings() {
           if (jobPayload.status === 'failed') {
             throw new ApiError(
               jobPayload.error?.type ?? 'SERVER_ERROR',
-              jobPayload.error?.message ?? 'OCR 泥섎━???ㅽ뙣?덉뒿?덈떎.',
+              jobPayload.error?.message ?? 'OCR 처리에 실패했습니다.',
               {
                 status: jobPayload.error?.httpStatus,
                 payload: jobPayload,
@@ -863,7 +864,7 @@ export default function Settings() {
 
           const createPayload = toBulkOcrCreatePayload(jobPayload.extractedFields, companyId);
           if (!createPayload) {
-            throw new ApiError('VALIDATION_ERROR', 'OCR 寃곌낵?먯꽌 李⑤웾踰덊샇? 李⑤?踰덊샇瑜??뺤씤?????놁뒿?덈떎.', {
+            throw new ApiError('VALIDATION_ERROR', 'OCR 결과에서 차량번호와 차대번호를 확인할 수 없습니다.', {
               status: 400,
               payload: jobPayload,
             });
@@ -877,7 +878,7 @@ export default function Settings() {
           nextResults.push({
             fileName: file.name,
             status: 'success',
-            message: '李⑤웾 ?먯궛 ?깅줉 ?꾨즺',
+            message: '차량 자산 등록 완료',
             assetId,
           });
           successCount += 1;
@@ -889,7 +890,7 @@ export default function Settings() {
           nextResults.push({
             fileName: file.name,
             status: 'error',
-            message: toErrorMessage(error, '?쇨큵 OCR ?낅줈??泥섎━???ㅽ뙣?덉뒿?덈떎.'),
+            message: toErrorMessage(error, '일괄 OCR 업로드 처리에 실패했습니다.'),
           });
         }
 
@@ -897,17 +898,17 @@ export default function Settings() {
       }
     } catch (error) {
       if (!(error instanceof DOMException && error.name === 'AbortError')) {
-        toast.error(toErrorMessage(error, '?쇨큵 OCR ?낅줈??泥섎━???ㅽ뙣?덉뒿?덈떎.'));
+        toast.error(toErrorMessage(error, '일괄 OCR 업로드 처리에 실패했습니다.'));
       }
     } finally {
       if (bulkOcrAbortControllerRef.current === controller) {
         bulkOcrAbortControllerRef.current = null;
       }
       setIsBulkOcrProcessing(false);
-      setBulkOcrProgressMessage(files.length > 0 ? `${successCount} / ${files.length} 泥섎━ ?꾨즺` : null);
+      setBulkOcrProgressMessage(files.length > 0 ? `${successCount} / ${files.length} 처리 완료` : null);
       void refreshCurrentDataCounts();
       if (successCount > 0) {
-        toast.success(`?쇨큵 OCR ?깅줉 ?꾨즺: ${successCount}嫄??깃났`);
+        toast.success(`일괄 OCR 등록 완료: ${successCount}건 성공`);
       }
     }
   }, [canUseBulkOcr, isBulkOcrProcessing, pollBulkOcrJobUntilTerminal, refreshCurrentDataCounts, user?.companyId]);
@@ -926,7 +927,7 @@ export default function Settings() {
               }
               return {
                 payload: { items: [] },
-                error: toErrorMessage(error, '珥덈? 紐⑸줉??遺덈윭?ㅼ? 紐삵뻽?듬땲??'),
+                error: toErrorMessage(error, '초대 목록을 불러오지 못했습니다.'),
               };
             })
         : Promise.resolve({ payload: { items: [] }, error: null as string | null }),
@@ -1107,12 +1108,12 @@ export default function Settings() {
     }
 
     if (isAnySaving) {
-      toast.info('???以묒뿉????쓣 ?대룞?????놁뒿?덈떎.');
+      toast.info('저장 중에는 탭을 이동할 수 없습니다.');
       return;
     }
 
     if (hasUnsavedChanges && typeof window !== 'undefined') {
-      const shouldLeave = window.confirm('??ν븯吏 ?딆? 蹂寃??ы빆???덉뒿?덈떎. ??쓣 ?대룞?섏떆寃좎뒿?덇퉴?');
+      const shouldLeave = window.confirm('저장하지 않은 변경 사항이 있습니다. 탭을 이동하시겠습니까?');
       if (!shouldLeave) {
         return;
       }
@@ -1160,15 +1161,15 @@ export default function Settings() {
 
     const clientErrors: FieldErrorMap<CompanyField> = {};
     if (!companyForm.name.trim()) {
-      clientErrors.name = '?뚯궗紐낆쓣 ?낅젰??二쇱꽭??';
+      clientErrors.name = '회사명을 입력해 주세요.';
     }
     if (companyForm.email.trim().length > 0 && !companyForm.email.includes('@')) {
-      clientErrors.email = '?좏슚???대찓???뺤떇???낅젰??二쇱꽭??';
+      clientErrors.email = '유효한 이메일 형식을 입력해 주세요.';
     }
 
     if (Object.keys(clientErrors).length > 0) {
       setCompanyFieldErrors(clientErrors);
-      setCompanySaveError('?낅젰媛믪쓣 ?뺤씤??二쇱꽭??');
+      setCompanySaveError('입력값을 확인해 주세요.');
       setCompanySaveSuccess(null);
       setCompanyRetryAction(null);
       return;
@@ -1176,7 +1177,7 @@ export default function Settings() {
 
     const payload = toCompanyPatchPayload();
     if (Object.keys(payload).length === 0) {
-      toast.info('蹂寃쎈맂 ?뚯궗 ?뺣낫媛 ?놁뒿?덈떎.');
+      toast.info('변경된 회사 정보가 없습니다.');
       return;
     }
 
@@ -1195,8 +1196,8 @@ export default function Settings() {
       setCompanyBaseline(nextForm);
       setCompanyUpdatedAt(toStringValue(updatedCompany.updatedAt));
       setCompanySchemaVersion(toStringValue(updatedCompany.schemaVersion) ?? companySchemaVersion);
-      setCompanySaveSuccess('?뚯궗 ?ㅼ젙????λ릺?덉뒿?덈떎.');
-      toast.success('?뚯궗 ?ㅼ젙????λ릺?덉뒿?덈떎.');
+      setCompanySaveSuccess('회사 설정이 저장되었습니다.');
+      toast.success('회사 설정이 저장되었습니다.');
       void refreshCompany();
     } catch (error) {
       if (error instanceof ApiError) {
@@ -1213,21 +1214,21 @@ export default function Settings() {
           if (Object.keys(mappedErrors).length > 0) {
             setCompanyFieldErrors(mappedErrors);
           }
-          setCompanySaveError(error.message || '?낅젰媛믪쓣 ?뺤씤??二쇱꽭??');
+          setCompanySaveError(error.message || '입력값을 확인해 주세요.');
           return;
         }
         if (error.status === 403) {
-          setCompanySaveError('?뚯궗 ?ㅼ젙 ?섏젙 沅뚰븳???놁뒿?덈떎. 愿由ъ옄?먭쾶 沅뚰븳???붿껌??二쇱꽭??');
+          setCompanySaveError('회사 설정 수정 권한이 없습니다. 관리자에게 권한을 요청해 주세요.');
           return;
         }
         if (error.status === 409) {
-          setCompanySaveError('?ㅻⅨ ?ъ슜?먯쓽 蹂寃쎌궗??낵 異⑸룎?덉뒿?덈떎. 理쒖떊 ?ㅼ젙???ㅼ떆 遺덈윭?듬땲??');
+          setCompanySaveError('다른 사용자의 변경사항과 충돌했습니다. 최신 설정을 다시 불러옵니다.');
           setCompanyRetryAction(null);
           void hydrateSettings();
           return;
         }
         if (isRetryableMutationError(error)) {
-          setCompanySaveError('?쇱떆?곸씤 ?ㅻ쪟濡???μ뿉 ?ㅽ뙣?덉뒿?덈떎. ?ㅼ떆 ?쒕룄??二쇱꽭??');
+          setCompanySaveError('일시적인 오류로 저장에 실패했습니다. 다시 시도해 주세요.');
           setCompanyRetryAction(() => () => {
             void handleCompanySave();
           });
@@ -1235,7 +1236,7 @@ export default function Settings() {
         }
       }
 
-      setCompanySaveError(toErrorMessage(error, '?뚯궗 ?ㅼ젙 ??μ뿉 ?ㅽ뙣?덉뒿?덈떎.'));
+      setCompanySaveError(toErrorMessage(error, '회사 설정 저장에 실패했습니다.'));
     } finally {
       setIsCompanySaving(false);
     }
@@ -1294,7 +1295,7 @@ export default function Settings() {
       return;
     }
     if (isGeofenceEditorDirty && typeof window !== 'undefined') {
-      const shouldClose = window.confirm('??ν븯吏 ?딆? 吏?ㅽ렂??蹂寃??ы빆???덉뒿?덈떎. ?レ쑝?쒓쿋?듬땲源?');
+      const shouldClose = window.confirm('저장하지 않은 지오펜스 변경 사항이 있습니다. 닫으시겠습니까?');
       if (!shouldClose) {
         return;
       }
@@ -1327,21 +1328,21 @@ export default function Settings() {
     }
 
     if (geofenceEditorMode === 'create' && !trimmedName) {
-      fieldErrors.name = '吏?ㅽ렂???대쫫???낅젰??二쇱꽭??';
+      fieldErrors.name = '지오펜스 이름을 입력해 주세요.';
     }
     if (geofenceForm.shape !== 'polygon' && latValue === null) {
-      fieldErrors.lat = '?꾨룄 媛믪쓣 ?낅젰??二쇱꽭??';
+      fieldErrors.lat = '위도 값을 입력해 주세요.';
     }
     if (geofenceForm.shape !== 'polygon' && lngValue === null) {
-      fieldErrors.lng = '寃쎈룄 媛믪쓣 ?낅젰??二쇱꽭??';
+      fieldErrors.lng = '경도 값을 입력해 주세요.';
     }
     if (geofenceForm.shape !== 'polygon' && (radiusValue === null || !Number.isInteger(radiusValue) || radiusValue <= 0)) {
-      fieldErrors.radiusMeter = '諛섍꼍? 1 ?댁긽???뺤닔(m)濡??낅젰??二쇱꽭??';
+      fieldErrors.radiusMeter = '반경은 1 이상의 정수(m)로 입력해 주세요.';
     }
 
     if (Object.keys(fieldErrors).length > 0) {
       setGeofenceFieldErrors(fieldErrors);
-      setGeofenceSaveError('?낅젰媛믪쓣 ?뺤씤??二쇱꽭??');
+      setGeofenceSaveError('입력값을 확인해 주세요.');
       setGeofenceSaveSuccess(null);
       setGeofenceRetryAction(null);
       return;
@@ -1374,7 +1375,7 @@ export default function Settings() {
         });
     } else {
       if (!editingGeofenceId || !selectedEditingGeofence) {
-        setGeofenceSaveError('?몄쭛 ??곸쓣 李얠쓣 ???놁뒿?덈떎. 紐⑸줉???덈줈怨좎묠??二쇱꽭??');
+        setGeofenceSaveError('편집 대상을 찾을 수 없습니다. 목록을 새로고침해 주세요.');
         return;
       }
 
@@ -1408,7 +1409,7 @@ export default function Settings() {
       }
 
       if (Object.keys(payload).length === 0) {
-        toast.info('蹂寃쎈맂 吏?ㅽ렂???뺣낫媛 ?놁뒿?덈떎.');
+        toast.info('변경된 지오펜스 정보가 없습니다.');
         return;
       }
 
@@ -1438,13 +1439,13 @@ export default function Settings() {
 
       setGeofenceSaveSuccess(
         geofenceEditorMode === 'create'
-          ? '吏?ㅽ렂?ㅺ? ?앹꽦?섏뿀?듬땲??'
-          : '吏?ㅽ렂?ㅺ? ??λ릺?덉뒿?덈떎.',
+          ? '지오펜스가 생성되었습니다.'
+          : '지오펜스가 저장되었습니다.',
       );
       toast.success(
         geofenceEditorMode === 'create'
-          ? '吏?ㅽ렂?ㅺ? ?앹꽦?섏뿀?듬땲??'
-          : '吏?ㅽ렂?ㅺ? ??λ릺?덉뒿?덈떎.',
+          ? '지오펜스가 생성되었습니다.'
+          : '지오펜스가 저장되었습니다.',
       );
 
       setIsGeofenceEditorOpen(false);
@@ -1468,21 +1469,21 @@ export default function Settings() {
           if (Object.keys(mappedErrors).length > 0) {
             setGeofenceFieldErrors(mappedErrors);
           }
-          setGeofenceSaveError(error.message || '?낅젰媛믪쓣 ?뺤씤??二쇱꽭??');
+          setGeofenceSaveError(error.message || '입력값을 확인해 주세요.');
           return;
         }
         if (error.status === 403) {
-          setGeofenceSaveError('吏?ㅽ렂???섏젙 沅뚰븳???놁뒿?덈떎. 愿由ъ옄?먭쾶 沅뚰븳???붿껌??二쇱꽭??');
+          setGeofenceSaveError('지오펜스 수정 권한이 없습니다. 관리자에게 권한을 요청해 주세요.');
           return;
         }
         if (error.status === 409) {
-          setGeofenceSaveError('?ㅻⅨ ?ъ슜??蹂寃쎌궗??낵 異⑸룎?덉뒿?덈떎. 理쒖떊 紐⑸줉???ㅼ떆 遺덈윭?듬땲??');
+          setGeofenceSaveError('다른 사용자 변경사항과 충돌했습니다. 최신 목록을 다시 불러옵니다.');
           setGeofenceRetryAction(null);
           void hydrateGeofencesOnly();
           return;
         }
         if (isRetryableMutationError(error)) {
-          setGeofenceSaveError('?쇱떆?곸씤 ?ㅻ쪟濡???μ뿉 ?ㅽ뙣?덉뒿?덈떎. ?ㅼ떆 ?쒕룄??二쇱꽭??');
+          setGeofenceSaveError('일시적인 오류로 저장에 실패했습니다. 다시 시도해 주세요.');
           setGeofenceRetryAction(() => () => {
             void handleGeofenceSave();
           });
@@ -1490,7 +1491,7 @@ export default function Settings() {
         }
       }
 
-      setGeofenceSaveError(toErrorMessage(error, '吏?ㅽ렂????μ뿉 ?ㅽ뙣?덉뒿?덈떎.'));
+      setGeofenceSaveError(toErrorMessage(error, '지오펜스 저장에 실패했습니다.'));
     } finally {
       setIsGeofenceSaving(false);
     }
@@ -1521,27 +1522,27 @@ export default function Settings() {
       setGeofences((prevItems) => prevItems.map((item) => (
         item.id === geofenceId ? updated : item
       )));
-      setGeofenceSaveSuccess('吏?ㅽ렂???쒖꽦 ?곹깭媛 ?낅뜲?댄듃?섏뿀?듬땲??');
+      setGeofenceSaveSuccess('지오펜스 활성 상태가 업데이트되었습니다.');
     } catch (error) {
       if (error instanceof ApiError) {
         if (error.status === 403) {
-          setGeofenceSaveError('吏?ㅽ렂???쒖꽦 ?곹깭瑜?蹂寃쏀븷 沅뚰븳???놁뒿?덈떎.');
+          setGeofenceSaveError('지오펜스 활성 상태를 변경할 권한이 없습니다.');
           return;
         }
         if (error.status === 409) {
-          setGeofenceSaveError('異⑸룎??諛쒖깮??理쒖떊 吏?ㅽ렂??紐⑸줉???ㅼ떆 遺덈윭?듬땲??');
+          setGeofenceSaveError('충돌이 발생해 최신 지오펜스 목록을 다시 불러옵니다.');
           void hydrateGeofencesOnly();
           return;
         }
         if (isRetryableMutationError(error)) {
-          setGeofenceSaveError('?쇱떆?곸씤 ?ㅻ쪟濡??쒖꽦 ?곹깭 蹂寃쎌뿉 ?ㅽ뙣?덉뒿?덈떎. ?ㅼ떆 ?쒕룄??二쇱꽭??');
+          setGeofenceSaveError('일시적인 오류로 활성 상태 변경에 실패했습니다. 다시 시도해 주세요.');
           setGeofenceRetryAction(() => () => {
             void runGeofenceToggle(geofenceId, nextActive);
           });
           return;
         }
       }
-      setGeofenceSaveError(toErrorMessage(error, '吏?ㅽ렂???쒖꽦 ?곹깭瑜?蹂寃쏀븯吏 紐삵뻽?듬땲??'));
+      setGeofenceSaveError(toErrorMessage(error, '지오펜스 활성 상태를 변경하지 못했습니다.'));
     } finally {
       setActiveToggleTargetId(null);
     }
@@ -1568,34 +1569,34 @@ export default function Settings() {
         companyId: settingsCompanyId ?? undefined,
       });
       setGeofences((prevItems) => prevItems.filter((item) => item.id !== geofenceId));
-      setGeofenceSaveSuccess('吏?ㅽ렂?ㅺ? ??젣?섏뿀?듬땲??');
+      setGeofenceSaveSuccess('지오펜스가 삭제되었습니다.');
       if (editingGeofenceId === geofenceId) {
         setIsGeofenceEditorOpen(false);
         setEditingGeofenceId(null);
         setGeofenceEditorMode('create');
         setGeofenceForm(DEFAULT_GEOFENCE_FORM_STATE);
       }
-      toast.success('吏?ㅽ렂?ㅺ? ??젣?섏뿀?듬땲??');
+      toast.success('지오펜스가 삭제되었습니다.');
     } catch (error) {
       if (error instanceof ApiError) {
         if (error.status === 403) {
-          setGeofenceSaveError('吏?ㅽ렂????젣 沅뚰븳???놁뒿?덈떎.');
+          setGeofenceSaveError('지오펜스 삭제 권한이 없습니다.');
           return;
         }
         if (error.status === 409) {
-          setGeofenceSaveError('異⑸룎??諛쒖깮??理쒖떊 吏?ㅽ렂??紐⑸줉???ㅼ떆 遺덈윭?듬땲??');
+          setGeofenceSaveError('충돌이 발생해 최신 지오펜스 목록을 다시 불러옵니다.');
           void hydrateGeofencesOnly();
           return;
         }
         if (isRetryableMutationError(error)) {
-          setGeofenceSaveError('?쇱떆?곸씤 ?ㅻ쪟濡???젣???ㅽ뙣?덉뒿?덈떎. ?ㅼ떆 ?쒕룄??二쇱꽭??');
+          setGeofenceSaveError('일시적인 오류로 삭제에 실패했습니다. 다시 시도해 주세요.');
           setGeofenceRetryAction(() => () => {
             void runGeofenceDelete(geofenceId);
           });
           return;
         }
       }
-      setGeofenceSaveError(toErrorMessage(error, '吏?ㅽ렂????젣???ㅽ뙣?덉뒿?덈떎.'));
+      setGeofenceSaveError(toErrorMessage(error, '지오펜스 삭제에 실패했습니다.'));
     } finally {
       setDeletingGeofenceId(null);
     }
@@ -1607,7 +1608,7 @@ export default function Settings() {
     }
 
     if (typeof window !== 'undefined') {
-      const shouldDelete = window.confirm('?대떦 吏?ㅽ렂?ㅻ? ??젣?섏떆寃좎뒿?덇퉴?');
+      const shouldDelete = window.confirm('해당 지오펜스를 삭제하시겠습니까?');
       if (!shouldDelete) {
         return;
       }
@@ -1658,15 +1659,15 @@ export default function Settings() {
         delete nextDrafts[memberId];
         return nextDrafts;
       });
-      setMemberSaveSuccess('硫ㅻ쾭 沅뚰븳????λ릺?덉뒿?덈떎.');
-      toast.success('硫ㅻ쾭 沅뚰븳????λ릺?덉뒿?덈떎.');
+      setMemberSaveSuccess('멤버 권한이 저장되었습니다.');
+      toast.success('멤버 권한이 저장되었습니다.');
     } catch (error) {
       if (error instanceof ApiError) {
         if (error.status === 400) {
           const mappedErrors = mapFieldErrors<MemberRoleField>(toErrorFieldEntries(error), {
             role: 'role',
           });
-          const fieldMessage = mappedErrors.role ?? error.message ?? '?낅젰媛믪쓣 ?뺤씤??二쇱꽭??';
+          const fieldMessage = mappedErrors.role ?? error.message ?? '입력값을 확인해 주세요.';
           setMemberFieldErrors((prevErrors) => ({
             ...prevErrors,
             [memberId]: fieldMessage,
@@ -1675,16 +1676,16 @@ export default function Settings() {
           return;
         }
         if (error.status === 403) {
-          setMemberSaveError('硫ㅻ쾭 沅뚰븳??蹂寃쏀븷 沅뚰븳???놁뒿?덈떎.');
+          setMemberSaveError('멤버 권한을 변경할 권한이 없습니다.');
           return;
         }
         if (error.status === 409) {
-          setMemberSaveError('沅뚰븳 蹂寃?異⑸룎??諛쒖깮??理쒖떊 硫ㅻ쾭 紐⑸줉???ㅼ떆 遺덈윭?듬땲??');
+          setMemberSaveError('권한 변경 충돌이 발생해 최신 멤버 목록을 다시 불러옵니다.');
           void hydrateMembersOnly();
           return;
         }
         if (isRetryableMutationError(error)) {
-          setMemberSaveError('?쇱떆?곸씤 ?ㅻ쪟濡?沅뚰븳 ??μ뿉 ?ㅽ뙣?덉뒿?덈떎. ?ㅼ떆 ?쒕룄??二쇱꽭??');
+          setMemberSaveError('일시적인 오류로 권한 저장에 실패했습니다. 다시 시도해 주세요.');
           setMemberRetryAction(() => () => {
             void runMemberRoleSave(memberId, role);
           });
@@ -1692,7 +1693,7 @@ export default function Settings() {
         }
       }
 
-      setMemberSaveError(toErrorMessage(error, '硫ㅻ쾭 沅뚰븳 ??μ뿉 ?ㅽ뙣?덉뒿?덈떎.'));
+      setMemberSaveError(toErrorMessage(error, '멤버 권한 저장에 실패했습니다.'));
     } finally {
       setSavingMemberId(null);
     }
@@ -1708,13 +1709,13 @@ export default function Settings() {
     if (nextRoleValue !== 'admin' && nextRoleValue !== 'member') {
       setMemberFieldErrors((prevErrors) => ({
         ...prevErrors,
-        [memberId]: 'role 媛믪? admin ?먮뒗 member留??덉슜?⑸땲??',
+        [memberId]: 'role 값은 admin 또는 member만 허용됩니다.',
       }));
       return;
     }
 
     if (nextRoleValue === originalMember.role) {
-      toast.info('蹂寃쎈맂 沅뚰븳???놁뒿?덈떎.');
+      toast.info('변경된 권한이 없습니다.');
       return;
     }
 
@@ -1766,8 +1767,8 @@ export default function Settings() {
       });
 
       const successMessage = status === 'approved'
-        ? '媛???湲?怨꾩젙???뱀씤?덉뒿?덈떎.'
-        : '媛???湲?怨꾩젙??嫄곗젅?덉뒿?덈떎.';
+        ? '가입 대기 계정을 승인했습니다.'
+        : '가입 대기 계정을 거절했습니다.';
       setMemberSaveSuccess(successMessage);
       toast.success(successMessage);
     } catch (error) {
@@ -1776,7 +1777,7 @@ export default function Settings() {
           const mappedErrors = mapFieldErrors<'status'>(toErrorFieldEntries(error), {
             status: 'status',
           });
-          const fieldMessage = mappedErrors.status ?? error.message ?? '?낅젰媛믪쓣 ?뺤씤??二쇱꽭??';
+          const fieldMessage = mappedErrors.status ?? error.message ?? '입력값을 확인해 주세요.';
           setMemberFieldErrors((prevErrors) => ({
             ...prevErrors,
             [memberId]: fieldMessage,
@@ -1785,16 +1786,16 @@ export default function Settings() {
           return;
         }
         if (error.status === 403) {
-          setMemberSaveError('媛???뱀씤 ?곹깭瑜?蹂寃쏀븷 沅뚰븳???놁뒿?덈떎.');
+          setMemberSaveError('가입 승인 상태를 변경할 권한이 없습니다.');
           return;
         }
         if (error.status === 404 || error.status === 409) {
-          setMemberSaveError(error.message || '硫ㅻ쾭 ?곹깭媛 蹂寃쎈릺??理쒖떊 紐⑸줉???ㅼ떆 遺덈윭?듬땲??');
+          setMemberSaveError(error.message || '멤버 상태가 변경되어 최신 목록을 다시 불러옵니다.');
           void hydrateMembersOnly();
           return;
         }
         if (isRetryableMutationError(error)) {
-          setMemberSaveError('?쇱떆?곸씤 ?ㅻ쪟濡?媛???뱀씤 泥섎━???ㅽ뙣?덉뒿?덈떎. ?ㅼ떆 ?쒕룄??二쇱꽭??');
+          setMemberSaveError('일시적인 오류로 가입 승인 처리에 실패했습니다. 다시 시도해 주세요.');
           setMemberRetryAction(() => () => {
             void runMemberStatusSave(memberId, status);
           });
@@ -1802,7 +1803,7 @@ export default function Settings() {
         }
       }
 
-      setMemberSaveError(toErrorMessage(error, '硫ㅻ쾭 ?곹깭 蹂寃쎌뿉 ?ㅽ뙣?덉뒿?덈떎.'));
+      setMemberSaveError(toErrorMessage(error, '멤버 상태 변경에 실패했습니다.'));
     } finally {
       setSavingMemberId(null);
     }
@@ -1839,7 +1840,6 @@ export default function Settings() {
     setInvitationFieldErrors((prevErrors) => ({
       ...prevErrors,
       [field]: undefined,
-      companyId: field === 'role' ? undefined : prevErrors.companyId,
     }));
     setInvitationSaveError(null);
     setInvitationSaveSuccess(null);
@@ -1867,8 +1867,8 @@ export default function Settings() {
       setInvitations((prevInvitations) => upsertPendingInvitation(prevInvitations, createdInvitation));
       setInvitationForm(DEFAULT_INVITATION_FORM_STATE);
       setIsInvitationEditorOpen(false);
-      setInvitationSaveSuccess('珥덈? 硫붿씪??諛쒖넚?덉뒿?덈떎.');
-      toast.success('珥덈? 硫붿씪??諛쒖넚?덉뒿?덈떎.');
+      setInvitationSaveSuccess('초대 메일을 발송했습니다.');
+      toast.success('초대 메일을 발송했습니다.');
     } catch (error) {
       if (error instanceof ApiError) {
         if (error.status === 400) {
@@ -1878,24 +1878,24 @@ export default function Settings() {
             companyId: 'companyId',
           });
           setInvitationFieldErrors(mappedErrors);
-          setInvitationSaveError(error.message ?? '?낅젰媛믪쓣 ?뺤씤??二쇱꽭??');
+          setInvitationSaveError(error.message ?? '입력값을 확인해 주세요.');
           return;
         }
         if (error.status === 403) {
-          setInvitationSaveError('珥덈? ?앹꽦 沅뚰븳???놁뒿?덈떎.');
+          setInvitationSaveError('초대 생성 권한이 없습니다.');
           return;
         }
         if (error.status === 409) {
           setInvitationFieldErrors((prevErrors) => ({
             ...prevErrors,
-            email: error.message || '?대? 媛?낅릺?덇굅??珥덈?媛 吏꾪뻾 以묒씤 ?ъ슜?먯엯?덈떎.',
+            email: error.message || '이미 가입되었거나 초대가 진행 중인 사용자입니다.',
           }));
-          setInvitationSaveError(error.message || '?대? 媛?낅릺?덇굅??珥덈?媛 吏꾪뻾 以묒씤 ?ъ슜?먯엯?덈떎.');
+          setInvitationSaveError(error.message || '이미 가입되었거나 초대가 진행 중인 사용자입니다.');
           void hydrateInvitationsOnly();
           return;
         }
         if (isRetryableMutationError(error)) {
-          setInvitationSaveError('?쇱떆?곸씤 ?ㅻ쪟濡?珥덈? ?앹꽦???ㅽ뙣?덉뒿?덈떎. ?ㅼ떆 ?쒕룄??二쇱꽭??');
+          setInvitationSaveError('일시적인 오류로 초대 생성에 실패했습니다. 다시 시도해 주세요.');
           setInvitationRetryAction(() => () => {
             void runInvitationCreate(draft);
           });
@@ -1903,7 +1903,7 @@ export default function Settings() {
         }
       }
 
-      setInvitationSaveError(toErrorMessage(error, '珥덈? ?앹꽦???ㅽ뙣?덉뒿?덈떎.'));
+      setInvitationSaveError(toErrorMessage(error, '초대 생성에 실패했습니다.'));
     } finally {
       setIsInvitationSaving(false);
     }
@@ -1937,21 +1937,21 @@ export default function Settings() {
         companyId: settingsCompanyId ?? undefined,
       });
       setInvitations((prevInvitations) => upsertPendingInvitation(prevInvitations, resentInvitation));
-      setInvitationSaveSuccess('珥덈?瑜??щ컻?≫뻽?듬땲??');
-      toast.success('珥덈?瑜??щ컻?≫뻽?듬땲??');
+      setInvitationSaveSuccess('초대를 재발송했습니다.');
+      toast.success('초대를 재발송했습니다.');
     } catch (error) {
       if (error instanceof ApiError) {
         if (error.status === 403) {
-          setInvitationSaveError('珥덈? ?щ컻??沅뚰븳???놁뒿?덈떎.');
+          setInvitationSaveError('초대 재발송 권한이 없습니다.');
           return;
         }
         if (error.status === 404 || error.status === 409) {
-          setInvitationSaveError(error.message || '珥덈? ?곹깭媛 蹂寃쎈릺??紐⑸줉???ㅼ떆 遺덈윭?듬땲??');
+          setInvitationSaveError(error.message || '초대 상태가 변경되어 목록을 다시 불러옵니다.');
           void hydrateInvitationsOnly();
           return;
         }
         if (isRetryableMutationError(error)) {
-          setInvitationSaveError('?쇱떆?곸씤 ?ㅻ쪟濡?珥덈? ?щ컻?≪뿉 ?ㅽ뙣?덉뒿?덈떎. ?ㅼ떆 ?쒕룄??二쇱꽭??');
+          setInvitationSaveError('일시적인 오류로 초대 재발송에 실패했습니다. 다시 시도해 주세요.');
           setInvitationRetryAction(() => () => {
             void runInvitationResend(invitationId);
           });
@@ -1959,7 +1959,7 @@ export default function Settings() {
         }
       }
 
-      setInvitationSaveError(toErrorMessage(error, '珥덈? ?щ컻?≪뿉 ?ㅽ뙣?덉뒿?덈떎.'));
+      setInvitationSaveError(toErrorMessage(error, '초대 재발송에 실패했습니다.'));
     } finally {
       setResendingInvitationId(null);
     }
@@ -1972,24 +1972,24 @@ export default function Settings() {
     void runInvitationResend(invitationId);
   }, [isInvitationSaving, resendingInvitationId, runInvitationResend]);
 
-  // CSV ?쒗뵆由??ㅼ슫濡쒕뱶
+  // CSV 템플릿 다운로드
   const downloadTemplate = (type: UploadType) => {
     let csv = '';
     let filename = '';
 
     if (type === 'vehicles') {
-      csv = '李⑤웾踰덊샇,李⑥쥌,?곹깭,蹂댄뿕留뚮즺???뺢린寃?ъ씪,李⑤?踰덊샇,?곗떇,?뚯쑀??n';
-      csv += '12媛3456,洹몃옖?,媛??2025-12-31,2025-06-30,KMHXX00XXXX000001,2023,?뚰꽣移?二?\n';
-      csv += '34??678,?섎굹?,媛??2025-11-30,2025-05-31,KMHXX00XXXX000002,2022,?뚰꽣移?二?\n';
+      csv = '차량번호,차종,상태,보험만료일,정기검사일,차대번호,연식,소유자\n';
+      csv += '12가3456,그랜저,가용,2025-12-31,2025-06-30,KMHXX00XXXX000001,2023,렌터카(주)\n';
+      csv += '34나5678,쏘나타,가용,2025-11-30,2025-05-31,KMHXX00XXXX000002,2022,렌터카(주)\n';
       filename = 'vehicle_template.csv';
     } else {
-      csv = '?덉빟ID,李⑤웾踰덊샇,怨좉컼紐??쒖옉??醫낅즺???좏삎,?꾪솕踰덊샇,寃곗젣諛⑸쾿,湲덉븸,?좉툑\n';
+      csv = '예약ID,차량번호,고객명,시작일,종료일,유형,전화번호,결제방법,금액,선금\n';
       templateReservations.slice(0, 10).forEach((reservation) => {
         const reservationType = reservation.type === 'rental'
-          ? '??ъ쨷'
+          ? '대여중'
           : reservation.type === 'reservation'
-            ? '?덉빟'
-            : '諛섎궔?꾨즺';
+            ? '예약'
+            : '반납완료';
         csv += `${reservation.id},${reservation.vehicleNumber},${reservation.customer},${reservation.startDateFull},${reservation.endDateFull},${reservationType},${reservation.phone},${reservation.paymentMethod},${reservation.amount},${reservation.deposit}\n`;
       });
       filename = 'reservation_template.csv';
@@ -2039,7 +2039,7 @@ export default function Settings() {
     };
   }, []);
 
-  // ?꾩옱 ?곗씠???ㅼ슫濡쒕뱶
+  // 현재 데이터 다운로드
   const downloadCurrentData = useCallback(async (type: CurrentDataType) => {
     if (activeCurrentDownloadType) {
       return;
@@ -2052,7 +2052,7 @@ export default function Settings() {
       if (type === 'vehicles') {
         setCurrentVehicleCount(totalCount);
         const lines = [
-          '李⑤웾踰덊샇,李⑥쥌,?곹깭,蹂댄뿕留뚮즺???뺢린寃?ъ씪,李⑤?踰덊샇,?곗떇,?뚯쑀??,
+          '차량번호,차종,상태,보험만료일,정기검사일,차대번호,연식,소유자',
           ...rows.map((row) => {
             const value = isRecord(row) ? row : {};
             const vehicleNumber = toStringValue(value.vehicleNumber)
@@ -2076,7 +2076,7 @@ export default function Settings() {
       } else {
         setCurrentReservationCount(totalCount);
         const lines = [
-          '?덉빟ID,李⑤웾踰덊샇,怨좉컼紐??쒖옉??醫낅즺???좏삎,?꾪솕踰덊샇,寃곗젣諛⑸쾿,湲덉븸,蹂댁쬆湲?,
+          '예약ID,차량번호,고객명,시작일,종료일,유형,전화번호,결제방법,금액,보증금',
           ...rows.map((row) => {
             const value = isRecord(row) ? row : {};
             const reservationId = toStringValue(value.id) ?? toStringValue(value.reservationId) ?? toStringValue(value.rentalId) ?? '';
@@ -2102,17 +2102,17 @@ export default function Settings() {
       }
 
       if (rows.length === 0) {
-        toast.info('?ㅼ슫濡쒕뱶???꾩옱 ?곗씠?곌? ?놁뒿?덈떎. ?ㅻ뜑留??ы븿??CSV媛 ?앹꽦?섏뿀?듬땲??');
+        toast.info('다운로드할 현재 데이터가 없습니다. 헤더만 포함된 CSV가 생성되었습니다.');
       }
     } catch (error) {
-      toast.error(toErrorMessage(error, '?꾩옱 ?곗씠???ㅼ슫濡쒕뱶???ㅽ뙣?덉뒿?덈떎.'));
+      toast.error(toErrorMessage(error, '현재 데이터 다운로드에 실패했습니다.'));
     } finally {
       setActiveCurrentDownloadType(null);
       void refreshCurrentDataCounts();
     }
   }, [activeCurrentDownloadType, fetchAllCurrentDataRows, refreshCurrentDataCounts]);
 
-  // ?뚯씪 寃利?
+  // 파일 검증
   const validateVehicleData = (data: any[]): { valid: any[]; errors: string[] } => {
     const valid: any[] = [];
     const errors: string[] = [];
@@ -2120,22 +2120,22 @@ export default function Settings() {
     data.forEach((row, index) => {
       const rowNum = index + 2;
 
-      if (!row['李⑤웾踰덊샇']) {
-        errors.push(`${rowNum}?? 李⑤웾踰덊샇媛 ?놁뒿?덈떎`);
+      if (!row['차량번호']) {
+        errors.push(`${rowNum}행: 차량번호가 없습니다`);
         return;
       }
-      if (!row['李⑥쥌']) {
-        errors.push(`${rowNum}?? 李⑥쥌???놁뒿?덈떎`);
+      if (!row['차종']) {
+        errors.push(`${rowNum}행: 차종이 없습니다`);
         return;
       }
-      if (!['??ъ쨷', '?덉빟', '?덉빟??, '媛??, '?뺣퉬以?].includes(row['?곹깭'])) {
-        errors.push(`${rowNum}?? ?곹깭??'??ъ쨷', '?덉빟', '媛??, '?뺣퉬以? 以??섎굹?ъ빞 ?⑸땲??(?명솚媛?'?덉빟?? ?덉슜)`);
+      if (!['대여중', '예약', '예약됨', '가용', '정비중'].includes(row['상태'])) {
+        errors.push(`${rowNum}행: 상태는 '대여중', '예약', '가용', '정비중' 중 하나여야 합니다 (호환값 '예약됨' 허용)`);
         return;
       }
 
       valid.push({
         ...row,
-        ?곹깭: row['?곹깭'] === '?덉빟?? ? '?덉빟' : row['?곹깭'],
+        상태: row['상태'] === '예약됨' ? '예약' : row['상태'],
       });
     });
 
@@ -2149,41 +2149,41 @@ export default function Settings() {
     data.forEach((row, index) => {
       const rowNum = index + 2;
 
-      if (!row['?덉빟ID']) {
-        errors.push(`${rowNum}?? ?덉빟ID媛 ?놁뒿?덈떎`);
+      if (!row['예약ID']) {
+        errors.push(`${rowNum}행: 예약ID가 없습니다`);
         return;
       }
-      if (!row['李⑤웾踰덊샇']) {
-        errors.push(`${rowNum}?? 李⑤웾踰덊샇媛 ?놁뒿?덈떎`);
+      if (!row['차량번호']) {
+        errors.push(`${rowNum}행: 차량번호가 없습니다`);
         return;
       }
-      if (!row['怨좉컼紐?]) {
-        errors.push(`${rowNum}?? 怨좉컼紐낆씠 ?놁뒿?덈떎`);
+      if (!row['고객명']) {
+        errors.push(`${rowNum}행: 고객명이 없습니다`);
         return;
       }
-      if (!['??ъ쨷', '?덉빟', '?덉빟??, '諛섎궔?꾨즺'].includes(row['?좏삎'])) {
-        errors.push(`${rowNum}?? ?좏삎? '??ъ쨷', '?덉빟', '諛섎궔?꾨즺' 以??섎굹?ъ빞 ?⑸땲??(?명솚媛?'?덉빟?? ?덉슜)`);
+      if (!['대여중', '예약', '예약됨', '반납완료'].includes(row['유형'])) {
+        errors.push(`${rowNum}행: 유형은 '대여중', '예약', '반납완료' 중 하나여야 합니다 (호환값 '예약됨' 허용)`);
         return;
       }
 
       valid.push({
         ...row,
-        ?좏삎: row['?좏삎'] === '?덉빟?? ? '?덉빟' : row['?좏삎'],
+        유형: row['유형'] === '예약됨' ? '예약' : row['유형'],
       });
     });
 
     return { valid, errors };
   };
 
-  // ?뚯씪 ?낅줈??泥섎━
+  // 파일 업로드 처리
   const handleFileUpload = (file: File) => {
     if (!canEditSettings) {
-      toast.error('?ㅼ젙 CSV 寃利?沅뚰븳???놁뒿?덈떎.');
+      toast.error('설정 CSV 검증 권한이 없습니다.');
       return;
     }
 
     if (!file.name.endsWith('.csv')) {
-      alert('CSV ?뚯씪留??낅줈??媛?ν빀?덈떎');
+      alert('CSV 파일만 업로드 가능합니다');
       return;
     }
 
@@ -2194,7 +2194,7 @@ export default function Settings() {
         const data = results.data.filter((row: any) => Object.values(row).some((value) => value !== ''));
 
         if (data.length === 0) {
-          alert('?좏슚???곗씠?곌? ?놁뒿?덈떎');
+          alert('유효한 데이터가 없습니다');
           return;
         }
 
@@ -2212,12 +2212,12 @@ export default function Settings() {
         });
       },
       error: (error) => {
-        alert(`?뚯씪 ?뚯떛 ?ㅻ쪟: ${error.message}`);
+        alert(`파일 파싱 오류: ${error.message}`);
       },
     });
   };
 
-  // ?쒕옒洹몄븻?쒕∼
+  // 드래그앤드롭
   const handleDragOver = (event: React.DragEvent) => {
     event.preventDefault();
     if (!canEditSettings) {
@@ -2235,7 +2235,7 @@ export default function Settings() {
     setIsDragging(false);
 
     if (!canEditSettings) {
-      toast.error('?ㅼ젙 CSV 寃利?沅뚰븳???놁뒿?덈떎.');
+      toast.error('설정 CSV 검증 권한이 없습니다.');
       return;
     }
 
@@ -2247,7 +2247,7 @@ export default function Settings() {
 
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     if (!canEditSettings) {
-      toast.error('?ㅼ젙 CSV 寃利?沅뚰븳???놁뒿?덈떎.');
+      toast.error('설정 CSV 검증 권한이 없습니다.');
       event.target.value = '';
       return;
     }
@@ -2260,7 +2260,7 @@ export default function Settings() {
 
   const handleUploadClick = () => {
     if (!canEditSettings) {
-      toast.error('?ㅼ젙 CSV 寃利?沅뚰븳???놁뒿?덈떎.');
+      toast.error('설정 CSV 검증 권한이 없습니다.');
       return;
     }
 
@@ -2275,18 +2275,18 @@ export default function Settings() {
   };
 
   return (
-    <Layout title="?ㅼ젙">
+    <Layout title="설정">
       <PageStateBoundary
         isLoading={isSettingsLoading}
         error={settingsError}
         isEmpty={false}
-        errorDescription="?ㅼ젙 ?곗씠?곕? 遺덈윭?ㅻ뒗 以?臾몄젣媛 諛쒖깮?덉뒿?덈떎."
-        emptyTitle="?쒖떆???ㅼ젙 ?곗씠?곌? ?놁뒿?덈떎"
-        emptyDescription="?좎떆 ???ㅼ떆 ?쒕룄?섍굅??愿由ъ옄?먭쾶 臾몄쓽??二쇱꽭??"
+        errorDescription="설정 데이터를 불러오는 중 문제가 발생했습니다."
+        emptyTitle="표시할 설정 데이터가 없습니다"
+        emptyDescription="잠시 후 다시 시도하거나 관리자에게 문의해 주세요."
         onRetry={handleSettingsRetry}
         errorActionLabel={getPageErrorActionLabel(settingsErrorKind)}
         onErrorAction={handleSettingsErrorAction}
-        emptyActionLabel="?ㅼ떆 遺덈윭?ㅺ린"
+        emptyActionLabel="다시 불러오기"
         onEmptyAction={handleSettingsRetry}
         className="m-6 min-h-[320px]"
       >
@@ -2301,7 +2301,7 @@ export default function Settings() {
                   : 'border-transparent text-gray-600 hover:text-gray-900'
               }`}
             >
-              ????낅줈???ㅼ슫濡쒕뱶
+              대량 업로드/다운로드
             </button>
             <button
               type="button"
@@ -2312,7 +2312,7 @@ export default function Settings() {
                   : 'border-transparent text-gray-600 hover:text-gray-900'
               }`}
             >
-              ?뚯궗 ?뺣낫
+              회사 정보
             </button>
             <button
               type="button"
@@ -2323,7 +2323,7 @@ export default function Settings() {
                   : 'border-transparent text-gray-600 hover:text-gray-900'
               }`}
             >
-              吏?ㅽ렂??
+              지오펜스
             </button>
             <button
               type="button"
@@ -2334,7 +2334,7 @@ export default function Settings() {
                   : 'border-transparent text-gray-600 hover:text-gray-900'
               }`}
             >
-              怨꾩젙 愿由?
+              계정 관리
             </button>
           </div>
 
@@ -2344,19 +2344,19 @@ export default function Settings() {
                 <div className="flex items-start gap-3">
                   <AlertCircle className="mt-0.5 h-5 w-5 flex-shrink-0 text-blue-600" />
                   <div className="text-sm text-blue-900">
-                    <p className="mb-1 font-semibold">珥덇린 ?곗씠???ㅼ젙 媛?대뱶</p>
+                    <p className="mb-1 font-semibold">초기 데이터 설정 가이드</p>
                     <ul className="list-inside list-disc space-y-1 text-blue-800">
-                      <li>CSV ?쒗뵆由우쓣 ?ㅼ슫濡쒕뱶?섏뿬 ?곗씠?곕? ?낅젰?섏꽭??/li>
-                      <li>李⑤웾 ?먯궛怨?????덉빟???쒕쾲???깅줉?????덉뒿?덈떎</li>
-                      <li>?낅줈?????곗씠??寃利앹씠 ?먮룞?쇰줈 ?섑뻾?⑸땲??/li>
-                      <li>?꾩옱 ?곗씠?곕? ?ㅼ슫濡쒕뱶?섏뿬 李멸퀬?????덉뒿?덈떎</li>
+                      <li>CSV 템플릿을 다운로드하여 데이터를 입력하세요</li>
+                      <li>차량 자산과 대여 예약을 한번에 등록할 수 있습니다</li>
+                      <li>업로드 전 데이터 검증이 자동으로 수행됩니다</li>
+                      <li>현재 데이터를 다운로드하여 참고할 수 있습니다</li>
                     </ul>
                   </div>
                 </div>
               </div>
 
               <div className="rounded-xl bg-white p-6 shadow-sm">
-                <h2 className="mb-4 text-base font-semibold text-[#1e2939]">?곗씠???좏삎 ?좏깮</h2>
+                <h2 className="mb-4 text-base font-semibold text-[#1e2939]">데이터 유형 선택</h2>
                 <div className="grid grid-cols-3 gap-4">
                   <button
                     type="button"
@@ -2377,9 +2377,9 @@ export default function Settings() {
                     </div>
                     <div className="text-left">
                       <div className={`mb-1 font-semibold ${uploadType === 'vehicles' ? 'text-blue-900' : 'text-gray-900'}`}>
-                        李⑤웾 ?먯궛 (CSV)
+                        차량 자산 (CSV)
                       </div>
-                      <div className="text-sm text-gray-600">李⑤웾踰덊샇, 李⑥쥌, ?곹깭 ??/div>
+                      <div className="text-sm text-gray-600">차량번호, 차종, 상태 등</div>
                     </div>
                   </button>
 
@@ -2402,9 +2402,9 @@ export default function Settings() {
                     </div>
                     <div className="text-left">
                       <div className={`mb-1 font-semibold ${uploadType === 'reservations' ? 'text-blue-900' : 'text-gray-900'}`}>
-                        ????덉빟 (CSV)
+                        대여 예약 (CSV)
                       </div>
-                      <div className="text-sm text-gray-600">?덉빟ID, 怨좉컼紐? 湲곌컙 ??/div>
+                      <div className="text-sm text-gray-600">예약ID, 고객명, 기간 등</div>
                     </div>
                   </button>
 
@@ -2427,9 +2427,9 @@ export default function Settings() {
                     </div>
                     <div className="text-left">
                       <div className={`mb-1 font-semibold ${uploadType === 'ocr' ? 'text-green-900' : 'text-gray-900'}`}>
-                        ?먮룞李??깅줉利?(OCR)
+                        자동차 등록증 (OCR)
                       </div>
-                      <div className="text-sm text-gray-600">?대?吏 ?뚯씪 ????낅줈??/div>
+                      <div className="text-sm text-gray-600">이미지 파일 대량 업로드</div>
                     </div>
                   </button>
                 </div>
@@ -2439,18 +2439,18 @@ export default function Settings() {
                 <div className="rounded-xl bg-white p-6 shadow-sm">
                   <div className="mb-4 flex items-center justify-between">
                     <div>
-                      <h2 className="mb-1 text-base font-semibold text-[#1e2939]">?먮룞李??깅줉利?OCR ????낅줈??/h2>
-                      <p className="text-sm text-gray-600">?щ윭 媛쒖쓽 李⑤웾?깅줉利??대?吏瑜??쒕쾲???낅줈?쒗븯硫?OCR濡??먮룞 泥섎━?⑸땲??/p>
+                      <h2 className="mb-1 text-base font-semibold text-[#1e2939]">자동차 등록증 OCR 대량 업로드</h2>
+                      <p className="text-sm text-gray-600">여러 개의 차량등록증 이미지를 한번에 업로드하면 OCR로 자동 처리됩니다</p>
                     </div>
                   </div>
 
                   <div className="rounded-lg border-2 border-dashed border-green-300 bg-green-50 p-8">
                     <div className="text-center">
                       <Upload className="mx-auto mb-4 h-16 w-16 text-green-600" />
-                      <h3 className="mb-2 text-lg font-semibold text-green-900">李⑤웾?깅줉利??대?吏 ?낅줈??/h3>
-                      <p className="mb-4 text-sm text-gray-700">?щ윭 媛쒖쓽 ?대?吏瑜??쒕쾲???좏깮?섎㈃ OCR怨?李⑤웾 ?깅줉???쒖감?곸쑝濡??ㅽ뻾?⑸땲??/p>
+                      <h3 className="mb-2 text-lg font-semibold text-green-900">차량등록증 이미지 업로드</h3>
+                      <p className="mb-4 text-sm text-gray-700">여러 개의 이미지를 한번에 선택하면 OCR과 차량 등록이 순차적으로 실행됩니다</p>
                       <label className="inline-block cursor-pointer rounded-lg bg-green-600 px-6 py-3 font-medium text-white hover:bg-green-700">
-                        {isBulkOcrProcessing ? '泥섎━ 以?..' : '?대?吏 ?뚯씪 ?좏깮'}
+                        {isBulkOcrProcessing ? '처리 중...' : '이미지 파일 선택'}
                         <input
                           data-testid="settings-bulk-ocr-input"
                           type="file"
@@ -2465,7 +2465,7 @@ export default function Settings() {
                           }}
                         />
                       </label>
-                      <p className="mt-4 text-xs text-gray-600">吏???뺤떇: JPG, PNG, PDF | 理쒕? 50媛??뚯씪源뚯? ?낅줈??媛??/p>
+                      <p className="mt-4 text-xs text-gray-600">지원 형식: JPG, PNG, PDF | 최대 50개 파일까지 업로드 가능</p>
                     </div>
                   </div>
 
@@ -2474,7 +2474,7 @@ export default function Settings() {
                       data-testid="settings-bulk-ocr-progress"
                       className="mt-4 rounded-lg border border-green-200 bg-white px-4 py-3 text-sm text-green-900"
                     >
-                      {bulkOcrProgressMessage ?? '?쇨큵 OCR ?낅줈?쒕? 泥섎━?섍퀬 ?덉뒿?덈떎.'}
+                      {bulkOcrProgressMessage ?? '일괄 OCR 업로드를 처리하고 있습니다.'}
                     </div>
                   )}
 
@@ -2484,9 +2484,9 @@ export default function Settings() {
                         data-testid="settings-bulk-ocr-result-summary"
                         className="flex items-center justify-between gap-2 text-sm font-medium text-gray-800"
                       >
-                        <span>?좏깮 ?뚯씪 {bulkOcrSelectedFiles.length}嫄?/span>
+                        <span>선택 파일 {bulkOcrSelectedFiles.length}건</span>
                         <span>
-                          ?깃났 {bulkOcrResults.filter((item) => item.status === 'success').length}嫄?/ ?ㅽ뙣 {bulkOcrResults.filter((item) => item.status === 'error').length}嫄?
+                          성공 {bulkOcrResults.filter((item) => item.status === 'success').length}건 / 실패 {bulkOcrResults.filter((item) => item.status === 'error').length}건
                         </span>
                       </div>
                       {bulkOcrResults.length > 0 && (
@@ -2512,11 +2512,11 @@ export default function Settings() {
                   )}
 
                   <div className="mt-6 rounded-lg border border-blue-200 bg-blue-50 p-4">
-                    <h3 className="mb-2 text-sm font-semibold text-blue-900">OCR ?먮룞 異붿텧 ??ぉ</h3>
+                    <h3 className="mb-2 text-sm font-semibold text-blue-900">OCR 자동 추출 항목</h3>
                     <ul className="space-y-1 text-sm text-blue-800">
-                      <li>??李⑤웾踰덊샇, 李⑤?踰덊샇, 李⑥쥌, ?곗떇</li>
-                      <li>???뚯쑀?먮챸, 蹂댄뿕留뚮즺??/li>
-                      <li>??異붿텧 ?꾨즺 ???섏젙 諛??뺤씤 媛??/li>
+                      <li>• 차량번호, 차대번호, 차종, 연식</li>
+                      <li>• 소유자명, 보험만료일</li>
+                      <li>• 추출 완료 후 수정 및 확인 가능</li>
                     </ul>
                   </div>
                 </div>
@@ -2524,11 +2524,11 @@ export default function Settings() {
                 <div className="rounded-xl bg-white p-6 shadow-sm">
                   {!canEditSettings && (
                     <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-                      ?꾩옱 怨꾩젙? ?ㅼ젙 CSV 寃利앹쓣 ?ㅽ뻾?????놁뼱 ?쒗뵆由??ㅼ슫濡쒕뱶留?媛?ν빀?덈떎.
+                      현재 계정은 설정 CSV 검증을 실행할 수 없어 템플릿 다운로드만 가능합니다.
                     </div>
                   )}
                   <div className="mb-4 flex items-center justify-between">
-                    <h2 className="text-base font-semibold text-[#1e2939]">{uploadType === 'vehicles' ? '李⑤웾 ?먯궛 CSV 寃利? : '????덉빟 CSV 寃利?}</h2>
+                    <h2 className="text-base font-semibold text-[#1e2939]">{uploadType === 'vehicles' ? '차량 자산 CSV 검증' : '대여 예약 CSV 검증'}</h2>
                     <div className="flex gap-2">
                       <button
                         type="button"
@@ -2536,7 +2536,7 @@ export default function Settings() {
                         className="flex items-center gap-2 rounded-lg bg-gray-100 px-4 py-2 font-medium text-gray-700 hover:bg-gray-200"
                       >
                         <Download className="h-4 w-4" />
-                        ?쒗뵆由??ㅼ슫濡쒕뱶
+                        템플릿 다운로드
                       </button>
                       <button
                         type="button"
@@ -2545,7 +2545,7 @@ export default function Settings() {
                         className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300"
                       >
                         <Upload className="h-4 w-4" />
-                        {uploadResult && uploadResult.valid > 0 ? '?ㅻⅨ ?뚯씪 寃利? : '?뚯씪 ?좏깮'}
+                        {uploadResult && uploadResult.valid > 0 ? '다른 파일 검증' : '파일 선택'}
                       </button>
                     </div>
                   </div>
@@ -2585,18 +2585,18 @@ export default function Settings() {
                             <XCircle className="mx-auto mb-3 h-16 w-16 text-red-600" />
                           )}
                           <p className={`mb-2 font-semibold ${uploadResult.success ? 'text-green-900' : 'text-red-900'}`}>
-                            {uploadResult.success ? '寃利??꾨즺 (??λ릺吏 ?딆쓬)' : '寃利??ㅽ뙣'}
+                            {uploadResult.success ? '검증 완료 (저장되지 않음)' : '검증 실패'}
                           </p>
-                          <p className="mb-3 text-sm text-gray-600">?꾩껜 {uploadResult.total}嫄?以?{uploadResult.valid}嫄??좏슚</p>
+                          <p className="mb-3 text-sm text-gray-600">전체 {uploadResult.total}건 중 {uploadResult.valid}건 유효</p>
                           {uploadResult.success && (
                             <p className="mb-3 text-sm text-amber-700">{CSV_VALIDATION_ONLY_NOTICE}</p>
                           )}
                           {uploadResult.errors.length > 0 && (
                             <div className="mx-auto max-w-md rounded-lg bg-white p-4 text-left">
-                              <p className="mb-2 text-sm font-semibold text-red-900">?ㅻ쪟 紐⑸줉:</p>
+                              <p className="mb-2 text-sm font-semibold text-red-900">오류 목록:</p>
                               <ul className="max-h-32 space-y-1 overflow-y-auto text-xs text-red-800">
                                 {uploadResult.errors.map((errorMessage, index) => (
-                                  <li key={index}>??{errorMessage}</li>
+                                  <li key={index}>• {errorMessage}</li>
                                 ))}
                               </ul>
                             </div>
@@ -2605,8 +2605,8 @@ export default function Settings() {
                       ) : (
                         <>
                           <FileSpreadsheet className="mx-auto mb-3 h-16 w-16 text-gray-400" />
-                          <p className="mb-1 font-medium text-gray-600">CSV ?뚯씪???쒕옒洹명븯嫄곕굹 ?대┃?섏뿬 寃利?/p>
-                          <p className="text-sm text-gray-500">理쒕? 1,000嫄닿퉴吏 ?쒕쾲???낅줈??媛??/p>
+                          <p className="mb-1 font-medium text-gray-600">CSV 파일을 드래그하거나 클릭하여 검증</p>
+                          <p className="text-sm text-gray-500">최대 1,000건까지 한번에 업로드 가능</p>
                         </>
                       )}
                     </div>
@@ -2614,7 +2614,7 @@ export default function Settings() {
 
                   {previewData.length > 0 && (
                     <div className="mt-4">
-                      <h3 className="mb-2 text-sm font-semibold text-gray-700">誘몃━蹂닿린 (理쒕? 5嫄?</h3>
+                      <h3 className="mb-2 text-sm font-semibold text-gray-700">미리보기 (최대 5건)</h3>
                       <div className="overflow-x-auto rounded-lg border border-gray-200">
                         <table className="w-full text-sm">
                           <thead className="border-b border-gray-200 bg-gray-50">
@@ -2647,8 +2647,8 @@ export default function Settings() {
               <div className="rounded-xl bg-white p-6 shadow-sm">
                 <div className="mb-4 flex items-center justify-between">
                   <div>
-                    <h2 className="mb-1 text-base font-semibold text-[#1e2939]">?꾩옱 ?곗씠???ㅼ슫濡쒕뱶</h2>
-                    <p className="text-sm text-gray-600">?꾩옱 ?쒖뒪?쒖뿉 ?깅줉???곗씠?곕? CSV濡??ㅼ슫濡쒕뱶?????덉뒿?덈떎</p>
+                    <h2 className="mb-1 text-base font-semibold text-[#1e2939]">현재 데이터 다운로드</h2>
+                    <p className="text-sm text-gray-600">현재 시스템에 등록된 데이터를 CSV로 다운로드할 수 있습니다</p>
                   </div>
                 </div>
 
@@ -2665,9 +2665,9 @@ export default function Settings() {
                   >
                     <div className="mb-2 flex items-center gap-3">
                       <FileSpreadsheet className="h-6 w-6 text-blue-600" />
-                      <div className="font-semibold text-gray-900">李⑤웾 ?먯궛 ?곗씠??/div>
+                      <div className="font-semibold text-gray-900">차량 자산 데이터</div>
                     </div>
-                    <div className="text-sm text-gray-600">?꾩옱 {currentVehicleCount ?? '-'}???李⑤웾 ?뺣낫</div>
+                    <div className="text-sm text-gray-600">현재 {currentVehicleCount ?? '-'}대의 차량 정보</div>
                   </button>
 
                   <button
@@ -2682,9 +2682,9 @@ export default function Settings() {
                   >
                     <div className="mb-2 flex items-center gap-3">
                       <FileText className="h-6 w-6 text-green-600" />
-                      <div className="font-semibold text-gray-900">????덉빟 ?곗씠??/div>
+                      <div className="font-semibold text-gray-900">대여 예약 데이터</div>
                     </div>
-                    <div className="text-sm text-gray-600">?꾩옱 {currentReservationCount ?? '-'}嫄댁쓽 ?덉빟 ?뺣낫</div>
+                    <div className="text-sm text-gray-600">현재 {currentReservationCount ?? '-'}건의 예약 정보</div>
                   </button>
                 </div>
               </div>
@@ -2695,7 +2695,7 @@ export default function Settings() {
             <div className="space-y-6">
               {!canEditSettings && (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-                  ?꾩옱 怨꾩젙? ?뚯궗 ?ㅼ젙???쎄린 ?꾩슜?쇰줈留?蹂????덉뒿?덈떎.
+                  현재 계정은 회사 설정을 읽기 전용으로만 볼 수 있습니다.
                 </div>
               )}
 
@@ -2716,7 +2716,7 @@ export default function Settings() {
                         className="inline-flex items-center gap-1 rounded-md border border-red-200 bg-white px-3 py-1 text-xs font-medium text-red-700 hover:bg-red-100"
                       >
                         <RefreshCw className="h-3.5 w-3.5" />
-                        ?ㅼ떆 ?쒕룄
+                        다시 시도
                       </button>
                     )}
                   </div>
@@ -2726,23 +2726,23 @@ export default function Settings() {
               <div className="rounded-xl bg-white p-6 shadow-sm">
                 <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
                   <div>
-                    <h2 className="text-base font-semibold text-[#1e2939]">?뚯궗 ?꾨줈??/h2>
-                    <p className="mt-1 text-sm text-gray-600">?뚯궗 湲곕낯 ?뺣낫瑜??섏젙?섎㈃ 利됱떆 ?댁쁺 ?ㅼ젙??諛섏쁺?⑸땲??</p>
+                    <h2 className="text-base font-semibold text-[#1e2939]">회사 프로필</h2>
+                    <p className="mt-1 text-sm text-gray-600">회사 기본 정보를 수정하면 즉시 운영 설정에 반영됩니다.</p>
                   </div>
                   <div className="text-right text-xs text-gray-500">
-                    <p>?ㅽ궎留?踰꾩쟾: {companySchemaVersion}</p>
-                    <p>留덉?留???? {formatUpdatedAt(companyUpdatedAt)}</p>
+                    <p>스키마 버전: {companySchemaVersion}</p>
+                    <p>마지막 저장: {formatUpdatedAt(companyUpdatedAt)}</p>
                   </div>
                 </div>
 
                 <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                   <div>
-                    <label className="mb-1 block text-sm font-medium text-gray-700">?뚯궗紐?*</label>
+                    <label className="mb-1 block text-sm font-medium text-gray-700">회사명 *</label>
                     <input
                       data-testid="settings-company-name-input"
                       type="text"
                       value={companyForm.name}
-                      placeholder="?뚯궗紐낆쓣 ?낅젰?섏꽭??
+                      placeholder="회사명을 입력하세요"
                       disabled={!canEditSettings || isCompanySaving}
                       onChange={(event) => {
                         setCompanyForm((prevState) => ({ ...prevState, name: event.target.value }));
@@ -2757,7 +2757,7 @@ export default function Settings() {
                   </div>
 
                   <div>
-                    <label className="mb-1 block text-sm font-medium text-gray-700">?ъ뾽?먮벑濡앸쾲??/label>
+                    <label className="mb-1 block text-sm font-medium text-gray-700">사업자등록번호</label>
                     <input
                       type="text"
                       value={companyForm.businessNumber}
@@ -2777,7 +2777,7 @@ export default function Settings() {
                   </div>
 
                   <div>
-                    <label className="mb-1 block text-sm font-medium text-gray-700">????곕씫泥?/label>
+                    <label className="mb-1 block text-sm font-medium text-gray-700">대표 연락처</label>
                     <input
                       type="text"
                       value={companyForm.phone}
@@ -2795,7 +2795,7 @@ export default function Settings() {
                   </div>
 
                   <div>
-                    <label className="mb-1 block text-sm font-medium text-gray-700">????대찓??/label>
+                    <label className="mb-1 block text-sm font-medium text-gray-700">대표 이메일</label>
                     <input
                       type="email"
                       value={companyForm.email}
@@ -2813,7 +2813,7 @@ export default function Settings() {
                   </div>
 
                   <div className="md:col-span-2">
-                    <label className="mb-1 block text-sm font-medium text-gray-700">二쇱냼</label>
+                    <label className="mb-1 block text-sm font-medium text-gray-700">주소</label>
                     <input
                       type="text"
                       value={companyForm.address}
@@ -2838,7 +2838,7 @@ export default function Settings() {
                     disabled={isCompanySaving || !isCompanyDirty}
                     className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    蹂寃?痍⑥냼
+                    변경 취소
                   </button>
                   <button
                     type="button"
@@ -2848,7 +2848,7 @@ export default function Settings() {
                     disabled={!canEditSettings || isCompanySaving || !isCompanyDirty}
                     className="inline-flex items-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    {isCompanySaving ? '???以?..' : '?뚯궗 ?ㅼ젙 ???}
+                    {isCompanySaving ? '저장 중...' : '회사 설정 저장'}
                   </button>
                 </div>
               </div>
@@ -2859,7 +2859,7 @@ export default function Settings() {
             <div className="space-y-6">
               {!canEditSettings && (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-                  ?꾩옱 怨꾩젙? 吏?ㅽ렂?ㅻ? ?쎄린 ?꾩슜?쇰줈留?蹂????덉뒿?덈떎.
+                  현재 계정은 지오펜스를 읽기 전용으로만 볼 수 있습니다.
                 </div>
               )}
 
@@ -2880,7 +2880,7 @@ export default function Settings() {
                         className="inline-flex items-center gap-1 rounded-md border border-red-200 bg-white px-3 py-1 text-xs font-medium text-red-700 hover:bg-red-100"
                       >
                         <RefreshCw className="h-3.5 w-3.5" />
-                        ?ㅼ떆 ?쒕룄
+                        다시 시도
                       </button>
                     )}
                   </div>
@@ -2889,7 +2889,7 @@ export default function Settings() {
 
               <div className="rounded-xl bg-white p-6 shadow-sm">
                 <div className="mb-4 flex items-center justify-between">
-                  <h2 className="text-base font-semibold text-[#1e2939]">吏?ㅽ렂??吏??/h2>
+                  <h2 className="text-base font-semibold text-[#1e2939]">지오펜스 지도</h2>
                   <button
                     type="button"
                     onClick={openCreateGeofenceEditor}
@@ -2897,15 +2897,15 @@ export default function Settings() {
                     className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     <Plus className="h-4 w-4" />
-                    吏?ㅽ렂???앹꽦
+                    지오펜스 생성
                   </button>
                 </div>
 
                 <div className="flex h-[320px] w-full items-center justify-center rounded-lg border-2 border-dashed border-gray-300 bg-gray-100">
                   <div className="text-center">
                     <MapPin className="mx-auto mb-3 h-16 w-16 text-gray-400" />
-                    <p className="font-medium text-gray-600">吏???곸뿭</p>
-                    <p className="mt-1 text-sm text-gray-500">吏?ㅽ렂???꾩튂媛 ?ш린???쒖떆?⑸땲??/p>
+                    <p className="font-medium text-gray-600">지도 영역</p>
+                    <p className="mt-1 text-sm text-gray-500">지오펜스 위치가 여기에 표시됩니다</p>
                   </div>
                 </div>
               </div>
@@ -2913,11 +2913,11 @@ export default function Settings() {
               {isGeofenceEditorOpen && (
                 <div className="rounded-xl border border-blue-200 bg-blue-50 p-6">
                   <h3 className="mb-4 text-base font-semibold text-blue-900">
-                    {geofenceEditorMode === 'create' ? '吏?ㅽ렂???앹꽦' : `吏?ㅽ렂???몄쭛 (${selectedEditingGeofence?.name ?? '-'})`}
+                    {geofenceEditorMode === 'create' ? '지오펜스 생성' : `지오펜스 편집 (${selectedEditingGeofence?.name ?? '-'})`}
                   </h3>
                   <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                     <div>
-                      <label className="mb-1 block text-sm font-medium text-blue-900">?대쫫 *</label>
+                      <label className="mb-1 block text-sm font-medium text-blue-900">이름 *</label>
                       <input
                         type="text"
                         value={geofenceForm.name}
@@ -2971,7 +2971,7 @@ export default function Settings() {
                       />
                     </div>
                     <div>
-                      <label className="mb-1 block text-sm font-medium text-blue-900">諛섍꼍 (m) *</label>
+                      <label className="mb-1 block text-sm font-medium text-blue-900">반경 (m) *</label>
                       <input
                         type="number"
                         min={1}
@@ -2991,7 +2991,7 @@ export default function Settings() {
                       )}
                     </div>
                     <div>
-                      <label className="mb-1 block text-sm font-medium text-blue-900">?꾨룄 *</label>
+                      <label className="mb-1 block text-sm font-medium text-blue-900">위도 *</label>
                       <input
                         type="number"
                         step="0.000001"
@@ -3009,7 +3009,7 @@ export default function Settings() {
                       {geofenceFieldErrors.lat && <p className="mt-1 text-xs text-red-600">{geofenceFieldErrors.lat}</p>}
                     </div>
                     <div>
-                      <label className="mb-1 block text-sm font-medium text-blue-900">寃쎈룄 *</label>
+                      <label className="mb-1 block text-sm font-medium text-blue-900">경도 *</label>
                       <input
                         type="number"
                         step="0.000001"
@@ -3039,7 +3039,7 @@ export default function Settings() {
                             setGeofenceRetryAction(null);
                           }}
                         />
-                        ?쒖꽦 ?곹깭
+                        활성 상태
                       </label>
                     </div>
                   </div>
@@ -3050,7 +3050,7 @@ export default function Settings() {
                       disabled={isGeofenceSaving}
                       className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      痍⑥냼
+                      취소
                     </button>
                     <button
                       type="button"
@@ -3060,7 +3060,7 @@ export default function Settings() {
                       disabled={!canEditSettings || isGeofenceSaving}
                       className="inline-flex items-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      {isGeofenceSaving ? '???以?..' : '???}
+                      {isGeofenceSaving ? '저장 중...' : '저장'}
                     </button>
                   </div>
                 </div>
@@ -3068,25 +3068,25 @@ export default function Settings() {
 
               <div className="overflow-hidden rounded-xl bg-white shadow-sm">
                 <div className="border-b border-gray-200 px-6 py-4">
-                  <h2 className="text-base font-semibold text-[#1e2939]">吏?ㅽ렂??紐⑸줉</h2>
+                  <h2 className="text-base font-semibold text-[#1e2939]">지오펜스 목록</h2>
                 </div>
 
                 <div className="overflow-x-auto">
                   <table className="w-full">
                     <thead className="border-b border-gray-200 bg-gray-50">
                       <tr>
-                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">?대쫫</th>
-                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">以묒떖 醫뚰몴</th>
-                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">諛섍꼍</th>
-                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">?쒖꽦 ?곹깭</th>
-                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">?≪뀡</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">이름</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">중심 좌표</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">반경</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">활성 상태</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">액션</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200">
                       {geofences.length === 0 && (
                         <tr>
                           <td colSpan={5} className="px-6 py-10 text-center text-sm text-gray-500">
-                            ?깅줉??吏?ㅽ렂?ㅺ? ?놁뒿?덈떎.
+                            등록된 지오펜스가 없습니다.
                           </td>
                         </tr>
                       )}
@@ -3120,7 +3120,7 @@ export default function Settings() {
                               disabled={!canEditSettings || isGeofenceSaving || activeToggleTargetId !== null}
                               className="mr-3 font-medium text-blue-600 hover:text-blue-800 disabled:cursor-not-allowed disabled:opacity-50"
                             >
-                              ?몄쭛
+                              편집
                             </button>
                             <button
                               type="button"
@@ -3128,7 +3128,7 @@ export default function Settings() {
                               disabled={!canEditSettings || deletingGeofenceId === geofence.id || isGeofenceSaving}
                               className="font-medium text-red-600 hover:text-red-800 disabled:cursor-not-allowed disabled:opacity-50"
                             >
-                              {deletingGeofenceId === geofence.id ? '??젣 以?..' : '??젣'}
+                              {deletingGeofenceId === geofence.id ? '삭제 중...' : '삭제'}
                             </button>
                           </td>
                         </tr>
@@ -3144,7 +3144,7 @@ export default function Settings() {
             <div className="space-y-4">
               {!canManageMemberRoles && (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-                  ?꾩옱 怨꾩젙? 硫ㅻ쾭 沅뚰븳???쎄린 ?꾩슜?쇰줈留?蹂????덉뒿?덈떎.
+                  현재 계정은 멤버 권한을 읽기 전용으로만 볼 수 있습니다.
                 </div>
               )}
 
@@ -3165,7 +3165,7 @@ export default function Settings() {
                         className="inline-flex items-center gap-1 rounded-md border border-red-200 bg-white px-3 py-1 text-xs font-medium text-red-700 hover:bg-red-100"
                       >
                         <RefreshCw className="h-3.5 w-3.5" />
-                        ?ㅼ떆 ?쒕룄
+                        다시 시도
                       </button>
                     )}
                   </div>
@@ -3189,7 +3189,7 @@ export default function Settings() {
                         className="inline-flex items-center gap-1 rounded-md border border-red-200 bg-white px-3 py-1 text-xs font-medium text-red-700 hover:bg-red-100"
                       >
                         <RefreshCw className="h-3.5 w-3.5" />
-                        ?ㅼ떆 ?쒕룄
+                        다시 시도
                       </button>
                     )}
                   </div>
@@ -3199,8 +3199,8 @@ export default function Settings() {
               <div className="overflow-hidden rounded-xl bg-white shadow-sm">
                 <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
                   <div>
-                    <h2 className="text-base font-semibold text-[#1e2939]">?ъ슜??紐⑸줉</h2>
-                    <p className="mt-1 text-sm text-gray-600">硫ㅻ쾭 沅뚰븳 蹂寃쎌? ???踰꾪듉???뚮윭???곸슜?⑸땲??</p>
+                    <h2 className="text-base font-semibold text-[#1e2939]">사용자 목록</h2>
+                    <p className="mt-1 text-sm text-gray-600">멤버 권한 변경은 저장 버튼을 눌러야 적용됩니다.</p>
                   </div>
                   <button
                     type="button"
@@ -3209,7 +3209,7 @@ export default function Settings() {
                     className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-600"
                   >
                     <Plus className="h-4 w-4" />
-                    珥덈??섍린
+                    초대하기
                   </button>
                 </div>
 
@@ -3218,7 +3218,7 @@ export default function Settings() {
                     <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_180px]">
                       <div>
                         <label htmlFor="settings-invitation-email" className="mb-1 block text-sm font-medium text-blue-900">
-                          珥덈? ?대찓??
+                          초대 이메일
                         </label>
                         <input
                           id="settings-invitation-email"
@@ -3235,7 +3235,7 @@ export default function Settings() {
                       </div>
                       <div>
                         <label htmlFor="settings-invitation-role" className="mb-1 block text-sm font-medium text-blue-900">
-                          沅뚰븳
+                          권한
                         </label>
                         <select
                           id="settings-invitation-role"
@@ -3265,7 +3265,7 @@ export default function Settings() {
                         disabled={isInvitationSaving}
                         className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
                       >
-                        痍⑥냼
+                        취소
                       </button>
                       <button
                         type="button"
@@ -3273,7 +3273,7 @@ export default function Settings() {
                         disabled={!canManageMemberRoles || isInvitationSaving}
                         className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300"
                       >
-                        {isInvitationSaving ? '諛쒖넚 以?..' : '珥덈? 硫붿씪 諛쒖넚'}
+                        {isInvitationSaving ? '발송 중...' : '초대 메일 발송'}
                       </button>
                     </div>
                   </div>
@@ -3283,18 +3283,18 @@ export default function Settings() {
                   <table className="w-full">
                     <thead className="border-b border-gray-200 bg-gray-50">
                       <tr>
-                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">?대쫫</th>
-                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">?대찓??/th>
-                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">沅뚰븳</th>
-                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">?곹깭</th>
-                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">?≪뀡</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">이름</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">이메일</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">권한</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">상태</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">액션</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200">
                       {members.length === 0 && (
                         <tr>
                           <td colSpan={5} className="px-6 py-10 text-center text-sm text-gray-500">
-                            議고쉶??硫ㅻ쾭媛 ?놁뒿?덈떎.
+                            조회된 멤버가 없습니다.
                           </td>
                         </tr>
                       )}
@@ -3350,7 +3350,7 @@ export default function Settings() {
                                     disabled={isRowSaving}
                                     className="font-medium text-blue-600 hover:text-blue-800 disabled:cursor-not-allowed disabled:opacity-50"
                                   >
-                                    {isRowSaving ? '???以?..' : '???}
+                                    {isRowSaving ? '저장 중...' : '저장'}
                                   </button>
                                   <button
                                     type="button"
@@ -3358,12 +3358,12 @@ export default function Settings() {
                                     disabled={isRowSaving}
                                     className="font-medium text-gray-600 hover:text-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
                                   >
-                                    痍⑥냼
+                                    취소
                                   </button>
                                 </div>
                               ) : (
                                 <span className={canReviewPendingMember ? 'hidden text-xs text-gray-400' : 'text-xs text-gray-400'}>
-                                  {canEditRowRole ? '-' : '沅뚰븳 蹂寃?遺덇?'}
+                                  {canEditRowRole ? '-' : '권한 변경 불가'}
                                 </span>
                               )}
                               {canReviewPendingMember && (
@@ -3376,7 +3376,7 @@ export default function Settings() {
                                     disabled={isRowSaving}
                                     className="font-medium text-green-600 hover:text-green-800 disabled:cursor-not-allowed disabled:opacity-50"
                                   >
-                                    {isRowSaving ? '泥섎━ 以?..' : '?뱀씤'}
+                                    {isRowSaving ? '처리 중...' : '승인'}
                                   </button>
                                   <button
                                     type="button"
@@ -3386,7 +3386,7 @@ export default function Settings() {
                                     disabled={isRowSaving}
                                     className="font-medium text-red-600 hover:text-red-800 disabled:cursor-not-allowed disabled:opacity-50"
                                   >
-                                    {isRowSaving ? '泥섎━ 以?..' : '嫄곗젅'}
+                                    {isRowSaving ? '처리 중...' : '거절'}
                                   </button>
                                 </div>
                               )}
@@ -3402,39 +3402,39 @@ export default function Settings() {
                 </div>
 
                 <div className="border-t border-gray-200 bg-gray-50 px-6 py-4">
-                  <h3 className="mb-2 text-sm font-semibold text-gray-700">沅뚰븳 ?ㅻ챸</h3>
+                  <h3 className="mb-2 text-sm font-semibold text-gray-700">권한 설명</h3>
                   <div className="space-y-1 text-sm text-gray-600">
-                    <p><span className="font-medium">愿由ъ옄(admin):</span> 硫ㅻ쾭 沅뚰븳 諛??댁쁺 ?ㅼ젙 蹂寃?媛??/p>
-                    <p><span className="font-medium">?댁쁺??member):</span> ?곗씠??議고쉶/?댁쁺 湲곕뒫 ?ъ슜, ?ㅼ젙 蹂寃??쒗븳</p>
-                    <p><span className="font-medium">?곹깭:</span> approved(?쒖꽦), pending(?뱀씤 ?湲?, rejected(嫄곗젅), withdrawn(?덊눜)</p>
+                    <p><span className="font-medium">관리자(admin):</span> 멤버 권한 및 운영 설정 변경 가능</p>
+                    <p><span className="font-medium">운영자(member):</span> 데이터 조회/운영 기능 사용, 설정 변경 제한</p>
+                    <p><span className="font-medium">상태:</span> approved(활성), pending(승인 대기), rejected(거절), withdrawn(탈퇴)</p>
                   </div>
                 </div>
               </div>
 
               <div className="overflow-hidden rounded-xl bg-white shadow-sm">
                 <div className="border-b border-gray-200 px-6 py-4">
-                  <h2 className="text-base font-semibold text-[#1e2939]">珥덈? ?湲?紐⑸줉</h2>
-                  <p className="mt-1 text-sm text-gray-600">?꾩쭅 媛?낆쓣 ?꾨즺?섏? ?딆? 珥덈?留??쒖떆?⑸땲??</p>
+                  <h2 className="text-base font-semibold text-[#1e2939]">초대 대기 목록</h2>
+                  <p className="mt-1 text-sm text-gray-600">아직 가입을 완료하지 않은 초대만 표시됩니다.</p>
                 </div>
 
                 <div className="overflow-x-auto">
                   <table className="w-full">
                     <thead className="border-b border-gray-200 bg-gray-50">
                       <tr>
-                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">?대찓??/th>
-                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">沅뚰븳</th>
-                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">?곹깭</th>
-                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">珥덈? ?쒓컖</th>
-                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">留뚮즺 ?쒓컖</th>
-                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">?щ컻??/th>
-                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">?≪뀡</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">이메일</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">권한</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">상태</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">초대 시각</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">만료 시각</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">재발송</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">액션</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200">
                       {invitations.length === 0 && (
                         <tr>
                           <td colSpan={7} className="px-6 py-10 text-center text-sm text-gray-500">
-                            ?湲?以묒씤 珥덈?媛 ?놁뒿?덈떎.
+                            대기 중인 초대가 없습니다.
                           </td>
                         </tr>
                       )}
@@ -3458,8 +3458,8 @@ export default function Settings() {
                             {formatUpdatedAt(invitation.expiresAt)}
                           </td>
                           <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-600">
-                            {invitation.resendCount}??
-                            {invitation.resentAt ? ` / 理쒓렐 ${formatUpdatedAt(invitation.resentAt)}` : ''}
+                            {invitation.resendCount}회
+                            {invitation.resentAt ? ` / 최근 ${formatUpdatedAt(invitation.resentAt)}` : ''}
                           </td>
                           <td className="px-6 py-4 text-sm">
                             <button
@@ -3468,7 +3468,7 @@ export default function Settings() {
                               disabled={!canManageMemberRoles || isInvitationSaving || resendingInvitationId === invitation.id}
                               className="font-medium text-blue-600 hover:text-blue-800 disabled:cursor-not-allowed disabled:opacity-50"
                             >
-                              {resendingInvitationId === invitation.id ? '?щ컻??以?..' : '?щ컻??}
+                              {resendingInvitationId === invitation.id ? '재발송 중...' : '재발송'}
                             </button>
                           </td>
                         </tr>
