@@ -29,6 +29,7 @@ import {
   buildPaymentSyncTargets,
   createFallbackVehicleAsset as createReservationFallbackVehicleAsset,
   mergeVehicleRows,
+  resolveReservationVehicleNumber,
 } from './reservationsViewModel';
 import {
   isUnpaidPaymentStatus,
@@ -669,6 +670,7 @@ function toReservationRow(row: unknown, index: number): Reservation | null {
   return {
     id: reservationId,
     vehicleNumber: fallbackVehicleNumber,
+    vin: toStringValue(row.vin) ?? toStringValue(row.chassisNumber) ?? undefined,
     customer,
     startDate: startDateOffset,
     endDate: endDateOffset,
@@ -1306,6 +1308,18 @@ export default function Reservations() {
     paymentScope,
     searchQuery,
   }));
+  const reservationsByVehicle = useMemo(() => {
+    const groupedReservations = new Map<string, Reservation[]>();
+
+    filteredReservations.forEach((reservation) => {
+      const vehicleNumber = resolveReservationVehicleNumber(reservation, vehicleAssets);
+      const existingReservations = groupedReservations.get(vehicleNumber) ?? [];
+      existingReservations.push(reservation);
+      groupedReservations.set(vehicleNumber, existingReservations);
+    });
+
+    return groupedReservations;
+  }, [filteredReservations, vehicleAssets]);
 
   const totalPages = Math.max(1, Math.ceil((totalReservationCount || 0) / pageSize));
   const hasPrevPage = page > 1;
@@ -1327,7 +1341,7 @@ export default function Reservations() {
     
     // 상태 필터에 따른 차량 필터링 (해당 차량의 예약이 필터 조건에 맞는 경우만)
     if (viewFilter !== 'all') {
-      const hasMatchingReservation = filteredReservations.some(res => res.vehicleNumber === vehicleNumber);
+      const hasMatchingReservation = (reservationsByVehicle.get(vehicleNumber)?.length ?? 0) > 0;
       if (!hasMatchingReservation) {
         return false;
       }
@@ -2243,7 +2257,10 @@ export default function Reservations() {
                 </div>
 
                 {/* 차량 행 */}
-                {filteredVehicles.map((vehicle, vIndex) => (
+                {filteredVehicles.map((vehicle, vIndex) => {
+                  const vehicleReservations = reservationsByVehicle.get(vehicle) ?? [];
+
+                  return (
                   <div key={vIndex} className="relative border-b border-gray-200">
                     <div style={{ display: 'grid', gridTemplateColumns: `120px repeat(${totalDaysToShow}, 1fr)` }}>
                       {/* 차량번호 */}
@@ -2260,8 +2277,7 @@ export default function Reservations() {
                           cellDate <= Math.max(dragStart.date, dragEnd.date);
 
                         // 충돌 검증: 이 셀에 기존 예약이 있는지 확인
-                        const hasConflict = filteredReservations.some(res =>
-                          res.vehicleNumber === vehicle &&
+                        const hasConflict = vehicleReservations.some(res =>
                           cellDate >= res.startDate &&
                           cellDate <= res.endDate
                         );
@@ -2289,8 +2305,7 @@ export default function Reservations() {
                                 const endDate = Math.max(dragStart.date, dragEnd.date);
 
                                 // 충돌 검사
-                                const conflicts = filteredReservations.filter(res =>
-                                  res.vehicleNumber === vehicle &&
+                                const conflicts = vehicleReservations.filter(res =>
                                   !(endDate < res.startDate || startDate > res.endDate)
                                 );
 
@@ -2317,8 +2332,7 @@ export default function Reservations() {
 
                     {/* 예약 블록 오버레이 - absolute로 전체 행 위에 배치 */}
                     <div className="absolute inset-0 left-[120px] pointer-events-none">
-                      {filteredReservations
-                        .filter(res => res.vehicleNumber === vehicle)
+                      {vehicleReservations
                         .filter(res => {
                           // 현재 보이는 범위와 겹치는 예약만 표시
                           const viewEnd = currentWeekStart + totalDaysToShow - 1;
@@ -2362,7 +2376,8 @@ export default function Reservations() {
                         })}
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           </PageStateBoundary>

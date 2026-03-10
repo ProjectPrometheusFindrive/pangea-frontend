@@ -20,6 +20,19 @@ function toStringValue(value: unknown): string | null {
   return null;
 }
 
+function normalizeVehicleVin(value: string | null | undefined): string | null {
+  if (!value) {
+    return null;
+  }
+
+  const normalized = value.trim().toUpperCase();
+  if (!normalized || normalized === '-') {
+    return null;
+  }
+
+  return normalized;
+}
+
 function normalizeIssues(issueValue: unknown): string[] {
   if (!Array.isArray(issueValue)) {
     return [];
@@ -143,6 +156,21 @@ export function createFallbackVehicleAsset(reservation: Reservation): VehicleAss
   };
 }
 
+export function resolveReservationVehicleNumber(
+  reservation: Reservation,
+  vehicleAssets: VehicleAsset[],
+): string {
+  const reservationVin = normalizeVehicleVin(reservation.vin);
+  if (reservationVin) {
+    const matchedVehicle = vehicleAssets.find((vehicle) => normalizeVehicleVin(vehicle.vin) === reservationVin);
+    if (matchedVehicle) {
+      return matchedVehicle.vehicleNumber;
+    }
+  }
+
+  return reservation.vehicleNumber;
+}
+
 function overlayReservationOnVehicle(baseAsset: VehicleAsset, reservation: Reservation): VehicleAsset {
   return {
     ...baseAsset,
@@ -165,21 +193,25 @@ export function mergeVehicleRows(assetPayload: unknown, reservationRows: Reserva
   }
 
   for (const reservation of reservationRows) {
-    const currentReservation = dominantReservationByVehicle.get(reservation.vehicleNumber) ?? null;
+    const vehicleNumber = resolveReservationVehicleNumber(reservation, Array.from(vehicleMap.values()));
+    const currentReservation = dominantReservationByVehicle.get(vehicleNumber) ?? null;
     dominantReservationByVehicle.set(
-      reservation.vehicleNumber,
+      vehicleNumber,
       chooseDominantReservation(currentReservation, reservation),
     );
   }
 
-  for (const reservation of dominantReservationByVehicle.values()) {
-    const existingVehicle = vehicleMap.get(reservation.vehicleNumber);
+  for (const [vehicleNumber, reservation] of dominantReservationByVehicle.entries()) {
+    const existingVehicle = vehicleMap.get(vehicleNumber);
     if (existingVehicle) {
-      vehicleMap.set(reservation.vehicleNumber, overlayReservationOnVehicle(existingVehicle, reservation));
+      vehicleMap.set(vehicleNumber, overlayReservationOnVehicle(existingVehicle, reservation));
       continue;
     }
 
-    vehicleMap.set(reservation.vehicleNumber, createFallbackVehicleAsset(reservation));
+    vehicleMap.set(vehicleNumber, {
+      ...createFallbackVehicleAsset(reservation),
+      vehicleNumber,
+    });
   }
 
   return Array.from(vehicleMap.values());
