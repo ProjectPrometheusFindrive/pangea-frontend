@@ -29,6 +29,7 @@ import {
   buildPaymentSyncTargets,
   createFallbackVehicleAsset as createReservationFallbackVehicleAsset,
   mergeVehicleRows,
+  resolveReservationVehicleNumber,
 } from './reservationsViewModel';
 import {
   isUnpaidPaymentStatus,
@@ -42,6 +43,7 @@ import type { VehicleAsset } from '../types/assets';
 import type { Reservation } from '../types/reservations';
 import { ApiError } from '../../services/api';
 import { getAssetsList } from '../../services/assets';
+import { patchPaymentStatus } from '../../services/payments';
 import {
   cancelReservation,
   createReservation,
@@ -320,6 +322,31 @@ function applySyncedPaymentStatusToReservation(
     paymentStatus: nextPaymentStatus,
     issues: nextIssues,
   };
+}
+
+function applyCompletedPaymentToReservation(reservation: Reservation): Reservation {
+  return {
+    ...reservation,
+    paymentStatus: toReservationPaymentStatus('paid'),
+    issues: withoutIssueLabel(reservation.issues, '미납/결제 문제'),
+  };
+}
+
+export function canMarkReservationPaymentAsPaid(
+  reservation: Reservation,
+  paymentSnapshot: PaymentStatusSnapshot | null,
+): boolean {
+  const effectiveStatus = paymentSnapshot?.status === 'not-found'
+    ? toCanonicalPaymentStatus(reservation.paymentStatus)
+    : paymentSnapshot?.status ?? toCanonicalPaymentStatus(reservation.paymentStatus);
+  return effectiveStatus === 'pending' || effectiveStatus === 'unpaid';
+}
+
+export function getReservationPaymentMutationId(
+  reservation: Reservation,
+  paymentSnapshot: PaymentStatusSnapshot | null,
+): string {
+  return paymentSnapshot?.paymentId?.trim() || `AUTO-PAY-${reservation.id}`;
 }
 
 function formatDateAsYmd(date: Date): string {
@@ -669,6 +696,7 @@ function toReservationRow(row: unknown, index: number): Reservation | null {
   return {
     id: reservationId,
     vehicleNumber: fallbackVehicleNumber,
+    vin: toStringValue(row.vin) ?? toStringValue(row.chassisNumber) ?? undefined,
     customer,
     startDate: startDateOffset,
     endDate: endDateOffset,
@@ -834,6 +862,7 @@ export default function Reservations() {
   const { user } = useAuth();
   const { canPerformAction, canAccessRoute } = useAuthorization();
   const canWriteReservations = canPerformAction(ACTION_PERMISSIONS.reservationsWrite);
+  const canWritePayments = canPerformAction(ACTION_PERMISSIONS.paymentsWrite);
   const canTransitionReservations = canWriteReservations
     && ['admin', 'super_admin'].includes((user?.role ?? '').trim().toLowerCase());
   const canViewAssets = canAccessRoute(ROUTE_PERMISSIONS.assets);
@@ -868,6 +897,7 @@ export default function Reservations() {
   const [isDetailNotFound, setIsDetailNotFound] = useState(false);
   const [isReturnSubmitting, setIsReturnSubmitting] = useState(false);
   const [returnSubmitError, setReturnSubmitError] = useState<string | null>(null);
+  const [isPaymentCompleting, setIsPaymentCompleting] = useState(false);
   const [activeReservationAction, setActiveReservationAction] = useState<'start' | 'cancel' | null>(null);
   const [reservationActionError, setReservationActionError] = useState<string | null>(null);
 
@@ -1167,6 +1197,7 @@ export default function Reservations() {
     setShowReturnConfirm(false);
     setIsReturnSubmitting(false);
     setReturnSubmitError(null);
+    setIsPaymentCompleting(false);
     setReservationActionError(null);
     setActiveReservationAction(null);
   }, []);
@@ -1306,6 +1337,18 @@ export default function Reservations() {
     paymentScope,
     searchQuery,
   }));
+  const reservationsByVehicle = useMemo(() => {
+    const groupedReservations = new Map<string, Reservation[]>();
+
+    filteredReservations.forEach((reservation) => {
+      const vehicleNumber = resolveReservationVehicleNumber(reservation, vehicleAssets);
+      const existingReservations = groupedReservations.get(vehicleNumber) ?? [];
+      existingReservations.push(reservation);
+      groupedReservations.set(vehicleNumber, existingReservations);
+    });
+
+    return groupedReservations;
+  }, [filteredReservations, vehicleAssets]);
 
   const totalPages = Math.max(1, Math.ceil((totalReservationCount || 0) / pageSize));
   const hasPrevPage = page > 1;
@@ -1327,7 +1370,7 @@ export default function Reservations() {
     
     // 상태 필터에 따른 차량 필터링 (해당 차량의 예약이 필터 조건에 맞는 경우만)
     if (viewFilter !== 'all') {
-      const hasMatchingReservation = filteredReservations.some(res => res.vehicleNumber === vehicleNumber);
+      const hasMatchingReservation = (reservationsByVehicle.get(vehicleNumber)?.length ?? 0) > 0;
       if (!hasMatchingReservation) {
         return false;
       }
@@ -1403,6 +1446,7 @@ export default function Reservations() {
     setShowReturnConfirm(false);
     setIsReturnSubmitting(false);
     setReturnSubmitError(null);
+    setIsPaymentCompleting(false);
     setReservationActionError(null);
     setActiveReservationAction(null);
     void hydrateReservationDetail(reservation.id, reservation);
@@ -1555,6 +1599,87 @@ export default function Reservations() {
       };
     }
   }, [canWriteReservations, hydrateReservationsData, openReservationDetail, vehicleAssets]);
+
+  const handleCompleteReservationPayment = useCallback(async () => {
+    if (!canWritePayments) {
+      setReservationActionError('결제 완료 처리 권한이 없습니다. 관리자에게 권한을 요청해 주세요.');
+      return;
+    }
+
+    if (!selectedReservation || isPaymentCompleting) {
+      return;
+    }
+
+    if (!canMarkReservationPaymentAsPaid(selectedReservation, selectedReservationPaymentSync)) {
+      return;
+    }
+
+    setIsPaymentCompleting(true);
+    setReservationActionError(null);
+
+    const paymentId = getReservationPaymentMutationId(selectedReservation, selectedReservationPaymentSync);
+
+    try {
+      await patchPaymentStatus(paymentId, {
+        status: 'paid',
+        reservationId: selectedReservation.id,
+      });
+
+      const updatedReservation = applyCompletedPaymentToReservation(selectedReservation);
+      setReservationsData((previousReservations) => previousReservations.map((reservation) => (
+        reservation.id === updatedReservation.id ? updatedReservation : reservation
+      )));
+      setSelectedReservation(updatedReservation);
+
+      refreshReservationsAfterMutation('결제 상태는 변경되었지만 목록을 다시 불러오지 못했습니다. 새로고침 후 확인해 주세요.');
+      void hydrateReservationDetail(updatedReservation.id, updatedReservation);
+      toast.success('결제 상태를 완료로 처리했습니다.');
+    } catch (error) {
+      if (error instanceof ApiError) {
+        if (error.status === 400) {
+          setReservationActionError(error.message || '결제 완료 처리 요청값을 확인해 주세요.');
+          return;
+        }
+        if (error.status === 403) {
+          setReservationActionError('결제 완료 처리 권한이 없습니다. 관리자에게 권한을 요청해 주세요.');
+          return;
+        }
+        if (error.status === 404) {
+          setReservationActionError('결제 정보를 찾을 수 없습니다. 새로고침 후 다시 시도해 주세요.');
+          void hydrateReservationsData();
+          void hydrateReservationDetail(selectedReservation.id, selectedReservation);
+          return;
+        }
+        if (error.status === 409) {
+          setReservationActionError(error.message || '결제 상태가 이미 변경되었습니다. 최신 상태를 다시 확인해 주세요.');
+          void hydrateReservationsData();
+          void hydrateReservationDetail(selectedReservation.id, selectedReservation);
+          return;
+        }
+        if (isRetryableMutationError(error)) {
+          setReservationActionError(RETRY_TOAST_MESSAGE);
+          toast.error(RETRY_TOAST_MESSAGE);
+          return;
+        }
+
+        setReservationActionError(error.message || '결제 완료 처리 중 오류가 발생했습니다.');
+        return;
+      }
+
+      setReservationActionError('결제 완료 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.');
+      toast.error(RETRY_TOAST_MESSAGE);
+    } finally {
+      setIsPaymentCompleting(false);
+    }
+  }, [
+    canWritePayments,
+    hydrateReservationDetail,
+    hydrateReservationsData,
+    isPaymentCompleting,
+    refreshReservationsAfterMutation,
+    selectedReservation,
+    selectedReservationPaymentSync,
+  ]);
 
   const handleStartReservation = useCallback(async () => {
     if (!canTransitionReservations) {
@@ -2243,7 +2368,10 @@ export default function Reservations() {
                 </div>
 
                 {/* 차량 행 */}
-                {filteredVehicles.map((vehicle, vIndex) => (
+                {filteredVehicles.map((vehicle, vIndex) => {
+                  const vehicleReservations = reservationsByVehicle.get(vehicle) ?? [];
+
+                  return (
                   <div key={vIndex} className="relative border-b border-gray-200">
                     <div style={{ display: 'grid', gridTemplateColumns: `120px repeat(${totalDaysToShow}, 1fr)` }}>
                       {/* 차량번호 */}
@@ -2260,8 +2388,7 @@ export default function Reservations() {
                           cellDate <= Math.max(dragStart.date, dragEnd.date);
 
                         // 충돌 검증: 이 셀에 기존 예약이 있는지 확인
-                        const hasConflict = filteredReservations.some(res =>
-                          res.vehicleNumber === vehicle &&
+                        const hasConflict = vehicleReservations.some(res =>
                           cellDate >= res.startDate &&
                           cellDate <= res.endDate
                         );
@@ -2289,8 +2416,7 @@ export default function Reservations() {
                                 const endDate = Math.max(dragStart.date, dragEnd.date);
 
                                 // 충돌 검사
-                                const conflicts = filteredReservations.filter(res =>
-                                  res.vehicleNumber === vehicle &&
+                                const conflicts = vehicleReservations.filter(res =>
                                   !(endDate < res.startDate || startDate > res.endDate)
                                 );
 
@@ -2317,8 +2443,7 @@ export default function Reservations() {
 
                     {/* 예약 블록 오버레이 - absolute로 전체 행 위에 배치 */}
                     <div className="absolute inset-0 left-[120px] pointer-events-none">
-                      {filteredReservations
-                        .filter(res => res.vehicleNumber === vehicle)
+                      {vehicleReservations
                         .filter(res => {
                           // 현재 보이는 범위와 겹치는 예약만 표시
                           const viewEnd = currentWeekStart + totalDaysToShow - 1;
@@ -2362,7 +2487,8 @@ export default function Reservations() {
                         })}
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           </PageStateBoundary>
@@ -2574,6 +2700,19 @@ export default function Reservations() {
                         <p className="text-xs text-gray-500 mt-2">
                           최근 반영: {new Date(selectedReservationPaymentSync.updatedAt).toLocaleString('ko-KR')}
                         </p>
+                      )}
+                      {canWritePayments && canMarkReservationPaymentAsPaid(selectedReservation, selectedReservationPaymentSync) && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            void handleCompleteReservationPayment();
+                          }}
+                          data-testid="reservation-payment-complete-button"
+                          disabled={isPaymentCompleting}
+                          className="mt-3 inline-flex items-center rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {isPaymentCompleting ? '처리 중...' : '결제 완료 처리'}
+                        </button>
                       )}
                     </div>
                   </div>

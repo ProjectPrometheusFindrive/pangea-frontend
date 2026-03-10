@@ -1,3 +1,4 @@
+import { uploadFileToSignedUrl } from './assetOcr';
 import { ApiError, apiClient } from './api';
 
 export interface SupportRequestOptions {
@@ -50,6 +51,7 @@ export interface CreateSupportTicketAttachmentPayload {
   fileName: string;
   sizeBytes: number;
   contentType?: string;
+  url?: string;
 }
 
 export interface CreateSupportTicketPayload {
@@ -78,6 +80,13 @@ export interface SupportTicketDetailOptions extends SupportRequestOptions {
 export interface UpdateSupportTicketStatusPayload {
   status: SupportTicketStatus;
   note?: string;
+}
+
+interface SupportAttachmentUploadResponse {
+  uploadUrl: string;
+  objectName: string;
+  publicUrl?: string;
+  contentType?: string;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -426,6 +435,48 @@ export async function getSupportCategories(options: SupportRequestOptions = {}):
 
     throw error;
   }
+}
+
+export async function uploadSupportTicketAttachment(
+  file: File,
+  companyId: string,
+  options: SupportRequestOptions = {},
+): Promise<CreateSupportTicketAttachmentPayload> {
+  const normalizedCompanyId = companyId.trim();
+  if (!normalizedCompanyId) {
+    throw new ApiError('VALIDATION_ERROR', 'companyId is required for support attachment upload', { status: 400 });
+  }
+
+  const uploadPayload = await apiClient.requestData<SupportAttachmentUploadResponse>({
+    path: '/api/v2/uploads/sign',
+    method: 'POST',
+    body: {
+      fileName: file.name,
+      fileSize: file.size,
+      contentType: file.type || undefined,
+      folder: `company/${normalizedCompanyId}/docs`,
+    },
+    signal: options.signal,
+  });
+
+  if (!isRecord(uploadPayload) || typeof uploadPayload.uploadUrl !== 'string' || typeof uploadPayload.objectName !== 'string') {
+    throw new ApiError('API_ERROR', 'Unexpected support attachment upload response payload');
+  }
+
+  const contentType = (toStringValue(uploadPayload.contentType) ?? file.type) || undefined;
+  await uploadFileToSignedUrl(
+    uploadPayload.uploadUrl,
+    file,
+    contentType ?? 'application/octet-stream',
+    options,
+  );
+
+  return {
+    fileName: file.name,
+    sizeBytes: file.size,
+    contentType,
+    url: toStringValue(uploadPayload.publicUrl) ?? undefined,
+  };
 }
 
 export async function createSupportTicket(payload: CreateSupportTicketPayload): Promise<SupportTicket> {

@@ -577,6 +577,71 @@ export default function Revenue() {
 
   return (
     <Layout title="매출 요약">
+      <div className="m-4 mb-0 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-white p-4 shadow-sm">
+        <div className="flex flex-wrap items-center gap-2">
+          {isSuperAdmin && (
+            <>
+              <span className="text-sm font-semibold text-gray-600">회사 범위</span>
+              <select
+                value={selectedCompanyId ?? ''}
+                onChange={(event) => {
+                  updateRevenueSearchParams({ companyId: event.target.value || null });
+                }}
+                disabled={isRefreshing || isCompanyOptionsLoading || companyOptionsError !== null}
+                className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 disabled:bg-gray-100 disabled:text-gray-400"
+              >
+                <option value="">전체 회사</option>
+                {companyOptions.map((option) => (
+                  <option key={option.companyId} value={option.companyId}>
+                    {option.name}
+                  </option>
+                ))}
+              </select>
+            </>
+          )}
+          <span className="text-sm font-semibold text-gray-600">조회 기간</span>
+          {PERIOD_OPTIONS.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              onClick={() => updateRevenueSearchParams({ preset: option.value })}
+              className={`rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+                selectedPreset === option.value
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              }`}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-sm font-semibold text-gray-600">집계 단위</span>
+          {GRANULARITY_OPTIONS.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              onClick={() => updateRevenueSearchParams({ granularity: option.value })}
+              className={`rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+                selectedGranularity === option.value
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              }`}
+            >
+              {option.label}
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={handleRetry}
+            className="inline-flex items-center gap-1 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-100"
+          >
+            <RotateCcw className="h-4 w-4" />
+            재조회
+          </button>
+        </div>
+      </div>
       <PageStateBoundary
         isLoading={isLoading}
         error={blockingError}
@@ -592,72 +657,6 @@ export default function Revenue() {
         className="m-4 min-h-[320px]"
       >
         <div className="h-full space-y-4 overflow-auto p-4">
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-white p-4 shadow-sm">
-            <div className="flex flex-wrap items-center gap-2">
-              {isSuperAdmin && (
-                <>
-                  <span className="text-sm font-semibold text-gray-600">회사 범위</span>
-                  <select
-                    value={selectedCompanyId ?? ''}
-                    onChange={(event) => {
-                      updateRevenueSearchParams({ companyId: event.target.value || null });
-                    }}
-                    disabled={isRefreshing || isCompanyOptionsLoading || companyOptionsError !== null}
-                    className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 disabled:bg-gray-100 disabled:text-gray-400"
-                  >
-                    <option value="">전체 회사</option>
-                    {companyOptions.map((option) => (
-                      <option key={option.companyId} value={option.companyId}>
-                        {option.name}
-                      </option>
-                    ))}
-                  </select>
-                </>
-              )}
-              <span className="text-sm font-semibold text-gray-600">조회 기간</span>
-              {PERIOD_OPTIONS.map((option) => (
-                <button
-                  key={option.value}
-                  type="button"
-                  onClick={() => updateRevenueSearchParams({ preset: option.value })}
-                  className={`rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
-                    selectedPreset === option.value
-                      ? 'bg-blue-600 text-white'
-                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                  }`}
-                >
-                  {option.label}
-                </button>
-              ))}
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-sm font-semibold text-gray-600">집계 단위</span>
-              {GRANULARITY_OPTIONS.map((option) => (
-                <button
-                  key={option.value}
-                  type="button"
-                  onClick={() => updateRevenueSearchParams({ granularity: option.value })}
-                  className={`rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
-                    selectedGranularity === option.value
-                      ? 'bg-blue-600 text-white'
-                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                  }`}
-                >
-                  {option.label}
-                </button>
-              ))}
-              <button
-                type="button"
-                onClick={handleRetry}
-                className="inline-flex items-center gap-1 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-100"
-              >
-                <RotateCcw className="h-4 w-4" />
-                재조회
-              </button>
-            </div>
-          </div>
-
           {companyOptionsError && (
             <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
               {companyOptionsError}

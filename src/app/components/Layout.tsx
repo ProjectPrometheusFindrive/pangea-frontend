@@ -7,6 +7,7 @@ import {
   getNotificationSummary,
   markNotificationAsRead,
   markAllNotificationsAsRead,
+  NOTIFICATION_STATE_UPDATED_EVENT,
   type NotificationItem,
 } from '../../services/notifications';
 import { NOTIFICATIONS_ROUTE } from '../../services/notificationNavigation.js';
@@ -176,7 +177,7 @@ export function Layout({ children, title }: LayoutProps) {
     setNotificationsError(null);
 
     const [listResult, summaryResult] = await Promise.allSettled([
-      getNotifications({ limit: 30, signal }),
+      getNotifications({ page: 1, pageSize: 30, signal }),
       getNotificationSummary({ signal }),
     ]);
 
@@ -219,8 +220,21 @@ export function Layout({ children, title }: LayoutProps) {
   useEffect(() => {
     if (!canUseNotifications) {
       setShowNotifications(false);
+      return undefined;
     }
-  }, [canUseNotifications]);
+    if (typeof window === 'undefined') {
+      return undefined;
+    }
+
+    const handleNotificationStateUpdated = () => {
+      void loadNotificationState();
+    };
+
+    window.addEventListener(NOTIFICATION_STATE_UPDATED_EVENT, handleNotificationStateUpdated);
+    return () => {
+      window.removeEventListener(NOTIFICATION_STATE_UPDATED_EVENT, handleNotificationStateUpdated);
+    };
+  }, [canUseNotifications, loadNotificationState]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
