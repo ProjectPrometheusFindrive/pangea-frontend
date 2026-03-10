@@ -36,6 +36,7 @@ export interface HomeRecentChange {
 
 export interface HomeSummaryResponse {
   tenantId: string;
+  companyId?: string | null;
   from: string;
   to: string;
   kpis: HomeSummaryKpis;
@@ -47,7 +48,7 @@ export interface HomeSummaryResponse {
 export interface HomeSummaryRequestParams {
   from: string;
   to: string;
-  tenantId: string;
+  companyId?: string;
   signal?: AbortSignal;
 }
 
@@ -185,13 +186,15 @@ function normalizeToday(value: unknown): HomeSummaryToday {
 
 function normalizeHomeSummary(
   payload: unknown,
-  defaults: { from: string; to: string; tenantId: string },
+  defaults: { from: string; to: string; companyId?: string | null },
 ): HomeSummaryResponse {
   const source = isRecord(payload) ? payload : {};
   const recentChangesRaw = Array.isArray(source.recentChanges) ? source.recentChanges : [];
+  const companyId = toText(source.companyId, defaults.companyId ?? '');
 
   return {
-    tenantId: toText(source.tenantId, defaults.tenantId),
+    tenantId: toText(source.tenantId, defaults.companyId ?? ''),
+    companyId: companyId || null,
     from: toText(source.from, defaults.from),
     to: toText(source.to, defaults.to),
     kpis: normalizeKpis(source.kpis),
@@ -206,7 +209,7 @@ function normalizeHomeSummary(
 export async function getHomeSummary({
   from,
   to,
-  tenantId,
+  companyId,
   signal,
 }: HomeSummaryRequestParams): Promise<HomeSummaryResponse> {
   const payload = await apiClient.requestData<unknown>({
@@ -215,7 +218,7 @@ export async function getHomeSummary({
     query: {
       from,
       to,
-      tenantId,
+      companyId,
     },
     signal,
   });
@@ -223,6 +226,6 @@ export async function getHomeSummary({
   return normalizeHomeSummary(payload, {
     from,
     to,
-    tenantId,
+    companyId,
   });
 }
