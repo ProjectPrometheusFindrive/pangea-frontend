@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 
 import { consumeStoredReturnUrl, useAuth } from '../context/AuthContext';
 import { ApiError } from '../../services/api';
+import { resolveDefaultLandingPath } from '../../services/auth';
 
 interface LoginUiError {
   message: string;
@@ -104,6 +105,7 @@ export default function Login() {
     login,
     error: authError,
     isLoading,
+    viewRole,
   } = useAuth();
 
   const returnUrl = useMemo(
@@ -119,6 +121,18 @@ export default function Login() {
 
   const isBusy = isSubmitting || isLoading;
   const errorMessage = uiError?.message ?? authError;
+  const defaultLandingPath = resolveDefaultLandingPath(viewRole);
+  const resolvedAuthenticatedPath = returnUrl !== '/' ? returnUrl : defaultLandingPath;
+
+  const resolvePostLoginPath = (storedReturnUrl: string | null) => {
+    if (returnUrl !== '/') {
+      return returnUrl;
+    }
+    if (storedReturnUrl && storedReturnUrl !== '/') {
+      return storedReturnUrl;
+    }
+    return defaultLandingPath;
+  };
 
   useEffect(() => {
     const reason = searchParams.get('reason');
@@ -150,7 +164,7 @@ export default function Login() {
   }
 
   if (isAuthenticated) {
-    return <Navigate to={returnUrl} replace />;
+    return <Navigate to={resolvedAuthenticatedPath} replace />;
   }
 
   const handleLogin = async (event: FormEvent<HTMLFormElement>) => {
@@ -173,7 +187,7 @@ export default function Login() {
     try {
       await login(payload);
       const storedReturnUrl = consumeStoredReturnUrl();
-      const targetPath = returnUrl !== '/' ? returnUrl : storedReturnUrl ?? '/';
+      const targetPath = resolvePostLoginPath(storedReturnUrl);
       navigate(targetPath, { replace: true });
     } catch (error) {
       setUiError(toLoginUiError(error));
@@ -193,7 +207,7 @@ export default function Login() {
     try {
       await login(lastPayload);
       const storedReturnUrl = consumeStoredReturnUrl();
-      const targetPath = returnUrl !== '/' ? returnUrl : storedReturnUrl ?? '/';
+      const targetPath = resolvePostLoginPath(storedReturnUrl);
       navigate(targetPath, { replace: true });
     } catch (error) {
       setUiError(toLoginUiError(error));
