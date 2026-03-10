@@ -98,7 +98,7 @@ test.describe('BK-091 Premium Installation E2E', () => {
 
     await expect(page.getByTestId('device-installation-submit')).toContainText('장착 신청');
     await expect(page.getByTestId('device-installation-action-message')).toContainText('장착 신청이 등록되었습니다. 상태가 대기로 반영됩니다.');
-    await expect(page.getByText('KMH12A34560000001')).toBeVisible();
+    await expect(page.getByRole('table').getByText('KMH12A34560000001')).toBeVisible();
   });
 
   test('장착 신청 403 오류 시 권한 안내를 표시한다', async ({ page }) => {
