@@ -478,6 +478,8 @@ function getRoleBadgeColor(role: string): string {
       return 'bg-purple-100 text-purple-700';
     case 'member':
       return 'bg-blue-100 text-blue-700';
+    case 'installer':
+      return 'bg-amber-100 text-amber-700';
     default:
       return 'bg-gray-100 text-gray-700';
   }
@@ -490,7 +492,30 @@ function toRoleLabel(role: string): string {
   if (role === 'member') {
     return '운영자';
   }
+  if (role === 'installer') {
+    return '설치 기사';
+  }
   return role || '미지정';
+}
+
+function canReviewPendingMemberStatus(
+  member: Pick<SettingsMember, 'role' | 'status'>,
+  actorRole: string | null | undefined,
+  canManageMemberRoles: boolean,
+): boolean {
+  if (!canManageMemberRoles) {
+    return false;
+  }
+
+  if (member.status === 'pending') {
+    if (member.role === 'installer') {
+      return actorRole === 'super_admin';
+    }
+
+    return true;
+  }
+
+  return false;
 }
 
 function toMemberStatusLabel(status: string): string {
@@ -3298,7 +3323,7 @@ export default function Settings() {
                           && member.status === 'approved'
                           && (member.role === 'admin' || member.role === 'member')
                         );
-                        const canReviewPendingMember = canManageMemberRoles && member.status === 'pending';
+                        const canReviewPendingMember = canReviewPendingMemberStatus(member, user?.role, canManageMemberRoles);
 
                         return (
                           <tr key={member.userId} className="hover:bg-gray-50">
