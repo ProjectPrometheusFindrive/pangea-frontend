@@ -19,6 +19,7 @@ export interface InvitationTokenClaims {
   email?: string;
   role?: string;
   companyId?: string;
+  companyName?: string;
 }
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -87,11 +88,14 @@ export function validateInvitationAwareSignUpForm(
   values: InvitationAwareSignUpFormValues,
   options: {
     invitationEmail?: string | null;
+    invitationRole?: string | null;
   } = {},
 ): InvitationAwareSignUpErrors {
   const errors: InvitationAwareSignUpErrors = {};
   const invitationEmail = normalizeEmail(options.invitationEmail || '');
+  const invitationRole = (options.invitationRole || '').trim().toLowerCase();
   const isInvitationMode = Boolean(invitationEmail);
+  const isInstallerInvitation = invitationRole === 'installer';
 
   const userId = normalizeEmail(values.userId);
   if (!isInvitationMode) {
@@ -131,7 +135,7 @@ export function validateInvitationAwareSignUpForm(
     }
   }
 
-  if (!values.position) {
+  if (!values.position && !isInstallerInvitation) {
     errors.position = '직위를 선택해 주세요.';
   }
 
@@ -152,6 +156,6 @@ export function buildInvitationAcceptPayload(values: InvitationAwareSignUpFormVa
     password: values.password,
     name: values.name.trim(),
     phone: values.phone,
-    position: values.position,
+    position: values.position.trim() || undefined,
   };
 }
