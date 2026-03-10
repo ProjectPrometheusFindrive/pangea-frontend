@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router';
+import { useNavigate, useSearchParams } from 'react-router';
 import { AlertCircle, ArrowDown, ArrowUp, DollarSign, RefreshCw, RotateCcw, TrendingUp } from 'lucide-react';
 import { Bar, BarChart, CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 
@@ -12,8 +12,10 @@ import {
   type RevenueSummaryResponse,
   type RevenueTrendResponse,
 } from '../../services/revenue';
+import { listSettingsCompanies } from '../../services/settings';
 import { Layout } from '../components/Layout';
 import { PageStateBoundary } from '../components/PageStateBoundary';
+import { useAuth } from '../context/AuthContext';
 import {
   getPageErrorActionLabel,
   handlePageErrorAction,
@@ -22,12 +24,19 @@ import {
 import {
   settleRevenueHydration,
 } from './revenueViewModel';
+import {
+  normalizeDashboardCompanyOptions,
+  resolveDashboardCompanyScope,
+  shouldShowDashboardCompanySelector,
+  updateDashboardSearchParams,
+} from './dashboardCompanyScope';
 
 type PeriodPreset = 'last7Days' | 'last30Days' | 'last365Days';
 
 interface RevenueFilters {
   preset: PeriodPreset;
   granularity: RevenueGranularity;
+  companyId: string | null;
 }
 
 interface RevenueSnapshot {
@@ -53,6 +62,21 @@ const PERIOD_DAYS_BY_PRESET: Record<PeriodPreset, number> = {
   last30Days: 30,
   last365Days: 365,
 };
+
+const DEFAULT_REVENUE_PRESET: PeriodPreset = 'last30Days';
+const DEFAULT_REVENUE_GRANULARITY: RevenueGranularity = 'week';
+
+function normalizeRevenuePreset(value: string | null): PeriodPreset {
+  return PERIOD_OPTIONS.some((option) => option.value === value)
+    ? value as PeriodPreset
+    : DEFAULT_REVENUE_PRESET;
+}
+
+function normalizeRevenueGranularity(value: string | null): RevenueGranularity {
+  return GRANULARITY_OPTIONS.some((option) => option.value === value)
+    ? value as RevenueGranularity
+    : DEFAULT_REVENUE_GRANULARITY;
+}
 
 const GRANULARITY_OPTIONS: Array<{ value: RevenueGranularity; label: string }> = [
   { value: 'day', label: '일별' },
@@ -220,9 +244,12 @@ function toTrendErrorMessage(displayTrendError: unknown | null): string | null {
 }
 
 export default function Revenue() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
-  const [selectedPreset, setSelectedPreset] = useState<PeriodPreset>('last30Days');
-  const [selectedGranularity, setSelectedGranularity] = useState<RevenueGranularity>('week');
+  const { user } = useAuth();
+  const [companyOptions, setCompanyOptions] = useState<Array<{ companyId: string; name: string }>>([]);
+  const [isCompanyOptionsLoading, setIsCompanyOptionsLoading] = useState(false);
+  const [companyOptionsError, setCompanyOptionsError] = useState<string | null>(null);
 
   const [snapshot, setSnapshot] = useState<RevenueSnapshot | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -240,10 +267,109 @@ export default function Revenue() {
   const snapshotRef = useRef<RevenueSnapshot | null>(null);
   const skipNextAutoHydrateRef = useRef(false);
 
+  const selectedPreset = useMemo(
+    () => normalizeRevenuePreset(searchParams.get('preset')),
+    [searchParams],
+  );
+  const selectedGranularity = useMemo(
+    () => normalizeRevenueGranularity(searchParams.get('granularity')),
+    [searchParams],
+  );
+  const selectedCompanyId = useMemo(
+    () => resolveDashboardCompanyScope(searchParams.get('companyId'), user?.companyId, user?.role),
+    [searchParams, user?.companyId, user?.role],
+  );
+  const isSuperAdmin = shouldShowDashboardCompanySelector(user?.role);
+  const effectiveCompanyId = isSuperAdmin && companyOptionsError ? null : selectedCompanyId;
+
+  const updateRevenueSearchParams = useCallback((
+    updates: {
+      preset?: string | null;
+      granularity?: string | null;
+      companyId?: string | null;
+    },
+    replace = false,
+  ) => {
+    const nextParams = updateDashboardSearchParams(searchParams, updates);
+    setSearchParams(nextParams, { replace });
+  }, [searchParams, setSearchParams]);
+
   useEffect(() => () => {
     mountedRef.current = false;
     controllerRef.current?.abort();
   }, []);
+
+  useEffect(() => {
+    const nextParams = updateDashboardSearchParams(searchParams, {
+      preset: selectedPreset,
+      granularity: selectedGranularity,
+      companyId: selectedCompanyId,
+    });
+    if (!nextParams.get('preset')) {
+      nextParams.set('preset', selectedPreset);
+    }
+    if (!nextParams.get('granularity')) {
+      nextParams.set('granularity', selectedGranularity);
+    }
+
+    if (nextParams.toString() === searchParams.toString()) {
+      return;
+    }
+
+    setSearchParams(nextParams, { replace: true });
+  }, [searchParams, selectedCompanyId, selectedGranularity, selectedPreset, setSearchParams]);
+
+  useEffect(() => {
+    if (!isSuperAdmin) {
+      setCompanyOptions([]);
+      setCompanyOptionsError(null);
+      setIsCompanyOptionsLoading(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    setIsCompanyOptionsLoading(true);
+    setCompanyOptionsError(null);
+
+    listSettingsCompanies({ signal: controller.signal })
+      .then((items) => {
+        if (controller.signal.aborted) {
+          return;
+        }
+
+        const normalizedOptions = normalizeDashboardCompanyOptions(items);
+        setCompanyOptions(normalizedOptions);
+
+        if (selectedCompanyId && !normalizedOptions.some((item) => item.companyId === selectedCompanyId)) {
+          updateRevenueSearchParams({ companyId: null }, true);
+        }
+      })
+      .catch((error) => {
+        if (controller.signal.aborted) {
+          return;
+        }
+
+        setCompanyOptions([]);
+        setCompanyOptionsError(
+          error instanceof Error && error.message
+            ? error.message
+            : '회사 목록을 불러오지 못해 전체 회사 기준으로 표시합니다.',
+        );
+
+        if (selectedCompanyId !== null) {
+          updateRevenueSearchParams({ companyId: null }, true);
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          setIsCompanyOptionsLoading(false);
+        }
+      });
+
+    return () => {
+      controller.abort();
+    };
+  }, [isSuperAdmin, selectedCompanyId, updateRevenueSearchParams]);
 
   const hydrateRevenue = useCallback(async (filters: RevenueFilters) => {
     const requestSequence = requestSequenceRef.current + 1;
@@ -276,11 +402,13 @@ export default function Revenue() {
           from,
           to,
           granularity: filters.granularity,
+          companyId: filters.companyId ?? undefined,
           signal: controller.signal,
         }),
         trendPromise: getRevenueTrend({
           from,
           to,
+          companyId: filters.companyId ?? undefined,
           signal: controller.signal,
         }),
         hasPreviousSnapshot: hasSnapshot,
@@ -306,10 +434,14 @@ export default function Revenue() {
           if (
             previousSnapshot.filters.preset !== filters.preset
             || previousSnapshot.filters.granularity !== filters.granularity
+            || previousSnapshot.filters.companyId !== filters.companyId
           ) {
             skipNextAutoHydrateRef.current = true;
-            setSelectedPreset(previousSnapshot.filters.preset);
-            setSelectedGranularity(previousSnapshot.filters.granularity);
+            updateRevenueSearchParams({
+              preset: previousSnapshot.filters.preset,
+              granularity: previousSnapshot.filters.granularity,
+              companyId: previousSnapshot.filters.companyId,
+            }, true);
           }
           setTrendError(previousSnapshot.trendErrorMessage);
         } else {
@@ -351,10 +483,14 @@ export default function Revenue() {
         if (
           previousSnapshot.filters.preset !== filters.preset
           || previousSnapshot.filters.granularity !== filters.granularity
+          || previousSnapshot.filters.companyId !== filters.companyId
         ) {
           skipNextAutoHydrateRef.current = true;
-          setSelectedPreset(previousSnapshot.filters.preset);
-          setSelectedGranularity(previousSnapshot.filters.granularity);
+          updateRevenueSearchParams({
+            preset: previousSnapshot.filters.preset,
+            granularity: previousSnapshot.filters.granularity,
+            companyId: previousSnapshot.filters.companyId,
+          }, true);
         }
         setTrendError(previousSnapshot.trendErrorMessage);
       } else {
@@ -371,7 +507,7 @@ export default function Revenue() {
       setIsLoading(false);
       setIsRefreshing(false);
     }
-  }, []);
+  }, [updateRevenueSearchParams]);
 
   useEffect(() => {
     if (skipNextAutoHydrateRef.current) {
@@ -382,15 +518,17 @@ export default function Revenue() {
     void hydrateRevenue({
       preset: selectedPreset,
       granularity: selectedGranularity,
+      companyId: effectiveCompanyId,
     });
-  }, [hydrateRevenue, selectedGranularity, selectedPreset]);
+  }, [effectiveCompanyId, hydrateRevenue, selectedGranularity, selectedPreset]);
 
   const handleRetry = useCallback(() => {
     void hydrateRevenue({
       preset: selectedPreset,
       granularity: selectedGranularity,
+      companyId: effectiveCompanyId,
     });
-  }, [hydrateRevenue, selectedGranularity, selectedPreset]);
+  }, [effectiveCompanyId, hydrateRevenue, selectedGranularity, selectedPreset]);
 
   const handleBlockingErrorAction = useCallback(() => {
     handlePageErrorAction(blockingErrorKind, navigate);
@@ -456,12 +594,32 @@ export default function Revenue() {
         <div className="h-full space-y-4 overflow-auto p-4">
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-white p-4 shadow-sm">
             <div className="flex flex-wrap items-center gap-2">
+              {isSuperAdmin && (
+                <>
+                  <span className="text-sm font-semibold text-gray-600">회사 범위</span>
+                  <select
+                    value={selectedCompanyId ?? ''}
+                    onChange={(event) => {
+                      updateRevenueSearchParams({ companyId: event.target.value || null });
+                    }}
+                    disabled={isRefreshing || isCompanyOptionsLoading || companyOptionsError !== null}
+                    className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 disabled:bg-gray-100 disabled:text-gray-400"
+                  >
+                    <option value="">전체 회사</option>
+                    {companyOptions.map((option) => (
+                      <option key={option.companyId} value={option.companyId}>
+                        {option.name}
+                      </option>
+                    ))}
+                  </select>
+                </>
+              )}
               <span className="text-sm font-semibold text-gray-600">조회 기간</span>
               {PERIOD_OPTIONS.map((option) => (
                 <button
                   key={option.value}
                   type="button"
-                  onClick={() => setSelectedPreset(option.value)}
+                  onClick={() => updateRevenueSearchParams({ preset: option.value })}
                   className={`rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
                     selectedPreset === option.value
                       ? 'bg-blue-600 text-white'
@@ -479,7 +637,7 @@ export default function Revenue() {
                 <button
                   key={option.value}
                   type="button"
-                  onClick={() => setSelectedGranularity(option.value)}
+                  onClick={() => updateRevenueSearchParams({ granularity: option.value })}
                   className={`rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
                     selectedGranularity === option.value
                       ? 'bg-blue-600 text-white'
@@ -499,6 +657,12 @@ export default function Revenue() {
               </button>
             </div>
           </div>
+
+          {companyOptionsError && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+              {companyOptionsError}
+            </div>
+          )}
 
           {snapshot && (
             <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-gray-500">

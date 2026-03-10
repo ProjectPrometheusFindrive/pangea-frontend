@@ -21,6 +21,11 @@ export interface SettingsCompanyProfile {
   schemaVersion?: string | null;
 }
 
+export interface SettingsCompanyOption {
+  companyId: string;
+  name: string;
+}
+
 export interface SettingsCompanyUpdateRequest {
   name?: string;
   businessNumber?: string;
