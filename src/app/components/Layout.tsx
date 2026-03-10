@@ -120,7 +120,7 @@ function getNotificationIcon(notification: NotificationItem): LucideIcon {
 export function Layout({ children, title }: LayoutProps) {
   const location = useLocation();
   const navigate = useNavigate();
-  const { logout, user } = useAuth();
+  const { logout, user, viewRole } = useAuth();
   const { canAccessRoute } = useAuthorization();
   const { company, isLoading: isCompanyLoading, isUpdating: isCompanyUpdating, error: companyError, updateCompany } = useCompany();
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
@@ -142,6 +142,7 @@ export function Layout({ children, title }: LayoutProps) {
   const [isNotificationsLoading, setIsNotificationsLoading] = useState(false);
   const [notificationsError, setNotificationsError] = useState<string | null>(null);
   const [isNotificationActionPending, setIsNotificationActionPending] = useState(false);
+  const canUseNotifications = viewRole !== 'device-installer';
 
   const notificationRef = useRef<HTMLDivElement>(null);
   const accountMenuRef = useRef<HTMLDivElement>(null);
@@ -164,6 +165,14 @@ export function Layout({ children, title }: LayoutProps) {
   const accountNameInitial = accountName.charAt(0) || '?';
 
   const loadNotificationState = useCallback(async (signal?: AbortSignal) => {
+    if (!canUseNotifications) {
+      setNotifications([]);
+      setUnreadCount(0);
+      setNotificationsError(null);
+      setIsNotificationsLoading(false);
+      return;
+    }
+
     setIsNotificationsLoading(true);
     setNotificationsError(null);
 
@@ -197,7 +206,7 @@ export function Layout({ children, title }: LayoutProps) {
     }
 
     setIsNotificationsLoading(false);
-  }, []);
+  }, [canUseNotifications]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -209,6 +218,10 @@ export function Layout({ children, title }: LayoutProps) {
   }, [loadNotificationState]);
 
   useEffect(() => {
+    if (!canUseNotifications) {
+      setShowNotifications(false);
+      return undefined;
+    }
     if (typeof window === 'undefined') {
       return undefined;
     }
@@ -221,7 +234,7 @@ export function Layout({ children, title }: LayoutProps) {
     return () => {
       window.removeEventListener(NOTIFICATION_STATE_UPDATED_EVENT, handleNotificationStateUpdated);
     };
-  }, [loadNotificationState]);
+  }, [canUseNotifications, loadNotificationState]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -464,7 +477,8 @@ export function Layout({ children, title }: LayoutProps) {
           {!title && <div />}
           <div className="flex items-center gap-4">
             {/* 알림 버튼 */}
-            <div className="relative" ref={notificationRef}>
+            {canUseNotifications && (
+              <div className="relative" ref={notificationRef}>
               <button 
                 onClick={() => setShowNotifications(!showNotifications)}
                 className="relative p-2 hover:bg-gray-100 rounded-lg transition-colors"
@@ -595,7 +609,8 @@ export function Layout({ children, title }: LayoutProps) {
                   )}
                 </div>
               )}
-            </div>
+              </div>
+            )}
 
             {/* 계정 메뉴 */}
             <div className="relative" ref={accountMenuRef}>

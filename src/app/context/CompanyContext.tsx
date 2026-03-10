@@ -87,7 +87,12 @@ function toErrorMessage(error: unknown, fallbackMessage: string): string {
 }
 
 export function CompanyProvider({ children }: { children: ReactNode }) {
-  const { status: authStatus, isBootstrapping: isAuthBootstrapping, isAuthenticated } = useAuth();
+  const {
+    status: authStatus,
+    isBootstrapping: isAuthBootstrapping,
+    isAuthenticated,
+    viewRole,
+  } = useAuth();
   const [company, setCompany] = useState<Company | null>(() => readCachedCompany());
   const [isLoading, setIsLoading] = useState(true);
   const [isUpdating, setIsUpdating] = useState(false);
@@ -140,8 +145,16 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
       return;
     }
 
+    if (viewRole === 'device-installer') {
+      setCompany(null);
+      setError(null);
+      setIsLoading(false);
+      clearCachedCompany();
+      return;
+    }
+
     void refreshCompany();
-  }, [authStatus, isAuthBootstrapping, isAuthenticated, refreshCompany]);
+  }, [authStatus, isAuthBootstrapping, isAuthenticated, refreshCompany, viewRole]);
 
   const contextValue = useMemo<CompanyContextType>(() => ({
     company,
