@@ -40,4 +40,7 @@ test('Assets keyword filter input has a dedicated label and stable form attribut
   assert.match(source, /id="assets-search-query"/u);
   assert.match(source, /name="queryKeyword"/u);
   assert.match(source, /aria-label="자산 검색"/u);
+  assert.match(source, /htmlFor="assets-model-filter"/u);
+  assert.match(source, /id="assets-model-filter"/u);
+  assert.match(source, /name="modelFilter"/u);
 });
