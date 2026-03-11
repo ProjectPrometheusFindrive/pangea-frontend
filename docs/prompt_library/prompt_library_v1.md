@@ -1,6 +1,6 @@
 # Prompt Library v1
 
-- Version: v1.2.57
+- Version: v1.2.58
 - Date: 2026-03-11
 - Owner: Pangea Frontend Team
 - Tags: prompt-library,workflow,branch-policy,history-policy,commit-policy,pr-automation,jira-traceability,end-prompt-protocol,worktree-cleanup,jira-status-sync,jira-comment-sync,ac-evidence,mock-removal,reservations-write,reservations-mock-removal,ocr-flow,revenue-api,revenue-trend-fallback,settings-api,payment-status-sync,home-api,home-summary,home-copy,i18n-regression,action-payment-mock-removal,support-center,rbac-permission-hardening,e2e-test-hardening,playwright-artifact-policy,device-installation-tenant-scope,authorization-loading-guard,auth-silent-refresh,review-followup,loan-schedule-replace-remove,home-placeholder-premium-modal
@@ -170,6 +170,7 @@ cp docs/prompt_history/_TEMPLATE.md docs/prompt_history/$(date +%Y%m%d)_SCRUM-12
 - Production push triggers auto tag (`vX.Y.Z`)
 
 ## Version History
+- v1.2.58 (2026-03-11, Jira SCRUM-293): Record end_prompt evidence for adding the viewer role across FE settings, invitations, and signup flows.
 - v1.2.57 (2026-03-11, Jira SCRUM-292): Record end_prompt evidence for reshaping Revenue KPI cards to the approved Figma taxonomy and exposing explicit contract gaps.
 - v1.2.56 (2026-03-11, Jira SCRUM-291): Record end_prompt evidence for restoring the Assets model filter with catalog-backed options, counts, and pagination.
 - v1.2.55 (2026-03-11, Jira SCRUM-290): Record end_prompt evidence for the Figma score-card layout while keeping unsupported operation sub-scores behind an explicit contract-gap note.

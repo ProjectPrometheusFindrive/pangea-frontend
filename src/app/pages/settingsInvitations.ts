@@ -17,6 +17,7 @@ const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const INVALID_COMPANY_IDS = new Set(['0000000000', '__global__', 'company-local', 'null', 'none']);
 const BASE_INVITATION_ROLE_OPTIONS: Array<{ value: InvitationRole; label: string }> = [
   { value: 'member', label: '운영자' },
+  { value: 'viewer', label: '조회자' },
   { value: 'admin', label: '관리자' },
 ];
 const INSTALLER_INVITATION_ROLE_OPTION = { value: 'installer' as const, label: '장착 기사' };
@@ -68,8 +69,8 @@ export function validateInvitationDraft(
     } else if (!resolvedCompanyId) {
       errors.companyId = 'installer 초대는 회사 선택이 필요합니다.';
     }
-  } else if (draft.role !== 'admin' && draft.role !== 'member') {
-    errors.role = '초대 권한은 admin 또는 member만 허용됩니다.';
+  } else if (draft.role !== 'admin' && draft.role !== 'member' && draft.role !== 'viewer') {
+    errors.role = '초대 권한은 admin, member 또는 viewer만 허용됩니다.';
   }
 
   return errors;
@@ -105,6 +106,8 @@ export function toInvitationRoleLabel(role: string): string {
     ? '관리자'
     : role === 'member'
       ? '운영자'
+      : role === 'viewer'
+        ? '조회자'
       : role === 'installer'
         ? '장착 기사'
         : role || '-';
