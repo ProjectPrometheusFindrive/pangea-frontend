@@ -13,7 +13,7 @@ test('settings keeps installer members visible and restricts pending installer r
   const serviceSource = readProjectFile('src/services/settings.ts');
   const pageSource = readProjectFile('src/app/pages/Settings.tsx');
 
-  assert.match(serviceSource, /export type SettingsMemberRole = 'admin' \| 'member' \| 'installer' \| string/u);
+  assert.match(serviceSource, /export type SettingsMemberRole = 'admin' \| 'member' \| 'viewer' \| 'installer' \| string/u);
   assert.match(pageSource, /role === 'installer'/u);
   assert.match(pageSource, /actorRole === 'super_admin'|user\?\.role === 'super_admin'/u);
   assert.match(pageSource, /member\.status === 'pending'/u);
