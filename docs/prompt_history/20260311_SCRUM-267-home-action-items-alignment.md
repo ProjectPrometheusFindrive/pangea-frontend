@@ -4,8 +4,8 @@
 - Author: Codex
 - Branch: fix/SCRUM-267-home-action-items-alignment
 - Jira Key: SCRUM-267 / SCRUM-288
-- Jira Status: In Progress
-- PR URL: PENDING
+- Jira Status: Resolved
+- PR URL: https://github.com/ProjectPrometheusFindrive/pangea-frontend/pull/138
 - Tags: home,action-required,figma-parity,prompt-history
 
 ## Start Context
