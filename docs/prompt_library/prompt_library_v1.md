@@ -1,7 +1,7 @@
 # Prompt Library v1
 
-- Version: v1.2.52
-- Date: 2026-03-10
+- Version: v1.2.53
+- Date: 2026-03-11
 - Owner: Pangea Frontend Team
 - Tags: prompt-library,workflow,branch-policy,history-policy,commit-policy,pr-automation,jira-traceability,end-prompt-protocol,worktree-cleanup,jira-status-sync,jira-comment-sync,ac-evidence,mock-removal,reservations-write,reservations-mock-removal,ocr-flow,revenue-api,revenue-trend-fallback,settings-api,payment-status-sync,home-api,home-summary,home-copy,i18n-regression,action-payment-mock-removal,support-center,rbac-permission-hardening,e2e-test-hardening,playwright-artifact-policy,device-installation-tenant-scope,authorization-loading-guard,auth-silent-refresh,review-followup,loan-schedule-replace-remove,home-placeholder-premium-modal
 
@@ -170,6 +170,7 @@ cp docs/prompt_history/_TEMPLATE.md docs/prompt_history/$(date +%Y%m%d)_SCRUM-12
 - Production push triggers auto tag (`vX.Y.Z`)
 
 ## Version History
+- v1.2.53 (2026-03-11, Jira SCRUM-288): Record end_prompt evidence for restoring the full Figma-aligned home issue-card taxonomy and premium-card parity.
 - v1.2.52 (2026-03-10, Jira SCRUM-271): Record end_prompt evidence for reservation create phone validation and removal of unsupported SSN input on the FE modal flow.
 - v1.2.51 (2026-03-10, Jira SCRUM-270): Record end_prompt evidence for super_admin dashboard company scope alignment across Home, Revenue, and settings-backed company selection.
 - v1.2.50 (2026-03-09, Jira SCRUM-267/269): Record review-follow-up evidence for loan-schedule append/replace/remove UX and premium-placeholder handling on the device-off home card.
