@@ -9,12 +9,18 @@ function readProjectFile(relativePath) {
   return fs.readFileSync(path.join(projectRoot, relativePath), 'utf8');
 }
 
-test('SCRUM-290 aligns the home operation-score taxonomy with the approved Figma labels', () => {
+test('SCRUM-290 keeps the approved operation-score labels without inventing unsupported score semantics', () => {
   const source = readProjectFile('src/app/pages/Home.tsx');
 
   assert.match(source, /label:\s*'안전운전'/u);
   assert.match(source, /label:\s*'차량관리'/u);
   assert.match(source, /label:\s*'사업운영'/u);
+  assert.match(source, /data-testid="home-operation-score-contract-gap"/u);
+  assert.doesNotMatch(source, /const completionRateScore =/u);
+  assert.doesNotMatch(source, /const safetyDrivingScore =/u);
+  assert.doesNotMatch(source, /const vehicleManagementScore =/u);
+  assert.doesNotMatch(source, /const paymentHealthScore =/u);
+  assert.doesNotMatch(source, /const businessOperationScore =/u);
   assert.doesNotMatch(source, /label:\s*'자산 활용률'/u);
   assert.doesNotMatch(source, /label:\s*'계약 완료율'/u);
   assert.doesNotMatch(source, /label:\s*'연체 안전도'/u);

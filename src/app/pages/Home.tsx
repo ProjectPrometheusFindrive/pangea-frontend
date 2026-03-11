@@ -798,28 +798,11 @@ export default function Home() {
     }));
   }, [contractStatusCounts, kpis.activeContracts, kpis.completedContracts, kpis.unpaidContracts]);
 
-  const operationScores = useMemo(() => {
-    const completionRateScore = kpis.totalContracts > 0
-      ? Math.round((kpis.completedContracts / kpis.totalContracts) * 100)
-      : 0;
-    const safetyDrivingScore = kpis.totalContracts > 0
-      ? Math.round(Math.max(0, 1 - (kpis.overdueContracts / kpis.totalContracts)) * 100)
-      : 0;
-    const maintenanceAssets = sumByKeys(managementStageCounts, ['점검대기', '정비중']);
-    const vehicleManagementScore = kpis.totalAssets > 0
-      ? Math.round(Math.max(0, 1 - (maintenanceAssets / kpis.totalAssets)) * 100)
-      : 0;
-    const paymentHealthScore = kpis.totalContracts > 0
-      ? Math.round(Math.max(0, 1 - (kpis.unpaidContracts / kpis.totalContracts)) * 100)
-      : 0;
-    const businessOperationScore = Math.round((completionRateScore + paymentHealthScore) / 2);
-
-    return [
-      { label: '안전운전', score: safetyDrivingScore, color: 'bg-green-500' },
-      { label: '차량관리', score: vehicleManagementScore, color: 'bg-amber-500' },
-      { label: '사업운영', score: businessOperationScore, color: 'bg-blue-500' },
-    ];
-  }, [kpis.completedContracts, kpis.overdueContracts, kpis.totalAssets, kpis.totalContracts, kpis.unpaidContracts, managementStageCounts]);
+const operationScores = useMemo(() => ([
+    { label: '안전운전', color: 'bg-green-500' },
+    { label: '차량관리', color: 'bg-amber-500' },
+    { label: '사업운영', color: 'bg-blue-500' },
+  ]), []);
 
   const recentChanges = useMemo(() => (
     (summary?.recentChanges ?? []).slice(0, 5)
@@ -1163,17 +1146,24 @@ export default function Home() {
                       <div key={index}>
                         <div className="mb-1.5 flex items-center justify-between">
                           <span className="text-xs text-[#4a5565]">{item.label}</span>
-                          <span className="text-base font-bold text-[#1e2939]">{item.score}점</span>
+                          <span className="text-sm font-semibold text-slate-500">준비 중</span>
                         </div>
                         <div className="h-2 w-full rounded-full bg-gray-200">
                           <div
                             className={`${item.color} h-2 rounded-full transition-all`}
-                            style={{ width: `${item.score}%` }}
+                            style={{ width: '0%' }}
                           />
                         </div>
                       </div>
                     ))}
                   </div>
+                  <p
+                    data-testid="home-operation-score-contract-gap"
+                    className="mt-4 rounded-lg bg-slate-50 px-3 py-2 text-xs leading-relaxed text-slate-500"
+                  >
+                    현재 홈 요약 API로는 안전운전, 차량관리, 사업운영 점수를 각각 계산할 수 없어
+                    Figma 레이아웃만 먼저 반영했습니다.
+                  </p>
                 </div>
 
                 <div data-testid="home-recent-changes-card" className="rounded-xl bg-white p-5 shadow-sm">
