@@ -12,6 +12,7 @@ import { useAuth } from '../context/AuthContext';
 import { useAuthorization } from '../context/AuthorizationContext';
 import { ACTION_PERMISSIONS } from '../authorization';
 import { ApiError } from '../../services/api';
+import { getAssetsList } from '../../services/assets';
 import {
   cancelDeviceInstallation,
   createDeviceInstallation,
@@ -22,6 +23,25 @@ import {
 } from '../../services/deviceInstallations';
 
 type DeviceInstallationStatusFilter = 'all' | DeviceInstallationStatus;
+type DeviceInstallationDisplayStatus = 'pending' | 'completed' | 'cancelled';
+
+interface DeviceInstallationVehicleOption {
+  vin: string;
+  vehicleNumber: string;
+  model: string;
+  year: string;
+}
+
+interface DeviceInstallationDisplayRow {
+  installation: DeviceInstallationItem;
+  displayStatus: DeviceInstallationDisplayStatus;
+  vehicleNumber: string;
+  model: string;
+  year: string;
+  healthCheck: string;
+  installationPhoto: string | null;
+  serialPhoto: string | null;
+}
 
 interface DeviceInstallationSummary {
   scheduled: number;
@@ -46,6 +66,68 @@ const FILTER_OPTIONS: { value: DeviceInstallationStatusFilter; label: string }[]
   { value: 'completed', label: '완료' },
   { value: 'cancelled', label: '취소' },
 ];
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function toText(value: unknown): string | null {
+  if (typeof value === 'string') {
+    const normalized = value.trim();
+    return normalized.length > 0 ? normalized : null;
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return String(value);
+  }
+  return null;
+}
+
+function toVehicleOptions(payload: unknown): DeviceInstallationVehicleOption[] {
+  if (!isRecord(payload)) {
+    return [];
+  }
+
+  const rawRows = Array.isArray(payload.items)
+    ? payload.items
+    : Array.isArray(payload.assets)
+      ? payload.assets
+      : Array.isArray(payload.rows)
+        ? payload.rows
+        : Array.isArray(payload.list)
+          ? payload.list
+          : [];
+
+  const options = rawRows
+    .map((row) => {
+      if (!isRecord(row)) {
+        return null;
+      }
+
+      const vin = toText(row.vin) ?? toText(row.chassisNumber);
+      const vehicleNumber = toText(row.vehicleNumber)
+        ?? toText(row.plateNumber)
+        ?? toText(row.plate)
+        ?? toText(row.number);
+
+      if (!vin || !vehicleNumber) {
+        return null;
+      }
+
+      return {
+        vin,
+        vehicleNumber,
+        model: toText(row.model) ?? toText(row.vehicleModel) ?? toText(row.vehicleType) ?? '차종 미확인',
+        year: toText(row.year) ?? toText(row.modelYear) ?? '-',
+      } satisfies DeviceInstallationVehicleOption;
+    })
+    .filter((option): option is DeviceInstallationVehicleOption => option !== null);
+
+  const deduped = new Map<string, DeviceInstallationVehicleOption>();
+  for (const option of options) {
+    deduped.set(option.vin, option);
+  }
+  return Array.from(deduped.values());
+}
 
 function formatDateTime(value?: string): string {
   if (!value) {
@@ -92,7 +174,17 @@ function toDateTimeLocalFromValue(value?: string): string | null {
   return toDateTimeLocalValue(parsed);
 }
 
-function getStatusBadge(status: DeviceInstallationStatus) {
+function toDisplayStatus(status: DeviceInstallationStatus): DeviceInstallationDisplayStatus {
+  if (status === 'completed') {
+    return 'completed';
+  }
+  if (status === 'cancelled') {
+    return 'cancelled';
+  }
+  return 'pending';
+}
+
+function getDisplayStatusBadge(status: DeviceInstallationDisplayStatus) {
   switch (status) {
     case 'completed':
       return (
@@ -101,21 +193,13 @@ function getStatusBadge(status: DeviceInstallationStatus) {
           완료
         </span>
       );
-    case 'in_progress':
-      return (
-        <span className="flex items-center gap-1 rounded-full bg-blue-100 px-2 py-1 text-xs font-medium text-blue-700">
-          <Loader2 className="h-3 w-3 animate-spin" />
-          진행중
-        </span>
-      );
     case 'cancelled':
       return (
-        <span className="flex items-center gap-1 rounded-full bg-gray-200 px-2 py-1 text-xs font-medium text-gray-700">
+        <span className="flex items-center gap-1 rounded-full bg-slate-200 px-2 py-1 text-xs font-medium text-slate-700">
           <XCircle className="h-3 w-3" />
           취소
         </span>
       );
-    case 'scheduled':
     default:
       return (
         <span className="flex items-center gap-1 rounded-full bg-yellow-100 px-2 py-1 text-xs font-medium text-yellow-700">
@@ -124,6 +208,10 @@ function getStatusBadge(status: DeviceInstallationStatus) {
         </span>
       );
   }
+}
+
+function getStatusBadge(status: DeviceInstallationStatus) {
+  return getDisplayStatusBadge(toDisplayStatus(status));
 }
 
 function toActionErrorMessage(action: 'create' | 'cancel' | 'start' | 'complete', error: unknown): string {
@@ -211,12 +299,13 @@ export default function DeviceInstallation() {
   const [summaryError, setSummaryError] = useState<string | null>(null);
   const [scheduledTaskOptions, setScheduledTaskOptions] = useState<DeviceInstallationItem[]>([]);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [vehicleOptions, setVehicleOptions] = useState<DeviceInstallationVehicleOption[]>([]);
   const [statusFilter, setStatusFilter] = useState<DeviceInstallationStatusFilter>('all');
   const [page, setPage] = useState(1);
   const [pageNotice, setPageNotice] = useState<string | null>(null);
 
   const [vin, setVin] = useState('');
-  const [scheduledAt, setScheduledAt] = useState(() => toDateTimeLocalValue(new Date()));
+  const [scheduledAt, setScheduledAt] = useState('');
   const [deviceSerial, setDeviceSerial] = useState('');
   const [installationPhotoFile, setInstallationPhotoFile] = useState<File | null>(null);
   const [installationPhotoPreview, setInstallationPhotoPreview] = useState<string>('');
@@ -242,6 +331,55 @@ export default function DeviceInstallation() {
     () => scheduledTaskOptions.find((task) => task.id === selectedTaskId) ?? null,
     [scheduledTaskOptions, selectedTaskId],
   );
+  const vehicleOptionsByVin = useMemo(() => {
+    const entries = new Map<string, DeviceInstallationVehicleOption>();
+
+    for (const option of vehicleOptions) {
+      entries.set(option.vin, option);
+    }
+
+    for (const installation of [...scheduledTaskOptions, ...installations]) {
+      if (!entries.has(installation.vin)) {
+        entries.set(installation.vin, {
+          vin: installation.vin,
+          vehicleNumber: installation.vin,
+          model: '차종 미확인',
+          year: '-',
+        });
+      }
+    }
+
+    return entries;
+  }, [installations, scheduledTaskOptions, vehicleOptions]);
+  const vehicleSelectOptions = useMemo(
+    () => Array.from(vehicleOptionsByVin.values()).sort((left, right) => left.vehicleNumber.localeCompare(right.vehicleNumber, 'ko-KR')),
+    [vehicleOptionsByVin],
+  );
+  const selectedVehicleOption = useMemo(
+    () => (vin ? vehicleOptionsByVin.get(vin) ?? null : null),
+    [vehicleOptionsByVin, vin],
+  );
+  const displayRows = useMemo<DeviceInstallationDisplayRow[]>(() => (
+    installations.map((installation) => {
+      const vehicle = vehicleOptionsByVin.get(installation.vin);
+      const displayStatus = toDisplayStatus(installation.status);
+
+      return {
+        installation,
+        displayStatus,
+        vehicleNumber: vehicle?.vehicleNumber ?? installation.vin,
+        model: vehicle?.model ?? '차종 미확인',
+        year: vehicle?.year ?? '-',
+        healthCheck: displayStatus === 'completed'
+          ? '확인 완료'
+          : displayStatus === 'cancelled'
+            ? '취소'
+            : '대기',
+        installationPhoto: installation.photos[0] ?? null,
+        serialPhoto: installation.photos[1] ?? null,
+      };
+    })
+  ), [installations, vehicleOptionsByVin]);
 
   const fetchList = useCallback((signal: AbortSignal) => getDeviceInstallationList({
     page,
@@ -296,6 +434,18 @@ export default function DeviceInstallation() {
     }
   }, []);
 
+  const hydrateVehicleOptions = useCallback(async () => {
+    try {
+      const payload = await getAssetsList({
+        page: 1,
+        size: 200,
+      });
+      setVehicleOptions(toVehicleOptions(payload));
+    } catch {
+      setVehicleOptions([]);
+    }
+  }, []);
+
   const hydrateSummary = useCallback(async () => {
     setSummaryError(null);
 
@@ -331,13 +481,18 @@ export default function DeviceInstallation() {
     void hydrateScheduledTaskOptions();
   }, [hydrateScheduledTaskOptions]);
 
+  useEffect(() => {
+    void hydrateVehicleOptions();
+  }, [hydrateVehicleOptions]);
+
   const refreshAll = useCallback(async () => {
     await Promise.all([
       hydrateInstallations(),
       hydrateScheduledTaskOptions(),
       hydrateSummary(),
+      hydrateVehicleOptions(),
     ]);
-  }, [hydrateInstallations, hydrateScheduledTaskOptions, hydrateSummary]);
+  }, [hydrateInstallations, hydrateScheduledTaskOptions, hydrateSummary, hydrateVehicleOptions]);
 
   const handleRetry = useCallback(() => {
     void refreshAll();
@@ -375,7 +530,7 @@ export default function DeviceInstallation() {
     }
 
     setVin('');
-    setScheduledAt(toDateTimeLocalValue(new Date()));
+    setScheduledAt('');
     setDeviceSerial('');
     setSelectedTaskId(null);
     setInstallationPhotoFile(null);
@@ -626,10 +781,8 @@ export default function DeviceInstallation() {
               <h2 className="text-lg font-bold">단말 장착 작업</h2>
             </div>
             <div className="flex items-center gap-4 text-sm">
-              <span>대기: <strong>{summary.scheduled}</strong>건</span>
-              <span>진행중: <strong>{summary.inProgress}</strong>건</span>
+              <span>대기: <strong>{summary.scheduled + summary.inProgress}</strong>건</span>
               <span>완료: <strong>{summary.completed}</strong>건</span>
-              <span>취소: <strong>{summary.cancelled}</strong>건</span>
             </div>
           </div>
           {summaryError && (
@@ -730,20 +883,69 @@ export default function DeviceInstallation() {
             </div>
           )}
 
-          <div className="flex gap-3 items-end">
+          <div className="flex gap-3 items-end flex-wrap">
             <div className="flex-shrink-0" style={{ width: '180px' }}>
               <label className="block text-xs font-semibold text-gray-700 mb-1">
-                VIN
+                차량번호
               </label>
-              <input
+              <select
                 data-testid="device-installation-vin-input"
-                type="text"
-                placeholder="KMH..."
                 value={vin}
-                onChange={(event) => setVin(event.target.value.toUpperCase())}
+                onChange={(event) => {
+                  setSelectedTaskId(null);
+                  setVin(event.target.value.toUpperCase());
+                }}
                 disabled={!canWriteDeviceInstallation || isSubmitting}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+              >
+                <option value="">장착 대상 차량 선택</option>
+                {vehicleSelectOptions.map((option) => (
+                  <option key={option.vin} value={option.vin}>
+                    {option.vehicleNumber} · {option.model}
+                  </option>
+                ))}
+              </select>
+              {selectedVehicleOption && (
+                <p className="mt-1 text-[11px] text-gray-500">
+                  {selectedVehicleOption.model} · {selectedVehicleOption.year}
+                </p>
+              )}
+              <input
+                data-testid="device-installation-manual-vin-input"
+                type="text"
+                value={vin}
+                onChange={(event) => {
+                  setSelectedTaskId(null);
+                  setVin(event.target.value.toUpperCase());
+                }}
+                placeholder="목록에 없으면 차량번호를 직접 입력"
+                disabled={!canWriteDeviceInstallation || isSubmitting}
+                className="mt-2 w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
               />
+              {vehicleSelectOptions.length > 0 && (
+                <p className="mt-1 text-[11px] text-gray-500">
+                  목록에 원하는 차량이 없으면 차량번호를 직접 입력할 수 있습니다.
+                </p>
+              )}
+            </div>
+
+            <div className="flex-shrink-0" style={{ width: '200px' }}>
+              <label className="block text-xs font-semibold text-gray-700 mb-1">
+                예약 시각
+              </label>
+              <input
+                data-testid="device-installation-scheduled-at-input"
+                type="datetime-local"
+                value={scheduledAt}
+                onChange={(event) => setScheduledAt(event.target.value)}
+                disabled={!canWriteDeviceInstallation || isSubmitting || !!selectedTaskId}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+              />
+              {selectedTaskId && (
+                <p className="mt-1 text-[11px] text-gray-500">
+                  선택한 예약 작업의 시각을 그대로 사용합니다.
+                </p>
+              )}
             </div>
 
             <div className="flex-shrink-0" style={{ width: '180px' }}>
@@ -758,20 +960,6 @@ export default function DeviceInstallation() {
                 onChange={(e) => setDeviceSerial(e.target.value.toUpperCase())}
                 disabled={!canWriteDeviceInstallation || isSubmitting}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm"
-              />
-            </div>
-
-            <div className="flex-shrink-0" style={{ width: '220px' }}>
-              <label className="block text-xs font-semibold text-gray-700 mb-1">
-                예약 일시 <span className="text-red-600">*</span>
-              </label>
-              <input
-                data-testid="device-installation-scheduled-at-input"
-                type="datetime-local"
-                value={scheduledAt}
-                onChange={(event) => setScheduledAt(event.target.value)}
-                disabled={!canWriteDeviceInstallation || isSubmitting}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
               />
             </div>
 
@@ -909,7 +1097,7 @@ export default function DeviceInstallation() {
                   void handleCreateInstallation();
                 }}
                 data-testid="device-installation-submit"
-                disabled={!canWriteDeviceInstallation || isSubmitting || !!selectedTaskId || !vin || !scheduledAt || !deviceSerial || !installationPhotoFile || !serialPhotoFile}
+                disabled={!canWriteDeviceInstallation || isSubmitting || !!selectedTaskId || !vin || !deviceSerial || !installationPhotoFile || !serialPhotoFile}
                 className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-bold text-sm disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
               >
                 {isSubmitting ? (
@@ -964,7 +1152,7 @@ export default function DeviceInstallation() {
         >
           <div className="bg-white rounded-lg shadow-sm overflow-hidden">
             <div className="px-4 py-3 border-b border-gray-200 bg-gray-50">
-              <h3 className="text-sm font-bold text-gray-900">장착 작업 리스트</h3>
+              <h3 className="text-sm font-bold text-gray-900">장착 대상 차량 리스트</h3>
             </div>
 
             <div className="overflow-x-auto">
@@ -972,38 +1160,47 @@ export default function DeviceInstallation() {
                 <thead className="bg-gray-50 border-b border-gray-200">
                   <tr>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">상태</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">작업ID</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">VIN</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">차량번호</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">차종</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">연식</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">단말 시리얼</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">작업자</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">예약 일시</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">완료 일시</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">사진</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">장착 일시</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">Health Check</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">장착사진</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">시리얼사진</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">작업</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
-                  {installations.map((installation) => (
+                  {displayRows.map((row) => {
+                    const installation = row.installation;
+
+                    return (
                     <tr
                       key={installation.id}
                       className="hover:bg-gray-50 transition-colors"
                     >
                       <td className="px-4 py-3">
-                        {getStatusBadge(installation.status)}
+                        {getDisplayStatusBadge(row.displayStatus)}
                       </td>
 
                       <td className="px-4 py-3">
-                        <span className="font-mono text-xs text-gray-900">{installation.id}</span>
+                        <span className="text-sm font-semibold text-gray-900">{row.vehicleNumber}</span>
                       </td>
 
                       <td className="px-4 py-3">
-                        <span className="font-mono text-xs text-gray-700">{installation.vin}</span>
+                        <span className="text-xs text-gray-700">{row.model}</span>
                       </td>
 
                       <td className="px-4 py-3">
-                        {installation.deviceSerial ? (
+                        <span className="text-xs text-gray-700">{row.year}</span>
+                      </td>
+
+                      <td className="px-4 py-3">
+                        {row.installation.deviceSerial ? (
                           <span className="font-mono text-xs text-gray-900 bg-gray-100 px-2 py-1 rounded">
-                            {installation.deviceSerial}
+                            {row.installation.deviceSerial}
                           </span>
                         ) : (
                           <span className="text-xs text-gray-400">-</span>
@@ -1011,34 +1208,42 @@ export default function DeviceInstallation() {
                       </td>
 
                       <td className="px-4 py-3">
-                        {installation.installer ? (
-                          <span className="text-sm text-gray-700">{installation.installer}</span>
+                        {row.installation.installer ? (
+                          <span className="text-sm text-gray-700">{row.installation.installer}</span>
                         ) : (
                           <span className="text-xs text-gray-400">-</span>
                         )}
                       </td>
 
                       <td className="px-4 py-3">
-                        <span className="text-xs text-gray-600">{formatDateTime(installation.scheduledAt)}</span>
+                        <span className="text-xs text-gray-600">{formatDateTime(row.installation.installedAt)}</span>
                       </td>
 
                       <td className="px-4 py-3">
-                        <span className="text-xs text-gray-600">{formatDateTime(installation.installedAt)}</span>
+                        <span className="text-xs text-gray-600">{row.healthCheck}</span>
                       </td>
 
                       <td className="px-4 py-3">
-                        {installation.photos.length > 0 ? (
-                          <div className="flex flex-col gap-1">
-                            {installation.photos.map((photo, index) => (
-                              <button
-                                key={`${installation.id}-photo-${index + 1}`}
-                                onClick={() => window.open(photo, '_blank', 'noopener,noreferrer')}
-                                className="text-blue-600 hover:text-blue-700 text-xs underline text-left"
-                              >
-                                사진 {index + 1}
-                              </button>
-                            ))}
-                          </div>
+                        {row.installationPhoto ? (
+                          <button
+                            onClick={() => window.open(row.installationPhoto, '_blank', 'noopener,noreferrer')}
+                            className="text-blue-600 hover:text-blue-700 text-xs underline text-left"
+                          >
+                            장착사진
+                          </button>
+                        ) : (
+                          <span className="text-xs text-gray-400">-</span>
+                        )}
+                      </td>
+
+                      <td className="px-4 py-3">
+                        {row.serialPhoto ? (
+                          <button
+                            onClick={() => window.open(row.serialPhoto, '_blank', 'noopener,noreferrer')}
+                            className="text-blue-600 hover:text-blue-700 text-xs underline text-left"
+                          >
+                            시리얼사진
+                          </button>
                         ) : (
                           <span className="text-xs text-gray-400">-</span>
                         )}
@@ -1088,7 +1293,8 @@ export default function DeviceInstallation() {
                         )}
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
