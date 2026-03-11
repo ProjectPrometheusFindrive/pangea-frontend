@@ -799,20 +799,27 @@ export default function Home() {
   }, [contractStatusCounts, kpis.activeContracts, kpis.completedContracts, kpis.unpaidContracts]);
 
   const operationScores = useMemo(() => {
-    const utilizationRateScore = toPercent(kpis.utilizationRate);
     const completionRateScore = kpis.totalContracts > 0
       ? Math.round((kpis.completedContracts / kpis.totalContracts) * 100)
       : 0;
-    const safetyScore = kpis.totalContracts > 0
+    const safetyDrivingScore = kpis.totalContracts > 0
       ? Math.round(Math.max(0, 1 - (kpis.overdueContracts / kpis.totalContracts)) * 100)
       : 0;
+    const maintenanceAssets = sumByKeys(managementStageCounts, ['점검대기', '정비중']);
+    const vehicleManagementScore = kpis.totalAssets > 0
+      ? Math.round(Math.max(0, 1 - (maintenanceAssets / kpis.totalAssets)) * 100)
+      : 0;
+    const paymentHealthScore = kpis.totalContracts > 0
+      ? Math.round(Math.max(0, 1 - (kpis.unpaidContracts / kpis.totalContracts)) * 100)
+      : 0;
+    const businessOperationScore = Math.round((completionRateScore + paymentHealthScore) / 2);
 
     return [
-      { label: '자산 활용률', score: utilizationRateScore, color: 'bg-blue-500' },
-      { label: '계약 완료율', score: completionRateScore, color: 'bg-green-500' },
-      { label: '연체 안전도', score: safetyScore, color: 'bg-orange-500' },
+      { label: '안전운전', score: safetyDrivingScore, color: 'bg-green-500' },
+      { label: '차량관리', score: vehicleManagementScore, color: 'bg-amber-500' },
+      { label: '사업운영', score: businessOperationScore, color: 'bg-blue-500' },
     ];
-  }, [kpis.completedContracts, kpis.overdueContracts, kpis.totalContracts, kpis.utilizationRate]);
+  }, [kpis.completedContracts, kpis.overdueContracts, kpis.totalAssets, kpis.totalContracts, kpis.unpaidContracts, managementStageCounts]);
 
   const recentChanges = useMemo(() => (
     (summary?.recentChanges ?? []).slice(0, 5)
@@ -1148,27 +1155,29 @@ export default function Home() {
                 </div>
               </div>
 
-              <div className="rounded-xl bg-white p-5 shadow-sm">
-                <h3 className="mb-3 text-sm font-semibold text-[#1e2939]">운영 점수</h3>
-                <div className="mt-6 space-y-5">
-                  {operationScores.map((item, index) => (
-                    <div key={index}>
-                      <div className="mb-1.5 flex items-center justify-between">
-                        <span className="text-xs text-[#4a5565]">{item.label}</span>
-                        <span className="text-base font-bold text-[#1e2939]">{item.score}점</span>
+              <div className="space-y-4">
+                <div data-testid="home-operation-score-card" className="rounded-xl bg-white p-5 shadow-sm">
+                  <h3 className="mb-3 text-sm font-semibold text-[#1e2939]">운영 점수</h3>
+                  <div className="mt-6 space-y-5">
+                    {operationScores.map((item, index) => (
+                      <div key={index}>
+                        <div className="mb-1.5 flex items-center justify-between">
+                          <span className="text-xs text-[#4a5565]">{item.label}</span>
+                          <span className="text-base font-bold text-[#1e2939]">{item.score}점</span>
+                        </div>
+                        <div className="h-2 w-full rounded-full bg-gray-200">
+                          <div
+                            className={`${item.color} h-2 rounded-full transition-all`}
+                            style={{ width: `${item.score}%` }}
+                          />
+                        </div>
                       </div>
-                      <div className="h-2 w-full rounded-full bg-gray-200">
-                        <div
-                          className={`${item.color} h-2 rounded-full transition-all`}
-                          style={{ width: `${item.score}%` }}
-                        />
-                      </div>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                 </div>
 
-                <div className="mt-5 border-t border-gray-100 pt-4">
-                  <h4 className="mb-2 text-xs font-semibold text-gray-600">최근 변경</h4>
+                <div data-testid="home-recent-changes-card" className="rounded-xl bg-white p-5 shadow-sm">
+                  <h3 className="mb-3 text-sm font-semibold text-[#1e2939]">최근 변경</h3>
                   <ul className="space-y-2">
                     {recentChanges.length > 0 && recentChanges.map((change) => (
                       <li
