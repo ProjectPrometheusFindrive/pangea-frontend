@@ -93,6 +93,29 @@ const EMPTY_TOTALS = {
   currency: 'KRW',
 };
 
+type RevenueParityCard = {
+  key: 'grossRevenue' | 'paidCount' | 'averageRentalAmount' | 'netRevenue' | 'refundAmount';
+  title: string;
+  value: string;
+  detail: string;
+};
+
+export const REVENUE_FIGMA_CONTRACT_GAP_NOTE = '미납금, 활성 차량, 결제 방법별 분포, 차량별 매출 현황은 현재 revenue API 계약에 없어 FE에서 계산하거나 시각화할 수 없습니다.';
+
+export const REVENUE_FIGMA_UNSUPPORTED_SECTIONS: Array<{
+  title: string;
+  description: string;
+}> = [
+  {
+    title: '결제 방법별 분포',
+    description: '현재 revenue API는 결제 수단별 집계 데이터를 내려주지 않아 파이 차트로 분포를 구성할 수 없습니다.',
+  },
+  {
+    title: '차량별 매출 현황',
+    description: '현재 revenue API는 차량별 매출 랭킹과 활성 차량 데이터를 내려주지 않아 순위 표를 구성할 수 없습니다.',
+  },
+];
+
 function toIsoDate(value: Date): string {
   const year = value.getFullYear();
   const month = String(value.getMonth() + 1).padStart(2, '0');
@@ -156,6 +179,47 @@ function formatTrendDateLabel(value: string): string {
     return `${value.slice(5, 7)}/${value.slice(8, 10)}`;
   }
   return value;
+}
+
+export function buildRevenueParityCards(
+  totals: RevenueSummaryResponse['totals'],
+  growthRate: number,
+): RevenueParityCard[] {
+  const averageRentalAmount = totals.paidCount > 0 ? Math.round(totals.grossRevenue / totals.paidCount) : 0;
+  const growthPrefix = growthRate >= 0 ? '+' : '-';
+
+  return [
+    {
+      key: 'grossRevenue',
+      title: '총 매출',
+      value: formatCurrency(totals.grossRevenue, totals.currency),
+      detail: '결제 완료 기준 누적 매출',
+    },
+    {
+      key: 'paidCount',
+      title: '총 대여 건수',
+      value: `${totals.paidCount.toLocaleString()}건`,
+      detail: '결제 완료 기준 대여 수',
+    },
+    {
+      key: 'averageRentalAmount',
+      title: '평균 대여 금액',
+      value: formatCurrency(averageRentalAmount, totals.currency),
+      detail: totals.paidCount > 0 ? `총 ${totals.paidCount.toLocaleString()}건 기준` : '대여 데이터 없음',
+    },
+    {
+      key: 'netRevenue',
+      title: '순매출',
+      value: formatCurrency(totals.netRevenue, totals.currency),
+      detail: `이전 구간 대비 ${growthPrefix}${Math.abs(growthRate)}%`,
+    },
+    {
+      key: 'refundAmount',
+      title: '환불 금액',
+      value: formatCurrency(totals.refundAmount, totals.currency),
+      detail: `환불 ${totals.refundCount.toLocaleString()}건`,
+    },
+  ];
 }
 
 function calculateGrowthRate(buckets: RevenueSummaryBucket[]): number {
@@ -542,6 +606,10 @@ export default function Revenue() {
   const summaryBuckets = snapshot?.summary.buckets ?? [];
   const trendItems = snapshot?.trend.items ?? [];
   const growthRate = useMemo(() => calculateGrowthRate(summaryBuckets), [summaryBuckets]);
+  const parityCards = useMemo(
+    () => buildRevenueParityCards(summaryTotals, growthRate),
+    [growthRate, summaryTotals],
+  );
 
   const selectedPeriodLabel = useMemo(
     () => PERIOD_OPTIONS.find((option) => option.value === selectedPreset)?.label ?? '',
@@ -713,82 +781,79 @@ export default function Revenue() {
             </div>
           )}
 
+          {snapshot && (
+            <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
+              <p className="font-semibold">Figma parity note</p>
+              <p className="mt-1 leading-6 text-sky-800">{REVENUE_FIGMA_CONTRACT_GAP_NOTE}</p>
+            </div>
+          )}
+
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
-            <div className="rounded-xl bg-white p-5 shadow-sm">
-              <div className="mb-3 flex items-center justify-between">
-                <span className="text-sm font-semibold text-gray-600">순매출</span>
-                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-100">
-                  <DollarSign className="h-5 w-5 text-blue-600" />
+            {parityCards.map((card) => (
+              <div key={card.key} className="rounded-xl bg-white p-5 shadow-sm">
+                <div className="mb-3 flex items-center justify-between">
+                  <span className="text-sm font-semibold text-gray-600">{card.title}</span>
+                  <div className={`flex h-10 w-10 items-center justify-center rounded-lg ${
+                    card.key === 'refundAmount'
+                      ? 'bg-red-100'
+                      : card.key === 'grossRevenue'
+                        ? 'bg-indigo-100'
+                        : card.key === 'paidCount'
+                          ? 'bg-emerald-100'
+                          : card.key === 'averageRentalAmount'
+                            ? 'bg-sky-100'
+                            : 'bg-blue-100'
+                  }`}
+                  >
+                    {card.key === 'refundAmount' ? (
+                      <AlertCircle className="h-5 w-5 text-red-600" />
+                    ) : card.key === 'grossRevenue' ? (
+                      <TrendingUp className="h-5 w-5 text-indigo-600" />
+                    ) : (
+                      <DollarSign className={`h-5 w-5 ${
+                        card.key === 'paidCount'
+                          ? 'text-emerald-600'
+                          : card.key === 'averageRentalAmount'
+                            ? 'text-sky-600'
+                            : 'text-blue-600'
+                      }`}
+                      />
+                    )}
+                  </div>
                 </div>
-              </div>
-              <div className="mb-1 text-xl font-bold text-gray-900">
-                {formatCurrency(summaryTotals.netRevenue, summaryTotals.currency)}
-              </div>
-              <div className="flex items-center gap-1 text-sm">
-                {growthRate >= 0 ? (
-                  <ArrowUp className="h-4 w-4 text-green-600" />
+                <div className={`mb-1 text-xl font-bold ${card.key === 'refundAmount' ? 'text-red-600' : 'text-gray-900'}`}>
+                  {card.value}
+                </div>
+                {card.key === 'netRevenue' ? (
+                  <div className="flex items-center gap-1 text-sm">
+                    {growthRate >= 0 ? (
+                      <ArrowUp className="h-4 w-4 text-green-600" />
+                    ) : (
+                      <ArrowDown className="h-4 w-4 text-red-600" />
+                    )}
+                    <span className={growthRate >= 0 ? 'font-medium text-green-600' : 'font-medium text-red-600'}>
+                      {card.detail}
+                    </span>
+                  </div>
                 ) : (
-                  <ArrowDown className="h-4 w-4 text-red-600" />
+                  <p className="text-sm text-gray-500">{card.detail}</p>
                 )}
-                <span className={growthRate >= 0 ? 'font-medium text-green-600' : 'font-medium text-red-600'}>
-                  {Math.abs(growthRate)}%
-                </span>
-                <span className="text-gray-500">구간 전반 대비</span>
               </div>
-            </div>
+            ))}
+          </div>
 
-            <div className="rounded-xl bg-white p-5 shadow-sm">
-              <div className="mb-3 flex items-center justify-between">
-                <span className="text-sm font-semibold text-gray-600">총 결제 금액</span>
-                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-indigo-100">
-                  <TrendingUp className="h-5 w-5 text-indigo-600" />
-                </div>
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+            {REVENUE_FIGMA_UNSUPPORTED_SECTIONS.map((section) => (
+              <div key={section.title} className="rounded-xl border border-amber-200 bg-amber-50 p-5 shadow-sm">
+                <h3 className="text-base font-bold text-amber-900">{section.title}</h3>
+                <p className="mt-2 text-sm leading-6 text-amber-800">{section.description}</p>
               </div>
-              <div className="text-xl font-bold text-gray-900">
-                {formatCurrency(summaryTotals.grossRevenue, summaryTotals.currency)}
-              </div>
-            </div>
-
-            <div className="rounded-xl bg-white p-5 shadow-sm">
-              <div className="mb-3 flex items-center justify-between">
-                <span className="text-sm font-semibold text-gray-600">환불 금액</span>
-                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-red-100">
-                  <AlertCircle className="h-5 w-5 text-red-600" />
-                </div>
-              </div>
-              <div className="text-xl font-bold text-red-600">
-                {formatCurrency(summaryTotals.refundAmount, summaryTotals.currency)}
-              </div>
-            </div>
-
-            <div className="rounded-xl bg-white p-5 shadow-sm">
-              <div className="mb-3 flex items-center justify-between">
-                <span className="text-sm font-semibold text-gray-600">결제 건수</span>
-                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-100">
-                  <DollarSign className="h-5 w-5 text-emerald-600" />
-                </div>
-              </div>
-              <div className="text-xl font-bold text-gray-900">
-                {summaryTotals.paidCount.toLocaleString()}건
-              </div>
-            </div>
-
-            <div className="rounded-xl bg-white p-5 shadow-sm">
-              <div className="mb-3 flex items-center justify-between">
-                <span className="text-sm font-semibold text-gray-600">환불 건수</span>
-                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-amber-100">
-                  <AlertCircle className="h-5 w-5 text-amber-600" />
-                </div>
-              </div>
-              <div className="text-xl font-bold text-gray-900">
-                {summaryTotals.refundCount.toLocaleString()}건
-              </div>
-            </div>
+            ))}
           </div>
 
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
             <div className="rounded-xl bg-white p-5 shadow-sm xl:col-span-2">
-              <h3 className="mb-4 text-base font-bold text-gray-900">집계 버킷 매출</h3>
+              <h3 className="mb-4 text-base font-bold text-gray-900">현재 API 기준 기간별 매출</h3>
               <ResponsiveContainer width="100%" height={280}>
                 <BarChart data={summaryChartData}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
@@ -814,7 +879,7 @@ export default function Revenue() {
             </div>
 
             <div className="rounded-xl bg-white p-5 shadow-sm">
-              <h3 className="mb-4 text-base font-bold text-gray-900">일별 순매출 추이</h3>
+              <h3 className="mb-4 text-base font-bold text-gray-900">현재 API 기준 순매출 추이</h3>
               {trendError ? (
                 <div className="flex h-[280px] flex-col items-center justify-center rounded-lg border border-dashed border-amber-200 bg-amber-50 px-6 text-center">
                   <AlertCircle className="h-6 w-6 text-amber-700" />
@@ -858,7 +923,7 @@ export default function Revenue() {
           </div>
 
           <div className="rounded-xl bg-white p-5 shadow-sm">
-            <h3 className="mb-4 text-base font-bold text-gray-900">버킷별 상세</h3>
+            <h3 className="mb-4 text-base font-bold text-gray-900">기간별 버킷 상세</h3>
             <div className="overflow-x-auto">
               <table className="w-full min-w-[820px]">
                 <thead>
