@@ -43,10 +43,7 @@ import {
   updateDashboardSearchParams,
 } from './dashboardCompanyScope';
 
-type PeriodPreset = 'last7Days' | 'last30Days' | 'last90Days';
-
 interface HomeFilters {
-  preset: PeriodPreset;
   companyId: string | null;
 }
 
@@ -89,20 +86,6 @@ interface HomeStatCard {
   description?: string;
   unit?: string;
 }
-
-const PERIOD_OPTIONS: Array<{ value: PeriodPreset; label: string; days: number }> = [
-  { value: 'last7Days', label: '최근 7일', days: 7 },
-  { value: 'last30Days', label: '최근 30일', days: 30 },
-  { value: 'last90Days', label: '최근 90일', days: 90 },
-];
-
-const PERIOD_DAYS_BY_PRESET: Record<PeriodPreset, number> = {
-  last7Days: 7,
-  last30Days: 30,
-  last90Days: 90,
-};
-
-const DEFAULT_PERIOD_PRESET: PeriodPreset = 'last30Days';
 
 const DEFAULT_ALERTS = {
   overdue: 0,
@@ -147,24 +130,13 @@ function toUtcIsoDate(value: Date): string {
   return value.toISOString().slice(0, 10);
 }
 
-function resolveDateRange(preset: PeriodPreset): { from: string; to: string } {
-  const days = PERIOD_DAYS_BY_PRESET[preset];
-  const toDate = new Date();
-  toDate.setHours(0, 0, 0, 0);
-
-  const fromDate = new Date(toDate);
-  fromDate.setDate(fromDate.getDate() - (days - 1));
-
+function resolveTodayRange(): { from: string; to: string } {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
   return {
-    from: toIsoDate(fromDate),
-    to: toIsoDate(toDate),
+    from: toIsoDate(today),
+    to: toIsoDate(today),
   };
-}
-
-function normalizePeriodPreset(value: string | null): PeriodPreset {
-  return PERIOD_OPTIONS.some((option) => option.value === value)
-    ? value as PeriodPreset
-    : DEFAULT_PERIOD_PRESET;
 }
 
 function toPercent(value: number): number {
@@ -183,7 +155,7 @@ function toPageErrorState(error: unknown): HomePageError {
         kind: 'unknown',
         message: error.message
           ? `조회 조건 오류: ${error.message}`
-          : '조회 기간/회사 정보를 확인해 주세요.',
+          : '회사 정보를 확인해 주세요.',
       };
     }
 
@@ -407,10 +379,6 @@ export default function Home() {
   const snapshotRef = useRef<HomeSnapshot | null>(null);
   const skipNextAutoHydrateRef = useRef(false);
 
-  const selectedPreset = useMemo(
-    () => normalizePeriodPreset(searchParams.get('preset')),
-    [searchParams],
-  );
   const selectedCompanyId = useMemo(
     () => resolveDashboardCompanyScope(searchParams.get('companyId'), user?.companyId, user?.role),
     [searchParams, user?.companyId, user?.role],
@@ -420,7 +388,6 @@ export default function Home() {
 
   const updateHomeSearchParams = useCallback((
     updates: {
-      preset?: string | null;
       companyId?: string | null;
     },
     replace = false,
@@ -436,19 +403,16 @@ export default function Home() {
 
   useEffect(() => {
     const nextParams = updateDashboardSearchParams(searchParams, {
-      preset: selectedPreset,
       companyId: selectedCompanyId,
     });
-    if (!nextParams.get('preset')) {
-      nextParams.set('preset', selectedPreset);
-    }
+    nextParams.delete('preset');
 
     if (nextParams.toString() === searchParams.toString()) {
       return;
     }
 
     setSearchParams(nextParams, { replace: true });
-  }, [searchParams, selectedCompanyId, selectedPreset, setSearchParams]);
+  }, [searchParams, selectedCompanyId, setSearchParams]);
 
   useEffect(() => {
     if (!isSuperAdmin) {
@@ -541,7 +505,7 @@ export default function Home() {
       return;
     }
 
-    const { from, to } = resolveDateRange(filters.preset);
+    const { from, to } = resolveTodayRange();
 
     try {
       const [summaryResult, actionItemCountsResult] = await Promise.allSettled([
@@ -607,13 +571,9 @@ export default function Home() {
         setRefreshError(pageError.message);
         setRefreshErrorKind(pageError.kind);
 
-        if (
-          previousSnapshot.filters.preset !== filters.preset
-          || previousSnapshot.filters.companyId !== filters.companyId
-        ) {
+        if (previousSnapshot.filters.companyId !== filters.companyId) {
           skipNextAutoHydrateRef.current = true;
           updateHomeSearchParams({
-            preset: previousSnapshot.filters.preset,
             companyId: previousSnapshot.filters.companyId,
           }, true);
         }
@@ -639,17 +599,15 @@ export default function Home() {
     }
 
     void hydrateHome({
-      preset: selectedPreset,
       companyId: effectiveCompanyId,
     });
-  }, [effectiveCompanyId, hydrateHome, selectedPreset]);
+  }, [effectiveCompanyId, hydrateHome]);
 
   const handleRetry = useCallback(() => {
     void hydrateHome({
-      preset: selectedPreset,
       companyId: effectiveCompanyId,
     });
-  }, [effectiveCompanyId, hydrateHome, selectedPreset]);
+  }, [effectiveCompanyId, hydrateHome]);
 
   const handleBlockingErrorAction = useCallback(() => {
     handlePageErrorAction(blockingErrorKind, navigate);
@@ -917,13 +875,6 @@ const operationScores = useMemo(() => ([
     (summary?.recentChanges ?? []).slice(0, 5)
   ), [summary?.recentChanges]);
 
-  const periodLabel = useMemo(() => {
-    if (!summary) {
-      return null;
-    }
-    return `${summary.from} ~ ${summary.to}`;
-  }, [summary]);
-
   const CustomTooltip = ({ active, payload }: { active?: boolean; payload?: Array<{ name: string; value: number; payload: DashboardDistributionItem }> }) => {
     if (!active || !payload || payload.length === 0) {
       return null;
@@ -951,8 +902,8 @@ const operationScores = useMemo(() => ([
         error={blockingError}
         isEmpty={isEmpty}
         errorDescription="홈 요약 데이터를 불러오는 중 문제가 발생했습니다."
-        emptyTitle="조회 기간에 표시할 홈 데이터가 없습니다"
-        emptyDescription="기간을 변경하거나 다시 조회해 주세요."
+        emptyTitle="현재 표시할 홈 데이터가 없습니다"
+        emptyDescription="지금 기준으로 집계된 데이터가 없어 잠시 후 다시 확인해 주세요."
         onRetry={handleRetry}
         errorActionLabel={getPageErrorActionLabel(blockingErrorKind)}
         onErrorAction={handleBlockingErrorAction}
@@ -965,7 +916,7 @@ const operationScores = useMemo(() => ([
             <div className="hidden">
               <h2 className="text-lg font-bold text-[#1e2939]">홈 요약</h2>
               <p className="text-xs text-gray-500">
-                {periodLabel ? `${periodLabel} · tenant: ${summary?.tenantId}` : '조회 기간을 선택해 주세요.'}
+                {summary?.tenantId ? `tenant: ${summary.tenantId}` : '현재 기준 홈 요약입니다.'}
               </p>
             </div>
             {isSuperAdmin && (
@@ -989,21 +940,6 @@ const operationScores = useMemo(() => ([
               </div>
             )}
             <div className="flex items-center gap-2">
-              {PERIOD_OPTIONS.map((option) => (
-                <button
-                  key={option.value}
-                  type="button"
-                  onClick={() => updateHomeSearchParams({ preset: option.value })}
-                  className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${
-                    option.value === selectedPreset
-                      ? 'bg-blue-600 text-white'
-                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                  }`}
-                  disabled={isRefreshing}
-                >
-                  {option.label}
-                </button>
-              ))}
               <button
                 type="button"
                 onClick={handleRetry}
@@ -1292,7 +1228,7 @@ const operationScores = useMemo(() => ([
                       </li>
                     ))}
                     {recentChanges.length === 0 && (
-                      <li className="text-xs text-gray-500">해당 기간의 변경 이력이 없습니다.</li>
+                      <li className="text-xs text-gray-500">오늘 변경 이력이 없습니다.</li>
                     )}
                   </ul>
                 </div>
