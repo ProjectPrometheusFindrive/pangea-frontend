@@ -264,6 +264,40 @@ function toAssetStatusFilter(stageLabel: string): string {
   return '';
 }
 
+function toCanonicalAssetBucketName(stageLabel: string): string {
+  const normalized = stageLabel.trim().toLowerCase();
+  if (!normalized) {
+    return '';
+  }
+  if (normalized.includes('정비') || normalized.includes('점검') || normalized.includes('수리')) {
+    return '정비중';
+  }
+  if (normalized.includes('예약') || normalized.includes('출고')) {
+    return '예약';
+  }
+  if (normalized.includes('운영') || normalized.includes('대여')) {
+    return '대여중';
+  }
+  if (normalized.includes('가용') || normalized.includes('대기')) {
+    return '가용';
+  }
+  return '';
+}
+
+function normalizeAssetBucketCounts(stageCounts: Record<string, number>): Record<string, number> {
+  const normalizedCounts: Record<string, number> = {};
+
+  for (const [name, value] of Object.entries(stageCounts)) {
+    const canonicalName = toCanonicalAssetBucketName(name);
+    if (!canonicalName) {
+      continue;
+    }
+    normalizedCounts[canonicalName] = (normalizedCounts[canonicalName] ?? 0) + Math.max(0, Math.trunc(value));
+  }
+
+  return normalizedCounts;
+}
+
 function buildReservationsFilterPath(filterValue: string): string {
   const params = new URLSearchParams();
 
@@ -606,6 +640,10 @@ export default function Home() {
   const alerts = summary?.statusCounts.alerts ?? DEFAULT_ALERTS;
   const kpis = summary?.kpis ?? DEFAULT_KPIS;
   const today = summary?.today ?? DEFAULT_TODAY;
+  const normalizedManagementStageCounts = useMemo(
+    () => normalizeAssetBucketCounts(managementStageCounts),
+    [managementStageCounts],
+  );
 
   const iconMap: Record<string, React.ComponentType<{ className?: string }>> = {
     Car,
@@ -700,7 +738,7 @@ export default function Home() {
   }, [today.overdueCount, today.pickupDueCount, today.returnDueCount]);
 
   const actionItemsForHome = useMemo<HomeStatCard[]>(() => {
-    const maintenanceAssets = sumByKeys(managementStageCounts, ['점검대기', '정비중']);
+    const maintenanceAssets = sumByKeys(normalizedManagementStageCounts, ['정비중']);
 
     return [
       {
@@ -722,13 +760,43 @@ export default function Home() {
         testId: 'home-issue-card-unpaid',
       },
       {
-        label: '정기점검 만료 임박',
+        label: '보험 만료 임박',
+        count: '확인 필요',
+        bg: 'bg-sky-50',
+        color: 'text-sky-600',
+        icon: 'Shield',
+        description: 'Action required에서 만료 대상을 확인하세요.',
+        onClick: () => handleIssueClick('보험 만료 임박'),
+        testId: 'home-issue-card-insurance',
+      },
+      {
+        label: '점검 만료 임박',
         count: maintenanceAssets,
         bg: 'bg-blue-50',
         color: 'text-blue-600',
         icon: 'ClipboardCheck',
         onClick: () => handleIssueClick('정기점검 만료 임박'),
         testId: 'home-issue-card-maintenance',
+      },
+      {
+        label: '사고 접수',
+        count: '확인 필요',
+        bg: 'bg-rose-50',
+        color: 'text-rose-600',
+        icon: 'AlertTriangle',
+        description: 'Action required에서 접수 차량을 확인하세요.',
+        onClick: () => handleIssueClick('사고 접수'),
+        testId: 'home-issue-card-accident',
+      },
+      {
+        label: '차량이상',
+        count: '프리미엄',
+        bg: 'bg-orange-50',
+        color: 'text-orange-600',
+        icon: 'Wrench',
+        description: '프리미엄 단말 연동 필요',
+        onClick: () => setShowPremiumModal(true),
+        testId: 'home-issue-card-vehicle-anomaly',
       },
       {
         label: '도난 의심',
@@ -750,19 +818,21 @@ export default function Home() {
         testId: 'home-issue-card-device-off',
       },
     ];
-  }, [alerts.overdue, alerts.stolen, handleIssueClick, kpis.unpaidContracts, managementStageCounts]);
+  }, [alerts.overdue, alerts.stolen, handleIssueClick, kpis.unpaidContracts, normalizedManagementStageCounts]);
 
   const assetData = useMemo<DashboardDistributionItem[]>(() => {
     const palette = ['#1e3a8a', '#60a5fa', '#22c55e', '#f59e0b'];
-    const entries = Object.entries(managementStageCounts)
-      .filter(([name]) => name.trim().length > 0)
-      .sort((left, right) => right[1] - left[1]);
+    const bucketOrder = ['대여중', '가용', '정비중', '예약'];
+    const entries = Object.entries(normalizedManagementStageCounts)
+      .filter(([, value]) => value > 0)
+      .sort((left, right) => bucketOrder.indexOf(left[0]) - bucketOrder.indexOf(right[0]));
 
     if (entries.length === 0) {
       return [
-        { name: '운영중', value: kpis.activeContracts, color: palette[0], status: 'rental', unit: '대' },
+        { name: '대여중', value: kpis.activeContracts, color: palette[0], status: 'rental', unit: '대' },
         { name: '가용', value: Math.max(0, kpis.totalAssets - kpis.activeContracts), color: palette[1], status: 'available', unit: '대' },
-        { name: '점검대기', value: 0, color: palette[2], status: 'maintenance', unit: '대' },
+        { name: '정비중', value: 0, color: palette[2], status: 'maintenance', unit: '대' },
+        { name: '예약', value: 0, color: palette[3], status: 'reserved', unit: '대' },
       ];
     }
 
@@ -773,7 +843,7 @@ export default function Home() {
       status: toAssetStatusFilter(name),
       unit: '대' as const,
     }));
-  }, [kpis.activeContracts, kpis.totalAssets, managementStageCounts]);
+  }, [kpis.activeContracts, kpis.totalAssets, normalizedManagementStageCounts]);
 
   const contractData = useMemo<DashboardDistributionItem[]>(() => {
     const palette = ['#1e3a8a', '#8b5cf6', '#ef4444', '#22c55e'];
@@ -798,21 +868,11 @@ export default function Home() {
     }));
   }, [contractStatusCounts, kpis.activeContracts, kpis.completedContracts, kpis.unpaidContracts]);
 
-  const operationScores = useMemo(() => {
-    const utilizationRateScore = toPercent(kpis.utilizationRate);
-    const completionRateScore = kpis.totalContracts > 0
-      ? Math.round((kpis.completedContracts / kpis.totalContracts) * 100)
-      : 0;
-    const safetyScore = kpis.totalContracts > 0
-      ? Math.round(Math.max(0, 1 - (kpis.overdueContracts / kpis.totalContracts)) * 100)
-      : 0;
-
-    return [
-      { label: '자산 활용률', score: utilizationRateScore, color: 'bg-blue-500' },
-      { label: '계약 완료율', score: completionRateScore, color: 'bg-green-500' },
-      { label: '연체 안전도', score: safetyScore, color: 'bg-orange-500' },
-    ];
-  }, [kpis.completedContracts, kpis.overdueContracts, kpis.totalContracts, kpis.utilizationRate]);
+const operationScores = useMemo(() => ([
+    { label: '안전운전', color: 'bg-green-500' },
+    { label: '차량관리', color: 'bg-amber-500' },
+    { label: '사업운영', color: 'bg-blue-500' },
+  ]), []);
 
   const recentChanges = useMemo(() => (
     (summary?.recentChanges ?? []).slice(0, 5)
@@ -1148,27 +1208,36 @@ export default function Home() {
                 </div>
               </div>
 
-              <div className="rounded-xl bg-white p-5 shadow-sm">
-                <h3 className="mb-3 text-sm font-semibold text-[#1e2939]">운영 점수</h3>
-                <div className="mt-6 space-y-5">
-                  {operationScores.map((item, index) => (
-                    <div key={index}>
-                      <div className="mb-1.5 flex items-center justify-between">
-                        <span className="text-xs text-[#4a5565]">{item.label}</span>
-                        <span className="text-base font-bold text-[#1e2939]">{item.score}점</span>
+              <div className="space-y-4">
+                <div data-testid="home-operation-score-card" className="rounded-xl bg-white p-5 shadow-sm">
+                  <h3 className="mb-3 text-sm font-semibold text-[#1e2939]">운영 점수</h3>
+                  <div className="mt-6 space-y-5">
+                    {operationScores.map((item, index) => (
+                      <div key={index}>
+                        <div className="mb-1.5 flex items-center justify-between">
+                          <span className="text-xs text-[#4a5565]">{item.label}</span>
+                          <span className="text-sm font-semibold text-slate-500">준비 중</span>
+                        </div>
+                        <div className="h-2 w-full rounded-full bg-gray-200">
+                          <div
+                            className={`${item.color} h-2 rounded-full transition-all`}
+                            style={{ width: '0%' }}
+                          />
+                        </div>
                       </div>
-                      <div className="h-2 w-full rounded-full bg-gray-200">
-                        <div
-                          className={`${item.color} h-2 rounded-full transition-all`}
-                          style={{ width: `${item.score}%` }}
-                        />
-                      </div>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
+                  <p
+                    data-testid="home-operation-score-contract-gap"
+                    className="mt-4 rounded-lg bg-slate-50 px-3 py-2 text-xs leading-relaxed text-slate-500"
+                  >
+                    현재 홈 요약 API로는 안전운전, 차량관리, 사업운영 점수를 각각 계산할 수 없어
+                    Figma 레이아웃만 먼저 반영했습니다.
+                  </p>
                 </div>
 
-                <div className="mt-5 border-t border-gray-100 pt-4">
-                  <h4 className="mb-2 text-xs font-semibold text-gray-600">최근 변경</h4>
+                <div data-testid="home-recent-changes-card" className="rounded-xl bg-white p-5 shadow-sm">
+                  <h3 className="mb-3 text-sm font-semibold text-[#1e2939]">최근 변경</h3>
                   <ul className="space-y-2">
                     {recentChanges.length > 0 && recentChanges.map((change) => (
                       <li

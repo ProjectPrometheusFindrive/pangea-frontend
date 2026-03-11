@@ -1,6 +1,6 @@
 import { ApiError, apiClient } from './api';
 
-export type KnownAuthRole = 'super_admin' | 'admin' | 'member' | 'installer';
+export type KnownAuthRole = 'super_admin' | 'admin' | 'member' | 'viewer' | 'installer';
 export type AuthViewRole = 'rental-business' | 'device-installer';
 
 export interface AuthUser {
@@ -73,7 +73,7 @@ export function toViewRole(role: string | null | undefined): AuthViewRole | null
   if (role === 'installer') {
     return 'device-installer';
   }
-  if (role === 'super_admin' || role === 'admin' || role === 'member') {
+  if (role === 'super_admin' || role === 'admin' || role === 'member' || role === 'viewer') {
     return 'rental-business';
   }
   return null;

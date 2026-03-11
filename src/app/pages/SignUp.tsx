@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { postRegister, getCheckUserId } from '../../services/auth';
 import { ApiError } from '../../services/api';
 import { postAcceptInvitation } from '../../services/invitations';
+import { toInvitationRoleLabel } from './settingsInvitations';
 import {
   clearSignupAgreementState,
   hasRequiredSignupAgreements,
@@ -654,7 +655,7 @@ export default function SignUp() {
                   <input
                     id="signup-invitation-role"
                     type="text"
-                    value={invitationRoleValue}
+                    value={toInvitationRoleLabel(invitationRoleValue)}
                     readOnly
                     className="w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2.5 text-sm text-slate-600"
                   />
