@@ -32,7 +32,7 @@ interface AuthContextType {
   isLoading: boolean;
   isBootstrapping: boolean;
   isAuthenticated: boolean;
-  login: (payload: AuthLoginPayload) => Promise<void>;
+  login: (payload: AuthLoginPayload) => Promise<AuthUser | null>;
   refreshSession: (options?: RefreshSessionOptions) => Promise<void>;
   logout: (options?: LogoutOptions) => Promise<void>;
 }
@@ -454,7 +454,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [applySession, clearSession, handleBootstrapSessionExpired, handleSessionExpired, refreshAccessToken]);
 
-  const login = useCallback(async (payload: AuthLoginPayload) => {
+  const login = useCallback(async (payload: AuthLoginPayload): Promise<AuthUser | null> => {
     authRequestVersionRef.current += 1;
     setError(null);
     setIsLoading(true);
@@ -463,6 +463,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const loginData = await postLogin(payload);
       const initialSession = toSessionFromTokenResponse(loginData, null);
+      let authenticatedUser = loginData.user ?? null;
 
       sessionExpiredHandledRef.current = false;
       setIsSessionExpiredModalOpen(false);
@@ -470,6 +471,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       try {
         const profile = await getMe();
+        authenticatedUser = profile;
         applySession({
           ...initialSession,
           user: profile,
@@ -477,6 +479,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } catch {
         // /me 실패 시 login 응답의 user를 fallback으로 유지한다.
       }
+      return authenticatedUser;
     } catch (loginError) {
       clearSession();
       setError(toErrorMessage(loginError, '로그인에 실패했습니다.'));
