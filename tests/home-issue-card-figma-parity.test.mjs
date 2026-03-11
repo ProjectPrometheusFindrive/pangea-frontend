@@ -26,3 +26,9 @@ test('SCRUM-288 keeps premium-only home issue cards explicit instead of placehol
   assert.match(source, /label:\s*'차량이상'[\s\S]*?description:\s*'프리미엄 단말 연동 필요'[\s\S]*?onClick:\s*\(\)\s*=>\s*setShowPremiumModal\(true\)[\s\S]*?testId:\s*'home-issue-card-vehicle-anomaly'/u);
   assert.match(source, /label:\s*'단말 OFF'[\s\S]*?description:\s*'단말 데이터 연동 예정'[\s\S]*?onClick:\s*\(\)\s*=>\s*setShowPremiumModal\(true\)[\s\S]*?testId:\s*'home-issue-card-device-off'/u);
 });
+
+test('SCRUM-288 restores the desktop home issue grid to four columns', () => {
+  const source = readProjectFile('src/app/pages/Home.tsx');
+
+  assert.match(source, /data-testid="home-issue-grid"[\s\S]*?mt-4 grid flex-1 auto-rows-fr gap-3 md:grid-cols-2 xl:grid-cols-4/u);
+});

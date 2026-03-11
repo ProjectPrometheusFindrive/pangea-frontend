@@ -22,6 +22,7 @@ import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts';
 import { toast } from 'sonner';
 
 import { ApiError } from '../../services/api';
+import { getActionItemTypeCounts } from '../../services/actionRequired';
 import { getHomeSummary, type HomeSummaryResponse } from '../../services/home';
 import { listSettingsCompanies } from '../../services/settings';
 import { ROUTE_PERMISSIONS, type AppRoutePermission } from '../authorization';
@@ -51,6 +52,7 @@ interface HomeFilters {
 
 interface HomeSnapshot {
   summary: HomeSummaryResponse;
+  actionItemCountsByType: Record<string, number>;
   filters: HomeFilters;
 }
 
@@ -122,6 +124,17 @@ const DEFAULT_TODAY = {
   returnDueCount: 0,
   overdueCount: 0,
 };
+
+const DEFAULT_ACTION_ITEM_COUNTS = {
+  '반납 지연': 0,
+  '미납/결제 문제': 0,
+  '보험 만료 임박': 0,
+  '정기점검 만료 임박': 0,
+  '사고 접수': 0,
+  '차량이상': 0,
+  '도난 의심': 0,
+  '단말 OFF': 0,
+} as const;
 
 function toIsoDate(value: Date): string {
   const year = value.getFullYear();
@@ -218,10 +231,6 @@ function toPageErrorState(error: unknown): HomePageError {
     kind: 'unknown',
     message: '요청을 처리하는 중 오류가 발생했습니다.',
   };
-}
-
-function sumByKeys(map: Record<string, number>, keys: string[]): number {
-  return keys.reduce((sum, key) => sum + Math.max(0, Math.trunc(map[key] ?? 0)), 0);
 }
 
 function toContractFilter(statusLabel: string): string {
@@ -501,7 +510,8 @@ export default function Home() {
     const controller = new AbortController();
     controllerRef.current = controller;
 
-    const hasSnapshot = snapshotRef.current !== null;
+    const previousSnapshot = snapshotRef.current;
+    const hasSnapshot = previousSnapshot !== null;
     if (hasSnapshot) {
       setIsRefreshing(true);
     } else {
@@ -534,12 +544,22 @@ export default function Home() {
     const { from, to } = resolveDateRange(filters.preset);
 
     try {
-      const summary = await getHomeSummary({
-        from,
-        to,
-        companyId: filters.companyId ?? undefined,
-        signal: controller.signal,
-      });
+      const [summaryResult, actionItemCountsResult] = await Promise.allSettled([
+        getHomeSummary({
+          from,
+          to,
+          companyId: filters.companyId ?? undefined,
+          signal: controller.signal,
+        }),
+        getActionItemTypeCounts({
+          pageSize: 100,
+          signal: controller.signal,
+        }),
+      ]);
+
+      if (summaryResult.status === 'rejected') {
+        throw summaryResult.reason;
+      }
 
       if (
         !mountedRef.current
@@ -549,8 +569,24 @@ export default function Home() {
         return;
       }
 
+      if (actionItemCountsResult.status === 'rejected') {
+        const actionItemCountError = toPageErrorState(actionItemCountsResult.reason);
+        setRefreshError(
+          previousSnapshot
+            ? '조치 필요 항목 카운트를 갱신하지 못해 이전 집계값을 유지합니다.'
+            : '조치 필요 항목 카운트를 불러오지 못해 기본값으로 표시합니다.',
+        );
+        setRefreshErrorKind(actionItemCountError.kind);
+      }
+
       const nextSnapshot: HomeSnapshot = {
-        summary,
+        summary: summaryResult.value,
+        actionItemCountsByType: {
+          ...DEFAULT_ACTION_ITEM_COUNTS,
+          ...(actionItemCountsResult.status === 'fulfilled'
+            ? actionItemCountsResult.value
+            : previousSnapshot?.actionItemCountsByType ?? {}),
+        },
         filters,
       };
 
@@ -567,8 +603,6 @@ export default function Home() {
       }
 
       const pageError = toPageErrorState(requestError);
-      const previousSnapshot = snapshotRef.current;
-
       if (previousSnapshot) {
         setRefreshError(pageError.message);
         setRefreshErrorKind(pageError.kind);
@@ -635,6 +669,13 @@ export default function Home() {
   }, [canAccessRoute, navigate]);
 
   const summary = snapshot?.summary;
+  const actionItemCountsByType = useMemo(
+    () => ({
+      ...DEFAULT_ACTION_ITEM_COUNTS,
+      ...(snapshot?.actionItemCountsByType ?? {}),
+    }),
+    [snapshot?.actionItemCountsByType],
+  );
   const contractStatusCounts = summary?.statusCounts.contractStatus ?? {};
   const managementStageCounts = summary?.statusCounts.managementStage ?? {};
   const alerts = summary?.statusCounts.alerts ?? DEFAULT_ALERTS;
@@ -738,12 +779,10 @@ export default function Home() {
   }, [today.overdueCount, today.pickupDueCount, today.returnDueCount]);
 
   const actionItemsForHome = useMemo<HomeStatCard[]>(() => {
-    const maintenanceAssets = sumByKeys(normalizedManagementStageCounts, ['정비중']);
-
     return [
       {
         label: '반납 지연',
-        count: alerts.overdue,
+        count: actionItemCountsByType['반납 지연'],
         bg: 'bg-red-50',
         color: 'text-red-600',
         icon: 'AlertCircle',
@@ -752,7 +791,7 @@ export default function Home() {
       },
       {
         label: '미납/결제 문제',
-        count: kpis.unpaidContracts,
+        count: actionItemCountsByType['미납/결제 문제'],
         bg: 'bg-yellow-50',
         color: 'text-yellow-600',
         icon: 'DollarSign',
@@ -761,7 +800,7 @@ export default function Home() {
       },
       {
         label: '보험 만료 임박',
-        count: '확인 필요',
+        count: actionItemCountsByType['보험 만료 임박'],
         bg: 'bg-sky-50',
         color: 'text-sky-600',
         icon: 'Shield',
@@ -771,7 +810,7 @@ export default function Home() {
       },
       {
         label: '점검 만료 임박',
-        count: maintenanceAssets,
+        count: actionItemCountsByType['정기점검 만료 임박'],
         bg: 'bg-blue-50',
         color: 'text-blue-600',
         icon: 'ClipboardCheck',
@@ -780,7 +819,7 @@ export default function Home() {
       },
       {
         label: '사고 접수',
-        count: '확인 필요',
+        count: actionItemCountsByType['사고 접수'],
         bg: 'bg-rose-50',
         color: 'text-rose-600',
         icon: 'AlertTriangle',
@@ -800,7 +839,7 @@ export default function Home() {
       },
       {
         label: '도난 의심',
-        count: alerts.stolen,
+        count: actionItemCountsByType['도난 의심'],
         bg: 'bg-orange-50',
         color: 'text-orange-600',
         icon: 'AlertOctagon',
@@ -818,7 +857,7 @@ export default function Home() {
         testId: 'home-issue-card-device-off',
       },
     ];
-  }, [alerts.overdue, alerts.stolen, handleIssueClick, kpis.unpaidContracts, normalizedManagementStageCounts]);
+  }, [actionItemCountsByType, handleIssueClick]);
 
   const assetData = useMemo<DashboardDistributionItem[]>(() => {
     const palette = ['#1e3a8a', '#60a5fa', '#22c55e', '#f59e0b'];
@@ -1067,7 +1106,7 @@ const operationScores = useMemo(() => ([
                 <div>
                   <h2 className="text-lg font-bold text-[#1e2939]">관리해야 할 이슈</h2>
                   <p className="mt-1 text-xs text-gray-500">
-                    {periodLabel ? `${periodLabel} 기준 조치 필요 항목과 동일한 기준입니다.` : '조회 기간을 선택해 주세요.'}
+                    현재 조치 필요 항목과 동일한 기준입니다.
                   </p>
                 </div>
                 <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
@@ -1075,7 +1114,7 @@ const operationScores = useMemo(() => ([
                 </span>
               </div>
 
-              <div className="mt-4 grid flex-1 auto-rows-fr gap-3 md:grid-cols-2 xl:grid-cols-3">
+              <div className="mt-4 grid flex-1 auto-rows-fr gap-3 md:grid-cols-2 xl:grid-cols-4">
                 {actionItemsForHome.map((issue) => {
                   const Icon = iconMap[issue.icon];
                   return (
