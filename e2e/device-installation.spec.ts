@@ -31,7 +31,18 @@ function filterInstallations(
 }
 
 async function fillInstallationForm(page: Page): Promise<void> {
-  await page.getByTestId('device-installation-vin-input').fill('KMH12A34560000001');
+  const manualVinInput = page.getByTestId('device-installation-manual-vin-input');
+  if (await manualVinInput.count()) {
+    await manualVinInput.fill('KMH12A34560000001');
+  } else {
+    const vinField = page.getByTestId('device-installation-vin-input');
+    const tagName = await vinField.evaluate((element) => element.tagName.toLowerCase());
+    if (tagName === 'select') {
+      await vinField.selectOption('KMH12A34560000001');
+    } else {
+      await vinField.fill('KMH12A34560000001');
+    }
+  }
   await page.getByTestId('device-installation-serial-input').fill('DEV-2026-0001');
   await page.getByTestId('device-installation-photo-file-input').setInputFiles(TEST_IMAGE_FILE);
   await page.getByTestId('device-installation-serial-photo-file-input').setInputFiles(TEST_IMAGE_FILE);
