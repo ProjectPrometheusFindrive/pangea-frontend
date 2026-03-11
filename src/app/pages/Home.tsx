@@ -868,21 +868,11 @@ export default function Home() {
     }));
   }, [contractStatusCounts, kpis.activeContracts, kpis.completedContracts, kpis.unpaidContracts]);
 
-  const operationScores = useMemo(() => {
-    const utilizationRateScore = toPercent(kpis.utilizationRate);
-    const completionRateScore = kpis.totalContracts > 0
-      ? Math.round((kpis.completedContracts / kpis.totalContracts) * 100)
-      : 0;
-    const safetyScore = kpis.totalContracts > 0
-      ? Math.round(Math.max(0, 1 - (kpis.overdueContracts / kpis.totalContracts)) * 100)
-      : 0;
-
-    return [
-      { label: '자산 활용률', score: utilizationRateScore, color: 'bg-blue-500' },
-      { label: '계약 완료율', score: completionRateScore, color: 'bg-green-500' },
-      { label: '연체 안전도', score: safetyScore, color: 'bg-orange-500' },
-    ];
-  }, [kpis.completedContracts, kpis.overdueContracts, kpis.totalContracts, kpis.utilizationRate]);
+const operationScores = useMemo(() => ([
+    { label: '안전운전', color: 'bg-green-500' },
+    { label: '차량관리', color: 'bg-amber-500' },
+    { label: '사업운영', color: 'bg-blue-500' },
+  ]), []);
 
   const recentChanges = useMemo(() => (
     (summary?.recentChanges ?? []).slice(0, 5)
@@ -1218,27 +1208,36 @@ export default function Home() {
                 </div>
               </div>
 
-              <div className="rounded-xl bg-white p-5 shadow-sm">
-                <h3 className="mb-3 text-sm font-semibold text-[#1e2939]">운영 점수</h3>
-                <div className="mt-6 space-y-5">
-                  {operationScores.map((item, index) => (
-                    <div key={index}>
-                      <div className="mb-1.5 flex items-center justify-between">
-                        <span className="text-xs text-[#4a5565]">{item.label}</span>
-                        <span className="text-base font-bold text-[#1e2939]">{item.score}점</span>
+              <div className="space-y-4">
+                <div data-testid="home-operation-score-card" className="rounded-xl bg-white p-5 shadow-sm">
+                  <h3 className="mb-3 text-sm font-semibold text-[#1e2939]">운영 점수</h3>
+                  <div className="mt-6 space-y-5">
+                    {operationScores.map((item, index) => (
+                      <div key={index}>
+                        <div className="mb-1.5 flex items-center justify-between">
+                          <span className="text-xs text-[#4a5565]">{item.label}</span>
+                          <span className="text-sm font-semibold text-slate-500">준비 중</span>
+                        </div>
+                        <div className="h-2 w-full rounded-full bg-gray-200">
+                          <div
+                            className={`${item.color} h-2 rounded-full transition-all`}
+                            style={{ width: '0%' }}
+                          />
+                        </div>
                       </div>
-                      <div className="h-2 w-full rounded-full bg-gray-200">
-                        <div
-                          className={`${item.color} h-2 rounded-full transition-all`}
-                          style={{ width: `${item.score}%` }}
-                        />
-                      </div>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
+                  <p
+                    data-testid="home-operation-score-contract-gap"
+                    className="mt-4 rounded-lg bg-slate-50 px-3 py-2 text-xs leading-relaxed text-slate-500"
+                  >
+                    현재 홈 요약 API로는 안전운전, 차량관리, 사업운영 점수를 각각 계산할 수 없어
+                    Figma 레이아웃만 먼저 반영했습니다.
+                  </p>
                 </div>
 
-                <div className="mt-5 border-t border-gray-100 pt-4">
-                  <h4 className="mb-2 text-xs font-semibold text-gray-600">최근 변경</h4>
+                <div data-testid="home-recent-changes-card" className="rounded-xl bg-white p-5 shadow-sm">
+                  <h3 className="mb-3 text-sm font-semibold text-[#1e2939]">최근 변경</h3>
                   <ul className="space-y-2">
                     {recentChanges.length > 0 && recentChanges.map((change) => (
                       <li
