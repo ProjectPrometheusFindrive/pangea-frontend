@@ -170,7 +170,7 @@ cp docs/prompt_history/_TEMPLATE.md docs/prompt_history/$(date +%Y%m%d)_SCRUM-12
 - Production push triggers auto tag (`vX.Y.Z`)
 
 ## Version History
-- v1.2.60 (2026-03-11, Jira SCRUM-295): Record end_prompt evidence for reshaping device installation into the approved vehicle-first Figma structure.
+- v1.2.60 (2026-03-11, Jira SCRUM-295): Record end_prompt evidence for the vehicle-first installer flow, explicit manual scheduling inputs, and cancelled/photo-split follow-up fixes.
 - v1.2.52 (2026-03-10, Jira SCRUM-271): Record end_prompt evidence for reservation create phone validation and removal of unsupported SSN input on the FE modal flow.
 - v1.2.51 (2026-03-10, Jira SCRUM-270): Record end_prompt evidence for super_admin dashboard company scope alignment across Home, Revenue, and settings-backed company selection.
 - v1.2.50 (2026-03-09, Jira SCRUM-267/269): Record review-follow-up evidence for loan-schedule append/replace/remove UX and premium-placeholder handling on the device-off home card.

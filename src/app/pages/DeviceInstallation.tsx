@@ -23,7 +23,7 @@ import {
 } from '../../services/deviceInstallations';
 
 type DeviceInstallationStatusFilter = 'all' | DeviceInstallationStatus;
-type DeviceInstallationDisplayStatus = 'pending' | 'completed' | 'failed';
+type DeviceInstallationDisplayStatus = 'pending' | 'completed' | 'cancelled';
 
 interface DeviceInstallationVehicleOption {
   vin: string;
@@ -179,7 +179,7 @@ function toDisplayStatus(status: DeviceInstallationStatus): DeviceInstallationDi
     return 'completed';
   }
   if (status === 'cancelled') {
-    return 'failed';
+    return 'cancelled';
   }
   return 'pending';
 }
@@ -193,11 +193,11 @@ function getDisplayStatusBadge(status: DeviceInstallationDisplayStatus) {
           완료
         </span>
       );
-    case 'failed':
+    case 'cancelled':
       return (
-        <span className="flex items-center gap-1 rounded-full bg-red-100 px-2 py-1 text-xs font-medium text-red-700">
+        <span className="flex items-center gap-1 rounded-full bg-slate-200 px-2 py-1 text-xs font-medium text-slate-700">
           <XCircle className="h-3 w-3" />
-          실패
+          취소
         </span>
       );
     default:
@@ -305,7 +305,7 @@ export default function DeviceInstallation() {
   const [pageNotice, setPageNotice] = useState<string | null>(null);
 
   const [vin, setVin] = useState('');
-  const [scheduledAt, setScheduledAt] = useState(() => toDateTimeLocalValue(new Date()));
+  const [scheduledAt, setScheduledAt] = useState('');
   const [deviceSerial, setDeviceSerial] = useState('');
   const [installationPhotoFile, setInstallationPhotoFile] = useState<File | null>(null);
   const [installationPhotoPreview, setInstallationPhotoPreview] = useState<string>('');
@@ -372,8 +372,8 @@ export default function DeviceInstallation() {
         year: vehicle?.year ?? '-',
         healthCheck: displayStatus === 'completed'
           ? '확인 완료'
-          : displayStatus === 'failed'
-            ? '실패'
+          : displayStatus === 'cancelled'
+            ? '취소'
             : '대기',
         installationPhoto: installation.photos[0] ?? null,
         serialPhoto: installation.photos[1] ?? null,
@@ -530,7 +530,7 @@ export default function DeviceInstallation() {
     }
 
     setVin('');
-    setScheduledAt(toDateTimeLocalValue(new Date()));
+    setScheduledAt('');
     setDeviceSerial('');
     setSelectedTaskId(null);
     setInstallationPhotoFile(null);
@@ -891,7 +891,10 @@ export default function DeviceInstallation() {
               <select
                 data-testid="device-installation-vin-input"
                 value={vin}
-                onChange={(event) => setVin(event.target.value.toUpperCase())}
+                onChange={(event) => {
+                  setSelectedTaskId(null);
+                  setVin(event.target.value.toUpperCase());
+                }}
                 disabled={!canWriteDeviceInstallation || isSubmitting}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
               >
@@ -907,15 +910,41 @@ export default function DeviceInstallation() {
                   {selectedVehicleOption.model} · {selectedVehicleOption.year}
                 </p>
               )}
-              {vehicleSelectOptions.length === 0 && (
-                <input
-                  type="text"
-                  value={vin}
-                  onChange={(event) => setVin(event.target.value.toUpperCase())}
-                  placeholder="차대번호를 직접 입력"
-                  disabled={!canWriteDeviceInstallation || isSubmitting}
-                  className="mt-2 w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                />
+              <input
+                data-testid="device-installation-manual-vin-input"
+                type="text"
+                value={vin}
+                onChange={(event) => {
+                  setSelectedTaskId(null);
+                  setVin(event.target.value.toUpperCase());
+                }}
+                placeholder="목록에 없으면 차량번호를 직접 입력"
+                disabled={!canWriteDeviceInstallation || isSubmitting}
+                className="mt-2 w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+              />
+              {vehicleSelectOptions.length > 0 && (
+                <p className="mt-1 text-[11px] text-gray-500">
+                  목록에 원하는 차량이 없으면 차량번호를 직접 입력할 수 있습니다.
+                </p>
+              )}
+            </div>
+
+            <div className="flex-shrink-0" style={{ width: '200px' }}>
+              <label className="block text-xs font-semibold text-gray-700 mb-1">
+                예약 시각
+              </label>
+              <input
+                data-testid="device-installation-scheduled-at-input"
+                type="datetime-local"
+                value={scheduledAt}
+                onChange={(event) => setScheduledAt(event.target.value)}
+                disabled={!canWriteDeviceInstallation || isSubmitting || !!selectedTaskId}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+              />
+              {selectedTaskId && (
+                <p className="mt-1 text-[11px] text-gray-500">
+                  선택한 예약 작업의 시각을 그대로 사용합니다.
+                </p>
               )}
             </div>
 
@@ -1195,27 +1224,22 @@ export default function DeviceInstallation() {
                       </td>
 
                       <td className="px-4 py-3">
-                        {installation.photos.length > 0 ? (
-                          <div className="flex flex-col gap-1">
-                            {installation.photos.map((photo, index) => (
-                              <button
-                                key={`${installation.id}-photo-${index + 1}`}
-                                onClick={() => window.open(photo, '_blank', 'noopener,noreferrer')}
-                                className="text-blue-600 hover:text-blue-700 text-xs underline text-left"
-                              >
-                                사진 {index + 1}
-                              </button>
-                            ))}
-                          </div>
+                        {row.installationPhoto ? (
+                          <button
+                            onClick={() => window.open(row.installationPhoto, '_blank', 'noopener,noreferrer')}
+                            className="text-blue-600 hover:text-blue-700 text-xs underline text-left"
+                          >
+                            장착사진
+                          </button>
                         ) : (
                           <span className="text-xs text-gray-400">-</span>
                         )}
                       </td>
 
                       <td className="px-4 py-3">
-                        {installation.photos[1] ? (
+                        {row.serialPhoto ? (
                           <button
-                            onClick={() => window.open(installation.photos[1], '_blank', 'noopener,noreferrer')}
+                            onClick={() => window.open(row.serialPhoto, '_blank', 'noopener,noreferrer')}
                             className="text-blue-600 hover:text-blue-700 text-xs underline text-left"
                           >
                             시리얼사진
