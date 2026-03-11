@@ -38,7 +38,22 @@ test('forbidden page uses the role-aware default landing path helper for the CTA
   const source = readProjectFile('src/app/pages/Forbidden.tsx');
 
   assert.match(source, /resolveDefaultLandingPath/u);
-  assert.match(source, /to=\{resolveDefaultLandingPath\(viewRole\)\}/u);
+  assert.match(source, /const defaultLandingPath = resolveDefaultLandingPath\(viewRole\);/u);
+  assert.match(source, /to=\{defaultLandingPath\}/u);
+});
+
+test('SCRUM-300 forbidden page shows a 3-second countdown and auto-redirects with the same role-aware path', () => {
+  const source = readProjectFile('src/app/pages/Forbidden.tsx');
+
+  assert.match(source, /const REDIRECT_DELAY_SECONDS = 3;/u);
+  assert.match(source, /const navigate = useNavigate\(\);/u);
+  assert.match(source, /const defaultLandingPath = resolveDefaultLandingPath\(viewRole\);/u);
+  assert.match(source, /const \[countdownSeconds, setCountdownSeconds\] = useState\(REDIRECT_DELAY_SECONDS\);/u);
+  assert.match(source, /useEffect\(\(\) => \{/u);
+  assert.match(source, /setTimeout\(\(\) => \{\s*navigate\(defaultLandingPath, \{ replace: true \}\);\s*\}, REDIRECT_DELAY_SECONDS \* 1000\)/u);
+  assert.match(source, /setInterval\(\(\) => \{\s*setCountdownSeconds\(\(currentSeconds\) => \{/u);
+  assert.match(source, /countdownSeconds\}초 후/u);
+  assert.match(source, /to=\{defaultLandingPath\}/u);
 });
 
 test('SCRUM-284 defines a shared role-aware default landing path helper', () => {
@@ -61,7 +76,8 @@ test('SCRUM-284 login and forbidden page reuse the role-aware default landing pa
 
   assert.match(forbiddenSource, /useAuth\(\)/u);
   assert.match(forbiddenSource, /resolveDefaultLandingPath\(viewRole\)/u);
-  assert.match(forbiddenSource, /to=\{resolveDefaultLandingPath\(viewRole\)\}/u);
+  assert.match(forbiddenSource, /const defaultLandingPath = resolveDefaultLandingPath\(viewRole\);/u);
+  assert.match(forbiddenSource, /to=\{defaultLandingPath\}/u);
 });
 
 test('SCRUM-284 resolves post-login landing from the authenticated user instead of stale pre-login viewRole', () => {
