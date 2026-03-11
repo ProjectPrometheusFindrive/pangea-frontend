@@ -80,7 +80,7 @@ export type SettingsGeofenceUpdateRequest = Partial<
   active?: boolean;
 };
 
-export type SettingsMemberRole = 'admin' | 'member' | 'installer' | string;
+export type SettingsMemberRole = 'admin' | 'member' | 'viewer' | 'installer' | string;
 export type SettingsMemberStatus = 'approved' | 'pending' | 'rejected' | 'withdrawn' | string;
 
 export interface SettingsMember {
@@ -97,7 +97,7 @@ export interface SettingsMembersListData {
 }
 
 export interface SettingsMemberRolePatchRequest {
-  role: 'admin' | 'member';
+  role: 'admin' | 'member' | 'viewer';
 }
 
 export interface SettingsMemberStatusPatchRequest {

@@ -50,12 +50,12 @@ test('settings invitation helpers support installer role only for scoped super_a
 
   assert.deepEqual(
     module.getInvitationRoleOptions(false).map((item) => item.value),
-    ['member', 'admin'],
+    ['member', 'viewer', 'admin'],
   );
 
   assert.deepEqual(
     module.getInvitationRoleOptions(true).map((item) => item.value),
-    ['member', 'admin', 'installer'],
+    ['member', 'viewer', 'admin', 'installer'],
   );
 
   assert.notEqual(module.toInvitationRoleLabel('installer'), 'installer');
@@ -67,7 +67,7 @@ test('settings page keeps installer invitation UI scoped to super_admin company 
     readFile(path.join(projectRoot, 'src/services/invitations.ts'), 'utf8'),
   ]);
 
-  assert.match(invitationServiceSource, /export type InvitationRole = 'admin' \| 'member' \| 'installer';/u);
+  assert.match(invitationServiceSource, /export type InvitationRole = 'admin' \| 'member' \| 'viewer' \| 'installer';/u);
   assert.match(settingsSource, /const isSuperAdmin = \(user\?\.role \?\? ''\)\.trim\(\)\.toLowerCase\(\) === 'super_admin';/u);
   assert.match(settingsSource, /isSuperAdmin && \(/u);
   assert.match(settingsSource, /<option value="installer">/u);

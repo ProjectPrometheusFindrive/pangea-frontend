@@ -535,6 +535,8 @@ function getRoleBadgeColor(role: string): string {
       return 'bg-purple-100 text-purple-700';
     case 'member':
       return 'bg-blue-100 text-blue-700';
+    case 'viewer':
+      return 'bg-slate-100 text-slate-700';
     case 'installer':
       return 'bg-amber-100 text-amber-700';
     default:
@@ -548,6 +550,9 @@ function toRoleLabel(role: string): string {
   }
   if (role === 'member') {
     return '운영자';
+  }
+  if (role === 'viewer') {
+    return '조회자';
   }
   if (role === 'installer') {
     return '설치 기사';
@@ -1786,7 +1791,7 @@ export default function Settings() {
     void runGeofenceDelete(geofenceId);
   }, [canEditSettings, deletingGeofenceId, isGeofenceSaving, runGeofenceDelete]);
 
-  const handleMemberRoleChange = useCallback((memberId: string, role: 'admin' | 'member') => {
+  const handleMemberRoleChange = useCallback((memberId: string, role: 'admin' | 'member' | 'viewer') => {
     setMemberRoleDrafts((prevDrafts) => ({
       ...prevDrafts,
       [memberId]: role,
@@ -1801,7 +1806,7 @@ export default function Settings() {
     setMemberRetryAction(null);
   }, []);
 
-  const runMemberRoleSave = useCallback(async (memberId: string, role: 'admin' | 'member') => {
+  const runMemberRoleSave = useCallback(async (memberId: string, role: 'admin' | 'member' | 'viewer') => {
     if (!canManageMemberRoles) {
       return;
     }
@@ -3458,6 +3463,7 @@ export default function Settings() {
                           className="w-full rounded-lg border border-blue-200 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 disabled:bg-gray-100"
                         >
                           <option value="member">운영자</option>
+                          <option value="viewer">조회자</option>
                           <option value="admin">관리자</option>
                           {isSuperAdmin && (
                             <option value="installer">장착 기사</option>
@@ -3513,14 +3519,14 @@ export default function Settings() {
                       )}
                       {members.map((member) => {
                         const draftRole = memberRoleDrafts[member.userId] ?? member.role;
-                        const normalizedDraftRole = draftRole === 'admin' ? 'admin' : 'member';
-                        const normalizedCurrentRole = member.role === 'admin' ? 'admin' : 'member';
+                        const normalizedDraftRole = draftRole === 'admin' || draftRole === 'viewer' ? draftRole : 'member';
+                        const normalizedCurrentRole = member.role === 'admin' || member.role === 'viewer' ? member.role : 'member';
                         const isRoleDirty = normalizedDraftRole !== normalizedCurrentRole;
                         const isRowSaving = savingMemberId === member.userId;
                         const canEditRowRole = (
                           canManageMemberRoles
                           && member.status === 'approved'
-                          && (member.role === 'admin' || member.role === 'member')
+                          && (member.role === 'admin' || member.role === 'member' || member.role === 'viewer')
                         );
                         const canReviewPendingMember = canReviewPendingMemberStatus(member, user?.role, canManageMemberRoles);
 
@@ -3536,12 +3542,13 @@ export default function Settings() {
                               {canEditRowRole ? (
                                 <select
                                   value={normalizedDraftRole}
-                                  onChange={(event) => handleMemberRoleChange(member.userId, event.target.value as 'admin' | 'member')}
+                                  onChange={(event) => handleMemberRoleChange(member.userId, event.target.value as 'admin' | 'member' | 'viewer')}
                                   disabled={isRowSaving}
                                   className="rounded-md border border-gray-300 px-2 py-1 text-xs font-medium text-gray-800 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:opacity-50"
                                 >
                                   <option value="admin">관리자</option>
                                   <option value="member">운영자</option>
+                                  <option value="viewer">조회자</option>
                                 </select>
                               ) : (
                                 <span className={`rounded-full px-2 py-1 text-xs font-medium ${getRoleBadgeColor(member.role)}`}>
@@ -3619,6 +3626,7 @@ export default function Settings() {
                   <div className="space-y-1 text-sm text-gray-600">
                     <p><span className="font-medium">관리자(admin):</span> 멤버 권한 및 운영 설정 변경 가능</p>
                     <p><span className="font-medium">운영자(member):</span> 데이터 조회/운영 기능 사용, 설정 변경 제한</p>
+                    <p><span className="font-medium">조회자(viewer):</span> 데이터 조회 전용</p>
                     <p><span className="font-medium">상태:</span> approved(활성), pending(승인 대기), rejected(거절), withdrawn(탈퇴)</p>
                   </div>
                 </div>
