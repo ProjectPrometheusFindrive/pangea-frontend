@@ -7,6 +7,17 @@ function getMetricCard(page: Page, label: string) {
   return page.getByRole('button', { name: new RegExp(label) });
 }
 
+function buildActionItemsPayload(
+  items: Array<{ id: string; vehicleNumber: string; type: string }>,
+) {
+  return {
+    items,
+    totalCount: items.length,
+    page: 1,
+    pageSize: 100,
+  };
+}
+
 test.describe('SCRUM-183 Home E2E', () => {
   test('shows overdue returns and unpaid contracts as separate counts', async ({ page }) => {
     const user = buildMockUser('member');
@@ -81,6 +92,14 @@ test.describe('SCRUM-183 Home E2E', () => {
             },
             recentChanges: [],
           });
+        },
+        'GET /api/v2/action-items': async ({ route }) => {
+          await fulfillSuccess(route, buildActionItemsPayload([
+            { id: 'action-overdue-1', vehicleNumber: '12가3456', type: '반납 지연' },
+            { id: 'action-overdue-2', vehicleNumber: '23가4567', type: '반납 지연' },
+            { id: 'action-overdue-3', vehicleNumber: '34가5678', type: '반납 지연' },
+            { id: 'action-payment-1', vehicleNumber: '45가6789', type: '미납/결제 문제' },
+          ]));
         },
         'GET /api/v2/auth/me': async ({ route }) => {
           await fulfillSuccess(route, user);
@@ -214,6 +233,9 @@ test.describe('SCRUM-184 Home premium CTA E2E', () => {
             },
             recentChanges: [],
           });
+        },
+        'GET /api/v2/action-items': async ({ route }) => {
+          await fulfillSuccess(route, buildActionItemsPayload([]));
         },
         'GET /api/v2/auth/me': async ({ route }) => {
           await fulfillSuccess(route, user);
@@ -350,6 +372,9 @@ test.describe('SCRUM-184 Home premium CTA E2E', () => {
             },
             recentChanges: [],
           });
+        },
+        'GET /api/v2/action-items': async ({ route }) => {
+          await fulfillSuccess(route, buildActionItemsPayload([]));
         },
         'GET /api/v2/auth/me': async ({ route }) => {
           await fulfillSuccess(route, user);
@@ -492,6 +517,9 @@ test.describe('SCRUM-184 Home premium CTA E2E', () => {
             },
             recentChanges: [],
           });
+        },
+        'GET /api/v2/action-items': async ({ route }) => {
+          await fulfillSuccess(route, buildActionItemsPayload([]));
         },
         'GET /api/v2/auth/me': async ({ route }) => {
           await fulfillSuccess(route, user);
