@@ -899,6 +899,11 @@ function cleanupAssetsQueryParams(params: URLSearchParams): void {
   if (!query || query.trim().length === 0) {
     params.delete('q');
   }
+
+  const model = params.get('model');
+  if (!model || model.trim().length === 0) {
+    params.delete('model');
+  }
 }
 
 export default function Assets() {
@@ -914,6 +919,7 @@ export default function Assets() {
   const statusParam = searchParams.get('status');
   const statusFilterCode = toStatusFilterCode(statusParam);
   const statusQueryValue = toStatusQueryValue(statusParam);
+  const modelFilter = (searchParams.get('model') ?? '').trim();
   const vehicleQuery = (searchParams.get('vehicle') ?? '').trim();
   const queryKeyword = searchParams.get('q') ?? searchParams.get('search') ?? '';
   const keyword = (queryKeyword || vehicleQuery).trim();
@@ -1163,6 +1169,7 @@ export default function Assets() {
       params.delete('q');
       params.delete('search');
       params.delete('status');
+      params.delete('model');
       params.delete('assetId');
       params.delete('vehicle');
       params.set('page', String(DEFAULT_PAGE));
@@ -1364,6 +1371,19 @@ export default function Assets() {
     });
   }, [updateAssetsSearchParams]);
 
+  const handleModelFilterChange = useCallback((nextModelFilter: string) => {
+    updateAssetsSearchParams((params) => {
+      if (nextModelFilter.trim().length > 0) {
+        params.set('model', nextModelFilter);
+      } else {
+        params.delete('model');
+      }
+      params.delete('assetId');
+      params.delete('vehicle');
+      params.set('page', '1');
+    });
+  }, [updateAssetsSearchParams]);
+
   const handlePageChange = useCallback((nextPage: number) => {
     const safeNextPage = Math.max(1, nextPage);
     updateAssetsSearchParams((params) => {
@@ -1428,12 +1448,31 @@ export default function Assets() {
     }
   };
 
+  const availableModelOptions = useMemo(() => {
+    const uniqueModelOptions = new Set<string>();
+    for (const asset of assets) {
+      const normalizedModel = asset.model.trim();
+      if (normalizedModel.length === 0) {
+        continue;
+      }
+      uniqueModelOptions.add(normalizedModel);
+    }
+    return Array.from(uniqueModelOptions).sort((left, right) => left.localeCompare(right, 'ko'));
+  }, [assets]);
+
+  const filteredAssets = useMemo(() => {
+    if (!modelFilter) {
+      return assets;
+    }
+    return assets.filter((asset) => asset.model.trim() === modelFilter);
+  }, [assets, modelFilter]);
+
   const statusCountMap = useMemo(() => ({
-    rental: assets.filter((asset) => asset.status === '대여중').length,
-    reserved: assets.filter((asset) => asset.status === '예약').length,
-    available: assets.filter((asset) => asset.status === '가용').length,
-    maintenance: assets.filter((asset) => asset.status === '정비중').length,
-  }), [assets]);
+    rental: filteredAssets.filter((asset) => asset.status === '대여중').length,
+    reserved: filteredAssets.filter((asset) => asset.status === '예약').length,
+    available: filteredAssets.filter((asset) => asset.status === '가용').length,
+    maintenance: filteredAssets.filter((asset) => asset.status === '정비중').length,
+  }), [filteredAssets]);
 
   const totalPages = useMemo(() => {
     if (totalCount === null) {
@@ -1452,7 +1491,7 @@ export default function Assets() {
   const isAssetsEmpty = (
     !isAssetsLoading
     && !assetsError
-    && (isAssetsApiEmpty || assets.length === 0)
+    && (isAssetsApiEmpty || filteredAssets.length === 0)
   ) || isOutOfRangeError;
   const premiumInstallableAssets = useMemo(() => (
     assets
@@ -2129,7 +2168,7 @@ export default function Assets() {
                   : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
               }`}
             >
-              전체 ({assets.length})
+              전체 ({filteredAssets.length})
             </button>
             <button
               onClick={() => handleStatusChange('rental')}
@@ -2176,6 +2215,19 @@ export default function Assets() {
           {/* 페이지 크기 & 등록 버튼 */}
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
+              <label htmlFor="assets-model-filter" className="text-sm font-semibold text-gray-700">차종:</label>
+              <select
+                id="assets-model-filter"
+                name="modelFilter"
+                value={modelFilter}
+                onChange={(event) => handleModelFilterChange(event.target.value)}
+                className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm"
+              >
+                <option value="">전체</option>
+                {availableModelOptions.map((modelOption) => (
+                  <option key={modelOption} value={modelOption}>{modelOption}</option>
+                ))}
+              </select>
               <span className="text-sm font-semibold text-gray-700">페이지 크기:</span>
               <select
                 value={pageSize}
@@ -2192,7 +2244,8 @@ export default function Assets() {
                 ))}
               </select>
               <span className="text-xs text-gray-500">
-                {totalCount !== null
+                {modelFilter ? `필터 결과 ${filteredAssets.length}대 표시 중`
+                  : totalCount !== null
                   ? `총 ${totalCount}대`
                   : `${assets.length}대 표시 중`}
               </span>
@@ -2246,7 +2299,7 @@ export default function Assets() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
-                  {assets.map((asset) => (
+                  {filteredAssets.map((asset) => (
                     <tr
                       key={asset.id}
                       data-testid={`asset-row-${asset.id}`}
