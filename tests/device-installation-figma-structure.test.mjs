@@ -37,3 +37,11 @@ test('SCRUM-295 renders installation and serial photos in separate columns', asy
   assert.match(pageSource, /installation\.photos\[1\]/u);
   assert.doesNotMatch(pageSource, /installation\.photos\.map/u);
 });
+
+test('SCRUM-295 keeps the page title and section heading distinct for E2E locators', async () => {
+  const pageSource = await readFile(path.join(projectRoot, 'src/app/pages/DeviceInstallation.tsx'), 'utf8');
+
+  assert.match(pageSource, /<Layout title="단말 장착\/관리">/u);
+  assert.match(pageSource, /<h2 className="text-lg font-bold">단말 장착 작업<\/h2>/u);
+  assert.doesNotMatch(pageSource, /<h2 className="text-lg font-bold">단말 장착\/관리<\/h2>/u);
+});

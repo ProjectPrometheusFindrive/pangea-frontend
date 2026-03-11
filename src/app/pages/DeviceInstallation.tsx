@@ -778,7 +778,7 @@ export default function DeviceInstallation() {
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Zap className="w-6 h-6" />
-              <h2 className="text-lg font-bold">단말 장착/관리</h2>
+              <h2 className="text-lg font-bold">단말 장착 작업</h2>
             </div>
             <div className="flex items-center gap-4 text-sm">
               <span>대기: <strong>{summary.scheduled + summary.inProgress}</strong>건</span>
