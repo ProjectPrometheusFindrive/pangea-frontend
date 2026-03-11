@@ -171,6 +171,9 @@ cp docs/prompt_history/_TEMPLATE.md docs/prompt_history/$(date +%Y%m%d)_SCRUM-12
 
 ## Version History
 - v1.2.56 (2026-03-11, Jira SCRUM-291): Record end_prompt evidence for restoring the Assets model filter with catalog-backed options, counts, and pagination.
+- v1.2.55 (2026-03-11, Jira SCRUM-290): Record end_prompt evidence for the Figma score-card layout while keeping unsupported operation sub-scores behind an explicit contract-gap note.
+- v1.2.54 (2026-03-11, Jira SCRUM-289): Record end_prompt evidence for normalizing home dashboard bucket labels to the approved Figma taxonomy.
+- v1.2.53 (2026-03-11, Jira SCRUM-288): Record end_prompt evidence for restoring the full Figma-aligned home issue-card taxonomy and premium-card parity.
 - v1.2.52 (2026-03-10, Jira SCRUM-271): Record end_prompt evidence for reservation create phone validation and removal of unsupported SSN input on the FE modal flow.
 - v1.2.51 (2026-03-10, Jira SCRUM-270): Record end_prompt evidence for super_admin dashboard company scope alignment across Home, Revenue, and settings-backed company selection.
 - v1.2.50 (2026-03-09, Jira SCRUM-267/269): Record review-follow-up evidence for loan-schedule append/replace/remove UX and premium-placeholder handling on the device-off home card.
