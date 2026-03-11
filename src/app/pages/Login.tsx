@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 
 import { consumeStoredReturnUrl, useAuth } from '../context/AuthContext';
 import { ApiError } from '../../services/api';
-import { resolveDefaultLandingPath } from '../../services/auth';
+import { resolveDefaultLandingPath, toViewRole } from '../../services/auth';
 
 interface LoginUiError {
   message: string;
@@ -124,14 +124,15 @@ export default function Login() {
   const defaultLandingPath = resolveDefaultLandingPath(viewRole);
   const resolvedAuthenticatedPath = returnUrl !== '/' ? returnUrl : defaultLandingPath;
 
-  const resolvePostLoginPath = (storedReturnUrl: string | null) => {
+  const resolvePostLoginPath = (storedReturnUrl: string | null, authenticatedUserRole?: string | null) => {
     if (returnUrl !== '/') {
       return returnUrl;
     }
     if (storedReturnUrl && storedReturnUrl !== '/') {
       return storedReturnUrl;
     }
-    return defaultLandingPath;
+    const postLoginViewRole = toViewRole(authenticatedUserRole);
+    return resolveDefaultLandingPath(postLoginViewRole ?? viewRole);
   };
 
   useEffect(() => {
@@ -185,9 +186,9 @@ export default function Login() {
     setLastPayload(payload);
 
     try {
-      await login(payload);
+      const authenticatedUser = await login(payload);
       const storedReturnUrl = consumeStoredReturnUrl();
-      const targetPath = resolvePostLoginPath(storedReturnUrl);
+      const targetPath = resolvePostLoginPath(storedReturnUrl, authenticatedUser?.role);
       navigate(targetPath, { replace: true });
     } catch (error) {
       setUiError(toLoginUiError(error));
@@ -205,9 +206,9 @@ export default function Login() {
     setIsSubmitting(true);
 
     try {
-      await login(lastPayload);
+      const authenticatedUser = await login(lastPayload);
       const storedReturnUrl = consumeStoredReturnUrl();
-      const targetPath = resolvePostLoginPath(storedReturnUrl);
+      const targetPath = resolvePostLoginPath(storedReturnUrl, authenticatedUser?.role);
       navigate(targetPath, { replace: true });
     } catch (error) {
       setUiError(toLoginUiError(error));

@@ -57,9 +57,19 @@ test('SCRUM-284 login and forbidden page reuse the role-aware default landing pa
   assert.match(loginSource, /viewRole/u);
   assert.match(loginSource, /resolveDefaultLandingPath\(viewRole\)/u);
   assert.match(loginSource, /storedReturnUrl && storedReturnUrl !== '\/'/u);
-  assert.match(loginSource, /resolvePostLoginPath\(storedReturnUrl\)/u);
+  assert.match(loginSource, /resolvePostLoginPath\(storedReturnUrl, authenticatedUser\?\.role\)/u);
 
   assert.match(forbiddenSource, /useAuth\(\)/u);
   assert.match(forbiddenSource, /resolveDefaultLandingPath\(viewRole\)/u);
   assert.match(forbiddenSource, /to=\{resolveDefaultLandingPath\(viewRole\)\}/u);
+});
+
+test('SCRUM-284 resolves post-login landing from the authenticated user instead of stale pre-login viewRole', () => {
+  const loginSource = readProjectFile('src/app/pages/Login.tsx');
+  const authContextSource = readProjectFile('src/app/context/AuthContext.tsx');
+
+  assert.match(authContextSource, /login: \(payload: AuthLoginPayload\) => Promise<AuthUser \| null>;/u);
+  assert.match(loginSource, /const authenticatedUser = await login\(payload\);/u);
+  assert.match(loginSource, /const postLoginViewRole = toViewRole\(authenticatedUserRole\);/u);
+  assert.match(loginSource, /return resolveDefaultLandingPath\(postLoginViewRole \?\? viewRole\);/u);
 });

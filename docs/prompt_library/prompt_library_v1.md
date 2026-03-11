@@ -1,6 +1,6 @@
 # Prompt Library v1
 
-- Version: v1.2.61
+- Version: v1.2.62
 - Date: 2026-03-11
 - Owner: Pangea Frontend Team
 - Tags: prompt-library,workflow,branch-policy,history-policy,commit-policy,pr-automation,jira-traceability,end-prompt-protocol,worktree-cleanup,jira-status-sync,jira-comment-sync,ac-evidence,mock-removal,reservations-write,reservations-mock-removal,ocr-flow,revenue-api,revenue-trend-fallback,settings-api,payment-status-sync,home-api,home-summary,home-copy,i18n-regression,action-payment-mock-removal,support-center,rbac-permission-hardening,e2e-test-hardening,playwright-artifact-policy,device-installation-tenant-scope,authorization-loading-guard,auth-silent-refresh,review-followup,loan-schedule-replace-remove,home-placeholder-premium-modal,home-action-items-alignment,home-issue-grid-parity
@@ -171,6 +171,7 @@ cp docs/prompt_history/_TEMPLATE.md docs/prompt_history/$(date +%Y%m%d)_SCRUM-12
 - Production push triggers auto tag (`vX.Y.Z`)
 
 ## Version History
+- v1.2.62 (2026-03-11, Jira SCRUM-284): Record end_prompt evidence for the installer default landing follow-up that resolves post-login routing from the authenticated user role instead of stale pre-login auth state.
 - v1.2.61 (2026-03-11, Jira SCRUM-267/288): Record end_prompt evidence for Home issue-card counts moving to the shared action-items basis and restoring the desktop 4-column issue grid parity.
 - v1.2.60 (2026-03-11, Jira SCRUM-295): Record end_prompt evidence for the vehicle-first installer flow, explicit manual scheduling inputs, and cancelled/photo-split follow-up fixes.
 - v1.2.59 (2026-03-11, Jira SCRUM-294): Record end_prompt evidence for fixing mojibake on the support-center submit label and matching E2E assertions.
