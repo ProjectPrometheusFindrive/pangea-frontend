@@ -83,6 +83,7 @@ End Prompt:
 - Home KPI 후속 티켓(SCRUM-183 계열)은 `prompt_history`에 `alerts.overdue`(반납 지연)와 `kpis.unpaidContracts`(미납/연체 계약) 분리 근거, Home -> Reservations 이동 시 `paymentScope=delinquent` 범위 동기화 근거, 라벨 기반 Playwright 회귀 검증 근거를 함께 기록한다.
 - Home issue/action-items alignment tickets (SCRUM-267/288 reopen series) must record evidence that Home `관리해야 할 이슈` count cards use the same `action-items` aggregation basis as the Action Required detail view, that reopened cards no longer bind directly to `home/summary` counters, and that the desktop issue grid preserves the Figma 4-column layout.
 - Home current-snapshot filter-removal tickets (SCRUM-297 series) must record evidence that Home period preset controls and stale `preset` query normalization were removed, that `/api/v2/home/summary` requests are pinned to the current day (`from=to=today`), and that company scope selection still hydrates after preset stripping.
+- Route guard privilege-fix tickets (SCRUM-299 series) must record evidence that `super_admin` cannot be redirected to `/forbidden` by centralized route-permission denial, that the guard policy is covered by an executable regression test, and that installer-only `allowedRoles` restrictions remain unchanged for non-privileged roles.
 - Home copy/i18n regression tickets (SCRUM-185 series) must record the exact localized string replacement, the rendered surface where the copy changed, and regression evidence that the Korean label is shown instead of the legacy English text. If Playwright reuses a running dev server, record whether `127.0.0.1:4173` was free or an isolated-port workaround was required.
 - Settings API 연동 티켓(BK-075/SCRUM-57 계열)은 `prompt_history`에 company/geofences/members API 연결 근거, 회사 정보 dirty-check/부분 업데이트(schemaVersion 포함)/저장 상태 분기, 권한 기반 읽기전용 처리, `400 필드 오류·403 권한·409 충돌 재로딩·5xx+network 재시도`, 저장/미저장 상태 이탈 경고(beforeunload) 근거를 함께 기록한다.
 - 고객센터 UI/연동 티켓(BK-087/SCRUM-66 계열)은 `prompt_history`에 `/api/v2/support/categories`, `/api/v2/support/tickets`, `/api/v2/support/tickets/{ticketId}` 연동 근거, 카테고리 loading/empty/직접입력 분기, 문의 submitting/중복 제출 방지/성공 ticketId 복구, `400/401/403/5xx+network` 분기와 Retry/권한 액션, 첨부파일 용량 제한 정책 반영 근거를 함께 기록한다.
@@ -173,7 +174,8 @@ cp docs/prompt_history/_TEMPLATE.md docs/prompt_history/$(date +%Y%m%d)_SCRUM-12
 - Production push triggers auto tag (`vX.Y.Z`)
 
 ## Version History
-- v1.2.64 (2026-03-12, Jira SCRUM-300): Record end_prompt evidence for the `/forbidden` 3-second countdown safety redirect, shared role-aware landing path reuse, and preserved manual CTA behavior.
+ - v1.2.64 (2026-03-12, Jira SCRUM-300): Record end_prompt evidence for the `/forbidden` 3-second countdown safety redirect, shared role-aware landing path reuse, and preserved manual CTA behavior.
+ - v1.2.64 (2026-03-12, Jira SCRUM-299): Record end_prompt evidence for the super_admin route-guard bypass, executable guard-policy regression coverage, and preserved non-privileged role restrictions.
 - v1.2.63 (2026-03-11, Jira SCRUM-297): Record end_prompt evidence for removing Home period presets, stripping stale preset query state, and pinning dashboard summary requests to the current day.
 - v1.2.62 (2026-03-11, Jira SCRUM-284): Record end_prompt evidence for the installer default landing follow-up that resolves post-login routing from the authenticated user role instead of stale pre-login auth state.
 - v1.2.61 (2026-03-11, Jira SCRUM-267/288): Record end_prompt evidence for Home issue-card counts moving to the shared action-items basis and restoring the desktop 4-column issue grid parity.

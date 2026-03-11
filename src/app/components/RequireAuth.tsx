@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { useAuthorization } from '../context/AuthorizationContext';
 import { resolveRoutePermissionForPath, type AppRoutePermission } from '../authorization';
 import type { AuthViewRole } from '../../services/auth';
+import { shouldRedirectToForbiddenForRoute } from './requireAuthPolicy';
 import { PageFallback } from './PageStateBoundary';
 
 interface RequireAuthProps {
@@ -15,7 +16,7 @@ const ROUTE_FORBIDDEN_REDIRECT_PATH = '/forbidden';
 
 export function RequireAuth({ allowedRoles, requiredPermission }: RequireAuthProps) {
   const location = useLocation();
-  const { isBootstrapping: isAuthBootstrapping, isAuthenticated, viewRole } = useAuth();
+  const { isBootstrapping: isAuthBootstrapping, isAuthenticated, user, viewRole } = useAuth();
   const {
     isBootstrapping: isAuthorizationBootstrapping,
     source: authorizationSource,
@@ -53,7 +54,13 @@ export function RequireAuth({ allowedRoles, requiredPermission }: RequireAuthPro
   }
 
   const routePermission = requiredPermission ?? resolveRoutePermissionForPath(location.pathname);
-  if (routePermission && !canAccessRoute(routePermission)) {
+  if (
+    routePermission
+    && shouldRedirectToForbiddenForRoute({
+      hasRoutePermission: canAccessRoute(routePermission),
+      userRole: user?.role,
+    })
+  ) {
     // Route-level permission denial policy: always move to /forbidden.
     return <Navigate to={ROUTE_FORBIDDEN_REDIRECT_PATH} replace />;
   }
