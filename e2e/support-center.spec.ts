@@ -211,7 +211,7 @@ test.describe('Support Center super_admin management view', () => {
     await expect(page.getByTestId('support-admin-ticket-list')).toBeVisible();
     await expect(page.getByTestId('support-admin-ticket-row-C1-SUP-0001')).toBeVisible();
     await expect(page.getByTestId('support-admin-ticket-row-C2-SUP-0001')).toBeVisible();
-    await expect(page.getByText('문의 등록')).toHaveCount(0);
+    await expect(page.getByTestId('support-admin-open-submit')).toHaveText('문의 등록');
 
     await page.getByTestId('support-admin-filter-company').fill('C2');
     await page.getByTestId('support-admin-filter-apply').click();
@@ -281,6 +281,6 @@ test.describe('Support Center super_admin management view', () => {
     await loginViaUi(page, 'admin', { returnUrl: '/support-center' });
 
     await expect(page.getByTestId('support-admin-heading')).toBeVisible();
-    await expect(page.getByText('문의 등록')).toHaveCount(0);
+    await expect(page.getByTestId('support-admin-open-submit')).toHaveText('문의 등록');
   });
 });
