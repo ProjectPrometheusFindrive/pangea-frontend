@@ -43,6 +43,7 @@ async function fillInstallationForm(page: Page): Promise<void> {
       await vinField.fill('KMH12A34560000001');
     }
   }
+  await page.getByTestId('device-installation-scheduled-at-input').fill('2025-02-20T09:00');
   await page.getByTestId('device-installation-serial-input').fill('DEV-2026-0001');
   await page.getByTestId('device-installation-photo-file-input').setInputFiles(TEST_IMAGE_FILE);
   await page.getByTestId('device-installation-serial-photo-file-input').setInputFiles(TEST_IMAGE_FILE);
