@@ -264,6 +264,40 @@ function toAssetStatusFilter(stageLabel: string): string {
   return '';
 }
 
+function toCanonicalAssetBucketName(stageLabel: string): string {
+  const normalized = stageLabel.trim().toLowerCase();
+  if (!normalized) {
+    return '';
+  }
+  if (normalized.includes('정비') || normalized.includes('점검') || normalized.includes('수리')) {
+    return '정비중';
+  }
+  if (normalized.includes('예약') || normalized.includes('출고')) {
+    return '예약';
+  }
+  if (normalized.includes('운영') || normalized.includes('대여')) {
+    return '대여중';
+  }
+  if (normalized.includes('가용') || normalized.includes('대기')) {
+    return '가용';
+  }
+  return '';
+}
+
+function normalizeAssetBucketCounts(stageCounts: Record<string, number>): Record<string, number> {
+  const normalizedCounts: Record<string, number> = {};
+
+  for (const [name, value] of Object.entries(stageCounts)) {
+    const canonicalName = toCanonicalAssetBucketName(name);
+    if (!canonicalName) {
+      continue;
+    }
+    normalizedCounts[canonicalName] = (normalizedCounts[canonicalName] ?? 0) + Math.max(0, Math.trunc(value));
+  }
+
+  return normalizedCounts;
+}
+
 function buildReservationsFilterPath(filterValue: string): string {
   const params = new URLSearchParams();
 
@@ -606,6 +640,10 @@ export default function Home() {
   const alerts = summary?.statusCounts.alerts ?? DEFAULT_ALERTS;
   const kpis = summary?.kpis ?? DEFAULT_KPIS;
   const today = summary?.today ?? DEFAULT_TODAY;
+  const normalizedManagementStageCounts = useMemo(
+    () => normalizeAssetBucketCounts(managementStageCounts),
+    [managementStageCounts],
+  );
 
   const iconMap: Record<string, React.ComponentType<{ className?: string }>> = {
     Car,
@@ -700,7 +738,7 @@ export default function Home() {
   }, [today.overdueCount, today.pickupDueCount, today.returnDueCount]);
 
   const actionItemsForHome = useMemo<HomeStatCard[]>(() => {
-    const maintenanceAssets = sumByKeys(managementStageCounts, ['점검대기', '정비중']);
+    const maintenanceAssets = sumByKeys(normalizedManagementStageCounts, ['정비중']);
 
     return [
       {
@@ -780,19 +818,21 @@ export default function Home() {
         testId: 'home-issue-card-device-off',
       },
     ];
-  }, [alerts.overdue, alerts.stolen, handleIssueClick, kpis.unpaidContracts, managementStageCounts]);
+  }, [alerts.overdue, alerts.stolen, handleIssueClick, kpis.unpaidContracts, normalizedManagementStageCounts]);
 
   const assetData = useMemo<DashboardDistributionItem[]>(() => {
     const palette = ['#1e3a8a', '#60a5fa', '#22c55e', '#f59e0b'];
-    const entries = Object.entries(managementStageCounts)
-      .filter(([name]) => name.trim().length > 0)
-      .sort((left, right) => right[1] - left[1]);
+    const bucketOrder = ['대여중', '가용', '정비중', '예약'];
+    const entries = Object.entries(normalizedManagementStageCounts)
+      .filter(([, value]) => value > 0)
+      .sort((left, right) => bucketOrder.indexOf(left[0]) - bucketOrder.indexOf(right[0]));
 
     if (entries.length === 0) {
       return [
-        { name: '운영중', value: kpis.activeContracts, color: palette[0], status: 'rental', unit: '대' },
+        { name: '대여중', value: kpis.activeContracts, color: palette[0], status: 'rental', unit: '대' },
         { name: '가용', value: Math.max(0, kpis.totalAssets - kpis.activeContracts), color: palette[1], status: 'available', unit: '대' },
-        { name: '점검대기', value: 0, color: palette[2], status: 'maintenance', unit: '대' },
+        { name: '정비중', value: 0, color: palette[2], status: 'maintenance', unit: '대' },
+        { name: '예약', value: 0, color: palette[3], status: 'reserved', unit: '대' },
       ];
     }
 
@@ -803,7 +843,7 @@ export default function Home() {
       status: toAssetStatusFilter(name),
       unit: '대' as const,
     }));
-  }, [kpis.activeContracts, kpis.totalAssets, managementStageCounts]);
+  }, [kpis.activeContracts, kpis.totalAssets, normalizedManagementStageCounts]);
 
   const contractData = useMemo<DashboardDistributionItem[]>(() => {
     const palette = ['#1e3a8a', '#8b5cf6', '#ef4444', '#22c55e'];
