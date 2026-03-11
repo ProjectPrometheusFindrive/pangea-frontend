@@ -117,6 +117,15 @@ interface OcrSuggestion {
   confidence: number;
 }
 
+interface AssetsHydrationPayload {
+  items: Asset[];
+  total: number;
+  page: number;
+  pageSize: number;
+  modelOptions: string[];
+  catalogItems: Asset[];
+}
+
 type StatusFilterCode = 'all' | 'rental' | 'reserved' | 'available' | 'maintenance';
 type CreateField = keyof Pick<CreateFormState, 'vehicleNumber' | 'vin' | 'model' | 'year'>;
 type FieldErrorMap<TField extends string> = Partial<Record<TField, string>>;
@@ -133,6 +142,7 @@ interface OcrDocConfig {
 const DEFAULT_PAGE = 1;
 const DEFAULT_PAGE_SIZE = 20;
 const ASSET_HISTORY_PAGE_SIZE = 20;
+const MODEL_CATALOG_PAGE_SIZE = 200;
 const PAGE_SIZE_OPTIONS = [10, 20, 50];
 const TOTAL_COUNT_KEYS = ['total', 'totalCount', 'count', 'itemsCount', 'totalElements'];
 const DEFAULT_CREATE_FORM_STATE: CreateFormState = {
@@ -882,6 +892,31 @@ function getTotalCountFromObject(source: unknown): number | null {
   return null;
 }
 
+function toModelOptions(rows: Asset[]): string[] {
+  const uniqueModelOptions = new Set<string>();
+  for (const asset of rows) {
+    const normalizedModel = asset.model.trim();
+    if (normalizedModel.length === 0) {
+      continue;
+    }
+    uniqueModelOptions.add(normalizedModel);
+  }
+  return Array.from(uniqueModelOptions).sort((left, right) => left.localeCompare(right, 'ko'));
+}
+
+function filterAssetsByModel(rows: Asset[], modelFilter: string): Asset[] {
+  if (!modelFilter) {
+    return rows;
+  }
+
+  return rows.filter((asset) => asset.model.trim() === modelFilter);
+}
+
+function paginateAssets(rows: Asset[], page: number, pageSize: number): Asset[] {
+  const start = Math.max(0, (page - 1) * pageSize);
+  return rows.slice(start, start + pageSize);
+}
+
 function cleanupAssetsQueryParams(params: URLSearchParams): void {
   if (params.get('page') === String(DEFAULT_PAGE)) {
     params.delete('page');
@@ -945,6 +980,8 @@ export default function Assets() {
     loanSchedule: [],
   });
   const [assets, setAssets] = useState<Asset[]>([]);
+  const [catalogAssets, setCatalogAssets] = useState<Asset[]>([]);
+  const [availableModelOptions, setAvailableModelOptions] = useState<string[]>([]);
   const [totalCount, setTotalCount] = useState<number | null>(null);
   const [assetsErrorStatus, setAssetsErrorStatus] = useState<number | null>(null);
   const [detailNotice, setDetailNotice] = useState<string | null>(null);
@@ -1000,33 +1037,86 @@ export default function Assets() {
     }, true);
   }, [statusParam, updateAssetsSearchParams]);
 
-  const requestAssets = useCallback(async (signal: AbortSignal) => {
-    try {
-      return await getAssetsList({
-        page,
-        size: pageSize,
+  const loadModelCatalog = useCallback(async (signal: AbortSignal) => {
+    const catalogAssets: Asset[] = [];
+    const catalogPageSize = Math.max(pageSize, MODEL_CATALOG_PAGE_SIZE);
+    let catalogPage = 1;
+    let catalogTotal = 1;
+
+    while (catalogAssets.length < catalogTotal) {
+      const payload = await getAssetsList({
+        page: catalogPage,
+        size: catalogPageSize,
         status: statusQueryValue,
         q: keyword || undefined,
         signal,
       });
+
+      const pageAssets = toAssetRows(payload);
+      const payloadTotal = getTotalCountFromObject(payload) ?? pageAssets.length;
+      catalogTotal = Math.max(1, payloadTotal);
+      catalogAssets.push(...pageAssets);
+
+      if (pageAssets.length === 0 || catalogAssets.length >= catalogTotal) {
+        break;
+      }
+
+      catalogPage += 1;
+    }
+
+    return catalogAssets;
+  }, [keyword, pageSize, statusQueryValue]);
+
+  const requestAssets = useCallback(async (signal: AbortSignal): Promise<AssetsHydrationPayload> => {
+    try {
+      const fullCatalog = await loadModelCatalog(signal);
+      const filteredCatalog = filterAssetsByModel(fullCatalog, modelFilter);
+      if (modelFilter) {
+        return {
+          items: filteredCatalog,
+          total: filteredCatalog.length,
+          page,
+          pageSize,
+          modelOptions: toModelOptions(fullCatalog),
+          catalogItems: fullCatalog,
+        };
+      }
+
+      const payload = await getAssetsList({
+        page,
+        size: pageSize,
+        status: statusQueryValue,
+        q: keyword || undefined,
+        model: modelFilter || undefined,
+        signal,
+      });
+
+      const pageAssets = toAssetRows(payload);
+
+      return {
+        items: pageAssets,
+        total: getTotalCountFromObject(payload) ?? pageAssets.length,
+        page,
+        pageSize,
+        modelOptions: toModelOptions(fullCatalog),
+        catalogItems: fullCatalog,
+      };
     } catch (error) {
       setAssetsErrorStatus(error instanceof ApiError ? error.status ?? null : null);
       throw error;
     }
-  }, [keyword, page, pageSize, statusQueryValue]);
+  }, [keyword, loadModelCatalog, modelFilter, page, pageSize, statusQueryValue]);
 
-  const handleAssetsSuccess = useCallback((payload: unknown) => {
-    setAssets(toAssetRows(payload));
-    setTotalCount(getTotalCountFromObject(payload));
+  const handleAssetsSuccess = useCallback((payload: AssetsHydrationPayload) => {
+    setAssets(payload.items);
+    setCatalogAssets(payload.catalogItems);
+    setAvailableModelOptions(payload.modelOptions);
+    setTotalCount(payload.total);
     setAssetsErrorStatus(null);
   }, []);
 
-  const isAssetsPayloadEmpty = useCallback((payload: unknown) => {
-    const rows = getCollectionFromPayload(payload, ['assets', 'items', 'rows', 'list']);
-    if (rows) {
-      return rows.length === 0;
-    }
-    return isPayloadEmpty(payload, ['assets', 'items', 'rows', 'list']);
+  const isAssetsPayloadEmpty = useCallback((payload: AssetsHydrationPayload) => {
+    return payload.items.length === 0;
   }, []);
 
   const {
@@ -1035,7 +1125,7 @@ export default function Assets() {
     errorKind: assetsErrorKind,
     isEmpty: isAssetsApiEmpty,
     run: hydrateAssets,
-  } = usePageEndpointState<unknown>({
+  } = usePageEndpointState<AssetsHydrationPayload>({
     request: requestAssets,
     onSuccess: handleAssetsSuccess,
     isEmpty: isAssetsPayloadEmpty,
@@ -1448,31 +1538,16 @@ export default function Assets() {
     }
   };
 
-  const availableModelOptions = useMemo(() => {
-    const uniqueModelOptions = new Set<string>();
-    for (const asset of assets) {
-      const normalizedModel = asset.model.trim();
-      if (normalizedModel.length === 0) {
-        continue;
-      }
-      uniqueModelOptions.add(normalizedModel);
-    }
-    return Array.from(uniqueModelOptions).sort((left, right) => left.localeCompare(right, 'ko'));
-  }, [assets]);
-
-  const filteredAssets = useMemo(() => {
-    if (!modelFilter) {
-      return assets;
-    }
-    return assets.filter((asset) => asset.model.trim() === modelFilter);
-  }, [assets, modelFilter]);
+  const visibleAssets = useMemo(() => (
+    modelFilter ? paginateAssets(assets, page, pageSize) : assets
+  ), [assets, modelFilter, page, pageSize]);
 
   const statusCountMap = useMemo(() => ({
-    rental: filteredAssets.filter((asset) => asset.status === '대여중').length,
-    reserved: filteredAssets.filter((asset) => asset.status === '예약').length,
-    available: filteredAssets.filter((asset) => asset.status === '가용').length,
-    maintenance: filteredAssets.filter((asset) => asset.status === '정비중').length,
-  }), [filteredAssets]);
+    rental: assets.filter((asset) => asset.status === '대여중').length,
+    reserved: assets.filter((asset) => asset.status === '예약').length,
+    available: assets.filter((asset) => asset.status === '가용').length,
+    maintenance: assets.filter((asset) => asset.status === '정비중').length,
+  }), [assets]);
 
   const totalPages = useMemo(() => {
     if (totalCount === null) {
@@ -1491,8 +1566,8 @@ export default function Assets() {
   const isAssetsEmpty = (
     !isAssetsLoading
     && !assetsError
-    && (isAssetsApiEmpty || filteredAssets.length === 0)
-  ) || isOutOfRangeError;
+    && (isAssetsApiEmpty || visibleAssets.length === 0)
+  ) || shouldShowOutOfRangeEmpty;
   const premiumInstallableAssets = useMemo(() => (
     assets
       .filter((asset) => !asset.hasDevice)
@@ -2168,7 +2243,7 @@ export default function Assets() {
                   : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
               }`}
             >
-              전체 ({filteredAssets.length})
+              전체 ({totalCount ?? assets.length})
             </button>
             <button
               onClick={() => handleStatusChange('rental')}
@@ -2244,7 +2319,7 @@ export default function Assets() {
                 ))}
               </select>
               <span className="text-xs text-gray-500">
-                {modelFilter ? `필터 결과 ${filteredAssets.length}대 표시 중`
+                {modelFilter ? `필터 결과 ${totalCount ?? assets.length}대 표시 중`
                   : totalCount !== null
                   ? `총 ${totalCount}대`
                   : `${assets.length}대 표시 중`}
@@ -2299,7 +2374,7 @@ export default function Assets() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
-                  {filteredAssets.map((asset) => (
+                  {visibleAssets.map((asset) => (
                     <tr
                       key={asset.id}
                       data-testid={`asset-row-${asset.id}`}
