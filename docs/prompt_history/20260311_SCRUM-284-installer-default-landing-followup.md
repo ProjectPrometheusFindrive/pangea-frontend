@@ -4,8 +4,8 @@
 - Author: Codex
 - Branch: `fix/SCRUM-284-installer-default-landing-followup`
 - Jira: https://pangea-autos.atlassian.net/browse/SCRUM-284
-- Jira Status: `In Progress` during documentation, `Resolved` planned after PR creation
-- PR URL: Pending at commit time
+- Jira Status: `Resolved`
+- PR URL: https://github.com/ProjectPrometheusFindrive/pangea-frontend/pull/137
 - Tags: scrum-284,fe,auth,installer,routing,follow-up
 
 ## Start Context
