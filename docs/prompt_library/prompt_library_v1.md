@@ -3,7 +3,7 @@
 - Version: v1.2.64
 - Date: 2026-03-12
 - Owner: Pangea Frontend Team
-- Tags: prompt-library,workflow,branch-policy,history-policy,commit-policy,pr-automation,jira-traceability,end-prompt-protocol,worktree-cleanup,jira-status-sync,jira-comment-sync,ac-evidence,mock-removal,reservations-write,reservations-mock-removal,ocr-flow,revenue-api,revenue-trend-fallback,settings-api,payment-status-sync,home-api,home-summary,home-copy,i18n-regression,action-payment-mock-removal,support-center,rbac-permission-hardening,e2e-test-hardening,playwright-artifact-policy,device-installation-tenant-scope,authorization-loading-guard,auth-silent-refresh,review-followup,loan-schedule-replace-remove,home-placeholder-premium-modal,home-action-items-alignment,home-issue-grid-parity,home-period-filter,home-current-snapshot
+- Tags: prompt-library,workflow,branch-policy,history-policy,commit-policy,pr-automation,jira-traceability,end-prompt-protocol,worktree-cleanup,jira-status-sync,jira-comment-sync,ac-evidence,mock-removal,reservations-write,reservations-mock-removal,ocr-flow,revenue-api,revenue-trend-fallback,settings-api,payment-status-sync,home-api,home-summary,home-copy,i18n-regression,action-payment-mock-removal,support-center,rbac-permission-hardening,e2e-test-hardening,playwright-artifact-policy,device-installation-tenant-scope,authorization-loading-guard,auth-silent-refresh,review-followup,loan-schedule-replace-remove,home-placeholder-premium-modal,home-action-items-alignment,home-issue-grid-parity,home-period-filter,home-current-snapshot,forbidden-auto-redirect
 
 ## Context
 - 초기 세팅 작업에서 프롬프트 템플릿, 브랜치 정책, 문서화 절차를 반복 가능하게 표준화할 필요가 있음.
@@ -101,6 +101,7 @@ End Prompt:
 - 인증 컨텍스트 교체 티켓(BK-021/BK-031 계열)은 `prompt_history`에 세션 저장 키, API 토큰 provider 연동 방식, role 매핑 규칙을 반드시 기록한다.
 - 로그인/보호 라우트 티켓(BK-031 계열)은 `prompt_history`에 `returnUrl` 복귀 흐름, 로그인 `401/429/NETWORK_ERROR` 분기, `401 -> /auth/refresh 1회 -> 원요청 재시도` 순서를 반드시 기록한다.
 - 인증 UX 정리 티켓(BK-032/SCRUM-35 계열)은 수동 로그아웃 토스트, 만료 모달+`returnUrl` 복구, `401` 연쇄 1회 종료, storage 토큰 정리 근거를 반드시 기록한다.
+- Forbidden UX 안전장치 티켓(SCRUM-300 계열)은 `prompt_history`에 `/forbidden` 진입 후 3초 카운트다운, 역할별 기본 랜딩 경로(`installer -> /device-installation`, 그 외 `/`) 재사용, 수동 CTA와 자동 리디렉션이 동일 경로를 공유한다는 근거를 반드시 기록한다.
 - ActionRequired 조회 연동 티켓(BK-062/SCRUM-48 계열)은 목록 쿼리(page/size/status/priority/assignee), 상세 조회(404 fallback), 필터 변경 race 방지 근거를 반드시 기록한다.
 - ActionRequired 쓰기 연동 티켓(BK-063/SCRUM-49 계열)은 상태 변경/해결 완료/메모 저장 API 연동 근거, saving 중복 제출 방지, 실패 시 낙관적 업데이트 롤백, `400/403/409/5xx+network` 분기와 Retry 제공 근거, 상태 변경 후 필터 이탈 처리 근거를 반드시 기록한다.
 - 결제 상태 연동 통합 티켓(BK-064/SCRUM-50 계열)은 결제 상태 canonical 매핑/우선순위(다중 결제/부분환불/out-of-order timestamp) 근거, Reservations/Home/Action 화면 동기화 지점, `401/403/404/5xx+network` 분기와 last-known fallback + 재시도 UX 근거를 반드시 기록한다.
@@ -173,7 +174,8 @@ cp docs/prompt_history/_TEMPLATE.md docs/prompt_history/$(date +%Y%m%d)_SCRUM-12
 - Production push triggers auto tag (`vX.Y.Z`)
 
 ## Version History
-- v1.2.64 (2026-03-12, Jira SCRUM-299): Record end_prompt evidence for the super_admin route-guard bypass, executable guard-policy regression coverage, and preserved non-privileged role restrictions.
+ - v1.2.64 (2026-03-12, Jira SCRUM-300): Record end_prompt evidence for the `/forbidden` 3-second countdown safety redirect, shared role-aware landing path reuse, and preserved manual CTA behavior.
+ - v1.2.64 (2026-03-12, Jira SCRUM-299): Record end_prompt evidence for the super_admin route-guard bypass, executable guard-policy regression coverage, and preserved non-privileged role restrictions.
 - v1.2.63 (2026-03-11, Jira SCRUM-297): Record end_prompt evidence for removing Home period presets, stripping stale preset query state, and pinning dashboard summary requests to the current day.
 - v1.2.62 (2026-03-11, Jira SCRUM-284): Record end_prompt evidence for the installer default landing follow-up that resolves post-login routing from the authenticated user role instead of stale pre-login auth state.
 - v1.2.61 (2026-03-11, Jira SCRUM-267/288): Record end_prompt evidence for Home issue-card counts moving to the shared action-items basis and restoring the desktop 4-column issue grid parity.
