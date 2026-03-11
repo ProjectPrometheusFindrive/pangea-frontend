@@ -69,11 +69,15 @@ export interface AuthRegisterData {
   createdAt?: string;
 }
 
+export function isSuperAdminRole(role: string | null | undefined): boolean {
+  return role?.trim().toLowerCase() === 'super_admin';
+}
+
 export function toViewRole(role: string | null | undefined): AuthViewRole | null {
   if (role === 'installer') {
     return 'device-installer';
   }
-  if (role === 'super_admin' || role === 'admin' || role === 'member' || role === 'viewer') {
+  if (isSuperAdminRole(role) || role === 'admin' || role === 'member' || role === 'viewer') {
     return 'rental-business';
   }
   return null;
