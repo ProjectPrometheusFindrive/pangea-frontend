@@ -45,6 +45,25 @@ function buildAsset(model: string, version: number, overrides: Partial<AssetFixt
 }
 
 test.describe('BK-091 Assets E2E', () => {
+  test('프리미엄 단말 배너에서 일괄 설치 신청 CTA가 보이지 않는다', async ({ page }) => {
+    await installApiMocks(page, {
+      user: { role: 'member', userId: 'member-001', name: 'E2E Member' },
+      handlers: {
+        'GET /api/v2/assets': async ({ route }) => {
+          await fulfillSuccess(route, {
+            items: [buildAsset('아반떼', 1, { hasDevice: false })],
+            total: 1,
+            page: 1,
+            pageSize: 20,
+          });
+        },
+      },
+    });
+
+    await loginViaUi(page, 'member', { returnUrl: '/assets' });
+    await expect(page.getByRole('button', { name: '일괄 설치 신청' })).toHaveCount(0);
+  });
+
   test('자산 조회 loading/success 후 상세 저장이 반영된다', async ({ page }) => {
     let currentModel = '아반떼';
     let currentVersion = 1;
