@@ -667,7 +667,7 @@ export default function Home() {
         bg: 'bg-orange-50',
         color: 'text-orange-600',
         icon: 'Wrench',
-        description: '단말 장착 차량만',
+        description: '프리미엄 단말 연동 필요',
         onClick: () => setShowPremiumModal(true),
         testId: 'home-issue-card-vehicle-anomaly',
       },
@@ -677,7 +677,7 @@ export default function Home() {
         bg: 'bg-orange-50',
         color: 'text-orange-600',
         icon: 'Signal',
-        description: '단말 장착 차량만',
+        description: '단말 데이터 연동 예정',
         onClick: () => setShowPremiumModal(true),
         testId: 'home-issue-card-device-off',
       },
@@ -876,10 +876,17 @@ const operationScores = useMemo(() => ([
                           <Icon className={`h-4 w-4 ${issue.color}`} />
                         </div>
                       </div>
-                      <p className="mb-0.5 text-2xl font-bold text-[#101828]">
-                        {formatStatCardCount(issue.count, issue.unit)}
-                      </p>
-                      <p className="text-xs text-[#4a5565]">{issue.label}</p>
+                      <div className="space-y-1">
+                        <p className="text-[10px] text-[#4a5565]">이슈명</p>
+                        <p className="text-xs font-bold text-[#101828]">{issue.label}</p>
+                      </div>
+
+                      <div className="mt-2 space-y-1">
+                        <p className="text-[10px] text-[#4a5565]">이슈 건 수</p>
+                        <p className="text-2xl font-bold text-[#101828]">
+                          {formatStatCardCount(issue.count, issue.unit)}
+                        </p>
+                      </div>
                       {issue.description && (
                         <p className="mt-1 text-[10px] leading-tight text-gray-500">
                           {issue.description}

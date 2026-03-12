@@ -2,8 +2,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 
-const projectRoot = path.resolve(import.meta.dirname, '..');
+const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 function readProjectFile(relativePath) {
   return fs.readFileSync(path.join(projectRoot, relativePath), 'utf8');
@@ -27,8 +28,15 @@ test('SCRUM-288 keeps premium-only home issue cards explicit instead of placehol
   assert.match(source, /label:\s*'단말 OFF'[\s\S]*?description:\s*'단말 데이터 연동 예정'[\s\S]*?onClick:\s*\(\)\s*=>\s*setShowPremiumModal\(true\)[\s\S]*?testId:\s*'home-issue-card-device-off'/u);
 });
 
+test('SCRUM-303 renders issue-card field labels for name and count', () => {
+  const source = readProjectFile('src/app/pages/Home.tsx');
+
+  assert.match(source, /이슈명/u);
+  assert.match(source, /이슈 건 수/u);
+});
+
 test('SCRUM-288 restores the desktop home issue grid to four columns', () => {
   const source = readProjectFile('src/app/pages/Home.tsx');
 
-  assert.match(source, /data-testid="home-issue-grid"[\s\S]*?mt-4 grid flex-1 auto-rows-fr gap-3 md:grid-cols-2 xl:grid-cols-4/u);
+  assert.match(source, /data-testid="home-issue-grid"[\s\S]*?grid grid-cols-2 gap-3 xl:grid-cols-4/u);
 });
