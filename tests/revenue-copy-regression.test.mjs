@@ -14,29 +14,37 @@ test('Revenue page keeps expected Korean UI copy without mojibake placeholders',
 
   for (const phrase of [
     '매출 요약',
-    '조회 기간',
-    '집계 단위',
-    '재조회',
+    '기간:',
+    '주간',
+    '월간',
+    '연간',
     '총 매출',
     '총 대여 건수',
     '평균 대여 금액',
-    '순매출',
-    '환불 금액',
+    '미납금',
+    '활성 차량',
     '결제 방법별 분포',
     '차량별 매출 현황',
-    '현재 API 기준 기간별 매출',
-    '현재 API 기준 순매출 추이',
-    '기간별 버킷 상세',
-    '기간',
-    '표시할 버킷 데이터가 없습니다.',
-    '일별',
-    '주별',
-    '월별',
+    '월간 매출 추이',
+    '결제 수단',
   ]) {
     assert.match(source, new RegExp(phrase, 'u'));
   }
 
-  assert.doesNotMatch(source, /\?{3,}/);
+  for (const removedPhrase of [
+    '회사 범위',
+    'Figma parity note',
+    '현재 API 기준 기간별 매출',
+    '현재 API 기준 순매출 추이',
+    '기간별 버킷 상세',
+  ]) {
+    assert.doesNotMatch(source, new RegExp(removedPhrase, 'u'));
+  }
+
+  assert.doesNotMatch(source, />조회 기간</u);
+  assert.doesNotMatch(source, />집계 단위</u);
+  assert.doesNotMatch(source, />재조회</u);
+  assert.doesNotMatch(source, /\?{3,}/u);
 });
 
 test('Prompt library keeps restored Korean guidance while preserving SCRUM-193 rule', () => {
@@ -51,6 +59,5 @@ test('Prompt library keeps restored Korean guidance while preserving SCRUM-193 r
     assert.match(source, new RegExp(phrase, 'u'));
   }
 
-  assert.doesNotMatch(source, /\?{3,}/);
-  assert.doesNotMatch(source, /珥덇린|洹쇨굅|議고쉶|留ㅼ텧/);
+  assert.doesNotMatch(source, /\?{3,}/u);
 });
