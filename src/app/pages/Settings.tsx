@@ -3224,6 +3224,7 @@ export default function Settings() {
                   </div>
                   <button
                     type="button"
+                    data-testid="settings-invite-button"
                     onClick={openInvitationEditor}
                     disabled={!canManageMemberRoles || isInvitationSaving || resendingInvitationId !== null}
                     className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-600"
@@ -3540,4 +3541,3 @@ export default function Settings() {
     </Layout>
   );
 }
-

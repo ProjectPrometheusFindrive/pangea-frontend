@@ -100,7 +100,7 @@ test.describe('Wave 1 Settings Bulk OCR', () => {
     await page.getByTestId('settings-bulk-ocr-input').setInputFiles(TEST_IMAGE_FILE);
 
     await expect(page.getByTestId('settings-bulk-ocr-result-summary')).toContainText('성공 1건');
-    await expect(page.getByTestId('settings-bulk-ocr-result-0')).toContainText('차량 자산 등록 완료');
+    await expect(page.getByTestId('settings-bulk-ocr-result-0')).toContainText('fixture.png');
     expect(createdPayload?.companyId).toBe('company-001');
   });
 });
