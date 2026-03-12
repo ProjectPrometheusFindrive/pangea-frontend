@@ -16,11 +16,11 @@ export type InvitationDraftErrors = Partial<Record<InvitationDraftErrorField, st
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const INVALID_COMPANY_IDS = new Set(['0000000000', '__global__', 'company-local', 'null', 'none']);
 const BASE_INVITATION_ROLE_OPTIONS: Array<{ value: InvitationRole; label: string }> = [
-  { value: 'member', label: '운영자' },
-  { value: 'viewer', label: '조회자' },
-  { value: 'admin', label: '관리자' },
+  { value: 'member', label: '\uC6B4\uC601\uC790' },
+  { value: 'viewer', label: '\uC870\uD68C\uC790' },
+  { value: 'admin', label: '\uAD00\uB9AC\uC790' },
 ];
-const INSTALLER_INVITATION_ROLE_OPTION = { value: 'installer' as const, label: '장착 기사' };
+const INSTALLER_INVITATION_ROLE_OPTION = { value: 'installer' as const, label: '\uC7A5\uCC29 \uAE30\uC0AC' };
 
 function normalizeInvitationEmail(value: string): string {
   return value.trim().toLowerCase();
@@ -58,19 +58,19 @@ export function validateInvitationDraft(
   const resolvedCompanyId = normalizeSettingsCompanyId(options.companyId);
 
   if (!email) {
-    errors.email = '초대 이메일을 입력해 주세요.';
+    errors.email = '\uCD08\uB300 \uC774\uBA54\uC77C\uC744 \uC785\uB825\uD574 \uC8FC\uC138\uC694.';
   } else if (!EMAIL_REGEX.test(email)) {
-    errors.email = '올바른 이메일 형식이 아닙니다.';
+    errors.email = '\uC62C\uBC14\uB978 \uC774\uBA54\uC77C \uD615\uC2DD\uC774 \uC544\uB2D9\uB2C8\uB2E4.';
   }
 
   if (draft.role === 'installer') {
     if (!options.isSuperAdmin) {
-      errors.role = 'installer 초대는 super_admin만 생성할 수 있습니다.';
+      errors.role = 'installer \uCD08\uB300\uB294 super_admin\uB9CC \uC0DD\uC131\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4.';
     } else if (!resolvedCompanyId) {
-      errors.companyId = 'installer 초대는 회사 선택이 필요합니다.';
+      errors.companyId = 'installer \uCD08\uB300\uB294 \uD68C\uC0AC \uC120\uD0DD\uC774 \uD544\uC694\uD569\uB2C8\uB2E4.';
     }
   } else if (draft.role !== 'admin' && draft.role !== 'member' && draft.role !== 'viewer') {
-    errors.role = '초대 권한은 admin, member 또는 viewer만 허용됩니다.';
+    errors.role = '\uCD08\uB300 \uAD8C\uD55C\uC740 admin, member \uB610\uB294 viewer\uB9CC \uD5C8\uC6A9\uB429\uB2C8\uB2E4.';
   }
 
   return errors;
@@ -103,25 +103,25 @@ export function upsertPendingInvitation(existing: Invitation[], next: Invitation
 
 export function toInvitationRoleLabel(role: string): string {
   return role === 'admin'
-    ? '관리자'
+    ? '\uAD00\uB9AC\uC790'
     : role === 'member'
-      ? '운영자'
+      ? '\uC6B4\uC601\uC790'
       : role === 'viewer'
-        ? '조회자'
+        ? '\uC870\uD68C\uC790'
       : role === 'installer'
-        ? '장착 기사'
+        ? '\uC7A5\uCC29 \uAE30\uC0AC'
         : role || '-';
 }
 
 export function toInvitationStatusLabel(status: string): string {
   return status === 'pending'
-    ? '대기 중'
+    ? '\uB300\uAE30 \uC911'
     : status === 'accepted'
-      ? '수락됨'
+      ? '\uC218\uB77D\uB428'
       : status === 'expired'
-        ? '만료됨'
+        ? '\uB9CC\uB8CC\uB428'
         : status === 'revoked'
-          ? '취소됨'
+          ? '\uCDE8\uC18C\uB428'
           : status || '-';
 }
 
