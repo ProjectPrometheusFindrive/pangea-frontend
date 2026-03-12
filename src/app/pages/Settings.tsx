@@ -150,7 +150,7 @@ const BULK_OCR_MAX_FILE_SIZE_BYTES = 25 * 1024 * 1024;
 const BULK_OCR_POLL_INTERVAL_MS = 1000;
 const BULK_OCR_POLL_TIMEOUT_MS = 90_000;
 const INVALID_COMPANY_IDS = new Set(['0000000000', '__global__', 'company-local', 'null', 'none']);
-const CSV_VALIDATION_ONLY_NOTICE = '?꾩옱??CSV 寃利앸쭔 吏?먰빀?덈떎. ??μ? 吏?먮릺吏 ?딆쑝??寃利?寃곌낵瑜??뺤씤?????ㅻⅨ ?깅줉 寃쎈줈瑜??댁슜??二쇱꽭??';
+const CSV_VALIDATION_ONLY_NOTICE = '현재는 CSV 검증만 지원합니다. 저장은 지원되지 않으니 검증 결과를 확인한 뒤 다른 등록 경로를 이용해 주세요.';
 
 const DEFAULT_COMPANY_FORM_STATE: CompanyFormState = {
   name: '',
@@ -468,7 +468,7 @@ function parseGeofencePolygonPoints(pointsText: string): {
   if (lines.length < 3) {
     return {
       points: [],
-      error: '瑗?쭞??醫뚰몴??理쒖냼 3媛쒓? ?꾩슂?⑸땲??',
+      error: '꼭짓점 좌표는 최소 3개가 필요합니다.',
     };
   }
 
@@ -478,7 +478,7 @@ function parseGeofencePolygonPoints(pointsText: string): {
     if (tokens.length !== 2) {
       return {
         points: [],
-        error: `${index + 1}踰덉㎏ 以꾩? lat,lng ?뺤떇?댁뼱???⑸땲??`,
+        error: `${index + 1}번째 줄은 lat,lng 형식이어야 합니다.`,
       };
     }
 
@@ -487,7 +487,7 @@ function parseGeofencePolygonPoints(pointsText: string): {
     if (lat === null || lng === null) {
       return {
         points: [],
-        error: `${index + 1}踰덉㎏ 以?醫뚰몴瑜??レ옄濡??낅젰??二쇱꽭??`,
+        error: `${index + 1}번째 줄 좌표를 숫자로 입력해 주세요.`,
       };
     }
 
@@ -583,13 +583,13 @@ function canReviewPendingMemberStatus(
 function toMemberStatusLabel(status: string): string {
   switch (status) {
     case 'approved':
-      return '승인';
+      return '활성';
     case 'pending':
-      return '확인 대기';
+      return '승인 대기';
     case 'rejected':
-      return '확인 거절';
+      return '승인 거절';
     case 'withdrawn':
-      return '철회';
+      return '탈퇴';
     default:
       return status || '미확인';
   }
@@ -692,7 +692,7 @@ function toReservationTypeLabel(value: unknown): string {
     return '대여중';
   }
   if (normalizedValue === 'reservation' || normalizedValue === 'reserved' || normalizedValue === '예약' || normalizedValue === '예약중') {
-    return '예약중';
+    return '예약';
   }
   if (
     normalizedValue === 'return'
@@ -723,6 +723,11 @@ export default function Settings() {
     [searchParams, user?.companyId],
   );
   const selectedCompanyId = settingsCompanyId;
+  const settingsScope = useMemo(() => ({
+    selectedCompanyId: settingsCompanyId,
+  }), [settingsCompanyId]);
+  const shouldBlockSettingsSelection = isSuperAdmin && !settingsCompanyId;
+
   const [activeTab, setActiveTab] = useState<TabType>('bulk');
   const [companyOptions, setCompanyOptions] = useState<SettingsCompanyOption[]>([]);
   const [isCompanyOptionsLoading, setIsCompanyOptionsLoading] = useState(false);
@@ -786,13 +791,6 @@ export default function Settings() {
     () => geofences.find((item) => item.id === editingGeofenceId) ?? null,
     [editingGeofenceId, geofences],
   );
-  const effectiveSettingsCompanyId = useMemo(
-    () => settingsCompanyId ?? (isSuperAdmin ? companyOptions[0]?.companyId ?? null : null),
-    [companyOptions, isSuperAdmin, settingsCompanyId],
-  );
-  const settingsScope = useMemo(() => ({
-    selectedCompanyId: effectiveSettingsCompanyId,
-  }), [effectiveSettingsCompanyId]);
 
   const updateSettingsCompanyScope = useCallback((companyId: string | null, replace = false) => {
     const normalizedCompanyId = normalizeTenantCompanyId(companyId);
@@ -830,11 +828,6 @@ export default function Settings() {
 
         if (selectedCompanyId && !normalizedItems.some((item) => item.companyId === selectedCompanyId)) {
           updateSettingsCompanyScope(null, true);
-          return;
-        }
-
-        if (!selectedCompanyId && normalizedItems.length > 0) {
-          updateSettingsCompanyScope(normalizedItems[0].companyId, true);
         }
       })
       .catch((error) => {
@@ -846,7 +839,7 @@ export default function Settings() {
         setCompanyOptionsError(
           error instanceof Error && error.message
             ? error.message
-            : '?뚯궗 紐⑸줉??遺덈윭?ㅼ? 紐삵뻽?듬땲??',
+            : '회사 목록을 불러오지 못했습니다.',
         );
       })
       .finally(() => {
@@ -859,20 +852,20 @@ export default function Settings() {
   }, [isSuperAdmin, selectedCompanyId, updateSettingsCompanyScope]);
 
   useEffect(() => {
-    if (isSuperAdmin && !effectiveSettingsCompanyId) {
+    if (isSuperAdmin && !settingsCompanyId) {
       setCompanySaveError(null);
       setCompanySaveSuccess(null);
     }
-  }, [effectiveSettingsCompanyId, isSuperAdmin]);
+  }, [isSuperAdmin, settingsCompanyId]);
 
   const hydrateMembersOnly = useCallback(async () => {
     const membersPayload = await listSettingsMembers(undefined, {
-      companyId: effectiveSettingsCompanyId ?? undefined,
+      companyId: settingsCompanyId ?? undefined,
     });
     setMembers(Array.isArray(membersPayload.items) ? membersPayload.items : []);
     setMemberRoleDrafts({});
     setMemberFieldErrors({});
-  }, [effectiveSettingsCompanyId]);
+  }, [settingsCompanyId]);
 
   const hydrateInvitationsOnly = useCallback(async (statusFilter: InvitationStatusFilter = invitationStatusFilter) => {
     if (!canManageMemberRoles) {
@@ -883,21 +876,21 @@ export default function Settings() {
     try {
       const invitationStatusFilterQuery = toInvitationStatusQuery(statusFilter);
       const invitationsPayload = await listInvitations(invitationStatusFilterQuery, {
-        companyId: effectiveSettingsCompanyId ?? undefined,
+        companyId: settingsCompanyId ?? undefined,
       });
       const invitationItems = Array.isArray(invitationsPayload.items) ? invitationsPayload.items : [];
       setInvitations(sortInvitations(invitationItems));
     } catch (error) {
-      setInvitationSaveError(toErrorMessage(error, '珥덈? 紐⑸줉???ㅼ떆 遺덈윭?ㅼ? 紐삵뻽?듬땲??'));
+      setInvitationSaveError(toErrorMessage(error, '초대 목록을 다시 불러오지 못했습니다.'));
     }
-  }, [canManageMemberRoles, effectiveSettingsCompanyId, invitationStatusFilter]);
+  }, [canManageMemberRoles, invitationStatusFilter, settingsCompanyId]);
 
   const hydrateGeofencesOnly = useCallback(async () => {
     const geofencesPayload = await listSettingsGeofences({
-      companyId: effectiveSettingsCompanyId ?? undefined,
+      companyId: settingsCompanyId ?? undefined,
     });
     setGeofences(Array.isArray(geofencesPayload.items) ? geofencesPayload.items : []);
-  }, [effectiveSettingsCompanyId]);
+  }, [settingsCompanyId]);
 
   const refreshCurrentDataCounts = useCallback(async () => {
     try {
@@ -934,14 +927,14 @@ export default function Settings() {
       return jobPayload;
     }
 
-    throw new ApiError('TIMEOUT', 'OCR 泥섎━ ?쒓컙??珥덇낵?섏뿀?듬땲??', {
+    throw new ApiError('TIMEOUT', 'OCR 처리 시간이 초과되었습니다.', {
       status: 504,
     });
   }, []);
 
   const handleBulkOcrFileSelection = useCallback(async (files: File[]) => {
     if (!canUseBulkOcr) {
-      toast.error('李⑤웾 ?먯궛 ?깅줉 沅뚰븳???놁뒿?덈떎.');
+      toast.error('차량 자산 등록 권한이 없습니다.');
       return;
     }
     if (files.length === 0 || isBulkOcrProcessing) {
@@ -955,10 +948,10 @@ export default function Settings() {
         {
           fileName: files[0].name,
           status: 'error',
-          message: '?뚯궗 ?뺣낫媛 ?놁뼱 ?쇨큵 OCR ?낅줈?쒕? ?쒖옉?????놁뒿?덈떎. ?ㅼ떆 濡쒓렇?????쒕룄??二쇱꽭??',
+          message: '회사 정보가 없어 일괄 OCR 업로드를 시작할 수 없습니다. 다시 로그인 후 시도해 주세요.',
         },
       ]);
-      toast.error('?뚯궗 ?뺣낫媛 ?놁뼱 ?쇨큵 OCR ?낅줈?쒕? ?쒖옉?????놁뒿?덈떎.');
+      toast.error('회사 정보가 없어 일괄 OCR 업로드를 시작할 수 없습니다.');
       return;
     }
 
@@ -969,7 +962,7 @@ export default function Settings() {
     setBulkOcrSelectedFiles(files.map((file) => file.name));
     setBulkOcrResults([]);
     setIsBulkOcrProcessing(true);
-    setBulkOcrProgressMessage('0 / ' + files.length + ' 파일 준비 중');
+    setBulkOcrProgressMessage(`0 / ${files.length} 파일 준비 중`);
 
     const nextResults: BulkOcrResult[] = [];
     let successCount = 0;
@@ -993,12 +986,12 @@ export default function Settings() {
             });
           }
 
-          setBulkOcrProgressMessage((index + 1) + ' / ' + files.length + ' 업로드 중 ' + file.name);
+          setBulkOcrProgressMessage(`${index + 1} / ${files.length} 업로드 중: ${file.name}`);
           const signedUpload = await signAssetUpload({
             fileName: file.name,
             contentType: resolvedContentType,
             fileSize: file.size,
-            folder: 'company/' + companyId + '/docs',
+            folder: `company/${companyId}/docs`,
           }, { signal: controller.signal });
 
           const uploadContentType = signedUpload.contentType?.trim() || resolvedContentType;
@@ -1009,7 +1002,7 @@ export default function Settings() {
             { signal: controller.signal },
           );
 
-          setBulkOcrProgressMessage((index + 1) + ' / ' + files.length + ' OCR 분석 중 ' + file.name);
+          setBulkOcrProgressMessage(`${index + 1} / ${files.length} OCR 분석 중: ${file.name}`);
           let jobPayload = await submitOcrExtractJob({
             docType: 'registrationDoc',
             objectName: signedUpload.objectName,
@@ -1024,7 +1017,7 @@ export default function Settings() {
           if (jobPayload.status === 'failed') {
             throw new ApiError(
               jobPayload.error?.type ?? 'SERVER_ERROR',
-              jobPayload.error?.message ?? 'OCR 泥섎━???ㅽ뙣?덉뒿?덈떎.',
+              jobPayload.error?.message ?? 'OCR 처리에 실패했습니다.',
               {
                 status: jobPayload.error?.httpStatus,
                 payload: jobPayload,
@@ -1034,7 +1027,7 @@ export default function Settings() {
 
           const createPayload = toBulkOcrCreatePayload(jobPayload.extractedFields, companyId);
           if (!createPayload) {
-            throw new ApiError('VALIDATION_ERROR', 'OCR 寃곌낵?먯꽌 李⑤웾踰덊샇? 李⑤?踰덊샇瑜??뺤씤?????놁뒿?덈떎.', {
+            throw new ApiError('VALIDATION_ERROR', 'OCR 결과에서 차량번호와 차대번호를 확인할 수 없습니다.', {
               status: 400,
               payload: jobPayload,
             });
@@ -1048,7 +1041,7 @@ export default function Settings() {
           nextResults.push({
             fileName: file.name,
             status: 'success',
-            message: '李⑤웾 ?먯궛 ?깅줉 ?꾨즺',
+            message: '차량 자산 등록 완료',
             assetId,
           });
           successCount += 1;
@@ -1060,7 +1053,7 @@ export default function Settings() {
           nextResults.push({
             fileName: file.name,
             status: 'error',
-            message: toErrorMessage(error, '?쇨큵 OCR ?낅줈??泥섎━???ㅽ뙣?덉뒿?덈떎.'),
+            message: toErrorMessage(error, '일괄 OCR 업로드 처리에 실패했습니다.'),
           });
         }
 
@@ -1068,17 +1061,17 @@ export default function Settings() {
       }
     } catch (error) {
       if (!(error instanceof DOMException && error.name === 'AbortError')) {
-        toast.error(toErrorMessage(error, '대량 OCR 업로드 처리에 실패했습니다.'));
+        toast.error(toErrorMessage(error, '일괄 OCR 업로드 처리에 실패했습니다.'));
       }
     } finally {
       if (bulkOcrAbortControllerRef.current === controller) {
         bulkOcrAbortControllerRef.current = null;
       }
       setIsBulkOcrProcessing(false);
-      setBulkOcrProgressMessage(files.length > 0 ? (successCount + ' / ' + files.length + ' 처리 완료') : null);
+      setBulkOcrProgressMessage(files.length > 0 ? `${successCount} / ${files.length} 처리 완료` : null);
       void refreshCurrentDataCounts();
       if (successCount > 0) {
-        toast.success('대량 OCR 등록 완료: ' + successCount + '건 성공');
+        toast.success(`일괄 OCR 등록 완료: ${successCount}건 성공`);
       }
     }
   }, [canUseBulkOcr, isBulkOcrProcessing, pollBulkOcrJobUntilTerminal, refreshCurrentDataCounts, user?.companyId]);
@@ -1086,11 +1079,11 @@ export default function Settings() {
   const requestSettingsHydration = useCallback(async (signal: AbortSignal): Promise<SettingsHydrationPayload> => {
     const invitationStatusFilterQuery = toInvitationStatusQuery(invitationStatusFilter);
     const [companyPayload, geofencesPayload, membersPayload, invitationsResult] = await Promise.all([
-      getSettingsCompany({ signal, companyId: effectiveSettingsCompanyId ?? undefined }),
-      listSettingsGeofences({ signal, companyId: effectiveSettingsCompanyId ?? undefined }),
-      listSettingsMembers(undefined, { signal, companyId: effectiveSettingsCompanyId ?? undefined }),
+      getSettingsCompany({ signal, companyId: settingsCompanyId ?? undefined }),
+      listSettingsGeofences({ signal, companyId: settingsCompanyId ?? undefined }),
+      listSettingsMembers(undefined, { signal, companyId: settingsCompanyId ?? undefined }),
       canManageMemberRoles
-        ? listInvitations(invitationStatusFilterQuery, { signal, companyId: effectiveSettingsCompanyId ?? undefined })
+        ? listInvitations(invitationStatusFilterQuery, { signal, companyId: settingsCompanyId ?? undefined })
             .then((payload) => ({ payload, error: null as string | null }))
             .catch((error: unknown) => {
               if (error instanceof DOMException && error.name === 'AbortError') {
@@ -1098,7 +1091,7 @@ export default function Settings() {
               }
               return {
                 payload: { items: [] },
-                error: toErrorMessage(error, '珥덈? 紐⑸줉??遺덈윭?ㅼ? 紐삵뻽?듬땲??'),
+                error: toErrorMessage(error, '초대 목록을 불러오지 못했습니다.'),
               };
             })
         : Promise.resolve({ payload: { items: [] }, error: null as string | null }),
@@ -1113,7 +1106,7 @@ export default function Settings() {
         : [],
       invitationLoadError: invitationsResult.error,
     };
-  }, [canManageMemberRoles, effectiveSettingsCompanyId, invitationStatusFilter]);
+  }, [canManageMemberRoles, invitationStatusFilter, settingsCompanyId]);
 
   const handleSettingsHydrationSuccess = useCallback((payload: SettingsHydrationPayload) => {
     const nextCompanyForm = toCompanyForm(payload.company);
@@ -1166,30 +1159,30 @@ export default function Settings() {
   });
 
   useEffect(() => {
-    if (isSuperAdmin && !effectiveSettingsCompanyId) {
+    if (isSuperAdmin && !settingsCompanyId) {
       handleSettingsHydrationSuccess(createEmptySettingsHydrationPayload());
       return;
     }
     void hydrateSettings();
-  }, [effectiveSettingsCompanyId, handleSettingsHydrationSuccess, hydrateSettings, isSuperAdmin]);
+  }, [handleSettingsHydrationSuccess, hydrateSettings, isSuperAdmin, settingsCompanyId]);
 
   useEffect(() => {
-    if (isSuperAdmin && !effectiveSettingsCompanyId) {
+    if (shouldBlockSettingsSelection) {
       return;
     }
     void refreshCurrentDataCounts();
-  }, [effectiveSettingsCompanyId, isSuperAdmin, refreshCurrentDataCounts]);
+  }, [refreshCurrentDataCounts, shouldBlockSettingsSelection]);
 
   useEffect(() => () => {
     bulkOcrAbortControllerRef.current?.abort();
   }, []);
 
   const handleSettingsRetry = useCallback(() => {
-    if (isSuperAdmin && !effectiveSettingsCompanyId) {
+    if (isSuperAdmin && !settingsCompanyId) {
       return;
     }
     void hydrateSettings();
-  }, [effectiveSettingsCompanyId, hydrateSettings, isSuperAdmin]);
+  }, [hydrateSettings, isSuperAdmin, settingsCompanyId]);
 
   const handleSettingsErrorAction = useCallback(() => {
     handlePageErrorAction(settingsErrorKind, navigate);
@@ -1264,13 +1257,9 @@ export default function Settings() {
   );
 
   useEffect(() => {
-    const tabParam = searchParams.get('tab');
-    if (tabParam === 'geofence' || tabParam === 'accounts') {
-      setActiveTab(tabParam);
-      return;
+    if (searchParams.get('tab') === 'company') {
+      setActiveTab('company');
     }
-
-    setActiveTab('bulk');
   }, [searchParams]);
 
   useEffect(() => {
@@ -1293,12 +1282,12 @@ export default function Settings() {
     }
 
     if (isAnySaving) {
-      toast.info('???以묒뿉????쓣 ?대룞?????놁뒿?덈떎.');
+      toast.info('저장 중에는 탭을 이동할 수 없습니다.');
       return;
     }
 
     if (hasUnsavedChanges && typeof window !== 'undefined') {
-      const shouldLeave = window.confirm('??ν븯吏 ?딆? 蹂寃??ы빆???덉뒿?덈떎. ??쓣 ?대룞?섏떆寃좎뒿?덇퉴?');
+      const shouldLeave = window.confirm('저장하지 않은 변경 사항이 있습니다. 탭을 이동하시겠습니까?');
       if (!shouldLeave) {
         return;
       }
@@ -1346,15 +1335,15 @@ export default function Settings() {
 
     const clientErrors: FieldErrorMap<CompanyField> = {};
     if (!companyForm.name.trim()) {
-      clientErrors.name = '?뚯궗紐낆쓣 ?낅젰??二쇱꽭??';
+      clientErrors.name = '회사명을 입력해 주세요.';
     }
     if (companyForm.email.trim().length > 0 && !companyForm.email.includes('@')) {
-      clientErrors.email = '?좏슚???대찓???뺤떇???낅젰??二쇱꽭??';
+      clientErrors.email = '유효한 이메일 형식을 입력해 주세요.';
     }
 
     if (Object.keys(clientErrors).length > 0) {
       setCompanyFieldErrors(clientErrors);
-      setCompanySaveError('?낅젰媛믪쓣 ?뺤씤??二쇱꽭??');
+      setCompanySaveError('입력값을 확인해 주세요.');
       setCompanySaveSuccess(null);
       setCompanyRetryAction(null);
       return;
@@ -1362,7 +1351,7 @@ export default function Settings() {
 
     const payload = toCompanyPatchPayload();
     if (Object.keys(payload).length === 0) {
-      toast.info('蹂寃쎈맂 ?뚯궗 ?뺣낫媛 ?놁뒿?덈떎.');
+      toast.info('변경된 회사 정보가 없습니다.');
       return;
     }
 
@@ -1374,15 +1363,15 @@ export default function Settings() {
 
     try {
       const updatedCompany = await putSettingsCompany(payload, {
-        companyId: effectiveSettingsCompanyId ?? undefined,
+        companyId: settingsCompanyId ?? undefined,
       });
       const nextForm = toCompanyForm(updatedCompany);
       setCompanyForm(nextForm);
       setCompanyBaseline(nextForm);
       setCompanyUpdatedAt(toStringValue(updatedCompany.updatedAt));
       setCompanySchemaVersion(toStringValue(updatedCompany.schemaVersion) ?? companySchemaVersion);
-      setCompanySaveSuccess('?뚯궗 ?ㅼ젙????λ릺?덉뒿?덈떎.');
-      toast.success('?뚯궗 ?ㅼ젙????λ릺?덉뒿?덈떎.');
+      setCompanySaveSuccess('회사 설정이 저장되었습니다.');
+      toast.success('회사 설정이 저장되었습니다.');
       void refreshCompany();
     } catch (error) {
       if (error instanceof ApiError) {
@@ -1399,21 +1388,21 @@ export default function Settings() {
           if (Object.keys(mappedErrors).length > 0) {
             setCompanyFieldErrors(mappedErrors);
           }
-          setCompanySaveError(error.message || '?낅젰媛믪쓣 ?뺤씤??二쇱꽭??');
+          setCompanySaveError(error.message || '입력값을 확인해 주세요.');
           return;
         }
         if (error.status === 403) {
-          setCompanySaveError('?뚯궗 ?ㅼ젙 ?섏젙 沅뚰븳???놁뒿?덈떎. 愿由ъ옄?먭쾶 沅뚰븳???붿껌??二쇱꽭??');
+          setCompanySaveError('회사 설정 수정 권한이 없습니다. 관리자에게 권한을 요청해 주세요.');
           return;
         }
         if (error.status === 409) {
-          setCompanySaveError('?ㅻⅨ ?ъ슜?먯쓽 蹂寃쎌궗??낵 異⑸룎?덉뒿?덈떎. 理쒖떊 ?ㅼ젙???ㅼ떆 遺덈윭?듬땲??');
+          setCompanySaveError('다른 사용자의 변경사항과 충돌했습니다. 최신 설정을 다시 불러옵니다.');
           setCompanyRetryAction(null);
           void hydrateSettings();
           return;
         }
         if (isRetryableMutationError(error)) {
-          setCompanySaveError('?쇱떆?곸씤 ?ㅻ쪟濡???μ뿉 ?ㅽ뙣?덉뒿?덈떎. ?ㅼ떆 ?쒕룄??二쇱꽭??');
+          setCompanySaveError('일시적인 오류로 저장에 실패했습니다. 다시 시도해 주세요.');
           setCompanyRetryAction(() => () => {
             void handleCompanySave();
           });
@@ -1421,7 +1410,7 @@ export default function Settings() {
         }
       }
 
-      setCompanySaveError(toErrorMessage(error, '?뚯궗 ?ㅼ젙 ??μ뿉 ?ㅽ뙣?덉뒿?덈떎.'));
+      setCompanySaveError(toErrorMessage(error, '회사 설정 저장에 실패했습니다.'));
     } finally {
       setIsCompanySaving(false);
     }
@@ -1432,7 +1421,7 @@ export default function Settings() {
     hydrateSettings,
     isCompanySaving,
     refreshCompany,
-    effectiveSettingsCompanyId,
+    settingsCompanyId,
     toCompanyPatchPayload,
   ]);
 
@@ -1480,7 +1469,7 @@ export default function Settings() {
       return;
     }
     if (isGeofenceEditorDirty && typeof window !== 'undefined') {
-      const shouldClose = window.confirm('??ν븯吏 ?딆? 吏?ㅽ렂??蹂寃??ы빆???덉뒿?덈떎. ?レ쑝?쒓쿋?듬땲源?');
+      const shouldClose = window.confirm('저장하지 않은 지오펜스 변경 사항이 있습니다. 닫으시겠습니까?');
       if (!shouldClose) {
         return;
       }
@@ -1513,21 +1502,21 @@ export default function Settings() {
     }
 
     if (geofenceEditorMode === 'create' && !trimmedName) {
-      fieldErrors.name = '吏?ㅽ렂???대쫫???낅젰??二쇱꽭??';
+      fieldErrors.name = '지오펜스 이름을 입력해 주세요.';
     }
     if (geofenceForm.shape !== 'polygon' && latValue === null) {
-      fieldErrors.lat = '?꾨룄 媛믪쓣 ?낅젰??二쇱꽭??';
+      fieldErrors.lat = '위도 값을 입력해 주세요.';
     }
     if (geofenceForm.shape !== 'polygon' && lngValue === null) {
-      fieldErrors.lng = '寃쎈룄 媛믪쓣 ?낅젰??二쇱꽭??';
+      fieldErrors.lng = '경도 값을 입력해 주세요.';
     }
     if (geofenceForm.shape !== 'polygon' && (radiusValue === null || !Number.isInteger(radiusValue) || radiusValue <= 0)) {
-      fieldErrors.radiusMeter = '諛섍꼍? 1 ?댁긽???뺤닔(m)濡??낅젰??二쇱꽭??';
+      fieldErrors.radiusMeter = '반경은 1 이상의 정수(m)로 입력해 주세요.';
     }
 
     if (Object.keys(fieldErrors).length > 0) {
       setGeofenceFieldErrors(fieldErrors);
-      setGeofenceSaveError('?낅젰媛믪쓣 ?뺤씤??二쇱꽭??');
+      setGeofenceSaveError('입력값을 확인해 주세요.');
       setGeofenceSaveSuccess(null);
       setGeofenceRetryAction(null);
       return;
@@ -1545,7 +1534,7 @@ export default function Settings() {
           points: parsedPolygon.points,
           active: geofenceForm.active,
         }, {
-          companyId: effectiveSettingsCompanyId ?? undefined,
+          companyId: settingsCompanyId ?? undefined,
         })
         : createSettingsGeofence({
           name: trimmedName,
@@ -1556,11 +1545,11 @@ export default function Settings() {
           radiusMeter: radiusValue!,
           active: geofenceForm.active,
         }, {
-          companyId: effectiveSettingsCompanyId ?? undefined,
+          companyId: settingsCompanyId ?? undefined,
         });
     } else {
       if (!editingGeofenceId || !selectedEditingGeofence) {
-        setGeofenceSaveError('?몄쭛 ??곸쓣 李얠쓣 ???놁뒿?덈떎. 紐⑸줉???덈줈怨좎묠??二쇱꽭??');
+        setGeofenceSaveError('편집 대상을 찾을 수 없습니다. 목록을 새로고침해 주세요.');
         return;
       }
 
@@ -1594,12 +1583,12 @@ export default function Settings() {
       }
 
       if (Object.keys(payload).length === 0) {
-        toast.info('蹂寃쎈맂 吏?ㅽ렂???뺣낫媛 ?놁뒿?덈떎.');
+        toast.info('변경된 지오펜스 정보가 없습니다.');
         return;
       }
 
       mutationTask = updateSettingsGeofence(editingGeofenceId, payload, {
-        companyId: effectiveSettingsCompanyId ?? undefined,
+        companyId: settingsCompanyId ?? undefined,
       });
     }
 
@@ -1624,13 +1613,13 @@ export default function Settings() {
 
       setGeofenceSaveSuccess(
         geofenceEditorMode === 'create'
-          ? '吏?ㅽ렂?ㅺ? ?앹꽦?섏뿀?듬땲??'
-          : '吏?ㅽ렂?ㅺ? ??λ릺?덉뒿?덈떎.',
+          ? '지오펜스가 생성되었습니다.'
+          : '지오펜스가 저장되었습니다.',
       );
       toast.success(
         geofenceEditorMode === 'create'
-          ? '吏?ㅽ렂?ㅺ? ?앹꽦?섏뿀?듬땲??'
-          : '吏?ㅽ렂?ㅺ? ??λ릺?덉뒿?덈떎.',
+          ? '지오펜스가 생성되었습니다.'
+          : '지오펜스가 저장되었습니다.',
       );
 
       setIsGeofenceEditorOpen(false);
@@ -1654,21 +1643,21 @@ export default function Settings() {
           if (Object.keys(mappedErrors).length > 0) {
             setGeofenceFieldErrors(mappedErrors);
           }
-          setGeofenceSaveError(error.message || '?낅젰媛믪쓣 ?뺤씤??二쇱꽭??');
+          setGeofenceSaveError(error.message || '입력값을 확인해 주세요.');
           return;
         }
         if (error.status === 403) {
-          setGeofenceSaveError('吏?ㅽ렂???섏젙 沅뚰븳???놁뒿?덈떎. 愿由ъ옄?먭쾶 沅뚰븳???붿껌??二쇱꽭??');
+          setGeofenceSaveError('지오펜스 수정 권한이 없습니다. 관리자에게 권한을 요청해 주세요.');
           return;
         }
         if (error.status === 409) {
-          setGeofenceSaveError('?ㅻⅨ ?ъ슜??蹂寃쎌궗??낵 異⑸룎?덉뒿?덈떎. 理쒖떊 紐⑸줉???ㅼ떆 遺덈윭?듬땲??');
+          setGeofenceSaveError('다른 사용자 변경사항과 충돌했습니다. 최신 목록을 다시 불러옵니다.');
           setGeofenceRetryAction(null);
           void hydrateGeofencesOnly();
           return;
         }
         if (isRetryableMutationError(error)) {
-          setGeofenceSaveError('?쇱떆?곸씤 ?ㅻ쪟濡???μ뿉 ?ㅽ뙣?덉뒿?덈떎. ?ㅼ떆 ?쒕룄??二쇱꽭??');
+          setGeofenceSaveError('일시적인 오류로 저장에 실패했습니다. 다시 시도해 주세요.');
           setGeofenceRetryAction(() => () => {
             void handleGeofenceSave();
           });
@@ -1676,7 +1665,7 @@ export default function Settings() {
         }
       }
 
-      setGeofenceSaveError(toErrorMessage(error, '吏?ㅽ렂????μ뿉 ?ㅽ뙣?덉뒿?덈떎.'));
+      setGeofenceSaveError(toErrorMessage(error, '지오펜스 저장에 실패했습니다.'));
     } finally {
       setIsGeofenceSaving(false);
     }
@@ -1687,7 +1676,7 @@ export default function Settings() {
     geofenceForm,
     hydrateGeofencesOnly,
     isGeofenceSaving,
-    effectiveSettingsCompanyId,
+    settingsCompanyId,
     selectedEditingGeofence,
   ]);
 
@@ -1702,36 +1691,36 @@ export default function Settings() {
 
     try {
       const updated = await updateSettingsGeofence(geofenceId, { active: nextActive }, {
-        companyId: effectiveSettingsCompanyId ?? undefined,
+        companyId: settingsCompanyId ?? undefined,
       });
       setGeofences((prevItems) => prevItems.map((item) => (
         item.id === geofenceId ? updated : item
       )));
-      setGeofenceSaveSuccess('吏?ㅽ렂???쒖꽦 ?곹깭媛 ?낅뜲?댄듃?섏뿀?듬땲??');
+      setGeofenceSaveSuccess('지오펜스 활성 상태가 업데이트되었습니다.');
     } catch (error) {
       if (error instanceof ApiError) {
         if (error.status === 403) {
-          setGeofenceSaveError('吏?ㅽ렂???쒖꽦 ?곹깭瑜?蹂寃쏀븷 沅뚰븳???놁뒿?덈떎.');
+          setGeofenceSaveError('지오펜스 활성 상태를 변경할 권한이 없습니다.');
           return;
         }
         if (error.status === 409) {
-          setGeofenceSaveError('異⑸룎??諛쒖깮??理쒖떊 吏?ㅽ렂??紐⑸줉???ㅼ떆 遺덈윭?듬땲??');
+          setGeofenceSaveError('충돌이 발생해 최신 지오펜스 목록을 다시 불러옵니다.');
           void hydrateGeofencesOnly();
           return;
         }
         if (isRetryableMutationError(error)) {
-          setGeofenceSaveError('?쇱떆?곸씤 ?ㅻ쪟濡??쒖꽦 ?곹깭 蹂寃쎌뿉 ?ㅽ뙣?덉뒿?덈떎. ?ㅼ떆 ?쒕룄??二쇱꽭??');
+          setGeofenceSaveError('일시적인 오류로 활성 상태 변경에 실패했습니다. 다시 시도해 주세요.');
           setGeofenceRetryAction(() => () => {
             void runGeofenceToggle(geofenceId, nextActive);
           });
           return;
         }
       }
-      setGeofenceSaveError(toErrorMessage(error, '吏?ㅽ렂???쒖꽦 ?곹깭瑜?蹂寃쏀븯吏 紐삵뻽?듬땲??'));
+      setGeofenceSaveError(toErrorMessage(error, '지오펜스 활성 상태를 변경하지 못했습니다.'));
     } finally {
       setActiveToggleTargetId(null);
     }
-  }, [canEditSettings, effectiveSettingsCompanyId, hydrateGeofencesOnly]);
+  }, [canEditSettings, hydrateGeofencesOnly, settingsCompanyId]);
 
   const handleGeofenceToggle = useCallback((geofence: SettingsGeofence) => {
     if (!canEditSettings || activeToggleTargetId !== null || isGeofenceSaving) {
@@ -1751,41 +1740,41 @@ export default function Settings() {
 
     try {
       await deleteSettingsGeofence(geofenceId, {
-        companyId: effectiveSettingsCompanyId ?? undefined,
+        companyId: settingsCompanyId ?? undefined,
       });
       setGeofences((prevItems) => prevItems.filter((item) => item.id !== geofenceId));
-      setGeofenceSaveSuccess('吏?ㅽ렂?ㅺ? ??젣?섏뿀?듬땲??');
+      setGeofenceSaveSuccess('지오펜스가 삭제되었습니다.');
       if (editingGeofenceId === geofenceId) {
         setIsGeofenceEditorOpen(false);
         setEditingGeofenceId(null);
         setGeofenceEditorMode('create');
         setGeofenceForm(DEFAULT_GEOFENCE_FORM_STATE);
       }
-      toast.success('吏?ㅽ렂?ㅺ? ??젣?섏뿀?듬땲??');
+      toast.success('지오펜스가 삭제되었습니다.');
     } catch (error) {
       if (error instanceof ApiError) {
         if (error.status === 403) {
-          setGeofenceSaveError('吏?ㅽ렂????젣 沅뚰븳???놁뒿?덈떎.');
+          setGeofenceSaveError('지오펜스 삭제 권한이 없습니다.');
           return;
         }
         if (error.status === 409) {
-          setGeofenceSaveError('異⑸룎??諛쒖깮??理쒖떊 吏?ㅽ렂??紐⑸줉???ㅼ떆 遺덈윭?듬땲??');
+          setGeofenceSaveError('충돌이 발생해 최신 지오펜스 목록을 다시 불러옵니다.');
           void hydrateGeofencesOnly();
           return;
         }
         if (isRetryableMutationError(error)) {
-          setGeofenceSaveError('?쇱떆?곸씤 ?ㅻ쪟濡???젣???ㅽ뙣?덉뒿?덈떎. ?ㅼ떆 ?쒕룄??二쇱꽭??');
+          setGeofenceSaveError('일시적인 오류로 삭제에 실패했습니다. 다시 시도해 주세요.');
           setGeofenceRetryAction(() => () => {
             void runGeofenceDelete(geofenceId);
           });
           return;
         }
       }
-      setGeofenceSaveError(toErrorMessage(error, '吏?ㅽ렂????젣???ㅽ뙣?덉뒿?덈떎.'));
+      setGeofenceSaveError(toErrorMessage(error, '지오펜스 삭제에 실패했습니다.'));
     } finally {
       setDeletingGeofenceId(null);
     }
-  }, [canEditSettings, editingGeofenceId, effectiveSettingsCompanyId, hydrateGeofencesOnly]);
+  }, [canEditSettings, editingGeofenceId, hydrateGeofencesOnly, settingsCompanyId]);
 
   const handleGeofenceDelete = useCallback((geofenceId: string) => {
     if (!canEditSettings || deletingGeofenceId !== null || isGeofenceSaving) {
@@ -1793,7 +1782,7 @@ export default function Settings() {
     }
 
     if (typeof window !== 'undefined') {
-      const shouldDelete = window.confirm('?대떦 吏?ㅽ렂?ㅻ? ??젣?섏떆寃좎뒿?덇퉴?');
+      const shouldDelete = window.confirm('해당 지오펜스를 삭제하시겠습니까?');
       if (!shouldDelete) {
         return;
       }
@@ -1834,7 +1823,7 @@ export default function Settings() {
 
     try {
       const updatedMember = await patchSettingsMemberRole(memberId, { role }, {
-        companyId: effectiveSettingsCompanyId ?? undefined,
+        companyId: settingsCompanyId ?? undefined,
       });
       setMembers((prevMembers) => prevMembers.map((member) => (
         member.userId === memberId ? updatedMember : member
@@ -1844,15 +1833,15 @@ export default function Settings() {
         delete nextDrafts[memberId];
         return nextDrafts;
       });
-      setMemberSaveSuccess('硫ㅻ쾭 沅뚰븳????λ릺?덉뒿?덈떎.');
-      toast.success('硫ㅻ쾭 沅뚰븳????λ릺?덉뒿?덈떎.');
+      setMemberSaveSuccess('멤버 권한이 저장되었습니다.');
+      toast.success('멤버 권한이 저장되었습니다.');
     } catch (error) {
       if (error instanceof ApiError) {
         if (error.status === 400) {
           const mappedErrors = mapFieldErrors<MemberRoleField>(toErrorFieldEntries(error), {
             role: 'role',
           });
-          const fieldMessage = mappedErrors.role ?? error.message ?? '?낅젰媛믪쓣 ?뺤씤??二쇱꽭??';
+          const fieldMessage = mappedErrors.role ?? error.message ?? '입력값을 확인해 주세요.';
           setMemberFieldErrors((prevErrors) => ({
             ...prevErrors,
             [memberId]: fieldMessage,
@@ -1861,16 +1850,16 @@ export default function Settings() {
           return;
         }
         if (error.status === 403) {
-          setMemberSaveError('硫ㅻ쾭 沅뚰븳??蹂寃쏀븷 沅뚰븳???놁뒿?덈떎.');
+          setMemberSaveError('멤버 권한을 변경할 권한이 없습니다.');
           return;
         }
         if (error.status === 409) {
-          setMemberSaveError('沅뚰븳 蹂寃?異⑸룎??諛쒖깮??理쒖떊 硫ㅻ쾭 紐⑸줉???ㅼ떆 遺덈윭?듬땲??');
+          setMemberSaveError('권한 변경 충돌이 발생해 최신 멤버 목록을 다시 불러옵니다.');
           void hydrateMembersOnly();
           return;
         }
         if (isRetryableMutationError(error)) {
-          setMemberSaveError('?쇱떆?곸씤 ?ㅻ쪟濡?沅뚰븳 ??μ뿉 ?ㅽ뙣?덉뒿?덈떎. ?ㅼ떆 ?쒕룄??二쇱꽭??');
+          setMemberSaveError('일시적인 오류로 권한 저장에 실패했습니다. 다시 시도해 주세요.');
           setMemberRetryAction(() => () => {
             void runMemberRoleSave(memberId, role);
           });
@@ -1878,11 +1867,11 @@ export default function Settings() {
         }
       }
 
-      setMemberSaveError(toErrorMessage(error, '硫ㅻ쾭 沅뚰븳 ??μ뿉 ?ㅽ뙣?덉뒿?덈떎.'));
+      setMemberSaveError(toErrorMessage(error, '멤버 권한 저장에 실패했습니다.'));
     } finally {
       setSavingMemberId(null);
     }
-  }, [canManageMemberRoles, effectiveSettingsCompanyId, hydrateMembersOnly]);
+  }, [canManageMemberRoles, hydrateMembersOnly, settingsCompanyId]);
 
   const handleMemberRoleSave = useCallback((memberId: string) => {
     const originalMember = members.find((member) => member.userId === memberId);
@@ -1894,13 +1883,13 @@ export default function Settings() {
     if (nextRoleValue !== 'admin' && nextRoleValue !== 'member') {
       setMemberFieldErrors((prevErrors) => ({
         ...prevErrors,
-        [memberId]: 'role 媛믪? admin ?먮뒗 member留??덉슜?⑸땲??',
+        [memberId]: 'role 값은 admin 또는 member만 허용됩니다.',
       }));
       return;
     }
 
     if (nextRoleValue === originalMember.role) {
-      toast.info('蹂寃쎈맂 沅뚰븳???놁뒿?덈떎.');
+      toast.info('변경된 권한이 없습니다.');
       return;
     }
 
@@ -1940,7 +1929,7 @@ export default function Settings() {
         ? { status: 'approved' as const }
         : { status: 'rejected' as const };
       const updatedMember = await patchSettingsMemberStatus(memberId, payload, {
-        companyId: effectiveSettingsCompanyId ?? undefined,
+        companyId: settingsCompanyId ?? undefined,
       });
       setMembers((prevMembers) => prevMembers.map((member) => (
         member.userId === memberId ? updatedMember : member
@@ -1952,8 +1941,8 @@ export default function Settings() {
       });
 
       const successMessage = status === 'approved'
-        ? '媛???湲?怨꾩젙???뱀씤?덉뒿?덈떎.'
-        : '媛???湲?怨꾩젙??嫄곗젅?덉뒿?덈떎.';
+        ? '가입 대기 계정을 승인했습니다.'
+        : '가입 대기 계정을 거절했습니다.';
       setMemberSaveSuccess(successMessage);
       toast.success(successMessage);
     } catch (error) {
@@ -1962,7 +1951,7 @@ export default function Settings() {
           const mappedErrors = mapFieldErrors<'status'>(toErrorFieldEntries(error), {
             status: 'status',
           });
-          const fieldMessage = mappedErrors.status ?? error.message ?? '?낅젰媛믪쓣 ?뺤씤??二쇱꽭??';
+          const fieldMessage = mappedErrors.status ?? error.message ?? '입력값을 확인해 주세요.';
           setMemberFieldErrors((prevErrors) => ({
             ...prevErrors,
             [memberId]: fieldMessage,
@@ -1971,16 +1960,16 @@ export default function Settings() {
           return;
         }
         if (error.status === 403) {
-          setMemberSaveError('媛???뱀씤 ?곹깭瑜?蹂寃쏀븷 沅뚰븳???놁뒿?덈떎.');
+          setMemberSaveError('가입 승인 상태를 변경할 권한이 없습니다.');
           return;
         }
         if (error.status === 404 || error.status === 409) {
-          setMemberSaveError(error.message || '硫ㅻ쾭 ?곹깭媛 蹂寃쎈릺??理쒖떊 紐⑸줉???ㅼ떆 遺덈윭?듬땲??');
+          setMemberSaveError(error.message || '멤버 상태가 변경되어 최신 목록을 다시 불러옵니다.');
           void hydrateMembersOnly();
           return;
         }
         if (isRetryableMutationError(error)) {
-          setMemberSaveError('?쇱떆?곸씤 ?ㅻ쪟濡?媛???뱀씤 泥섎━???ㅽ뙣?덉뒿?덈떎. ?ㅼ떆 ?쒕룄??二쇱꽭??');
+          setMemberSaveError('일시적인 오류로 가입 승인 처리에 실패했습니다. 다시 시도해 주세요.');
           setMemberRetryAction(() => () => {
             void runMemberStatusSave(memberId, status);
           });
@@ -1988,11 +1977,11 @@ export default function Settings() {
         }
       }
 
-      setMemberSaveError(toErrorMessage(error, '硫ㅻ쾭 ?곹깭 蹂寃쎌뿉 ?ㅽ뙣?덉뒿?덈떎.'));
+      setMemberSaveError(toErrorMessage(error, '멤버 상태 변경에 실패했습니다.'));
     } finally {
       setSavingMemberId(null);
     }
-  }, [canManageMemberRoles, effectiveSettingsCompanyId, hydrateMembersOnly]);
+  }, [canManageMemberRoles, hydrateMembersOnly, settingsCompanyId]);
 
   const openInvitationEditor = useCallback(() => {
     if (!canManageMemberRoles || isInvitationSaving || resendingInvitationId !== null) {
@@ -2044,9 +2033,9 @@ export default function Settings() {
 
     try {
       const createdInvitation = await createInvitation(
-        buildInvitationCreatePayload(draft, effectiveSettingsCompanyId),
+        buildInvitationCreatePayload(draft, settingsCompanyId),
         {
-          companyId: effectiveSettingsCompanyId ?? undefined,
+          companyId: settingsCompanyId ?? undefined,
         },
       );
       setInvitations((prevInvitations) => (
@@ -2056,8 +2045,8 @@ export default function Settings() {
       ));
       setInvitationForm(DEFAULT_INVITATION_FORM_STATE);
       setIsInvitationEditorOpen(false);
-      setInvitationSaveSuccess('珥덈? 硫붿씪??諛쒖넚?덉뒿?덈떎.');
-      toast.success('珥덈? 硫붿씪??諛쒖넚?덉뒿?덈떎.');
+      setInvitationSaveSuccess('초대 메일을 발송했습니다.');
+      toast.success('초대 메일을 발송했습니다.');
     } catch (error) {
       if (error instanceof ApiError) {
         if (error.status === 400) {
@@ -2067,24 +2056,24 @@ export default function Settings() {
             companyId: 'companyId',
           });
           setInvitationFieldErrors(mappedErrors);
-          setInvitationSaveError(error.message ?? '?낅젰媛믪쓣 ?뺤씤??二쇱꽭??');
+          setInvitationSaveError(error.message ?? '입력값을 확인해 주세요.');
           return;
         }
         if (error.status === 403) {
-          setInvitationSaveError('珥덈? ?앹꽦 沅뚰븳???놁뒿?덈떎.');
+          setInvitationSaveError('초대 생성 권한이 없습니다.');
           return;
         }
         if (error.status === 409) {
           setInvitationFieldErrors((prevErrors) => ({
             ...prevErrors,
-            email: error.message || '?대? 媛?낅릺?덇굅??珥덈?媛 吏꾪뻾 以묒씤 ?ъ슜?먯엯?덈떎.',
+            email: error.message || '이미 가입되었거나 초대가 진행 중인 사용자입니다.',
           }));
-          setInvitationSaveError(error.message || '?대? 媛?낅릺?덇굅??珥덈?媛 吏꾪뻾 以묒씤 ?ъ슜?먯엯?덈떎.');
+          setInvitationSaveError(error.message || '이미 가입되었거나 초대가 진행 중인 사용자입니다.');
           void hydrateInvitationsOnly();
           return;
         }
         if (isRetryableMutationError(error)) {
-          setInvitationSaveError('?쇱떆?곸씤 ?ㅻ쪟濡?珥덈? ?앹꽦???ㅽ뙣?덉뒿?덈떎. ?ㅼ떆 ?쒕룄??二쇱꽭??');
+          setInvitationSaveError('일시적인 오류로 초대 생성에 실패했습니다. 다시 시도해 주세요.');
           setInvitationRetryAction(() => () => {
             void runInvitationCreate(draft);
           });
@@ -2092,16 +2081,16 @@ export default function Settings() {
         }
       }
 
-      setInvitationSaveError(toErrorMessage(error, '珥덈? ?앹꽦???ㅽ뙣?덉뒿?덈떎.'));
+      setInvitationSaveError(toErrorMessage(error, '초대 생성에 실패했습니다.'));
     } finally {
       setIsInvitationSaving(false);
     }
-  }, [canManageMemberRoles, effectiveSettingsCompanyId, hydrateInvitationsOnly, invitationStatusFilter]);
+  }, [canManageMemberRoles, hydrateInvitationsOnly, invitationStatusFilter, settingsCompanyId]);
 
   const handleInvitationCreate = useCallback(() => {
     const validationErrors = validateInvitationDraft(invitationForm, {
       isSuperAdmin,
-      companyId: effectiveSettingsCompanyId,
+      companyId: settingsCompanyId,
     });
     if (Object.keys(validationErrors).length > 0) {
       setInvitationFieldErrors(validationErrors);
@@ -2109,7 +2098,7 @@ export default function Settings() {
     }
 
     void runInvitationCreate(invitationForm);
-  }, [effectiveSettingsCompanyId, invitationForm, isSuperAdmin, runInvitationCreate]);
+  }, [invitationForm, isSuperAdmin, runInvitationCreate, settingsCompanyId]);
 
   const runInvitationResend = useCallback(async (invitationId: string) => {
     if (!canManageMemberRoles) {
@@ -2123,28 +2112,28 @@ export default function Settings() {
 
     try {
       const resentInvitation = await resendInvitation(invitationId, {
-        companyId: effectiveSettingsCompanyId ?? undefined,
+        companyId: settingsCompanyId ?? undefined,
       });
       setInvitations((prevInvitations) => (
         invitationMatchesStatusFilter(resentInvitation, invitationStatusFilter)
           ? upsertPendingInvitation(prevInvitations, resentInvitation)
           : prevInvitations.filter((item) => item.id !== resentInvitation.id)
       ));
-      setInvitationSaveSuccess('珥덈?瑜??щ컻?≫뻽?듬땲??');
-      toast.success('珥덈?瑜??щ컻?≫뻽?듬땲??');
+      setInvitationSaveSuccess('초대를 재발송했습니다.');
+      toast.success('초대를 재발송했습니다.');
     } catch (error) {
       if (error instanceof ApiError) {
         if (error.status === 403) {
-          setInvitationSaveError('珥덈? ?щ컻??沅뚰븳???놁뒿?덈떎.');
+          setInvitationSaveError('초대 재발송 권한이 없습니다.');
           return;
         }
         if (error.status === 404 || error.status === 409) {
-          setInvitationSaveError(error.message || '珥덈? ?곹깭媛 蹂寃쎈릺??紐⑸줉???ㅼ떆 遺덈윭?듬땲??');
+          setInvitationSaveError(error.message || '초대 상태가 변경되어 목록을 다시 불러옵니다.');
           void hydrateInvitationsOnly();
           return;
         }
         if (isRetryableMutationError(error)) {
-          setInvitationSaveError('?쇱떆?곸씤 ?ㅻ쪟濡?珥덈? ?щ컻?≪뿉 ?ㅽ뙣?덉뒿?덈떎. ?ㅼ떆 ?쒕룄??二쇱꽭??');
+          setInvitationSaveError('일시적인 오류로 초대 재발송에 실패했습니다. 다시 시도해 주세요.');
           setInvitationRetryAction(() => () => {
             void runInvitationResend(invitationId);
           });
@@ -2152,11 +2141,11 @@ export default function Settings() {
         }
       }
 
-      setInvitationSaveError(toErrorMessage(error, '珥덈? ?щ컻?≪뿉 ?ㅽ뙣?덉뒿?덈떎.'));
+      setInvitationSaveError(toErrorMessage(error, '초대 재발송에 실패했습니다.'));
     } finally {
       setResendingInvitationId(null);
     }
-  }, [canManageMemberRoles, effectiveSettingsCompanyId, hydrateInvitationsOnly, invitationStatusFilter]);
+  }, [canManageMemberRoles, hydrateInvitationsOnly, invitationStatusFilter, settingsCompanyId]);
 
   const handleInvitationResend = useCallback((invitationId: string) => {
     if (isInvitationSaving || resendingInvitationId !== null) {
@@ -2165,24 +2154,24 @@ export default function Settings() {
     void runInvitationResend(invitationId);
   }, [isInvitationSaving, resendingInvitationId, runInvitationResend]);
 
-  // CSV ?쒗뵆由??ㅼ슫濡쒕뱶
+  // CSV 템플릿 다운로드
   const downloadTemplate = (type: UploadType) => {
     let csv = '';
     let filename = '';
 
     if (type === 'vehicles') {
-      csv = '李⑤웾踰덊샇,李⑥쥌,?곹깭,蹂댄뿕留뚮즺???뺢린寃?ъ씪,李⑤?踰덊샇,?곗떇,?뚯쑀??n';
-      csv += '12媛3456,洹몃옖?,媛??2025-12-31,2025-06-30,KMHXX00XXXX000001,2023,?뚰꽣移?二?\n';
-      csv += '34??678,?섎굹?,媛??2025-11-30,2025-05-31,KMHXX00XXXX000002,2022,?뚰꽣移?二?\n';
+      csv = '차량번호,차종,상태,보험만료일,정기검사일,차대번호,연식,소유자\n';
+      csv += '12가3456,그랜저,가용,2025-12-31,2025-06-30,KMHXX00XXXX000001,2023,렌터카(주)\n';
+      csv += '34나5678,쏘나타,가용,2025-11-30,2025-05-31,KMHXX00XXXX000002,2022,렌터카(주)\n';
       filename = 'vehicle_template.csv';
     } else {
-      csv = '?덉빟ID,李⑤웾踰덊샇,怨좉컼紐??쒖옉??醫낅즺???좏삎,?꾪솕踰덊샇,寃곗젣諛⑸쾿,湲덉븸,?좉툑\n';
+      csv = '예약ID,차량번호,고객명,시작일,종료일,유형,전화번호,결제방법,금액,선금\n';
       templateReservations.slice(0, 10).forEach((reservation) => {
         const reservationType = reservation.type === 'rental'
-          ? '??ъ쨷'
+          ? '대여중'
           : reservation.type === 'reservation'
-            ? '?덉빟'
-            : '諛섎궔?꾨즺';
+            ? '예약'
+            : '반납완료';
         csv += `${reservation.id},${reservation.vehicleNumber},${reservation.customer},${reservation.startDateFull},${reservation.endDateFull},${reservationType},${reservation.phone},${reservation.paymentMethod},${reservation.amount},${reservation.deposit}\n`;
       });
       filename = 'reservation_template.csv';
@@ -2232,7 +2221,7 @@ export default function Settings() {
     };
   }, []);
 
-  // ?꾩옱 ?곗씠???ㅼ슫濡쒕뱶
+  // 현재 데이터 다운로드
   const downloadCurrentData = useCallback(async (type: CurrentDataType) => {
     if (activeCurrentDownloadType) {
       return;
@@ -2245,7 +2234,7 @@ export default function Settings() {
       if (type === 'vehicles') {
         setCurrentVehicleCount(totalCount);
         const lines = [
-          '차량번호,차종,상태,보험만료일,정기검사일,차대번호,연식,보유사',
+          '차량번호,차종,상태,보험만료일,정기검사일,차대번호,연식,소유자',
           ...rows.map((row) => {
             const value = isRecord(row) ? row : {};
             const vehicleNumber = toStringValue(value.vehicleNumber)
@@ -2295,17 +2284,17 @@ export default function Settings() {
       }
 
       if (rows.length === 0) {
-        toast.info('?ㅼ슫濡쒕뱶???꾩옱 ?곗씠?곌? ?놁뒿?덈떎. ?ㅻ뜑留??ы븿??CSV媛 ?앹꽦?섏뿀?듬땲??');
+        toast.info('다운로드할 현재 데이터가 없습니다. 헤더만 포함된 CSV가 생성되었습니다.');
       }
     } catch (error) {
-      toast.error(toErrorMessage(error, '?꾩옱 ?곗씠???ㅼ슫濡쒕뱶???ㅽ뙣?덉뒿?덈떎.'));
+      toast.error(toErrorMessage(error, '현재 데이터 다운로드에 실패했습니다.'));
     } finally {
       setActiveCurrentDownloadType(null);
       void refreshCurrentDataCounts();
     }
   }, [activeCurrentDownloadType, fetchAllCurrentDataRows, refreshCurrentDataCounts]);
 
-  // ?뚯씪 寃利?
+  // 파일 검증
   const validateVehicleData = (data: any[]): { valid: any[]; errors: string[] } => {
     const valid: any[] = [];
     const errors: string[] = [];
@@ -2313,22 +2302,22 @@ export default function Settings() {
     data.forEach((row, index) => {
       const rowNum = index + 2;
 
-      if (!row['李⑤웾踰덊샇']) {
-        errors.push(`${rowNum}?? 李⑤웾踰덊샇媛 ?놁뒿?덈떎`);
+      if (!row['차량번호']) {
+        errors.push(`${rowNum}행: 차량번호가 없습니다`);
         return;
       }
-      if (!row['李⑥쥌']) {
-        errors.push(`${rowNum}?? 李⑥쥌???놁뒿?덈떎`);
+      if (!row['차종']) {
+        errors.push(`${rowNum}행: 차종이 없습니다`);
         return;
       }
-      if (!['대여중', '예약', '예약중', '가용', '정비중'].includes(row['?곹깭'])) {
-        errors.push(`${rowNum}행 상태는 '대여중', '예약', '가용', '정비중' 중 하나여야 합니다. ('예약중' 입력 허용)`);
+      if (!['대여중', '예약', '예약됨', '가용', '정비중'].includes(row['상태'])) {
+        errors.push(`${rowNum}행: 상태는 '대여중', '예약', '가용', '정비중' 중 하나여야 합니다 (호환값 '예약됨' 허용)`);
         return;
       }
 
       valid.push({
         ...row,
-        ['상태']: row['?곹깭'] === '예약중' ? '예약' : row['?곹깭'],
+        상태: row['상태'] === '예약됨' ? '예약' : row['상태'],
       });
     });
 
@@ -2342,41 +2331,41 @@ export default function Settings() {
     data.forEach((row, index) => {
       const rowNum = index + 2;
 
-      if (!row['?덉빟ID']) {
-        errors.push(`${rowNum}?? ?덉빟ID媛 ?놁뒿?덈떎`);
+      if (!row['예약ID']) {
+        errors.push(`${rowNum}행: 예약ID가 없습니다`);
         return;
       }
-      if (!row['李⑤웾踰덊샇']) {
-        errors.push(`${rowNum}?? 李⑤웾踰덊샇媛 ?놁뒿?덈떎`);
+      if (!row['차량번호']) {
+        errors.push(`${rowNum}행: 차량번호가 없습니다`);
         return;
       }
       if (!row['고객명']) {
-        errors.push(`${rowNum}행 고객명이 없습니다`);
+        errors.push(`${rowNum}행: 고객명이 없습니다`);
         return;
       }
-      if (!['대여중', '예약', '예약중', '반납완료'].includes(row['?좏삎'])) {
-        errors.push(`${rowNum}행 유형은 '대여중', '예약', '반납완료' 중 하나여야 합니다. ('예약중' 입력 허용)`);
+      if (!['대여중', '예약', '예약됨', '반납완료'].includes(row['유형'])) {
+        errors.push(`${rowNum}행: 유형은 '대여중', '예약', '반납완료' 중 하나여야 합니다 (호환값 '예약됨' 허용)`);
         return;
       }
 
       valid.push({
         ...row,
-        ['유형']: row['?좏삎'] === '예약중' ? '예약' : row['?좏삎'],
+        유형: row['유형'] === '예약됨' ? '예약' : row['유형'],
       });
     });
 
     return { valid, errors };
   };
 
-  // ?뚯씪 ?낅줈??泥섎━
+  // 파일 업로드 처리
   const handleFileUpload = (file: File) => {
     if (!canEditSettings) {
-      toast.error('?ㅼ젙 CSV 寃利?沅뚰븳???놁뒿?덈떎.');
+      toast.error('설정 CSV 검증 권한이 없습니다.');
       return;
     }
 
     if (!file.name.endsWith('.csv')) {
-      alert('CSV ?뚯씪留??낅줈??媛?ν빀?덈떎');
+      alert('CSV 파일만 업로드 가능합니다');
       return;
     }
 
@@ -2387,7 +2376,7 @@ export default function Settings() {
         const data = results.data.filter((row: any) => Object.values(row).some((value) => value !== ''));
 
         if (data.length === 0) {
-          alert('?좏슚???곗씠?곌? ?놁뒿?덈떎');
+          alert('유효한 데이터가 없습니다');
           return;
         }
 
@@ -2405,12 +2394,12 @@ export default function Settings() {
         });
       },
       error: (error) => {
-        alert(`?뚯씪 ?뚯떛 ?ㅻ쪟: ${error.message}`);
+        alert(`파일 파싱 오류: ${error.message}`);
       },
     });
   };
 
-  // ?쒕옒洹몄븻?쒕∼
+  // 드래그앤드롭
   const handleDragOver = (event: React.DragEvent) => {
     event.preventDefault();
     if (!canEditSettings) {
@@ -2428,7 +2417,7 @@ export default function Settings() {
     setIsDragging(false);
 
     if (!canEditSettings) {
-      toast.error('?ㅼ젙 CSV 寃利?沅뚰븳???놁뒿?덈떎.');
+      toast.error('설정 CSV 검증 권한이 없습니다.');
       return;
     }
 
@@ -2440,7 +2429,7 @@ export default function Settings() {
 
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     if (!canEditSettings) {
-      toast.error('?ㅼ젙 CSV 寃利?沅뚰븳???놁뒿?덈떎.');
+      toast.error('설정 CSV 검증 권한이 없습니다.');
       event.target.value = '';
       return;
     }
@@ -2453,7 +2442,7 @@ export default function Settings() {
 
   const handleUploadClick = () => {
     if (!canEditSettings) {
-      toast.error('?ㅼ젙 CSV 寃利?沅뚰븳???놁뒿?덈떎.');
+      toast.error('설정 CSV 검증 권한이 없습니다.');
       return;
     }
 
@@ -2469,17 +2458,53 @@ export default function Settings() {
 
   return (
     <Layout title="설정">
+      {isSuperAdmin && (
+        <div className="px-6 pt-6">
+          <div className="rounded-xl border border-slate-200 bg-white px-5 py-4 shadow-sm">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div>
+                <h2 className="text-sm font-semibold text-slate-900">회사 범위</h2>
+                <p className="mt-1 text-sm text-slate-600">회사를 선택해 주세요. 선택한 범위로 설정 데이터가 다시 조회됩니다.</p>
+              </div>
+              <div className="flex min-w-[240px] flex-col gap-2">
+                <select
+                  value={settingsCompanyId ?? ''}
+                  onChange={(event) => updateSettingsCompanyScope(event.target.value || null)}
+                  disabled={isCompanyOptionsLoading}
+                  className="rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-100"
+                >
+                  <option value="">회사를 선택해 주세요</option>
+                  {companyOptions.map((item) => (
+                    <option key={item.companyId} value={item.companyId}>
+                      {item.name}
+                    </option>
+                  ))}
+                </select>
+                {companyOptionsError && (
+                  <p className="text-xs text-red-600">{companyOptionsError}</p>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {shouldBlockSettingsSelection ? (
+        <div className="m-6 rounded-2xl border border-dashed border-slate-300 bg-white px-6 py-12 text-center shadow-sm">
+          <p className="text-base font-semibold text-slate-900">회사를 선택해 주세요</p>
+          <p className="mt-2 text-sm text-slate-600">super_admin은 회사를 선택한 뒤 회사 정보, 지오펜스, 계정관리 데이터를 조회할 수 있습니다.</p>
+        </div>
+      ) : (
       <PageStateBoundary
         isLoading={isSettingsLoading}
         error={settingsError}
         isEmpty={false}
-        errorDescription="?ㅼ젙 ?곗씠?곕? 遺덈윭?ㅻ뒗 以?臾몄젣媛 諛쒖깮?덉뒿?덈떎."
-        emptyTitle="?쒖떆???ㅼ젙 ?곗씠?곌? ?놁뒿?덈떎"
-        emptyDescription="?좎떆 ???ㅼ떆 ?쒕룄?섍굅??愿由ъ옄?먭쾶 臾몄쓽??二쇱꽭??"
+        errorDescription="설정 데이터를 불러오는 중 문제가 발생했습니다."
+        emptyTitle="표시할 설정 데이터가 없습니다"
+        emptyDescription="잠시 후 다시 시도하거나 관리자에게 문의해 주세요."
         onRetry={handleSettingsRetry}
         errorActionLabel={getPageErrorActionLabel(settingsErrorKind)}
         onErrorAction={handleSettingsErrorAction}
-        emptyActionLabel="?ㅼ떆 遺덈윭?ㅺ린"
+        emptyActionLabel="다시 불러오기"
         onEmptyAction={handleSettingsRetry}
         className="m-6 min-h-[320px]"
       >
@@ -2488,7 +2513,6 @@ export default function Settings() {
             <button
               type="button"
               onClick={() => handleTabChange('bulk')}
-              data-testid="settings-tab-bulk"
               className={`border-b-2 px-6 py-3 text-sm font-medium transition-colors ${
                 activeTab === 'bulk'
                   ? 'border-blue-600 text-blue-600'
@@ -2499,8 +2523,18 @@ export default function Settings() {
             </button>
             <button
               type="button"
+              onClick={() => handleTabChange('company')}
+              className={`border-b-2 px-6 py-3 text-sm font-medium transition-colors ${
+                activeTab === 'company'
+                  ? 'border-blue-600 text-blue-600'
+                  : 'border-transparent text-gray-600 hover:text-gray-900'
+              }`}
+            >
+              회사 정보
+            </button>
+            <button
+              type="button"
               onClick={() => handleTabChange('geofence')}
-              data-testid="settings-tab-geofence"
               className={`border-b-2 px-6 py-3 text-sm font-medium transition-colors ${
                 activeTab === 'geofence'
                   ? 'border-blue-600 text-blue-600'
@@ -2512,7 +2546,6 @@ export default function Settings() {
             <button
               type="button"
               onClick={() => handleTabChange('accounts')}
-              data-testid="settings-tab-accounts"
               className={`border-b-2 px-6 py-3 text-sm font-medium transition-colors ${
                 activeTab === 'accounts'
                   ? 'border-blue-600 text-blue-600'
@@ -2595,7 +2628,6 @@ export default function Settings() {
 
                   <button
                     type="button"
-                    data-testid="settings-bulk-type-ocr"
                     onClick={() => {
                       setUploadType('ocr');
                       setUploadResult(null);
@@ -2626,7 +2658,7 @@ export default function Settings() {
                   <div className="mb-4 flex items-center justify-between">
                     <div>
                       <h2 className="mb-1 text-base font-semibold text-[#1e2939]">자동차 등록증 OCR 대량 업로드</h2>
-                      <p className="text-sm text-gray-600">여러 개의 차량등록증 이미지를 한번에 업로드하면 OCR로 자동 처리합니다.</p>
+                      <p className="text-sm text-gray-600">여러 개의 차량등록증 이미지를 한번에 업로드하면 OCR로 자동 처리됩니다</p>
                     </div>
                   </div>
 
@@ -2634,9 +2666,9 @@ export default function Settings() {
                     <div className="text-center">
                       <Upload className="mx-auto mb-4 h-16 w-16 text-green-600" />
                       <h3 className="mb-2 text-lg font-semibold text-green-900">차량등록증 이미지 업로드</h3>
-                      <p className="mb-4 text-sm text-gray-700">여러 개의 이미지를 한번에 선택하면 OCR과 차량 등록을 순차적으로 수행합니다.</p>
+                      <p className="mb-4 text-sm text-gray-700">여러 개의 이미지를 한번에 선택하면 OCR과 차량 등록이 순차적으로 실행됩니다</p>
                       <label className="inline-block cursor-pointer rounded-lg bg-green-600 px-6 py-3 font-medium text-white hover:bg-green-700">
-                        {isBulkOcrProcessing ? '처리 중..' : '이미지 파일 선택'}
+                        {isBulkOcrProcessing ? '처리 중...' : '이미지 파일 선택'}
                         <input
                           data-testid="settings-bulk-ocr-input"
                           type="file"
@@ -2660,7 +2692,7 @@ export default function Settings() {
                       data-testid="settings-bulk-ocr-progress"
                       className="mt-4 rounded-lg border border-green-200 bg-white px-4 py-3 text-sm text-green-900"
                     >
-                      {bulkOcrProgressMessage ?? '대량 OCR 업로드를 처리하고 있습니다.'}
+                      {bulkOcrProgressMessage ?? '일괄 OCR 업로드를 처리하고 있습니다.'}
                     </div>
                   )}
 
@@ -2700,9 +2732,9 @@ export default function Settings() {
                   <div className="mt-6 rounded-lg border border-blue-200 bg-blue-50 p-4">
                     <h3 className="mb-2 text-sm font-semibold text-blue-900">OCR 자동 추출 항목</h3>
                     <ul className="space-y-1 text-sm text-blue-800">
-                      <li>차량번호, 차대번호, 차종, 연식</li>
-                      <li>보유사명, 보험만료일</li>
-                      <li>추출 완료 후 수정 및 확인 가능</li>
+                      <li>• 차량번호, 차대번호, 차종, 연식</li>
+                      <li>• 소유자명, 보험만료일</li>
+                      <li>• 추출 완료 후 수정 및 확인 가능</li>
                     </ul>
                   </div>
                 </div>
@@ -2710,11 +2742,11 @@ export default function Settings() {
                 <div className="rounded-xl bg-white p-6 shadow-sm">
                   {!canEditSettings && (
                     <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-                      현재 계정은 설정 CSV 검증을 수행할 수 없어 템플릿 다운로드만 가능합니다.
+                      현재 계정은 설정 CSV 검증을 실행할 수 없어 템플릿 다운로드만 가능합니다.
                     </div>
                   )}
                   <div className="mb-4 flex items-center justify-between">
-                    <h2 className="text-base font-semibold text-[#1e2939]">{uploadType === 'vehicles' ? '차량 자산 업로드' : '대여 예약 업로드'}</h2>
+                    <h2 className="text-base font-semibold text-[#1e2939]">{uploadType === 'vehicles' ? '차량 자산 CSV 검증' : '대여 예약 CSV 검증'}</h2>
                     <div className="flex gap-2">
                       <button
                         type="button"
@@ -2771,11 +2803,9 @@ export default function Settings() {
                             <XCircle className="mx-auto mb-3 h-16 w-16 text-red-600" />
                           )}
                           <p className={`mb-2 font-semibold ${uploadResult.success ? 'text-green-900' : 'text-red-900'}`}>
-                            {uploadResult.success ? '검증 완료 (업로드되지 않음)' : '검증 실패'}
+                            {uploadResult.success ? '검증 완료 (저장되지 않음)' : '검증 실패'}
                           </p>
-                          <p className="mb-3 text-sm text-gray-600">
-                            전체 {uploadResult.total}건 중 {uploadResult.valid}건 유효
-                          </p>
+                          <p className="mb-3 text-sm text-gray-600">전체 {uploadResult.total}건 중 {uploadResult.valid}건 유효</p>
                           {uploadResult.success && (
                             <p className="mb-3 text-sm text-amber-700">{CSV_VALIDATION_ONLY_NOTICE}</p>
                           )}
@@ -2784,7 +2814,7 @@ export default function Settings() {
                               <p className="mb-2 text-sm font-semibold text-red-900">오류 목록:</p>
                               <ul className="max-h-32 space-y-1 overflow-y-auto text-xs text-red-800">
                                 {uploadResult.errors.map((errorMessage, index) => (
-                                  <li key={index}>- {errorMessage}</li>
+                                  <li key={index}>• {errorMessage}</li>
                                 ))}
                               </ul>
                             </div>
@@ -2793,7 +2823,7 @@ export default function Settings() {
                       ) : (
                         <>
                           <FileSpreadsheet className="mx-auto mb-3 h-16 w-16 text-gray-400" />
-                          <p className="mb-1 font-medium text-gray-600">CSV 파일을 드래그하거나 클릭하여 업로드</p>
+                          <p className="mb-1 font-medium text-gray-600">CSV 파일을 드래그하거나 클릭하여 검증</p>
                           <p className="text-sm text-gray-500">최대 1,000건까지 한번에 업로드 가능</p>
                         </>
                       )}
@@ -2879,11 +2909,175 @@ export default function Settings() {
             </div>
           )}
 
+          {activeTab === 'company' && (
+            <div className="space-y-6">
+              {!canEditSettings && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                  현재 계정은 회사 설정을 읽기 전용으로만 볼 수 있습니다.
+                </div>
+              )}
+
+              {(companySaveError || companySaveSuccess) && (
+                <div
+                  className={`rounded-lg border px-4 py-3 text-sm ${
+                    companySaveError
+                      ? 'border-red-200 bg-red-50 text-red-700'
+                      : 'border-green-200 bg-green-50 text-green-700'
+                  }`}
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <p>{companySaveError ?? companySaveSuccess}</p>
+                    {companySaveError && companyRetryAction && (
+                      <button
+                        type="button"
+                        onClick={companyRetryAction}
+                        className="inline-flex items-center gap-1 rounded-md border border-red-200 bg-white px-3 py-1 text-xs font-medium text-red-700 hover:bg-red-100"
+                      >
+                        <RefreshCw className="h-3.5 w-3.5" />
+                        다시 시도
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              <div className="rounded-xl bg-white p-6 shadow-sm">
+                <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h2 className="text-base font-semibold text-[#1e2939]">회사 프로필</h2>
+                    <p className="mt-1 text-sm text-gray-600">회사 기본 정보를 수정하면 즉시 운영 설정에 반영됩니다.</p>
+                  </div>
+                  <div className="text-right text-xs text-gray-500">
+                    <p>스키마 버전: {companySchemaVersion}</p>
+                    <p>마지막 저장: {formatUpdatedAt(companyUpdatedAt)}</p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-gray-700">회사명 *</label>
+                    <input
+                      data-testid="settings-company-name-input"
+                      type="text"
+                      value={companyForm.name}
+                      placeholder="회사명을 입력하세요"
+                      disabled={!canEditSettings || isCompanySaving}
+                      onChange={(event) => {
+                        setCompanyForm((prevState) => ({ ...prevState, name: event.target.value }));
+                        setCompanyFieldErrors((prevErrors) => ({ ...prevErrors, name: undefined }));
+                        setCompanySaveError(null);
+                        setCompanySaveSuccess(null);
+                        setCompanyRetryAction(null);
+                      }}
+                      className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 disabled:bg-gray-100"
+                    />
+                    {companyFieldErrors.name && <p className="mt-1 text-xs text-red-600">{companyFieldErrors.name}</p>}
+                  </div>
+
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-gray-700">사업자등록번호</label>
+                    <input
+                      type="text"
+                      value={companyForm.businessNumber}
+                      disabled={!canEditSettings || isCompanySaving}
+                      onChange={(event) => {
+                        setCompanyForm((prevState) => ({ ...prevState, businessNumber: event.target.value }));
+                        setCompanyFieldErrors((prevErrors) => ({ ...prevErrors, businessNumber: undefined }));
+                        setCompanySaveError(null);
+                        setCompanySaveSuccess(null);
+                        setCompanyRetryAction(null);
+                      }}
+                      className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 disabled:bg-gray-100"
+                    />
+                    {companyFieldErrors.businessNumber && (
+                      <p className="mt-1 text-xs text-red-600">{companyFieldErrors.businessNumber}</p>
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-gray-700">대표 연락처</label>
+                    <input
+                      type="text"
+                      value={companyForm.phone}
+                      disabled={!canEditSettings || isCompanySaving}
+                      onChange={(event) => {
+                        setCompanyForm((prevState) => ({ ...prevState, phone: event.target.value }));
+                        setCompanyFieldErrors((prevErrors) => ({ ...prevErrors, phone: undefined }));
+                        setCompanySaveError(null);
+                        setCompanySaveSuccess(null);
+                        setCompanyRetryAction(null);
+                      }}
+                      className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 disabled:bg-gray-100"
+                    />
+                    {companyFieldErrors.phone && <p className="mt-1 text-xs text-red-600">{companyFieldErrors.phone}</p>}
+                  </div>
+
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-gray-700">대표 이메일</label>
+                    <input
+                      type="email"
+                      value={companyForm.email}
+                      disabled={!canEditSettings || isCompanySaving}
+                      onChange={(event) => {
+                        setCompanyForm((prevState) => ({ ...prevState, email: event.target.value }));
+                        setCompanyFieldErrors((prevErrors) => ({ ...prevErrors, email: undefined }));
+                        setCompanySaveError(null);
+                        setCompanySaveSuccess(null);
+                        setCompanyRetryAction(null);
+                      }}
+                      className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 disabled:bg-gray-100"
+                    />
+                    {companyFieldErrors.email && <p className="mt-1 text-xs text-red-600">{companyFieldErrors.email}</p>}
+                  </div>
+
+                  <div className="md:col-span-2">
+                    <label className="mb-1 block text-sm font-medium text-gray-700">주소</label>
+                    <input
+                      type="text"
+                      value={companyForm.address}
+                      disabled={!canEditSettings || isCompanySaving}
+                      onChange={(event) => {
+                        setCompanyForm((prevState) => ({ ...prevState, address: event.target.value }));
+                        setCompanyFieldErrors((prevErrors) => ({ ...prevErrors, address: undefined }));
+                        setCompanySaveError(null);
+                        setCompanySaveSuccess(null);
+                        setCompanyRetryAction(null);
+                      }}
+                      className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 disabled:bg-gray-100"
+                    />
+                    {companyFieldErrors.address && <p className="mt-1 text-xs text-red-600">{companyFieldErrors.address}</p>}
+                  </div>
+                </div>
+
+                <div className="mt-6 flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={handleCompanyReset}
+                    disabled={isCompanySaving || !isCompanyDirty}
+                    className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    변경 취소
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void handleCompanySave();
+                    }}
+                    disabled={!canEditSettings || isCompanySaving || !isCompanyDirty}
+                    className="inline-flex items-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {isCompanySaving ? '\uC800\uC7A5 \uC911...' : '\uD68C\uC0AC \uC124\uC815 \uC800\uC7A5'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {activeTab === 'geofence' && (
             <div className="space-y-6">
               {!canEditSettings && (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-                  ?꾩옱 怨꾩젙? 吏?ㅽ렂?ㅻ? ?쎄린 ?꾩슜?쇰줈留?蹂????덉뒿?덈떎.
+                  \uD604\uC7AC \uACC4\uC815\uC740 \uC9C0\uC624\uD39C\uC2A4\uB97C \uC77D\uAE30 \uC804\uC6A9\uC73C\uB85C\uB9CC \uBCFC \uC218 \uC788\uC2B5\uB2C8\uB2E4.
                 </div>
               )}
 
@@ -2904,7 +3098,7 @@ export default function Settings() {
                         className="inline-flex items-center gap-1 rounded-md border border-red-200 bg-white px-3 py-1 text-xs font-medium text-red-700 hover:bg-red-100"
                       >
                         <RefreshCw className="h-3.5 w-3.5" />
-                        ?ㅼ떆 ?쒕룄
+                        \uB2E4\uC2DC \uC2DC\uB3C4
                       </button>
                     )}
                   </div>
@@ -2913,7 +3107,7 @@ export default function Settings() {
 
               <div className="rounded-xl bg-white p-6 shadow-sm">
                 <div className="mb-4 flex items-center justify-between">
-                  <h2 className="text-base font-semibold text-[#1e2939]">지오펜스 지도</h2>
+                  <h2 className="text-base font-semibold text-[#1e2939]">\uC9C0\uC624\uD39C\uC2A4 \uC9C0\uB3C4</h2>
                   <button
                     type="button"
                     onClick={openCreateGeofenceEditor}
@@ -2921,15 +3115,15 @@ export default function Settings() {
                     className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     <Plus className="h-4 w-4" />
-                    吏?ㅽ렂???앹꽦
+                    \uC9C0\uC624\uD39C\uC2A4 \uC0DD\uC131
                   </button>
                 </div>
 
                 <div className="flex h-[320px] w-full items-center justify-center rounded-lg border-2 border-dashed border-gray-300 bg-gray-100">
                   <div className="text-center">
                     <MapPin className="mx-auto mb-3 h-16 w-16 text-gray-400" />
-                    <p className="font-medium text-gray-600">吏???곸뿭</p>
-                    <p className="mt-1 text-sm text-gray-500">지오펜스 위치가 여기에 표시됩니다.</p>
+                    <p className="font-medium text-gray-600">\uC9C0\uB3C4 \uC601\uC5ED</p>
+                    <p className="mt-1 text-sm text-gray-500">\uC9C0\uC624\uD39C\uC2A4 \uC704\uCE58\uAC00 \uC5EC\uAE30\uC5D0 \uD45C\uC2DC\uB429\uB2C8\uB2E4</p>
                   </div>
                 </div>
               </div>
@@ -2937,11 +3131,11 @@ export default function Settings() {
               {isGeofenceEditorOpen && (
                 <div className="rounded-xl border border-blue-200 bg-blue-50 p-6">
                   <h3 className="mb-4 text-base font-semibold text-blue-900">
-                    {geofenceEditorMode === 'create' ? '吏?ㅽ렂???앹꽦' : `吏?ㅽ렂???몄쭛 (${selectedEditingGeofence?.name ?? '-'})`}
+                    {geofenceEditorMode === 'create' ? '\uC9C0\uC624\uD39C\uC2A4 \uC0DD\uC131' : `\uC9C0\uC624\uD39C\uC2A4 \uD3B8\uC9D1 (${selectedEditingGeofence?.name ?? '-'})`}
                   </h3>
                   <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                     <div>
-                      <label className="mb-1 block text-sm font-medium text-blue-900">?대쫫 *</label>
+                      <label className="mb-1 block text-sm font-medium text-blue-900">\uC774\uB984 *</label>
                       <input
                         type="text"
                         value={geofenceForm.name}
@@ -2995,7 +3189,7 @@ export default function Settings() {
                       />
                     </div>
                     <div>
-                      <label className="mb-1 block text-sm font-medium text-blue-900">諛섍꼍 (m) *</label>
+                      <label className="mb-1 block text-sm font-medium text-blue-900">\uBC18\uACBD (m) *</label>
                       <input
                         type="number"
                         min={1}
@@ -3015,7 +3209,7 @@ export default function Settings() {
                       )}
                     </div>
                     <div>
-                      <label className="mb-1 block text-sm font-medium text-blue-900">?꾨룄 *</label>
+                      <label className="mb-1 block text-sm font-medium text-blue-900">\uC704\uB3C4 *</label>
                       <input
                         type="number"
                         step="0.000001"
@@ -3033,7 +3227,7 @@ export default function Settings() {
                       {geofenceFieldErrors.lat && <p className="mt-1 text-xs text-red-600">{geofenceFieldErrors.lat}</p>}
                     </div>
                     <div>
-                      <label className="mb-1 block text-sm font-medium text-blue-900">寃쎈룄 *</label>
+                      <label className="mb-1 block text-sm font-medium text-blue-900">\uACBD\uB3C4 *</label>
                       <input
                         type="number"
                         step="0.000001"
@@ -3063,7 +3257,7 @@ export default function Settings() {
                             setGeofenceRetryAction(null);
                           }}
                         />
-                        ?쒖꽦 ?곹깭
+                        \uD65C\uC131 \uC0C1\uD0DC
                       </label>
                     </div>
                   </div>
@@ -3074,7 +3268,7 @@ export default function Settings() {
                       disabled={isGeofenceSaving}
                       className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      痍⑥냼
+                      \uCDE8\uC18C
                     </button>
                     <button
                       type="button"
@@ -3084,7 +3278,7 @@ export default function Settings() {
                       disabled={!canEditSettings || isGeofenceSaving}
                       className="inline-flex items-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      {isGeofenceSaving ? '저장 중..' : '저장'}
+                      {isGeofenceSaving ? '\uC800\uC7A5 \uC911...' : '\uC800\uC7A5'}
                     </button>
                   </div>
                 </div>
@@ -3092,25 +3286,25 @@ export default function Settings() {
 
               <div className="overflow-hidden rounded-xl bg-white shadow-sm">
                 <div className="border-b border-gray-200 px-6 py-4">
-                  <h2 className="text-base font-semibold text-[#1e2939]">吏?ㅽ렂??紐⑸줉</h2>
+                  <h2 className="text-base font-semibold text-[#1e2939]">\uC9C0\uC624\uD39C\uC2A4 \uBAA9\uB85D</h2>
                 </div>
 
                 <div className="overflow-x-auto">
                   <table className="w-full">
                     <thead className="border-b border-gray-200 bg-gray-50">
                       <tr>
-                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">?대쫫</th>
-                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">以묒떖 醫뚰몴</th>
-                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">諛섍꼍</th>
-                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">?쒖꽦 ?곹깭</th>
-                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">?≪뀡</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">\uC774\uB984</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">\uC911\uC2EC \uC88C\uD45C</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">\uBC18\uACBD</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">\uD65C\uC131 \uC0C1\uD0DC</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">\uC561\uC158</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200">
                       {geofences.length === 0 && (
                         <tr>
                           <td colSpan={5} className="px-6 py-10 text-center text-sm text-gray-500">
-                            ?깅줉??吏?ㅽ렂?ㅺ? ?놁뒿?덈떎.
+                            \uB4F1\uB85D\uB41C \uC9C0\uC624\uD39C\uC2A4\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4.
                           </td>
                         </tr>
                       )}
@@ -3144,7 +3338,7 @@ export default function Settings() {
                               disabled={!canEditSettings || isGeofenceSaving || activeToggleTargetId !== null}
                               className="mr-3 font-medium text-blue-600 hover:text-blue-800 disabled:cursor-not-allowed disabled:opacity-50"
                             >
-                              ?몄쭛
+                              \uD3B8\uC9D1
                             </button>
                             <button
                               type="button"
@@ -3152,7 +3346,7 @@ export default function Settings() {
                               disabled={!canEditSettings || deletingGeofenceId === geofence.id || isGeofenceSaving}
                               className="font-medium text-red-600 hover:text-red-800 disabled:cursor-not-allowed disabled:opacity-50"
                             >
-                              {deletingGeofenceId === geofence.id ? '??젣 以?..' : '??젣'}
+                              {deletingGeofenceId === geofence.id ? '\uC0AD\uC81C \uC911...' : '\uC0AD\uC81C'}
                             </button>
                           </td>
                         </tr>
@@ -3168,7 +3362,7 @@ export default function Settings() {
             <div className="space-y-4">
               {!canManageMemberRoles && (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-                  ?꾩옱 怨꾩젙? 硫ㅻ쾭 沅뚰븳???쎄린 ?꾩슜?쇰줈留?蹂????덉뒿?덈떎.
+                  \uD604\uC7AC \uACC4\uC815\uC740 \uBA64\uBC84 \uAD8C\uD55C\uC744 \uC77D\uAE30 \uC804\uC6A9\uC73C\uB85C\uB9CC \uBCFC \uC218 \uC788\uC2B5\uB2C8\uB2E4.
                 </div>
               )}
 
@@ -3189,7 +3383,7 @@ export default function Settings() {
                         className="inline-flex items-center gap-1 rounded-md border border-red-200 bg-white px-3 py-1 text-xs font-medium text-red-700 hover:bg-red-100"
                       >
                         <RefreshCw className="h-3.5 w-3.5" />
-                        ?ㅼ떆 ?쒕룄
+                        \uB2E4\uC2DC \uC2DC\uB3C4
                       </button>
                     )}
                   </div>
@@ -3213,7 +3407,7 @@ export default function Settings() {
                         className="inline-flex items-center gap-1 rounded-md border border-red-200 bg-white px-3 py-1 text-xs font-medium text-red-700 hover:bg-red-100"
                       >
                         <RefreshCw className="h-3.5 w-3.5" />
-                        ?ㅼ떆 ?쒕룄
+                        \uB2E4\uC2DC \uC2DC\uB3C4
                       </button>
                     )}
                   </div>
@@ -3223,18 +3417,17 @@ export default function Settings() {
               <div className="overflow-hidden rounded-xl bg-white shadow-sm">
                 <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
                   <div>
-                    <h2 className="text-base font-semibold text-[#1e2939]">?ъ슜??紐⑸줉</h2>
-                    <p className="mt-1 text-sm text-gray-600">硫ㅻ쾭 沅뚰븳 蹂寃쎌? ???踰꾪듉???뚮윭???곸슜?⑸땲??</p>
+                    <h2 className="text-base font-semibold text-[#1e2939]">\uC0AC\uC6A9\uC790 \uBAA9\uB85D</h2>
+                    <p className="mt-1 text-sm text-gray-600">\uBA64\uBC84 \uAD8C\uD55C \uBCC0\uACBD\uC740 \uC800\uC7A5 \uBC84\uD2BC\uC744 \uB20C\uB7EC\uC57C \uC801\uC6A9\uB429\uB2C8\uB2E4.</p>
                   </div>
                   <button
                     type="button"
                     onClick={openInvitationEditor}
                     disabled={!canManageMemberRoles || isInvitationSaving || resendingInvitationId !== null}
-                    data-testid="settings-invite-open-button"
                     className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-600"
                   >
                     <Plus className="h-4 w-4" />
-                    珥덈??섍린
+                    \uCD08\uB300\uD558\uAE30
                   </button>
                 </div>
 
@@ -3243,12 +3436,11 @@ export default function Settings() {
                     <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_180px]">
                       <div>
                         <label htmlFor="settings-invitation-email" className="mb-1 block text-sm font-medium text-blue-900">
-                          珥덈? ?대찓??
+                          \uCD08\uB300 \uC774\uBA54\uC77C
                         </label>
                         <input
                           id="settings-invitation-email"
                           type="email"
-                          data-testid="settings-invitation-email"
                           value={invitationForm.email}
                           onChange={(event) => handleInvitationFieldChange('email', event.target.value)}
                           disabled={isInvitationSaving}
@@ -3261,21 +3453,20 @@ export default function Settings() {
                       </div>
                       <div>
                         <label htmlFor="settings-invitation-role" className="mb-1 block text-sm font-medium text-blue-900">
-                          권한
+                          \uAD8C\uD55C
                         </label>
                         <select
                           id="settings-invitation-role"
-                          data-testid="settings-invitation-role"
                           value={invitationForm.role}
                           onChange={(event) => handleInvitationFieldChange('role', event.target.value)}
                           disabled={isInvitationSaving}
                           className="w-full rounded-lg border border-blue-200 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 disabled:bg-gray-100"
                         >
-                          <option value="member">운영자</option>
-                          <option value="viewer">조회자</option>
-                          <option value="admin">관리자</option>
+                          <option value="member">\uC6B4\uC601\uC790</option>
+                          <option value="viewer">\uC870\uD68C\uC790</option>
+                          <option value="admin">\uAD00\uB9AC\uC790</option>
                           {isSuperAdmin && (
-                            <option value="installer">설치 기사</option>
+                            <option value="installer">\uC7A5\uCC29 \uAE30\uC0AC</option>
                           )}
                         </select>
                         {invitationFieldErrors.role && (
@@ -3293,16 +3484,15 @@ export default function Settings() {
                         disabled={isInvitationSaving}
                         className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
                       >
-                        취소
+                        \uCDE8\uC18C
                       </button>
                       <button
                         type="button"
                         onClick={handleInvitationCreate}
                         disabled={!canManageMemberRoles || isInvitationSaving}
-                        data-testid="settings-invitation-send-button"
                         className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300"
                       >
-                        {isInvitationSaving ? '발송 중..' : '초대 메일 발송'}
+                        {isInvitationSaving ? '\uBC1C\uC1A1 \uC911...' : '\uCD08\uB300 \uBA54\uC77C \uBC1C\uC1A1'}
                       </button>
                     </div>
                   </div>
@@ -3312,18 +3502,18 @@ export default function Settings() {
                   <table className="w-full">
                     <thead className="border-b border-gray-200 bg-gray-50">
                       <tr>
-                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">이름</th>
-                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">이메일</th>
-                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">권한</th>
-                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">상태</th>
-                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">액션</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">\uC774\uB984</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">\uC774\uBA54\uC77C</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">\uAD8C\uD55C</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">\uC0C1\uD0DC</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">\uC561\uC158</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200">
                       {members.length === 0 && (
                         <tr>
                           <td colSpan={5} className="px-6 py-10 text-center text-sm text-gray-500">
-                            조회된 멤버가 없습니다.
+                            \uC870\uD68C\uB41C \uBA64\uBC84\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4.
                           </td>
                         </tr>
                       )}
@@ -3356,9 +3546,9 @@ export default function Settings() {
                                   disabled={isRowSaving}
                                   className="rounded-md border border-gray-300 px-2 py-1 text-xs font-medium text-gray-800 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:opacity-50"
                                 >
-                                  <option value="admin">관리자</option>
-                                  <option value="member">운영자</option>
-                                  <option value="viewer">조회자</option>
+                                  <option value="admin">\uAD00\uB9AC\uC790</option>
+                                  <option value="member">\uC6B4\uC601\uC790</option>
+                                  <option value="viewer">\uC870\uD68C\uC790</option>
                                 </select>
                               ) : (
                                 <span className={`rounded-full px-2 py-1 text-xs font-medium ${getRoleBadgeColor(member.role)}`}>
@@ -3380,7 +3570,7 @@ export default function Settings() {
                                     disabled={isRowSaving}
                                     className="font-medium text-blue-600 hover:text-blue-800 disabled:cursor-not-allowed disabled:opacity-50"
                                   >
-                                    {isRowSaving ? '저장 중..' : '저장'}
+                                    {isRowSaving ? '\uC800\uC7A5 \uC911...' : '\uC800\uC7A5'}
                                   </button>
                                   <button
                                     type="button"
@@ -3388,12 +3578,12 @@ export default function Settings() {
                                     disabled={isRowSaving}
                                     className="font-medium text-gray-600 hover:text-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
                                   >
-                                    취소
+                                    \uCDE8\uC18C
                                   </button>
                                 </div>
                               ) : (
                                 <span className={canReviewPendingMember ? 'hidden text-xs text-gray-400' : 'text-xs text-gray-400'}>
-                                  {canEditRowRole ? '-' : '권한 변경 불가'}
+                                  {canEditRowRole ? '-' : '\uAD8C\uD55C \uBCC0\uACBD \uBD88\uAC00'}
                                 </span>
                               )}
                               {canReviewPendingMember && (
@@ -3406,7 +3596,7 @@ export default function Settings() {
                                     disabled={isRowSaving}
                                     className="font-medium text-green-600 hover:text-green-800 disabled:cursor-not-allowed disabled:opacity-50"
                                   >
-                                    {isRowSaving ? '泥섎━ 以?..' : '?뱀씤'}
+                                    {isRowSaving ? '\uCC98\uB9AC \uC911...' : '\uC2B9\uC778'}
                                   </button>
                                   <button
                                     type="button"
@@ -3416,7 +3606,7 @@ export default function Settings() {
                                     disabled={isRowSaving}
                                     className="font-medium text-red-600 hover:text-red-800 disabled:cursor-not-allowed disabled:opacity-50"
                                   >
-                                    {isRowSaving ? '泥섎━ 以?..' : '嫄곗젅'}
+                                    {isRowSaving ? '\uCC98\uB9AC \uC911...' : '\uAC70\uC808'}
                                   </button>
                                 </div>
                               )}
@@ -3432,25 +3622,25 @@ export default function Settings() {
                 </div>
 
                 <div className="border-t border-gray-200 bg-gray-50 px-6 py-4">
-                  <h3 className="mb-2 text-sm font-semibold text-gray-700">권한 설명</h3>
+                  <h3 className="mb-2 text-sm font-semibold text-gray-700">\uAD8C\uD55C \uC124\uBA85</h3>
                   <div className="space-y-1 text-sm text-gray-600">
-                    <p><span className="font-medium">관리자(admin):</span> 멤버 권한과 운영 설정을 변경할 수 있습니다.</p>
-                    <p><span className="font-medium">운영자(member):</span> 데이터 조회와 운영 기능을 사용할 수 있지만 설정 변경은 제한됩니다.</p>
-                    <p><span className="font-medium">조회자(viewer):</span> 데이터 조회만 가능합니다.</p>
-                    <p><span className="font-medium">상태:</span> approved(승인), pending(대기), rejected(거절), withdrawn(취소)</p>
+                    <p><span className="font-medium">\uAD00\uB9AC\uC790(admin):</span> \uBA64\uBC84 \uAD8C\uD55C \uBC0F \uC6B4\uC601 \uC124\uC815 \uBCC0\uACBD \uAC00\uB2A5</p>
+                    <p><span className="font-medium">\uC6B4\uC601\uC790(member):</span> \uB370\uC774\uD130 \uC870\uD68C/\uC6B4\uC601 \uAE30\uB2A5 \uC0AC\uC6A9, \uC124\uC815 \uBCC0\uACBD \uC81C\uD55C</p>
+                    <p><span className="font-medium">\uC870\uD68C\uC790(viewer):</span> \uB370\uC774\uD130 \uC870\uD68C \uC804\uC6A9</p>
+                    <p><span className="font-medium">\uC0C1\uD0DC:</span> approved(\uD65C\uC131), pending(\uC2B9\uC778 \uB300\uAE30), rejected(\uAC70\uC808), withdrawn(\uD0C8\uD1F4)</p>
                   </div>
                 </div>
               </div>
 
               <div className="overflow-hidden rounded-xl bg-white shadow-sm">
                 <div className="border-b border-gray-200 px-6 py-4">
-                  <h2 className="text-base font-semibold text-[#1e2939]">珥덈? ?대젰</h2>
-                  <p className="mt-1 text-sm text-gray-600">?곹깭蹂?珥덈? ?대젰怨??섎씫 ?뺣낫瑜??④퍡 ?뺤씤?⑸땲??</p>
+                  <h2 className="text-base font-semibold text-[#1e2939]">\uCD08\uB300 \uC774\uB825</h2>
+                  <p className="mt-1 text-sm text-gray-600">\uC0C1\uD0DC\uBCC4 \uCD08\uB300 \uC774\uB825\uACFC \uC218\uB77D \uC815\uBCF4\uB97C \uD568\uAED8 \uD655\uC778\uD569\uB2C8\uB2E4.</p>
                 </div>
 
                 <div className="border-b border-gray-100 bg-gray-50 px-6 py-4">
                   <label className="flex items-center gap-2 text-sm text-gray-600">
-                    <span className="font-medium text-gray-700">?곹깭</span>
+                    <span className="font-medium text-gray-700">\uC0C1\uD0DC</span>
                     <select
                       value={invitationStatusFilter}
                       onChange={(event) => {
@@ -3460,11 +3650,11 @@ export default function Settings() {
                       disabled={!canManageMemberRoles || isInvitationSaving || resendingInvitationId !== null}
                       className="rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-800 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-gray-100"
                     >
-                      <option value="pending">대기 중</option>
-                      <option value="accepted">수락됨</option>
-                      <option value="expired">만료됨</option>
-                      <option value="revoked">취소됨</option>
-                      <option value="all">전체</option>
+                      <option value="pending">\uB300\uAE30 \uC911</option>
+                      <option value="accepted">\uC218\uB77D\uB428</option>
+                      <option value="expired">\uB9CC\uB8CC\uB428</option>
+                      <option value="revoked">\uCDE8\uC18C\uB428</option>
+                      <option value="all">\uC804\uCCB4</option>
                     </select>
                   </label>
                 </div>
@@ -3473,22 +3663,22 @@ export default function Settings() {
                   <table className="w-full">
                     <thead className="border-b border-gray-200 bg-gray-50">
                       <tr>
-                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">이메일</th>
-                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">권한</th>
-                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">상태</th>
-                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">초대 시각</th>
-                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">만료 시각</th>
-                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">수락 시각</th>
-                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">수락 사용자</th>
-                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">재발송</th>
-                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">액션</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">\uC774\uBA54\uC77C</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">\uAD8C\uD55C</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">\uC0C1\uD0DC</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">\uCD08\uB300 \uC2DC\uAC01</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">\uB9CC\uB8CC \uC2DC\uAC01</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">\uC218\uB77D \uC2DC\uAC01</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">\uC218\uB77D \uC0AC\uC6A9\uC790</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">\uC7AC\uBC1C\uC1A1</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">\uC561\uC158</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200">
                       {invitations.length === 0 && (
                         <tr>
                           <td colSpan={9} className="px-6 py-10 text-center text-sm text-gray-500">
-                            선택한 상태의 초대가 없습니다.
+                            \uC120\uD0DD\uD55C \uC0C1\uD0DC\uC758 \uCD08\uB300\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4.
                           </td>
                         </tr>
                       )}
@@ -3529,7 +3719,7 @@ export default function Settings() {
                                 disabled={!canManageMemberRoles || isInvitationSaving || resendingInvitationId === invitation.id}
                                 className="font-medium text-blue-600 hover:text-blue-800 disabled:cursor-not-allowed disabled:opacity-50"
                               >
-                                {resendingInvitationId === invitation.id ? '재발송 중..' : '재발송'}
+                                {resendingInvitationId === invitation.id ? '재발송 중...' : '재발송'}
                               </button>
                             ) : (
                               <span className="text-xs text-gray-400">-</span>
@@ -3545,6 +3735,7 @@ export default function Settings() {
           )}
         </div>
       </PageStateBoundary>
+      )}
     </Layout>
   );
 }
