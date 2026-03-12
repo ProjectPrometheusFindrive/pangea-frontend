@@ -134,7 +134,7 @@ test.describe('Account settings', () => {
     await page.getByRole('button', { name: '계정 관리' }).click();
     await expect(page.getByText('pending@example.com')).toBeVisible();
 
-    await page.getByRole('button', { name: '초대하기' }).click();
+    await page.getByRole('button', { name: /^초대$/ }).click();
     await page.getByLabel('초대 이메일').fill('Invitee@Example.com');
     await page.getByLabel('권한').selectOption('admin');
     await page.getByRole('button', { name: '초대 메일 발송' }).click();

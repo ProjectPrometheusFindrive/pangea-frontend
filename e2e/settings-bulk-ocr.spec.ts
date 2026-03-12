@@ -95,12 +95,8 @@ test.describe('Wave 1 Settings Bulk OCR', () => {
 
     await loginViaUi(page, 'admin', { returnUrl: '/settings' });
 
-    await page.getByRole('button', { name: '회사 정보' }).click();
-    await expect(page.getByTestId('settings-company-name-input')).toHaveValue('');
-    await expect(page.getByTestId('settings-company-name-input')).toHaveAttribute('placeholder', '회사명을 입력하세요');
-
-    await page.getByRole('button', { name: '대량 업로드/다운로드' }).click();
-    await page.getByText('자동차 등록증 (OCR)').click();
+    await page.getByRole('button', { name: '자동차 등록증 (OCR)' }).click();
+    await expect(page.getByText('차량등록증 이미지 업로드')).toBeVisible();
     await page.getByTestId('settings-bulk-ocr-input').setInputFiles(TEST_IMAGE_FILE);
 
     await expect(page.getByTestId('settings-bulk-ocr-result-summary')).toContainText('성공 1건');
