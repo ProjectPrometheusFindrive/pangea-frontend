@@ -1350,6 +1350,9 @@ function SupportTicketSubmitView({
     if (!normalizedContent) {
       nextFieldErrors.content = '문의 내용을 입력해 주세요.';
     }
+    if (!normalizedContactPhone) {
+      nextFieldErrors.contactPhone = '연락처를 입력해 주세요.';
+    }
     if (attachments.length > MAX_ATTACHMENT_COUNT) {
       nextFieldErrors.attachments = `첨부파일은 최대 ${MAX_ATTACHMENT_COUNT}개까지 등록할 수 있습니다.`;
     }
@@ -1400,7 +1403,7 @@ function SupportTicketSubmitView({
         category: normalizedCategory,
         title: normalizedTitle,
         content: normalizedContent,
-        contactPhone: normalizedContactPhone || undefined,
+        contactPhone: normalizedContactPhone,
         attachments: uploadedAttachments,
       });
 
@@ -1712,7 +1715,7 @@ function SupportTicketSubmitView({
 
               <div>
                 <label htmlFor="support-contact-phone" className="mb-1 block text-sm font-semibold text-gray-700">
-                  연락처 (선택)
+                  연락처 <span className="text-red-600">*</span>
                 </label>
                 <input
                   id="support-contact-phone"
