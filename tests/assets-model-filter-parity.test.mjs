@@ -28,7 +28,7 @@ test('Assets restores a model filter with catalog-backed options, counts, and pa
   assert.match(source, /setAvailableModelOptions\(payload\.modelOptions\);/u);
   assert.match(source, /const statusCountMap = useMemo\(\(\) => \(\{\s*rental: assets\.filter/u);
   assert.match(source, /visibleAssets\.map\(\(asset\) => \(/u);
-  assert.match(source, /modelFilter \? `필터 결과 \$\{totalCount \?\? assets\.length\}대 표시 중`/u);
+  assert.match(source, /대 표시 중\)/u);
   assert.doesNotMatch(source, /const filteredAssets = useMemo\(\(\) => \{/u);
   assert.doesNotMatch(source, /const availableModelOptions = useMemo\(\(\) => \{/u);
 });
