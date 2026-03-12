@@ -134,10 +134,10 @@ test.describe('Account settings', () => {
     await page.getByRole('button', { name: '계정 관리' }).click();
     await expect(page.getByText('pending@example.com')).toBeVisible();
 
-    await page.getByTestId('settings-invite-button').click();
-    await page.locator('#settings-invitation-email').fill('Invitee@Example.com');
-    await page.locator('#settings-invitation-role').selectOption('admin');
-    await page.getByRole('button', { name: '초대 메일 발송' }).click();
+    await page.getByTestId('settings-invite-open-button').click();
+    await page.getByTestId('settings-invitation-email').fill('Invitee@Example.com');
+    await page.getByTestId('settings-invitation-role').selectOption('admin');
+    await page.getByTestId('settings-invitation-send-button').click();
 
     await expect.poll(() => createCount).toBe(1);
     await expect(page.getByText('invitee@example.com')).toBeVisible();

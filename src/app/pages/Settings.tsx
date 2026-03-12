@@ -2488,6 +2488,7 @@ export default function Settings() {
             <button
               type="button"
               onClick={() => handleTabChange('bulk')}
+              data-testid="settings-tab-bulk"
               className={`border-b-2 px-6 py-3 text-sm font-medium transition-colors ${
                 activeTab === 'bulk'
                   ? 'border-blue-600 text-blue-600'
@@ -2499,6 +2500,7 @@ export default function Settings() {
             <button
               type="button"
               onClick={() => handleTabChange('geofence')}
+              data-testid="settings-tab-geofence"
               className={`border-b-2 px-6 py-3 text-sm font-medium transition-colors ${
                 activeTab === 'geofence'
                   ? 'border-blue-600 text-blue-600'
@@ -2510,6 +2512,7 @@ export default function Settings() {
             <button
               type="button"
               onClick={() => handleTabChange('accounts')}
+              data-testid="settings-tab-accounts"
               className={`border-b-2 px-6 py-3 text-sm font-medium transition-colors ${
                 activeTab === 'accounts'
                   ? 'border-blue-600 text-blue-600'
@@ -2592,6 +2595,7 @@ export default function Settings() {
 
                   <button
                     type="button"
+                    data-testid="settings-bulk-type-ocr"
                     onClick={() => {
                       setUploadType('ocr');
                       setUploadResult(null);
@@ -3224,9 +3228,9 @@ export default function Settings() {
                   </div>
                   <button
                     type="button"
-                    data-testid="settings-invite-button"
                     onClick={openInvitationEditor}
                     disabled={!canManageMemberRoles || isInvitationSaving || resendingInvitationId !== null}
+                    data-testid="settings-invite-open-button"
                     className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-600"
                   >
                     <Plus className="h-4 w-4" />
@@ -3244,6 +3248,7 @@ export default function Settings() {
                         <input
                           id="settings-invitation-email"
                           type="email"
+                          data-testid="settings-invitation-email"
                           value={invitationForm.email}
                           onChange={(event) => handleInvitationFieldChange('email', event.target.value)}
                           disabled={isInvitationSaving}
@@ -3260,6 +3265,7 @@ export default function Settings() {
                         </label>
                         <select
                           id="settings-invitation-role"
+                          data-testid="settings-invitation-role"
                           value={invitationForm.role}
                           onChange={(event) => handleInvitationFieldChange('role', event.target.value)}
                           disabled={isInvitationSaving}
@@ -3293,6 +3299,7 @@ export default function Settings() {
                         type="button"
                         onClick={handleInvitationCreate}
                         disabled={!canManageMemberRoles || isInvitationSaving}
+                        data-testid="settings-invitation-send-button"
                         className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300"
                       >
                         {isInvitationSaving ? '발송 중..' : '초대 메일 발송'}
