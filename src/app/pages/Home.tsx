@@ -539,7 +539,7 @@ export default function Home() {
     TrendingUp,
   };
 
-  const handleTaskClick = useCallback((target: 'pickup' | 'rental' | 'return') => {
+  const handleTaskClick = useCallback((target: 'pickup' | 'return' | 'overdue') => {
     const params = new URLSearchParams();
     if (target === 'pickup') {
       const todayDate = toIsoDate(new Date());
@@ -598,10 +598,10 @@ export default function Home() {
         testId: 'home-today-card-pickup',
       },
       {
-        label: '오늘 대여',
-        count: kpis.activeContracts,
+        label: '기간 초과 미반납',
+        count: today.overdueCount,
         icon: 'Clock',
-        filter: 'rental' as const,
+        filter: 'overdue' as const,
         testId: 'home-today-card-rental',
       },
       {
