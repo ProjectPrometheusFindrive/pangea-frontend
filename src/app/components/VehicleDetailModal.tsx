@@ -814,9 +814,6 @@ export function VehicleDetailModal({
                     >
                       프리미엄으로 업그레이드
                     </button>
-                    <p className="text-xs text-gray-500 mt-3">
-                      월 29,000원 · 차량 단말 무료 설치 · 언제든 해지 가능
-                    </p>
                   </div>
                 </div>
               )}
