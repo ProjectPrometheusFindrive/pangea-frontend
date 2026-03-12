@@ -53,9 +53,9 @@ test('dashboard services and pages wire company scope through settings companies
   assert.match(revenueServiceSource, /companyId\?: string/);
   assert.match(revenueServiceSource, /query:\s*\{[\s\S]*companyId,\s*[\s\S]*\}/u);
 
-  assert.match(homePageSource, /useSearchParams/u);
-  assert.match(homePageSource, /listSettingsCompanies/u);
-  assert.match(homePageSource, /resolveDashboardCompanyScope/u);
+  assert.doesNotMatch(homePageSource, /listSettingsCompanies/u);
+  assert.doesNotMatch(homePageSource, /회사 범위/u);
+  assert.doesNotMatch(homePageSource, /전체 회사/u);
   assert.match(homePageSource, /getHomeSummary\(\{[\s\S]*companyId:\s*filters\.companyId\s*\?\?\s*undefined/u);
 
   assert.match(revenuePageSource, /useSearchParams/u);
