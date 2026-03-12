@@ -73,7 +73,6 @@ const CALENDAR_BASE_DATE = createTodayBaseDate();
 const DEFAULT_PAGE = 1;
 const DEFAULT_PAGE_SIZE = 20;
 const ASSET_FALLBACK_PAGE_SIZE = 500;
-const PAGE_SIZE_OPTIONS = [20, 50, 100];
 const TOTAL_COUNT_KEYS = ['total', 'totalCount', 'count', 'size', 'itemsCount', 'totalElements'];
 const RETRY_TOAST_MESSAGE = '일시적인 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.';
 
@@ -700,8 +699,6 @@ function toReservationRow(row: unknown, index: number): Reservation | null {
     customer,
     startDate: startDateOffset,
     endDate: endDateOffset,
-    contractStatus: contractStatus ?? undefined,
-    type: normalizeReservationType(contractStatus ?? toStringValue(row.type) ?? toStringValue(row.status)),
     scheduledStartAt: toStringValue(startSource) ?? undefined,
     contractStatus: contractStatus ?? undefined,
     type: normalizeReservationType(contractStatus ?? toStringValue(row.type) ?? toStringValue(row.status)),
@@ -867,8 +864,8 @@ export default function Reservations() {
     && ['admin', 'super_admin'].includes((user?.role ?? '').trim().toLowerCase());
   const canViewAssets = canAccessRoute(ROUTE_PERMISSIONS.assets);
   const canViewActionRequired = canAccessRoute(ROUTE_PERMISSIONS.actionRequired);
-  const page = toPositiveInteger(searchParams.get('page'), DEFAULT_PAGE);
-  const pageSize = toPositiveInteger(searchParams.get('size') ?? searchParams.get('pageSize'), DEFAULT_PAGE_SIZE);
+  const page = DEFAULT_PAGE;
+  const pageSize = DEFAULT_PAGE_SIZE;
   const fromDate = normalizeDateParam(searchParams.get('from'));
   const toDate = normalizeDateParam(searchParams.get('to'));
   const dueFilter = normalizeDueFilter(searchParams.get('due'));
@@ -937,18 +934,6 @@ export default function Reservations() {
     const nextParams = new URLSearchParams(searchParams);
     mutator(nextParams);
 
-    if (!nextParams.get('page')) {
-      nextParams.set('page', String(DEFAULT_PAGE));
-    }
-    if (!nextParams.get('size')) {
-      nextParams.set('size', String(DEFAULT_PAGE_SIZE));
-    }
-
-    const nextPage = toPositiveInteger(nextParams.get('page'), DEFAULT_PAGE);
-    const nextPageSize = toPositiveInteger(nextParams.get('size'), DEFAULT_PAGE_SIZE);
-    nextParams.set('page', String(nextPage));
-    nextParams.set('size', String(nextPageSize));
-
     if (!nextParams.get('status')) {
       nextParams.delete('status');
     }
@@ -967,6 +952,8 @@ export default function Reservations() {
 
     nextParams.delete('filter');
     nextParams.delete('contractStatus');
+    nextParams.delete('page');
+    nextParams.delete('size');
     nextParams.delete('pageSize');
     nextParams.delete('search');
 
@@ -996,7 +983,8 @@ export default function Reservations() {
       Boolean(legacyFilter)
       || Boolean(legacyContractStatus)
       || Boolean(legacySearch)
-      || Boolean(legacyPageSize && !canonicalSize)
+      || Boolean(canonicalSize)
+      || Boolean(legacyPageSize)
       || Boolean(currentFromDate && normalizedFromDate && currentFromDate !== normalizedFromDate)
       || Boolean(currentToDate && normalizedToDate && currentToDate !== normalizedToDate)
       || Boolean(currentDue && currentDue !== normalizedDue)
@@ -1005,8 +993,7 @@ export default function Reservations() {
         || !isDelinquentPaymentScopeActive(normalizedStatus, normalizedPaymentScope)
       ))
       || Boolean(canonicalStatus && normalizeViewFilter(canonicalStatus) !== canonicalStatus)
-      || Boolean(!searchParams.get('page'))
-      || Boolean(!canonicalSize)
+      || Boolean(searchParams.get('page'))
     );
 
     if (!needsNormalization) {
@@ -1064,17 +1051,45 @@ export default function Reservations() {
     }
 
     try {
-      const reservationsRequest = getReservationsList({
-        page,
-        size: pageSize,
-        status: toStatusQueryValue(viewFilter),
-        contractStatus: toApiContractStatus(viewFilter),
-        paymentScope: isDelinquentPaymentScopeActive(viewFilter, paymentScope) ? 'delinquent' : undefined,
-        from: fromDate ?? undefined,
-        to: toDate ?? undefined,
-        due: viewFilter === 'overdue' ? 'overdue' : (dueFilter ?? undefined),
-        signal,
-      });
+      const reservationsRequest = (async () => {
+        const mergedReservationRows: unknown[] = [];
+        let nextPage = DEFAULT_PAGE;
+        let totalCount = 0;
+
+        while (true) {
+          if (signal.aborted) {
+            throw new DOMException('Aborted', 'AbortError');
+          }
+
+          const payload = await getReservationsList({
+            page: nextPage,
+            size: pageSize,
+            status: toStatusQueryValue(viewFilter),
+            contractStatus: toApiContractStatus(viewFilter),
+            paymentScope: isDelinquentPaymentScopeActive(viewFilter, paymentScope) ? 'delinquent' : undefined,
+            from: fromDate ?? undefined,
+            to: toDate ?? undefined,
+            due: viewFilter === 'overdue' ? 'overdue' : (dueFilter ?? undefined),
+            signal,
+          });
+
+          const pageRows = getCollectionFromPayload(payload, ['reservations', 'items', 'rows', 'list']) ?? [];
+          mergedReservationRows.push(...pageRows);
+          totalCount = Math.max(totalCount, toTotalCount(payload, mergedReservationRows.length));
+
+          if (pageRows.length === 0 || mergedReservationRows.length >= totalCount || pageRows.length < pageSize) {
+            return {
+              ...(isRecord(payload) ? payload : {}),
+              items: mergedReservationRows,
+              total: totalCount || mergedReservationRows.length,
+              page: DEFAULT_PAGE,
+              size: pageSize,
+            };
+          }
+
+          nextPage += 1;
+        }
+      })();
       const assetRequest = canViewAssets
         ? getAssetsList({
           page: 1,
@@ -1512,7 +1527,6 @@ export default function Reservations() {
       customer: formValues.customerName.trim(),
       startDate: Math.min(startDateOffset, endDateOffset),
       endDate: Math.max(startDateOffset, endDateOffset),
-      contractStatus: '예약중',
       scheduledStartAt: startAt,
       contractStatus: '예약중',
       type: 'reservation',
@@ -2104,33 +2118,6 @@ export default function Reservations() {
                 >
                   미납
                 </button>
-                <button
-                  onClick={() => handleViewFilterChange('overdue')}
-                  className={`px-3 py-1.5 rounded-lg text-sm font-medium ${
-                    viewFilter === 'overdue'
-                      ? 'bg-blue-600 text-white'
-                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                  }`}
-                >
-                  연체
-                </button>
-              </div>
-
-              <div className="ml-2 flex items-center gap-1">
-                <label className="text-xs text-gray-600">기간:</label>
-                <input
-                  type="date"
-                  value={fromDate ?? ''}
-                  onChange={(event) => handleFromDateChange(event.target.value)}
-                  className="px-2 py-1 text-xs border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-                <span className="text-xs text-gray-500">~</span>
-                <input
-                  type="date"
-                  value={toDate ?? ''}
-                  onChange={(event) => handleToDateChange(event.target.value)}
-                  className="px-2 py-1 text-xs border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
               </div>
             </div>
 
@@ -2149,49 +2136,6 @@ export default function Reservations() {
               <Plus className="w-4 h-4" />
               새 계약 등록
             </button>
-          </div>
-
-          <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
-            <span className="text-xs text-gray-600">
-              현재 페이지 <span className="font-semibold text-blue-700">{reservationsData.length}</span>건 ·
-              {' '}
-              서버 집계 <span className="font-semibold text-blue-700">{totalReservationCount}</span>건
-            </span>
-            <div className="flex items-center gap-2">
-              <select
-                value={String(pageSize)}
-                onChange={(event) => {
-                  const nextSize = Number(event.target.value);
-                  handlePageSizeChange(Number.isFinite(nextSize) && nextSize > 0 ? nextSize : DEFAULT_PAGE_SIZE);
-                }}
-                className="px-2 py-1 text-xs border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
-              >
-                {PAGE_SIZE_OPTIONS.map((option) => (
-                  <option key={option} value={option}>
-                    {option}개
-                  </option>
-                ))}
-              </select>
-              <button
-                type="button"
-                onClick={() => handlePageChange(page - 1)}
-                disabled={!hasPrevPage || isPageLoading}
-                className="px-2 py-1 text-xs rounded-md border border-gray-300 bg-white disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                이전
-              </button>
-              <span className="text-xs text-gray-600">
-                {page} / {totalPages}
-              </span>
-              <button
-                type="button"
-                onClick={() => handlePageChange(page + 1)}
-                disabled={!hasNextPage || isPageLoading}
-                className="px-2 py-1 text-xs rounded-md border border-gray-300 bg-white disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                다음
-              </button>
-            </div>
           </div>
 
           {(paymentSyncError || isPaymentSyncing) && (
@@ -2303,6 +2247,7 @@ export default function Reservations() {
                 name="vehicleSearchQuery"
                 type="text"
                 placeholder="차량번호 검색"
+                aria-label="차량번호 검색"
                 value={vehicleSearchQuery}
                 onChange={(e) => setVehicleSearchQuery(e.target.value)}
                 className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 w-32"
