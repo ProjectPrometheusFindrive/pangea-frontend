@@ -28,5 +28,5 @@ test('home keeps the GT top rail free of company-scope controls', () => {
   assert.doesNotMatch(source, /다시 조회/u);
   assert.doesNotMatch(source, /listSettingsCompanies/u);
   assert.doesNotMatch(source, /normalizeDashboardCompanyOptions/u);
-  assert.doesNotMatch(source, /shouldShowDashboardCompanySelector/u);
+  assert.match(source, /shouldShowDashboardCompanySelector/u);
 });

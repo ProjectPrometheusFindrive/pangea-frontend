@@ -35,6 +35,7 @@ import {
   handlePageErrorAction,
   type PageErrorKind,
 } from '../hooks/usePageEndpointState';
+import { shouldShowDashboardCompanySelector } from './dashboardCompanyScope';
 
 interface HomeFilters {
   companyId: string | null;
@@ -63,7 +64,7 @@ interface HomeTodayTaskCard {
   label: string;
   count: number | string;
   icon: string;
-  filter: 'reservation' | 'rental' | 'return';
+  filter: 'pickup' | 'rental' | 'return';
   testId: string;
   unit?: string;
 }
@@ -349,7 +350,7 @@ export default function Home() {
   const requestSequenceRef = useRef(0);
   const controllerRef = useRef<AbortController | null>(null);
   const snapshotRef = useRef<HomeSnapshot | null>(null);
-  const isSuperAdmin = user?.role === 'super_admin';
+  const isSuperAdmin = shouldShowDashboardCompanySelector(user?.role);
   const filters = useMemo<HomeFilters>(() => ({
     companyId: isSuperAdmin ? null : (user?.companyId ?? null),
   }), [isSuperAdmin, user?.companyId]);
@@ -538,9 +539,23 @@ export default function Home() {
     TrendingUp,
   };
 
-  const handleTaskClick = useCallback((target: 'reservation' | 'rental' | 'return') => {
+  const handleTaskClick = useCallback((target: 'pickup' | 'rental' | 'return') => {
     const params = new URLSearchParams();
-    params.set('filter', target);
+    if (target === 'pickup') {
+      const todayDate = toIsoDate(new Date());
+      params.set('status', 'reservation');
+      params.set('from', todayDate);
+      params.set('to', todayDate);
+      params.set('due', 'pickup');
+    } else if (target === 'return') {
+      const todayDate = toIsoDate(new Date());
+      params.set('status', 'rental');
+      params.set('from', todayDate);
+      params.set('to', todayDate);
+      params.set('due', 'return');
+    } else {
+      params.set('filter', 'rental');
+    }
 
     navigateWithRoutePermission(
       `/reservations?${params.toString()}`,
@@ -579,7 +594,7 @@ export default function Home() {
         label: '오늘 예약',
         count: today.pickupDueCount,
         icon: 'Calendar',
-        filter: 'reservation' as const,
+        filter: 'pickup' as const,
         testId: 'home-today-card-pickup',
       },
       {
