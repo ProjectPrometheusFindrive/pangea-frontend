@@ -332,7 +332,7 @@ export function VehicleDetailModal({
                         <tr>
                           <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">{'시각'}</th>
                           <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">{'이벤트'}</th>
-                          <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">{'버전'}</th>
+
                           <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">{'변경 내용'}</th>
                           <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">{'작업자'}</th>
                         </tr>
@@ -348,9 +348,7 @@ export function VehicleDetailModal({
                                 {entry.event}
                               </span>
                             </td>
-                            <td className="whitespace-nowrap px-4 py-3 text-xs text-gray-700">
-                              {`v${entry.versionFrom} -> v${entry.versionTo}`}
-                            </td>
+
                             <td className="px-4 py-3 text-xs text-gray-700">
                               {entry.changes.length > 0 ? (
                                 <div className="space-y-1">
