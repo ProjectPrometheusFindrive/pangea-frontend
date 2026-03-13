@@ -788,8 +788,6 @@ export default function ActionRequired() {
       }
 
       if (error instanceof ApiError && error.status === 404) {
-        setIsDetailNotFound(true);
-        setDetailError(null);
         setSelectedItem(fallbackItem);
         return;
       }
