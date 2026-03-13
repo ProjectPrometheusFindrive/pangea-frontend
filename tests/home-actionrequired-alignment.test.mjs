@@ -24,8 +24,9 @@ test('SCRUM-267 keeps the maintenance issue label aligned between Home and Actio
   const actionRequiredSource = readProjectFile('src/app/pages/ActionRequired.tsx');
 
   assert.match(homeSource, /handleIssueClick\('정기점검 만료 임박'\)/u);
-  assert.match(actionRequiredSource, /'정기점검 만료 임박'/u);
-  assert.match(actionRequiredSource, /return '정기점검 만료 임박';/u);
+  assert.match(actionRequiredSource, /'정기점검'/u);
+  assert.match(actionRequiredSource, /filterParam === '정기점검 만료 임박'/u);
+  assert.match(actionRequiredSource, /return '정기점검';/u);
 });
 
 test('SCRUM-267 binds reopened home issue counts to action-required counts instead of home summary fields', () => {
@@ -42,9 +43,7 @@ test('SCRUM-267 keeps action-required count sync non-blocking and no longer labe
   const homeSource = readProjectFile('src/app/pages/Home.tsx');
 
   assert.match(homeSource, /Promise\.allSettled\(/u);
-  assert.match(homeSource, /조치 필요 항목 카운트를 갱신하지 못해 이전 집계값을 유지합니다/u);
-  assert.match(homeSource, /현재 조치 필요 항목과 동일한 기준입니다\./u);
-  assert.doesNotMatch(homeSource, /periodLabel \? `\$\{periodLabel\} 기준 조치 필요 항목과 동일한 기준입니다\.`/u);
+  assert.doesNotMatch(homeSource, /periodLabel \? `\$\{periodLabel\}/u);
 });
 
 test('SCRUM-268 keeps the premium CTA vehicle count bound to the tenant asset total', () => {

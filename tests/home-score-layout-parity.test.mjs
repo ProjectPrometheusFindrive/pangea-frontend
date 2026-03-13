@@ -15,7 +15,6 @@ test('SCRUM-290 keeps the approved operation-score labels without inventing unsu
   assert.match(source, /label:\s*'안전운전'/u);
   assert.match(source, /label:\s*'차량관리'/u);
   assert.match(source, /label:\s*'사업운영'/u);
-  assert.match(source, /data-testid="home-operation-score-contract-gap"/u);
   assert.doesNotMatch(source, /const completionRateScore =/u);
   assert.doesNotMatch(source, /const safetyDrivingScore =/u);
   assert.doesNotMatch(source, /const vehicleManagementScore =/u);
@@ -26,11 +25,12 @@ test('SCRUM-290 keeps the approved operation-score labels without inventing unsu
   assert.doesNotMatch(source, /label:\s*'연체 안전도'/u);
 });
 
-test('SCRUM-290 keeps recent changes in a separate card instead of nesting it inside operation scores', () => {
+test('SCRUM-290 keeps only the GT-visible operation score card on home', () => {
   const source = readProjectFile('src/app/pages/Home.tsx');
 
   assert.match(source, /data-testid="home-operation-score-card"/u);
-  assert.match(source, /data-testid="home-recent-changes-card"/u);
   assert.match(source, /data-testid="home-operation-score-card"[\s\S]*?운영 점수/u);
-  assert.match(source, /data-testid="home-recent-changes-card"[\s\S]*?최근 변경/u);
+  assert.doesNotMatch(source, /data-testid="home-recent-changes-card"/u);
+  assert.doesNotMatch(source, /최근 변경/u);
+  assert.doesNotMatch(source, /home-operation-score-contract-gap/u);
 });

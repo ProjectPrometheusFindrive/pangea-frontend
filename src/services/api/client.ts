@@ -95,6 +95,12 @@ function isBodyInit(body: unknown): body is BodyInit {
   return false;
 }
 
+async function readResponseTextAsUtf8(response: Response): Promise<string> {
+  const buffer = await response.arrayBuffer();
+  const decoder = new TextDecoder('utf-8');
+  return decoder.decode(new Uint8Array(buffer));
+}
+
 function buildUrl(
   baseUrl: string,
   path: string,
@@ -159,7 +165,7 @@ async function parseResponseBody(
   }
 
   if (responseType === 'text') {
-    return response.text();
+    return readResponseTextAsUtf8(response);
   }
 
   if (response.status === 204) {
@@ -167,7 +173,7 @@ async function parseResponseBody(
   }
 
   const contentType = response.headers.get('content-type')?.toLowerCase() ?? '';
-  const rawText = await response.text();
+  const rawText = await readResponseTextAsUtf8(response);
 
   if (!rawText) {
     return null;

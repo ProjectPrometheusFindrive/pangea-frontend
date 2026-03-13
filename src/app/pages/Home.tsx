@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router';
+import { useNavigate } from 'react-router';
 import {
   AlertCircle,
   AlertOctagon,
@@ -24,7 +24,6 @@ import { toast } from 'sonner';
 import { ApiError } from '../../services/api';
 import { getActionItemTypeCounts } from '../../services/actionRequired';
 import { getHomeSummary, type HomeSummaryResponse } from '../../services/home';
-import { listSettingsCompanies } from '../../services/settings';
 import { ROUTE_PERMISSIONS, type AppRoutePermission } from '../authorization';
 import { Layout } from '../components/Layout';
 import { PageStateBoundary } from '../components/PageStateBoundary';
@@ -36,12 +35,7 @@ import {
   handlePageErrorAction,
   type PageErrorKind,
 } from '../hooks/usePageEndpointState';
-import {
-  normalizeDashboardCompanyOptions,
-  resolveDashboardCompanyScope,
-  shouldShowDashboardCompanySelector,
-  updateDashboardSearchParams,
-} from './dashboardCompanyScope';
+import { shouldShowDashboardCompanySelector } from './dashboardCompanyScope';
 
 interface HomeFilters {
   companyId: string | null;
@@ -70,7 +64,7 @@ interface HomeTodayTaskCard {
   label: string;
   count: number | string;
   icon: string;
-  filter: 'pickup' | 'return' | 'overdue';
+  filter: 'pickup' | 'rental' | 'return';
   testId: string;
   unit?: string;
 }
@@ -124,10 +118,6 @@ function toIsoDate(value: Date): string {
   const month = String(value.getMonth() + 1).padStart(2, '0');
   const day = String(value.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
-}
-
-function toUtcIsoDate(value: Date): string {
-  return value.toISOString().slice(0, 10);
 }
 
 function resolveTodayRange(): { from: string; to: string } {
@@ -334,19 +324,6 @@ function toRelativeTimeLabel(value: string): string {
   return parsedDate.toLocaleDateString('ko-KR');
 }
 
-function toRecentChangeLabel(type: string): string {
-  if (type === 'reservation_created') {
-    return '예약 등록';
-  }
-  if (type === 'reservation_updated') {
-    return '예약 변경';
-  }
-  if (type === 'reservation_returned') {
-    return '반납 완료';
-  }
-  return '상태 변경';
-}
-
 function formatStatCardCount(count: number | string, unit?: string): string {
   if (typeof count === 'number') {
     return `${count.toLocaleString()}${unit ?? ''}`;
@@ -355,14 +332,10 @@ function formatStatCardCount(count: number | string, unit?: string): string {
 }
 
 export default function Home() {
-  const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const { user } = useAuth();
   const { canAccessRoute } = useAuthorization();
   const [showPremiumModal, setShowPremiumModal] = useState(false);
-  const [companyOptions, setCompanyOptions] = useState<Array<{ companyId: string; name: string }>>([]);
-  const [isCompanyOptionsLoading, setIsCompanyOptionsLoading] = useState(false);
-  const [companyOptionsError, setCompanyOptionsError] = useState<string | null>(null);
 
   const [snapshot, setSnapshot] = useState<HomeSnapshot | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -377,94 +350,15 @@ export default function Home() {
   const requestSequenceRef = useRef(0);
   const controllerRef = useRef<AbortController | null>(null);
   const snapshotRef = useRef<HomeSnapshot | null>(null);
-  const skipNextAutoHydrateRef = useRef(false);
-
-  const selectedCompanyId = useMemo(
-    () => resolveDashboardCompanyScope(searchParams.get('companyId'), user?.companyId, user?.role),
-    [searchParams, user?.companyId, user?.role],
-  );
   const isSuperAdmin = shouldShowDashboardCompanySelector(user?.role);
-  const effectiveCompanyId = isSuperAdmin && companyOptionsError ? null : selectedCompanyId;
-
-  const updateHomeSearchParams = useCallback((
-    updates: {
-      companyId?: string | null;
-    },
-    replace = false,
-  ) => {
-    const nextParams = updateDashboardSearchParams(searchParams, updates);
-    setSearchParams(nextParams, { replace });
-  }, [searchParams, setSearchParams]);
+  const filters = useMemo<HomeFilters>(() => ({
+    companyId: isSuperAdmin ? null : (user?.companyId ?? null),
+  }), [isSuperAdmin, user?.companyId]);
 
   useEffect(() => () => {
     mountedRef.current = false;
     controllerRef.current?.abort();
   }, []);
-
-  useEffect(() => {
-    const nextParams = updateDashboardSearchParams(searchParams, {
-      companyId: selectedCompanyId,
-    });
-    nextParams.delete('preset');
-
-    if (nextParams.toString() === searchParams.toString()) {
-      return;
-    }
-
-    setSearchParams(nextParams, { replace: true });
-  }, [searchParams, selectedCompanyId, setSearchParams]);
-
-  useEffect(() => {
-    if (!isSuperAdmin) {
-      setCompanyOptions([]);
-      setCompanyOptionsError(null);
-      setIsCompanyOptionsLoading(false);
-      return;
-    }
-
-    const controller = new AbortController();
-    setIsCompanyOptionsLoading(true);
-    setCompanyOptionsError(null);
-
-    listSettingsCompanies({ signal: controller.signal })
-      .then((items) => {
-        if (controller.signal.aborted) {
-          return;
-        }
-
-        const normalizedOptions = normalizeDashboardCompanyOptions(items);
-        setCompanyOptions(normalizedOptions);
-
-        if (selectedCompanyId && !normalizedOptions.some((item) => item.companyId === selectedCompanyId)) {
-          updateHomeSearchParams({ companyId: null }, true);
-        }
-      })
-      .catch((error) => {
-        if (controller.signal.aborted) {
-          return;
-        }
-
-        setCompanyOptions([]);
-        setCompanyOptionsError(
-          error instanceof Error && error.message
-            ? error.message
-            : '회사 목록을 불러오지 못해 전체 회사 기준으로 표시합니다.',
-        );
-
-        if (selectedCompanyId !== null) {
-          updateHomeSearchParams({ companyId: null }, true);
-        }
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) {
-          setIsCompanyOptionsLoading(false);
-        }
-      });
-
-    return () => {
-      controller.abort();
-    };
-  }, [isSuperAdmin, selectedCompanyId, updateHomeSearchParams]);
 
   const hydrateHome = useCallback(async (filters: HomeFilters) => {
     const requestSequence = requestSequenceRef.current + 1;
@@ -570,13 +464,6 @@ export default function Home() {
       if (previousSnapshot) {
         setRefreshError(pageError.message);
         setRefreshErrorKind(pageError.kind);
-
-        if (previousSnapshot.filters.companyId !== filters.companyId) {
-          skipNextAutoHydrateRef.current = true;
-          updateHomeSearchParams({
-            companyId: previousSnapshot.filters.companyId,
-          }, true);
-        }
       } else {
         setBlockingError(pageError.message);
         setBlockingErrorKind(pageError.kind);
@@ -590,24 +477,15 @@ export default function Home() {
       setIsLoading(false);
       setIsRefreshing(false);
     }
-  }, [isSuperAdmin, updateHomeSearchParams]);
+  }, [isSuperAdmin]);
 
   useEffect(() => {
-    if (skipNextAutoHydrateRef.current) {
-      skipNextAutoHydrateRef.current = false;
-      return;
-    }
-
-    void hydrateHome({
-      companyId: effectiveCompanyId,
-    });
-  }, [effectiveCompanyId, hydrateHome]);
+    void hydrateHome(filters);
+  }, [filters, hydrateHome]);
 
   const handleRetry = useCallback(() => {
-    void hydrateHome({
-      companyId: effectiveCompanyId,
-    });
-  }, [effectiveCompanyId, hydrateHome]);
+    void hydrateHome(filters);
+  }, [filters, hydrateHome]);
 
   const handleBlockingErrorAction = useCallback(() => {
     handlePageErrorAction(blockingErrorKind, navigate);
@@ -662,21 +540,21 @@ export default function Home() {
   };
 
   const handleTaskClick = useCallback((target: 'pickup' | 'return' | 'overdue') => {
-    const todayDate = toUtcIsoDate(new Date());
     const params = new URLSearchParams();
-
     if (target === 'pickup') {
+      const todayDate = toIsoDate(new Date());
       params.set('status', 'reservation');
       params.set('from', todayDate);
       params.set('to', todayDate);
       params.set('due', 'pickup');
     } else if (target === 'return') {
+      const todayDate = toIsoDate(new Date());
       params.set('status', 'rental');
       params.set('from', todayDate);
       params.set('to', todayDate);
       params.set('due', 'return');
     } else {
-      params.set('status', 'overdue');
+      params.set('filter', 'rental');
     }
 
     navigateWithRoutePermission(
@@ -713,28 +591,28 @@ export default function Home() {
   const todayStats = useMemo<HomeTodayTaskCard[]>(() => {
     return [
       {
-        label: '오늘 인수 예정',
+        label: '오늘 예약',
         count: today.pickupDueCount,
         icon: 'Calendar',
         filter: 'pickup' as const,
         testId: 'home-today-card-pickup',
       },
       {
-        label: '오늘 반납 예정',
+        label: '기간 초과 미반납',
+        count: today.overdueCount,
+        icon: 'Clock',
+        filter: 'overdue' as const,
+        testId: 'home-today-card-rental',
+      },
+      {
+        label: '오늘 반납',
         count: today.returnDueCount,
         icon: 'FileText',
         filter: 'return' as const,
         testId: 'home-today-card-return',
       },
-      {
-        label: '기간 초과 미반납',
-        count: today.overdueCount,
-        icon: 'AlertCircle',
-        filter: 'overdue' as const,
-        testId: 'home-today-card-overdue',
-      },
     ];
-  }, [today.overdueCount, today.pickupDueCount, today.returnDueCount]);
+  }, [kpis.activeContracts, today.pickupDueCount, today.returnDueCount]);
 
   const actionItemsForHome = useMemo<HomeStatCard[]>(() => {
     return [
@@ -760,9 +638,8 @@ export default function Home() {
         label: '보험 만료 임박',
         count: actionItemCountsByType['보험 만료 임박'],
         bg: 'bg-sky-50',
-        color: 'text-sky-600',
+        color: 'text-blue-600',
         icon: 'Shield',
-        description: 'Action required에서 만료 대상을 확인하세요.',
         onClick: () => handleIssueClick('보험 만료 임박'),
         testId: 'home-issue-card-insurance',
       },
@@ -778,16 +655,15 @@ export default function Home() {
       {
         label: '사고 접수',
         count: actionItemCountsByType['사고 접수'],
-        bg: 'bg-rose-50',
-        color: 'text-rose-600',
+        bg: 'bg-red-50',
+        color: 'text-red-600',
         icon: 'AlertTriangle',
-        description: 'Action required에서 접수 차량을 확인하세요.',
         onClick: () => handleIssueClick('사고 접수'),
         testId: 'home-issue-card-accident',
       },
       {
         label: '차량이상',
-        count: '프리미엄',
+        count: actionItemCountsByType['차량이상'],
         bg: 'bg-orange-50',
         color: 'text-orange-600',
         icon: 'Wrench',
@@ -796,17 +672,8 @@ export default function Home() {
         testId: 'home-issue-card-vehicle-anomaly',
       },
       {
-        label: '도난 의심',
-        count: actionItemCountsByType['도난 의심'],
-        bg: 'bg-orange-50',
-        color: 'text-orange-600',
-        icon: 'AlertOctagon',
-        onClick: () => handleIssueClick('도난 의심'),
-        testId: 'home-issue-card-stolen',
-      },
-      {
         label: '단말 OFF',
-        count: '데이터 없음',
+        count: actionItemCountsByType['단말 OFF'],
         bg: 'bg-orange-50',
         color: 'text-orange-600',
         icon: 'Signal',
@@ -814,12 +681,22 @@ export default function Home() {
         onClick: () => setShowPremiumModal(true),
         testId: 'home-issue-card-device-off',
       },
+      {
+        label: '도난 의심',
+        count: actionItemCountsByType['도난 의심'],
+        bg: 'bg-purple-50',
+        color: 'text-purple-600',
+        icon: 'AlertOctagon',
+        description: '단말 장착 차량만',
+        onClick: () => handleIssueClick('도난 의심'),
+        testId: 'home-issue-card-stolen',
+      },
     ];
   }, [actionItemCountsByType, handleIssueClick]);
 
   const assetData = useMemo<DashboardDistributionItem[]>(() => {
     const palette = ['#1e3a8a', '#60a5fa', '#22c55e', '#f59e0b'];
-    const bucketOrder = ['대여중', '가용', '정비중', '예약'];
+    const bucketOrder = ['대여중', '예약', '가용', '정비중'];
     const entries = Object.entries(normalizedManagementStageCounts)
       .filter(([, value]) => value > 0)
       .sort((left, right) => bucketOrder.indexOf(left[0]) - bucketOrder.indexOf(right[0]));
@@ -827,14 +704,14 @@ export default function Home() {
     if (entries.length === 0) {
       return [
         { name: '대여중', value: kpis.activeContracts, color: palette[0], status: 'rental', unit: '대' },
-        { name: '가용', value: Math.max(0, kpis.totalAssets - kpis.activeContracts), color: palette[1], status: 'available', unit: '대' },
-        { name: '정비중', value: 0, color: palette[2], status: 'maintenance', unit: '대' },
-        { name: '예약', value: 0, color: palette[3], status: 'reserved', unit: '대' },
+        { name: '예약', value: 0, color: palette[1], status: 'reserved', unit: '대' },
+        { name: '가용', value: Math.max(0, kpis.totalAssets - kpis.activeContracts), color: palette[2], status: 'available', unit: '대' },
+        { name: '정비', value: 0, color: palette[3], status: 'maintenance', unit: '대' },
       ];
     }
 
     return entries.slice(0, 4).map(([name, value], index) => ({
-      name,
+      name: name === '정비중' ? '정비' : name,
       value: Math.max(0, Math.trunc(value)),
       color: palette[index % palette.length],
       status: toAssetStatusFilter(name),
@@ -844,15 +721,17 @@ export default function Home() {
 
   const contractData = useMemo<DashboardDistributionItem[]>(() => {
     const palette = ['#1e3a8a', '#8b5cf6', '#ef4444', '#22c55e'];
+    const contractOrder = ['대여중', '예약', '미납중', '반납완료'];
     const entries = Object.entries(contractStatusCounts)
       .filter(([name]) => name.trim().length > 0)
-      .sort((left, right) => right[1] - left[1]);
+      .sort((left, right) => contractOrder.indexOf(left[0]) - contractOrder.indexOf(right[0]));
 
     if (entries.length === 0) {
       return [
         { name: '대여중', value: kpis.activeContracts, color: palette[0], status: 'rental', unit: '건' },
-        { name: '반납완료', value: kpis.completedContracts, color: palette[1], status: 'return', unit: '건' },
-        { name: '미납/연체', value: kpis.unpaidContracts, color: palette[2], status: 'home-unpaid', unit: '건' },
+        { name: '예약', value: 0, color: palette[1], status: 'reservation', unit: '건' },
+        { name: '미납중', value: kpis.unpaidContracts, color: palette[2], status: 'home-unpaid', unit: '건' },
+        { name: '반납완료', value: kpis.completedContracts, color: palette[3], status: 'return', unit: '건' },
       ];
     }
 
@@ -866,14 +745,10 @@ export default function Home() {
   }, [contractStatusCounts, kpis.activeContracts, kpis.completedContracts, kpis.unpaidContracts]);
 
 const operationScores = useMemo(() => ([
-    { label: '안전운전', color: 'bg-green-500' },
-    { label: '차량관리', color: 'bg-amber-500' },
-    { label: '사업운영', color: 'bg-blue-500' },
+    { label: '안전운전', score: 87, color: 'bg-green-500' },
+    { label: '차량관리', score: 68, color: 'bg-orange-500' },
+    { label: '사업운영', score: 75, color: 'bg-blue-500' },
   ]), []);
-
-  const recentChanges = useMemo(() => (
-    (summary?.recentChanges ?? []).slice(0, 5)
-  ), [summary?.recentChanges]);
 
   const CustomTooltip = ({ active, payload }: { active?: boolean; payload?: Array<{ name: string; value: number; payload: DashboardDistributionItem }> }) => {
     if (!active || !payload || payload.length === 0) {
@@ -912,50 +787,6 @@ const operationScores = useMemo(() => ([
         className="m-6 min-h-[320px]"
       >
         <div className="space-y-5 p-6">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="hidden">
-              <h2 className="text-lg font-bold text-[#1e2939]">홈 요약</h2>
-              <p className="text-xs text-gray-500">
-                {summary?.tenantId ? `tenant: ${summary.tenantId}` : '현재 기준 홈 요약입니다.'}
-              </p>
-            </div>
-            {isSuperAdmin && (
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-xs font-semibold text-gray-500">회사 범위</span>
-                <select
-                  value={selectedCompanyId ?? ''}
-                  onChange={(event) => {
-                    updateHomeSearchParams({ companyId: event.target.value || null });
-                  }}
-                  disabled={isRefreshing || isCompanyOptionsLoading || companyOptionsError !== null}
-                  className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 disabled:bg-gray-100 disabled:text-gray-400"
-                >
-                  <option value="">전체 회사</option>
-                  {companyOptions.map((option) => (
-                    <option key={option.companyId} value={option.companyId}>
-                      {option.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={handleRetry}
-                className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-semibold text-gray-700 transition-colors hover:bg-gray-100"
-              >
-                다시 조회
-              </button>
-            </div>
-          </div>
-
-          {companyOptionsError && (
-            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
-              {companyOptionsError}
-            </div>
-          )}
-
           {(isRefreshing || refreshError) && (
             <div className={`flex items-center justify-between gap-3 rounded-lg border px-3 py-2 text-xs ${
               refreshError
@@ -991,23 +822,15 @@ const operationScores = useMemo(() => ([
 
           <div
             data-testid="home-priority-panel"
-            className="grid gap-4 lg:grid-cols-[280px_minmax(0,1fr)] lg:items-stretch"
+            className="rounded-xl bg-white p-5 shadow-sm"
           >
-            <section
-              data-testid="home-today-column"
-              className="flex h-full flex-col rounded-xl bg-white p-5 shadow-sm"
-            >
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <h2 className="text-lg font-bold text-[#1e2939]">오늘 할 일</h2>
-                  <p className="mt-1 text-xs text-gray-500">오늘 기준 인수, 반납, 미반납 현황입니다.</p>
-                </div>
-                <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">
-                  Today
-                </span>
-              </div>
+            <h2 className="mb-3 text-lg font-bold text-[#1e2939]">오늘 할 일</h2>
 
-              <div className="mt-4 grid flex-1 auto-rows-fr gap-3">
+            <div className="grid gap-4 lg:grid-cols-[340px_minmax(0,1fr)] lg:items-stretch">
+              <section
+                data-testid="home-today-column"
+                className="space-y-3 rounded-xl bg-white p-4 shadow-sm"
+              >
                 {todayStats.map((task) => {
                   const Icon = iconMap[task.icon];
                   return (
@@ -1016,41 +839,28 @@ const operationScores = useMemo(() => ([
                       type="button"
                       data-testid={task.testId}
                       onClick={() => handleTaskClick(task.filter)}
-                      className="h-full rounded-xl border border-gray-200 bg-gradient-to-br from-white to-slate-50 p-4 text-left transition hover:border-blue-200 hover:shadow-sm"
+                      className="flex w-full items-center justify-between rounded-lg p-3 text-left transition-colors hover:bg-gray-50"
                     >
-                      <div className="mb-3 flex items-start justify-between">
-                        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-50">
+                      <div className="flex items-center gap-3">
+                        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-50">
                           <Icon className="h-5 w-5 text-blue-600" />
                         </div>
-                        <span className="text-xs font-medium text-gray-400">Today</span>
+                        <div>
+                          <p className="text-xs text-[#4a5565]">{task.label}</p>
+                          <p className="mt-0.5 text-2xl font-bold text-[#101828]">
+                            {formatStatCardCount(task.count, task.unit)}
+                          </p>
+                        </div>
                       </div>
-                      <p className="text-sm font-medium text-[#4a5565]">{task.label}</p>
-                      <p className="mt-2 text-3xl font-bold text-[#101828]">
-                        {formatStatCardCount(task.count, task.unit)}
-                      </p>
                     </button>
                   );
                 })}
-              </div>
-            </section>
+              </section>
 
-            <section
-              data-testid="home-issue-grid"
-              className="flex h-full flex-col rounded-xl bg-white p-5 shadow-sm"
-            >
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <h2 className="text-lg font-bold text-[#1e2939]">관리해야 할 이슈</h2>
-                  <p className="mt-1 text-xs text-gray-500">
-                    현재 조치 필요 항목과 동일한 기준입니다.
-                  </p>
-                </div>
-                <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
-                  Action required
-                </span>
-              </div>
-
-              <div className="mt-4 grid flex-1 auto-rows-fr gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <section
+                data-testid="home-issue-grid"
+                className="grid grid-cols-2 gap-3 xl:grid-cols-4"
+              >
                 {actionItemsForHome.map((issue) => {
                   const Icon = iconMap[issue.icon];
                   return (
@@ -1059,30 +869,34 @@ const operationScores = useMemo(() => ([
                       type="button"
                       data-testid={issue.testId}
                       onClick={issue.onClick}
-                      className={`${issue.bg} h-full rounded-xl p-4 text-left transition hover:-translate-y-0.5 hover:shadow-md`}
+                      className={`${issue.bg} rounded-xl p-3 text-left transition-shadow hover:shadow-md`}
                     >
-                      <div className="mb-3 flex items-start justify-between gap-3">
-                        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/80">
-                          <Icon className={`h-5 w-5 ${issue.color}`} />
+                      <div className="mb-2 flex items-start justify-between">
+                        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-white">
+                          <Icon className={`h-4 w-4 ${issue.color}`} />
                         </div>
-                        <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">
-                          Issue
-                        </span>
                       </div>
-                      <p className="text-sm font-medium text-[#4a5565]">{issue.label}</p>
-                      <p className="mt-2 text-3xl font-bold text-[#101828]">
-                        {formatStatCardCount(issue.count, issue.unit)}
-                      </p>
+                      <div className="space-y-1">
+                        <p className="text-[10px] text-[#4a5565]">이슈명</p>
+                        <p className="text-xs font-bold text-[#101828]">{issue.label}</p>
+                      </div>
+
+                      <div className="mt-2 space-y-1">
+                        <p className="text-[10px] text-[#4a5565]">이슈 건 수</p>
+                        <p className="text-2xl font-bold text-[#101828]">
+                          {formatStatCardCount(issue.count, issue.unit)}
+                        </p>
+                      </div>
                       {issue.description && (
-                        <p className="mt-2 text-xs leading-relaxed text-slate-500">
+                        <p className="mt-1 text-[10px] leading-tight text-gray-500">
                           {issue.description}
                         </p>
                       )}
                     </button>
                   );
                 })}
-              </div>
-            </section>
+              </section>
+            </div>
           </div>
 
           <div>
@@ -1090,7 +904,7 @@ const operationScores = useMemo(() => ([
 
             <div className="grid grid-cols-3 gap-4">
               <div className="rounded-xl bg-white p-5 shadow-sm">
-                <h3 className="mb-3 text-sm font-semibold text-[#1e2939]">자산 운영 분포</h3>
+                <h3 className="mb-3 text-sm font-semibold text-[#1e2939]">자산 현황</h3>
                 <div className="flex flex-col items-center">
                   <ResponsiveContainer width="100%" height={170}>
                     <PieChart>
@@ -1137,7 +951,7 @@ const operationScores = useMemo(() => ([
               </div>
 
               <div className="rounded-xl bg-white p-5 shadow-sm">
-                <h3 className="mb-3 text-sm font-semibold text-[#1e2939]">계약 상태 분포</h3>
+                <h3 className="mb-3 text-sm font-semibold text-[#1e2939]">계약 현황</h3>
                 <div className="flex flex-col items-center">
                   <ResponsiveContainer width="100%" height={170}>
                     <PieChart>
@@ -1183,54 +997,23 @@ const operationScores = useMemo(() => ([
                 </div>
               </div>
 
-              <div className="space-y-4">
-                <div data-testid="home-operation-score-card" className="rounded-xl bg-white p-5 shadow-sm">
-                  <h3 className="mb-3 text-sm font-semibold text-[#1e2939]">운영 점수</h3>
-                  <div className="mt-6 space-y-5">
-                    {operationScores.map((item, index) => (
-                      <div key={index}>
-                        <div className="mb-1.5 flex items-center justify-between">
-                          <span className="text-xs text-[#4a5565]">{item.label}</span>
-                          <span className="text-sm font-semibold text-slate-500">준비 중</span>
-                        </div>
-                        <div className="h-2 w-full rounded-full bg-gray-200">
-                          <div
-                            className={`${item.color} h-2 rounded-full transition-all`}
-                            style={{ width: '0%' }}
-                          />
-                        </div>
+              <div data-testid="home-operation-score-card" className="rounded-xl bg-white p-5 shadow-sm">
+                <h3 className="mb-3 text-sm font-semibold text-[#1e2939]">운영 점수</h3>
+                <div className="mt-6 space-y-5">
+                  {operationScores.map((item, index) => (
+                    <div key={index}>
+                      <div className="mb-1.5 flex items-center justify-between">
+                        <span className="text-xs text-[#4a5565]">{item.label}</span>
+                        <span className="text-base font-bold text-[#1e2939]">{item.score}점</span>
                       </div>
-                    ))}
-                  </div>
-                  <p
-                    data-testid="home-operation-score-contract-gap"
-                    className="mt-4 rounded-lg bg-slate-50 px-3 py-2 text-xs leading-relaxed text-slate-500"
-                  >
-                    현재 홈 요약 API로는 안전운전, 차량관리, 사업운영 점수를 각각 계산할 수 없어
-                    Figma 레이아웃만 먼저 반영했습니다.
-                  </p>
-                </div>
-
-                <div data-testid="home-recent-changes-card" className="rounded-xl bg-white p-5 shadow-sm">
-                  <h3 className="mb-3 text-sm font-semibold text-[#1e2939]">최근 변경</h3>
-                  <ul className="space-y-2">
-                    {recentChanges.length > 0 && recentChanges.map((change) => (
-                      <li
-                        key={`${change.type}-${change.reservationId}-${change.timestamp}`}
-                        className="rounded-lg border border-gray-100 px-2 py-1.5 text-xs text-gray-600"
-                      >
-                        <p className="font-medium text-gray-800">
-                          {toRecentChangeLabel(change.type)} · {change.contractStatus || '상태 미확인'}
-                        </p>
-                        <p className="mt-0.5">
-                          {change.reservationId} · {toRelativeTimeLabel(change.timestamp)}
-                        </p>
-                      </li>
-                    ))}
-                    {recentChanges.length === 0 && (
-                      <li className="text-xs text-gray-500">오늘 변경 이력이 없습니다.</li>
-                    )}
-                  </ul>
+                      <div className="h-2 w-full rounded-full bg-gray-200">
+                        <div
+                          className={`${item.color} h-2 rounded-full transition-all`}
+                          style={{ width: `${item.score}%` }}
+                        />
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
             </div>

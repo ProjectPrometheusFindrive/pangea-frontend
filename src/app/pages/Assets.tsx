@@ -2209,14 +2209,11 @@ export default function Assets() {
         <div className="mb-6 mt-4 space-y-4">
           {/* 검색창 */}
           <div className="relative">
-            <label htmlFor="assets-search-query" className="sr-only">
-              자산 검색
-            </label>
             <input
               id="assets-search-query"
               name="queryKeyword"
               type="text"
-              aria-label="자산 검색"
+              aria-label="차량번호 또는 차종으로 검색..."
               placeholder="차량번호 또는 차종으로 검색..."
               value={queryKeyword}
               onChange={(e) => handleKeywordChange(e.target.value)}
@@ -2287,7 +2284,7 @@ export default function Assets() {
             </button>
           </div>
 
-          {/* 페이지 크기 & 등록 버튼 */}
+          {/* 차종 필터 & 등록 버튼 */}
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <label htmlFor="assets-model-filter" className="text-sm font-semibold text-gray-700">차종:</label>
@@ -2303,26 +2300,8 @@ export default function Assets() {
                   <option key={modelOption} value={modelOption}>{modelOption}</option>
                 ))}
               </select>
-              <span className="text-sm font-semibold text-gray-700">페이지 크기:</span>
-              <select
-                value={pageSize}
-                onChange={(e) => handlePageSizeChange(Number(e.target.value))}
-                className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm"
-              >
-                {!PAGE_SIZE_OPTIONS.includes(pageSize) && (
-                  <option value={pageSize}>{pageSize}개</option>
-                )}
-                {PAGE_SIZE_OPTIONS.map((sizeOption) => (
-                  <option key={sizeOption} value={sizeOption}>
-                    {sizeOption}개
-                  </option>
-                ))}
-              </select>
               <span className="text-xs text-gray-500">
-                {modelFilter ? `필터 결과 ${totalCount ?? assets.length}대 표시 중`
-                  : totalCount !== null
-                  ? `총 ${totalCount}대`
-                  : `${assets.length}대 표시 중`}
+                ({modelFilter ? totalCount ?? assets.length : totalCount ?? assets.length}대 표시 중)
               </span>
             </div>
             
@@ -2418,33 +2397,35 @@ export default function Assets() {
                 </tbody>
               </table>
             </div>
-            <div className="flex items-center justify-between border-t border-gray-200 px-6 py-4">
-              <p className="text-sm text-gray-600">
-                {totalCount !== null
-                  ? `총 ${totalCount}대 · ${page} / ${totalPages ?? page} 페이지`
-                  : `현재 페이지 ${page} · ${assets.length}대`}
-              </p>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => handlePageChange(page - 1)}
-                  disabled={!hasPrevPage || isAssetsLoading}
-                  className="inline-flex items-center gap-1 rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <ChevronLeft className="h-4 w-4" />
-                  이전
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handlePageChange(page + 1)}
-                  disabled={!hasNextPage || isAssetsLoading}
-                  className="inline-flex items-center gap-1 rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  다음
-                  <ChevronRight className="h-4 w-4" />
-                </button>
+            {(hasPrevPage || hasNextPage) && (
+              <div className="flex items-center justify-between border-t border-gray-200 px-6 py-4">
+                <p className="text-sm text-gray-600">
+                  {totalCount !== null
+                    ? `총 ${totalCount}대 · ${page} / ${totalPages ?? page} 페이지`
+                    : `현재 페이지 ${page} · ${assets.length}대`}
+                </p>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handlePageChange(page - 1)}
+                    disabled={!hasPrevPage || isAssetsLoading}
+                    className="inline-flex items-center gap-1 rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                    이전
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handlePageChange(page + 1)}
+                    disabled={!hasNextPage || isAssetsLoading}
+                    className="inline-flex items-center gap-1 rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    다음
+                    <ChevronRight className="h-4 w-4" />
+                  </button>
+                </div>
               </div>
-            </div>
+            )}
           </div>
         </PageStateBoundary>
 

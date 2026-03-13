@@ -16,11 +16,13 @@ export interface ActionRequiredDetailRequestOptions {
 export interface ActionRequiredStatusPatchOptions {
   status: string;
   memo?: string | null;
+  assignee?: string;
   signal?: AbortSignal;
 }
 
 export interface ActionRequiredMemoPatchOptions {
   memo: string;
+  assignee?: string;
   signal?: AbortSignal;
 }
 
@@ -256,11 +258,15 @@ function requestStatusPatch(
   path: string,
   status: string,
   memo: string | null | undefined,
+  assignee?: string,
   signal?: AbortSignal,
 ): Promise<unknown> {
   const body: Record<string, unknown> = { status };
   if (memo !== undefined) {
     body.memo = memo;
+  }
+  if (assignee) {
+    body.assignee = assignee;
   }
 
   return apiClient.requestData<unknown>({
@@ -271,11 +277,17 @@ function requestStatusPatch(
   });
 }
 
-function requestMemoPatch(path: string, method: 'PATCH' | 'POST', memo: string, signal?: AbortSignal): Promise<unknown> {
+function requestMemoPatch(
+  path: string,
+  method: 'PATCH' | 'POST',
+  memo: string,
+  assignee?: string,
+  signal?: AbortSignal,
+): Promise<unknown> {
   return apiClient.requestData<unknown>({
     path,
     method,
-    body: { memo },
+    body: { memo, ...(assignee ? { assignee } : {}) },
     signal,
   });
 }
@@ -285,7 +297,13 @@ export async function patchActionRequiredStatus(
   options: ActionRequiredStatusPatchOptions,
 ): Promise<unknown> {
   const encodedActionId = encodeURIComponent(actionId);
-  return requestStatusPatch(`/api/v2/action-items/${encodedActionId}/status`, options.status, options.memo, options.signal);
+  return requestStatusPatch(
+    `/api/v2/action-items/${encodedActionId}/status`,
+    options.status,
+    options.memo,
+    options.assignee,
+    options.signal,
+  );
 }
 
 export async function patchActionRequiredMemo(
@@ -293,5 +311,11 @@ export async function patchActionRequiredMemo(
   options: ActionRequiredMemoPatchOptions,
 ): Promise<unknown> {
   const encodedActionId = encodeURIComponent(actionId);
-  return requestMemoPatch(`/api/v2/action-items/${encodedActionId}/memos`, 'POST', options.memo, options.signal);
+  return requestMemoPatch(
+    `/api/v2/action-items/${encodedActionId}/memos`,
+    'POST',
+    options.memo,
+    options.assignee,
+    options.signal,
+  );
 }

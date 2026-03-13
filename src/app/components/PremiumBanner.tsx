@@ -2,11 +2,9 @@ import { AlertTriangle } from 'lucide-react';
 
 interface PremiumBannerProps {
   vehiclesWithoutDevice: number;
-  onCTAClick: () => void;
-  disabled?: boolean;
 }
 
-export function PremiumBanner({ vehiclesWithoutDevice, onCTAClick, disabled = false }: PremiumBannerProps) {
+export function PremiumBanner({ vehiclesWithoutDevice }: PremiumBannerProps) {
   return (
     <div className="bg-orange-50 rounded-lg px-4 py-3 border border-orange-200 mb-4 flex items-center justify-between">
       <div className="flex items-center gap-3">
@@ -21,17 +19,6 @@ export function PremiumBanner({ vehiclesWithoutDevice, onCTAClick, disabled = fa
           )}
         </p>
       </div>
-      <button
-        onClick={onCTAClick}
-        disabled={disabled}
-        className={`px-4 py-1.5 text-sm font-medium rounded-lg transition-colors shrink-0 ${
-          disabled
-            ? 'bg-orange-200 text-orange-500 cursor-not-allowed'
-            : 'bg-orange-600 text-white hover:bg-orange-700'
-        }`}
-      >
-        {disabled ? '신청 대상 없음' : '일괄 설치 신청'}
-      </button>
     </div>
   );
 }

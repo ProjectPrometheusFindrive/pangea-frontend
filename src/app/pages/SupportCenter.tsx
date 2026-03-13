@@ -1350,6 +1350,9 @@ function SupportTicketSubmitView({
     if (!normalizedContent) {
       nextFieldErrors.content = '문의 내용을 입력해 주세요.';
     }
+    if (!normalizedContactPhone) {
+      nextFieldErrors.contactPhone = '연락처를 입력해 주세요.';
+    }
     if (attachments.length > MAX_ATTACHMENT_COUNT) {
       nextFieldErrors.attachments = `첨부파일은 최대 ${MAX_ATTACHMENT_COUNT}개까지 등록할 수 있습니다.`;
     }
@@ -1400,7 +1403,7 @@ function SupportTicketSubmitView({
         category: normalizedCategory,
         title: normalizedTitle,
         content: normalizedContent,
-        contactPhone: normalizedContactPhone || undefined,
+        contactPhone: normalizedContactPhone,
         attachments: uploadedAttachments,
       });
 
@@ -1712,7 +1715,7 @@ function SupportTicketSubmitView({
 
               <div>
                 <label htmlFor="support-contact-phone" className="mb-1 block text-sm font-semibold text-gray-700">
-                  연락처 (선택)
+                  연락처 <span className="text-red-600">*</span>
                 </label>
                 <input
                   id="support-contact-phone"
@@ -1792,149 +1795,6 @@ function SupportTicketSubmitView({
               </button>
             </div>
           </form>
-        </div>
-
-        <div className="rounded-lg bg-white p-5 shadow-sm">
-          <div className="mb-4 flex items-center justify-between">
-            <div>
-              <h3 className="text-base font-semibold text-gray-900">접수 상태 조회</h3>
-              <p className="mt-1 text-sm text-gray-500">
-                접수번호를 입력하면 최신 처리 상태를 확인할 수 있습니다.
-              </p>
-            </div>
-            {receiptTicket && (
-              <div className="rounded-md border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs text-blue-700">
-                최근 접수번호: <span className="font-semibold">{receiptTicket.id}</span>
-              </div>
-            )}
-          </div>
-
-          <div className="flex flex-col gap-2 sm:flex-row">
-            <input
-              type="text"
-              value={lookupTicketId}
-              onChange={(event) => setLookupTicketId(event.target.value.toUpperCase())}
-              placeholder="예) SUP-0001"
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 sm:max-w-xs"
-            />
-            <button
-              type="button"
-              onClick={() => {
-                void refreshTicketStatus();
-              }}
-              disabled={isLookupLoading}
-              className="inline-flex items-center justify-center gap-2 rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {isLookupLoading ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Search className="h-4 w-4" />
-              )}
-              조회
-            </button>
-            {lookupTicket && (
-              <button
-                type="button"
-                onClick={() => {
-                  void refreshTicketStatus(lookupTicket.id);
-                }}
-                disabled={isLookupLoading}
-                className="inline-flex items-center justify-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-medium text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                <RefreshCw className={`h-4 w-4 ${isLookupLoading ? 'animate-spin' : ''}`} />
-                상태 새로고침
-              </button>
-            )}
-          </div>
-
-          {lookupError && (
-            <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-              <p>{lookupError.message}</p>
-              <div className="mt-2 flex items-center gap-2">
-                {lookupError.kind === 'retryable' && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void refreshTicketStatus();
-                    }}
-                    className="rounded-md border border-red-200 bg-white px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-100"
-                  >
-                    재시도
-                  </button>
-                )}
-                {lookupErrorActionLabel && (
-                  <button
-                    type="button"
-                    onClick={handleLookupErrorAction}
-                    className="rounded-md border border-red-200 bg-white px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-100"
-                  >
-                    {lookupErrorActionLabel}
-                  </button>
-                )}
-              </div>
-            </div>
-          )}
-
-          {lookupTicket && (
-            <div className="mt-4 rounded-lg border border-gray-200 bg-gray-50 p-4">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-sm font-semibold text-gray-900">{lookupTicket.id}</span>
-                <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${toSupportStatusBadgeClass(lookupTicket.status)}`}>
-                  {toSupportStatusLabel(lookupTicket.status)}
-                </span>
-                {lookupTicket.updatedAt && (
-                  <span className="text-xs text-gray-500">
-                    최근 갱신: {formatDateTime(lookupTicket.updatedAt)}
-                  </span>
-                )}
-              </div>
-
-              <dl className="mt-3 grid gap-2 text-sm text-gray-700 sm:grid-cols-2">
-                <div>
-                  <dt className="text-xs text-gray-500">카테고리</dt>
-                  <dd className="font-medium text-gray-900">{lookupTicket.category}</dd>
-                </div>
-                <div>
-                  <dt className="text-xs text-gray-500">접수 일시</dt>
-                  <dd className="font-medium text-gray-900">{formatDateTime(lookupTicket.createdAt)}</dd>
-                </div>
-                <div className="sm:col-span-2">
-                  <dt className="text-xs text-gray-500">제목</dt>
-                  <dd className="font-medium text-gray-900">{lookupTicket.title}</dd>
-                </div>
-              </dl>
-
-              {lookupTicket.attachments.length > 0 && (
-                <div className="mt-3">
-                  <SupportAttachmentList attachments={lookupTicket.attachments} title="첨부파일" />
-                </div>
-              )}
-
-              {lookupTicket.statusHistory.length > 0 && (
-                <div className="mt-3">
-                  <p className="text-xs font-semibold text-gray-500">상태 이력</p>
-                  <ul className="mt-1 space-y-1">
-                    {lookupTicket.statusHistory.map((entry, index) => (
-                      <li
-                        key={`${lookupTicket.id}-history-${index + 1}`}
-                        className="flex flex-wrap items-center gap-2 text-xs text-gray-600"
-                      >
-                        <span className="rounded bg-white px-2 py-0.5">{toSupportStatusLabel(entry.to)}</span>
-                        {entry.changedAt && <span>{formatDateTime(entry.changedAt)}</span>}
-                        {entry.note && <span className="text-gray-500">({entry.note})</span>}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-            </div>
-          )}
-
-          {!lookupTicket && !lookupError && (
-            <div className="mt-4 rounded-lg border border-dashed border-gray-300 bg-gray-50 px-4 py-6 text-center text-sm text-gray-500">
-              접수번호를 조회하면 문의 상태가 여기에 표시됩니다.
-            </div>
-          )}
         </div>
 
         {receiptTicket && (

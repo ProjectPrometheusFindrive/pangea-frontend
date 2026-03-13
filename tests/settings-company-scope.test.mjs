@@ -44,5 +44,6 @@ test('settings services thread companyId through settings and invitations reques
   assert.match(invitationsSource, /query:\s*\{[\s\S]*companyId:\s*options\.companyId[\s\S]*\}/);
   assert.match(pageSource, /useSearchParams/);
   assert.match(pageSource, /resolveSettingsCompanyScope/);
-  assert.match(pageSource, /companyId:\s*settingsCompanyId\s*\?\?\s*undefined/);
+  assert.match(pageSource, /companyId:\s*effectiveSettingsCompanyId\s*\?\?\s*undefined/);
+  assert.match(pageSource, /selectedCompanyId:\s*effectiveSettingsCompanyId/u);
 });

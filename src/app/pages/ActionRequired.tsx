@@ -127,6 +127,23 @@ function pickString(source: Record<string, unknown>, keys: string[]): string | n
   return null;
 }
 
+function formatActionDate(rawValue: string): string {
+  const normalized = rawValue.trim();
+  if (!normalized || normalized === '-') {
+    return '-';
+  }
+
+  const parsed = new Date(normalized);
+  if (Number.isNaN(parsed.getTime())) {
+    return normalized;
+  }
+
+  const year = parsed.getFullYear();
+  const month = String(parsed.getMonth() + 1).padStart(2, '0');
+  const day = String(parsed.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 function normalizeSeverity(rawValue: string | null): ActionItem['severity'] {
   if (!rawValue) {
     return 'Low';
@@ -149,7 +166,7 @@ function normalizeActionItemType(rawValue: string | null, hasPaymentInfo: boolea
 
   const normalized = rawValue.replace(/\s+/g, '').toLowerCase();
   if (normalized.includes('정기점검')) {
-    return '정기점검 만료 임박';
+    return '정기점검';
   }
   if (normalized.includes('미납') || normalized.includes('결제') || normalized.includes('연체')) {
     return '미납/결제 문제';
@@ -297,7 +314,7 @@ function toActionWriteError(kind: ActionWriteKind, error: unknown): ActionWriteE
     if (error.status === 404) {
       return {
         kind,
-        message: '대상 항목을 찾을 수 없습니다. 목록을 새로고침한 뒤 다시 시도해 주세요.',
+        message: '대상 항목을 찾을 수 없습니다. 목록을 새로고침한 뒤 재시도해 주세요.',
         retryable: false,
       };
     }
@@ -305,7 +322,7 @@ function toActionWriteError(kind: ActionWriteKind, error: unknown): ActionWriteE
     if (error.status === 409) {
       return {
         kind,
-        message: '다른 사용자가 먼저 수정했습니다. 최신 데이터로 다시 시도해 주세요.',
+        message: '다른 사용자가 먼저 수정했습니다. 최신 데이터로 재시도해 주세요.',
         retryable: false,
       };
     }
@@ -313,7 +330,7 @@ function toActionWriteError(kind: ActionWriteKind, error: unknown): ActionWriteE
     if (error.status !== undefined && error.status >= 500) {
       return {
         kind,
-        message: '서버 오류가 발생했습니다. 다시 시도해 주세요.',
+        message: '서버 오류가 발생했습니다. 재시도해 주세요.',
         retryable: true,
       };
     }
@@ -321,7 +338,7 @@ function toActionWriteError(kind: ActionWriteKind, error: unknown): ActionWriteE
     if (error.code === 'NETWORK_ERROR' || error.code === 'TIMEOUT') {
       return {
         kind,
-        message: '네트워크 오류가 발생했습니다. 연결 상태를 확인한 뒤 다시 시도해 주세요.',
+        message: '네트워크 오류가 발생했습니다. 연결 상태를 확인한 뒤 재시도해 주세요.',
         retryable: true,
       };
     }
@@ -329,7 +346,7 @@ function toActionWriteError(kind: ActionWriteKind, error: unknown): ActionWriteE
     if (error.code === 'ABORTED') {
       return {
         kind,
-        message: '요청이 중단되었습니다. 다시 시도해 주세요.',
+        message: '요청이 중단되었습니다. 재시도해 주세요.',
         retryable: true,
       };
     }
@@ -616,7 +633,7 @@ export default function ActionRequired() {
     '미납/결제 문제',
     '단말 OFF',
     '도난 의심',
-    '정기점검 만료 임박',
+    '정기점검',
     '차량이상',
     '보험 만료 임박',
   ];
@@ -693,8 +710,12 @@ export default function ActionRequired() {
     const filterParam = searchParams.get('filter');
     const searchParam = searchParams.get('search');
 
-    if (filterParam && filterChips.includes(filterParam)) {
-      setSelectedFilters([filterParam]);
+    const normalizedFilterParam = filterParam === '정기점검 만료 임박'
+      ? '정기점검'
+      : filterParam;
+
+    if (normalizedFilterParam && filterChips.includes(normalizedFilterParam)) {
+      setSelectedFilters([normalizedFilterParam]);
     }
 
     if (searchParam) {
@@ -802,14 +823,6 @@ export default function ActionRequired() {
     clearWriteFeedback();
   }, [clearWriteFeedback, isWriteSaving]);
 
-  const assigneeOptions = Array.from(
-    new Set(
-      sourceActionItems
-        .map((item) => item.assignee)
-        .filter((assignee) => assignee && assignee !== '-'),
-    ),
-  ).sort((left, right) => left.localeCompare(right, 'ko'));
-
   const allItems: ActionItem[] = useMemo(() => (
     sourceActionItems.map((item) => {
       const paymentSnapshot = (
@@ -893,7 +906,6 @@ export default function ActionRequired() {
 
   const isUnpaidFilterActive = selectedFilters.includes('미납/결제 문제');
   const totalPages = Math.max(1, Math.ceil((totalItems || 0) / pageSize));
-
   const getSeverityColor = (severity: string) => {
     switch (severity) {
       case 'High':
@@ -1015,11 +1027,13 @@ export default function ActionRequired() {
     const nextStatusLabel = toStatusLabel(nextStatusCode);
     const shouldRemoveFromList = statusFilter !== 'all' && statusFilter !== nextStatusCode;
 
+    const optimisticAssignee = user?.name ?? user?.email ?? user?.userId;
     applyOptimisticActionPatch(
       actionId,
       {
         status: nextStatusLabel,
         statusCode: nextStatusCode,
+        ...(optimisticAssignee ? { assignee: optimisticAssignee } : {}),
       },
       shouldRemoveFromList,
     );
@@ -1032,7 +1046,11 @@ export default function ActionRequired() {
     }
 
     try {
-      await patchActionRequiredStatus(actionId, { status: toStatusPatchValue(nextStatusCode) });
+      const currentAssignee = user?.name ?? user?.email ?? user?.userId;
+      await patchActionRequiredStatus(actionId, {
+        status: toStatusPatchValue(nextStatusCode),
+        assignee: currentAssignee,
+      });
       setCurrentStatus('');
       setWriteNotice(
         shouldRemoveFromList
@@ -1047,6 +1065,7 @@ export default function ActionRequired() {
         ...targetItem,
         status: nextStatusLabel,
         statusCode: nextStatusCode,
+        ...(currentAssignee ? { assignee: currentAssignee } : {}),
       };
       void hydrateActionItems();
       void hydrateActionDetail(actionId, fallbackItem);
@@ -1126,23 +1145,27 @@ export default function ActionRequired() {
       statusLabel: nextStatusLabel,
     };
 
+    const currentAssignee = user?.name ?? user?.email ?? user?.userId;
     applyOptimisticActionPatch(
       actionId,
       {
         status: nextStatusLabel,
         statusCode: nextStatusCode,
         memos: [...(targetItem.memos ?? []), createdMemo],
+        ...(currentAssignee ? { assignee: currentAssignee } : {}),
       },
       shouldRemoveFromList,
     );
     setCurrentStatus(nextStatusLabel);
-
     setIsMemoSaving(true);
     try {
       if (targetItem.statusCode !== nextStatusCode) {
-        await patchActionRequiredStatus(actionId, { status: toStatusPatchValue(nextStatusCode) });
+        await patchActionRequiredStatus(actionId, {
+          status: toStatusPatchValue(nextStatusCode),
+          assignee: currentAssignee,
+        });
       }
-      await patchActionRequiredMemo(actionId, { memo: trimmedMemo });
+      await patchActionRequiredMemo(actionId, { memo: trimmedMemo, assignee: currentAssignee });
 
       setCurrentMemo('');
       setCurrentStatus('');
@@ -1158,6 +1181,7 @@ export default function ActionRequired() {
         status: nextStatusLabel,
         statusCode: nextStatusCode,
         memos: [...(targetItem.memos ?? []), createdMemo],
+        ...(currentAssignee ? { assignee: currentAssignee } : {}),
       };
       void hydrateActionItems();
       void hydrateActionDetail(actionId, fallbackItem);
@@ -1228,92 +1252,17 @@ export default function ActionRequired() {
       <div className="p-6">
           <div className="mb-6 space-y-4">
             <div className="relative">
-              <label htmlFor="action-required-search-query" className="sr-only">
-                조치 필요 검색
-              </label>
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
               <input
                 id="action-required-search-query"
                 name="searchQuery"
                 type="text"
-                aria-label="조치 필요 검색"
+                aria-label="차량번호 또는 고객명 검색"
                 placeholder="차량번호 또는 고객명 검색..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
-          </div>
-
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-            <select
-              id="action-required-status-filter"
-              name="statusFilter"
-              aria-label="상태 필터"
-              value={statusFilter}
-              onChange={(e) => {
-                setStatusFilter(e.target.value as ActionStatusFilter);
-                setPage(1);
-              }}
-              className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              <option value="all">상태 전체</option>
-              <option value="pending">대기</option>
-              <option value="in-progress">진행중</option>
-              <option value="resolved">완료</option>
-            </select>
-
-            <select
-              id="action-required-priority-filter"
-              name="priorityFilter"
-              aria-label="우선순위 필터"
-              value={priorityFilter}
-              onChange={(e) => {
-                setPriorityFilter(e.target.value as ActionPriorityFilter);
-                setPage(1);
-              }}
-              className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              <option value="all">우선순위 전체</option>
-              <option value="high">{ACTION_PRIORITY_LABELS.High}</option>
-              <option value="medium">{ACTION_PRIORITY_LABELS.Medium}</option>
-              <option value="low">{ACTION_PRIORITY_LABELS.Low}</option>
-            </select>
-
-            <select
-              id="action-required-assignee-filter"
-              name="assigneeFilter"
-              aria-label="담당자 필터"
-              value={assigneeFilter}
-              onChange={(e) => {
-                setAssigneeFilter(e.target.value);
-                setPage(1);
-              }}
-              className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              <option value="all">담당자 전체</option>
-              {assigneeOptions.map((assignee) => (
-                <option key={assignee} value={assignee}>
-                  {assignee}
-                </option>
-              ))}
-            </select>
-
-            <select
-              id="action-required-page-size"
-              name="pageSize"
-              aria-label="페이지 크기"
-              value={String(pageSize)}
-              onChange={(e) => {
-                const nextSize = Number(e.target.value);
-                setPageSize(Number.isFinite(nextSize) && nextSize > 0 ? nextSize : 20);
-                setPage(1);
-              }}
-              className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              <option value="10">10개씩 보기</option>
-              <option value="20">20개씩 보기</option>
-              <option value="50">50개씩 보기</option>
-            </select>
           </div>
 
           <div className="flex flex-wrap gap-2">
@@ -1338,12 +1287,12 @@ export default function ActionRequired() {
 
           <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-gray-600">
             <div>
-              현재 페이지 <span className="font-bold text-blue-600">{sortedItems.length}</span>건 표시
-              {' · '}
-              서버 집계 <span className="font-bold text-blue-600">{totalItems}</span>건
+              총 <span className="font-bold text-blue-600">{sortedItems.length}</span>건의 조치 필요 항목
+              {null}
+              {null}
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="hidden items-center gap-2" aria-hidden="true">
               <button
                 type="button"
                 onClick={() => setPage((prev) => Math.max(1, prev - 1))}
@@ -1367,7 +1316,7 @@ export default function ActionRequired() {
           </div>
 
           {(paymentSyncError || isPaymentSyncing) && (
-            <div className={`flex items-center justify-between gap-3 rounded-lg border px-3 py-2 text-xs ${
+            <div className={`hidden items-center justify-between gap-3 rounded-lg border px-3 py-2 text-xs ${
               paymentSyncError
                 ? 'border-amber-200 bg-amber-50 text-amber-700'
                 : 'border-blue-200 bg-blue-50 text-blue-700'
@@ -1387,7 +1336,7 @@ export default function ActionRequired() {
                   onClick={retryPaymentSync}
                   className="rounded-md border border-amber-300 bg-white px-2 py-1 font-semibold text-amber-700 hover:bg-amber-100"
                 >
-                  다시 시도
+                  재시도
                 </button>
               )}
             </div>
@@ -1434,11 +1383,6 @@ export default function ActionRequired() {
                         미납금액
                       </th>
                     )}
-                    {isUnpaidFilterActive && (
-                      <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
-                        결제상태
-                      </th>
-                    )}
                     <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider cursor-pointer" onClick={() => handleSort('severity')}>
                       심각도
                       {sortField === 'severity' && (sortDirection === 'asc' ? <ArrowUp className="inline-block ml-1 w-3 h-3" /> : <ArrowDown className="inline-block ml-1 w-3 h-3" />)}
@@ -1468,7 +1412,7 @@ export default function ActionRequired() {
                         {item.vehicleNumber}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{item.customerName}</td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">{item.date}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">{formatActionDate(item.date)}</td>
                       {isUnpaidFilterActive && (
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-right">
                           {item.paymentInfo ? (
@@ -1480,20 +1424,9 @@ export default function ActionRequired() {
                           )}
                         </td>
                       )}
-                      {isUnpaidFilterActive && (
-                        <td className="px-6 py-4 whitespace-nowrap text-sm">
-                          {item.paymentInfo?.statusLabel ? (
-                            <span className={`px-2 py-1 rounded-full text-xs font-semibold ${getPaymentStatusBadgeColor(item.paymentInfo.statusLabel)}`}>
-                              {item.paymentInfo.statusLabel}
-                            </span>
-                          ) : (
-                            <span className="text-gray-400">-</span>
-                          )}
-                        </td>
-                      )}
                       <td className="px-6 py-4 whitespace-nowrap">
                         <span className={`px-2 py-1 text-xs font-medium rounded-full ${getSeverityColor(item.severity)}`}>
-                          {ACTION_PRIORITY_LABELS[item.severity]}
+                          {item.severity}
                         </span>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{item.status}</td>
@@ -1565,7 +1498,7 @@ export default function ActionRequired() {
                           disabled={isWriteSaving}
                           className="rounded-md border border-red-300 bg-white px-3 py-1 text-xs font-semibold text-red-700 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60"
                         >
-                          다시 시도
+                          재시도
                         </button>
                       )}
                     </div>
@@ -1591,14 +1524,14 @@ export default function ActionRequired() {
 
                 <div>
                   <label className="text-sm font-semibold text-gray-600">발생일</label>
-                  <p className="text-base text-gray-900 mt-1">{selectedItem.date}</p>
+                  <p className="text-base text-gray-900 mt-1">{formatActionDate(selectedItem.date)}</p>
                 </div>
 
                 <div>
                   <label className="text-sm font-semibold text-gray-600">심각도</label>
                   <p className="text-base text-gray-900 mt-1">
                     <span className={`px-2 py-1 text-xs font-medium rounded-full ${getSeverityColor(selectedItem.severity)}`}>
-                      {ACTION_PRIORITY_LABELS[selectedItem.severity]}
+                      {selectedItem.severity}
                     </span>
                   </p>
                 </div>
@@ -1610,16 +1543,10 @@ export default function ActionRequired() {
                   </div>
                 )}
 
-                {selectedItem.paymentInfo && (
+                {selectedItem.type === '미납/결제 문제' && selectedItem.paymentInfo && (
                   <div className="border-t border-gray-200 pt-4">
                     <label className="text-sm font-semibold text-gray-600 mb-3 block">결제 정보</label>
                     <div className="bg-red-50 rounded-lg p-4 space-y-2">
-                      <div className="flex justify-between items-center">
-                        <span className="text-sm text-gray-700">결제 상태</span>
-                        <span className={`px-2 py-1 rounded-full text-xs font-semibold ${getPaymentStatusBadgeColor(selectedItem.paymentInfo.statusLabel)}`}>
-                          {selectedItem.paymentInfo.statusLabel ?? '-'}
-                        </span>
-                      </div>
                       <div className="flex justify-between items-center">
                         <span className="text-sm text-gray-700">결제 유형</span>
                         <span className="text-sm font-semibold text-gray-900">{selectedItem.paymentInfo.paymentType}</span>
@@ -1640,22 +1567,28 @@ export default function ActionRequired() {
                         <span className="text-base font-bold text-gray-900">총 청구금액</span>
                         <span className="text-lg font-bold text-red-600">{selectedItem.paymentInfo.totalAmount.toLocaleString()}원</span>
                       </div>
-                      {selectedItem.paymentInfo.updatedAt && (
-                        <div className="pt-1 text-right text-xs text-gray-500">
-                          최근 반영: {new Date(selectedItem.paymentInfo.updatedAt).toLocaleString('ko-KR')}
-                        </div>
-                      )}
                     </div>
                   </div>
                 )}
 
                 <div>
-                  <label className="text-sm font-semibold text-gray-600">현재 상태</label>
+                  <label className="text-sm font-semibold text-gray-600">상태 변경</label>
                   <div className="flex gap-2 mt-1">
                     <select
                       className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                       value={currentStatus || selectedItem.status}
-                      onChange={(e) => setCurrentStatus(e.target.value)}
+                      onChange={(e) => {
+                        const nextStatus = e.target.value;
+                        setCurrentStatus(nextStatus);
+                        if (!canWriteActionRequired || isWriteSaving || !selectedItem) {
+                          return;
+                        }
+                        const nextStatusCode = normalizeStatusCode(nextStatus);
+                        if (nextStatusCode === selectedItem.statusCode) {
+                          return;
+                        }
+                        void runStatusUpdate(selectedItem.id, nextStatusCode, 'status');
+                      }}
                       disabled={!canWriteActionRequired || isWriteSaving}
                     >
                       {!STATUS_OPTIONS.includes(selectedItem.status as typeof STATUS_OPTIONS[number]) && (
@@ -1667,21 +1600,6 @@ export default function ActionRequired() {
                         </option>
                       ))}
                     </select>
-                  <button
-                    type="button"
-                    onClick={handleStatusSave}
-                    disabled={!canWriteActionRequired || isWriteSaving}
-                    className="px-3 py-2 text-sm font-semibold rounded-lg border border-blue-300 text-blue-700 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                      {isStatusSaving ? (
-                        <span className="inline-flex items-center gap-1">
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                          저장중
-                        </span>
-                      ) : (
-                        '상태 저장'
-                      )}
-                    </button>
                   </div>
                 </div>
 
@@ -1713,7 +1631,7 @@ export default function ActionRequired() {
 
                 {selectedItem.memos && selectedItem.memos.length > 0 && (
                   <div>
-                    <label className="text-sm font-semibold text-gray-600 mb-2 block">처리 내역</label>
+                    <label className="text-sm font-semibold text-gray-600 mb-2 block">메모 이력</label>
                     <div className="space-y-3 max-h-64 overflow-y-auto">
                       {selectedItem.memos.map((memo) => (
                         <div key={memo.id} className="bg-gray-50 rounded-lg p-3 border border-gray-200">
