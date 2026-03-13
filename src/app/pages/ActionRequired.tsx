@@ -1029,11 +1029,13 @@ export default function ActionRequired() {
     const nextStatusLabel = toStatusLabel(nextStatusCode);
     const shouldRemoveFromList = statusFilter !== 'all' && statusFilter !== nextStatusCode;
 
+    const optimisticAssignee = user?.name ?? user?.email ?? user?.userId;
     applyOptimisticActionPatch(
       actionId,
       {
         status: nextStatusLabel,
         statusCode: nextStatusCode,
+        ...(optimisticAssignee ? { assignee: optimisticAssignee } : {}),
       },
       shouldRemoveFromList,
     );
@@ -1046,7 +1048,11 @@ export default function ActionRequired() {
     }
 
     try {
-      await patchActionRequiredStatus(actionId, { status: toStatusPatchValue(nextStatusCode) });
+      const currentAssignee = user?.name ?? user?.email ?? user?.userId;
+      await patchActionRequiredStatus(actionId, {
+        status: toStatusPatchValue(nextStatusCode),
+        assignee: currentAssignee,
+      });
       setCurrentStatus('');
       setWriteNotice(
         shouldRemoveFromList
@@ -1061,6 +1067,7 @@ export default function ActionRequired() {
         ...targetItem,
         status: nextStatusLabel,
         statusCode: nextStatusCode,
+        ...(currentAssignee ? { assignee: currentAssignee } : {}),
       };
       void hydrateActionItems();
       void hydrateActionDetail(actionId, fallbackItem);
@@ -1140,23 +1147,27 @@ export default function ActionRequired() {
       statusLabel: nextStatusLabel,
     };
 
+    const currentAssignee = user?.name ?? user?.email ?? user?.userId;
     applyOptimisticActionPatch(
       actionId,
       {
         status: nextStatusLabel,
         statusCode: nextStatusCode,
         memos: [...(targetItem.memos ?? []), createdMemo],
+        ...(currentAssignee ? { assignee: currentAssignee } : {}),
       },
       shouldRemoveFromList,
     );
     setCurrentStatus(nextStatusLabel);
-
     setIsMemoSaving(true);
     try {
       if (targetItem.statusCode !== nextStatusCode) {
-        await patchActionRequiredStatus(actionId, { status: toStatusPatchValue(nextStatusCode) });
+        await patchActionRequiredStatus(actionId, {
+          status: toStatusPatchValue(nextStatusCode),
+          assignee: currentAssignee,
+        });
       }
-      await patchActionRequiredMemo(actionId, { memo: trimmedMemo });
+      await patchActionRequiredMemo(actionId, { memo: trimmedMemo, assignee: currentAssignee });
 
       setCurrentMemo('');
       setCurrentStatus('');
@@ -1172,6 +1183,7 @@ export default function ActionRequired() {
         status: nextStatusLabel,
         statusCode: nextStatusCode,
         memos: [...(targetItem.memos ?? []), createdMemo],
+        ...(currentAssignee ? { assignee: currentAssignee } : {}),
       };
       void hydrateActionItems();
       void hydrateActionDetail(actionId, fallbackItem);
