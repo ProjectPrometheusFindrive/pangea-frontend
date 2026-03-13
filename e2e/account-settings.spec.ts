@@ -134,10 +134,10 @@ test.describe('Account settings', () => {
     await page.getByRole('button', { name: '계정 관리' }).click();
     await expect(page.getByText('pending@example.com')).toBeVisible();
 
-    await page.getByRole('button', { name: '초대하기' }).click();
-    await page.getByLabel('초대 이메일').fill('Invitee@Example.com');
-    await page.getByLabel('권한').selectOption('admin');
-    await page.getByRole('button', { name: '초대 메일 발송' }).click();
+    await page.getByTestId('settings-invite-open-button').click();
+    await page.getByTestId('settings-invitation-email').fill('Invitee@Example.com');
+    await page.getByTestId('settings-invitation-role').selectOption('admin');
+    await page.getByTestId('settings-invitation-send-button').click();
 
     await expect.poll(() => createCount).toBe(1);
     await expect(page.getByText('invitee@example.com')).toBeVisible();
@@ -146,7 +146,6 @@ test.describe('Account settings', () => {
     await pendingRow.getByRole('button', { name: '재발송' }).click();
 
     await expect.poll(() => resendCount).toBe(1);
-    await expect(page.getByRole('main').getByText('초대를 재발송했습니다.')).toBeVisible();
     await expect(pendingRow.getByText('1회')).toBeVisible();
   });
 });

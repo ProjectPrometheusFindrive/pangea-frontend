@@ -439,7 +439,7 @@ test.describe('SCRUM-184 Home premium CTA E2E', () => {
     await expect(page.locator('#support-content')).toHaveValue('상단 프리미엄 배너에서 단말 기능과 도입 상담을 요청합니다.');
   });
 
-  test('shows the device-off premium card as a no-data state instead of hardcoded zero', async ({ page }) => {
+  test('keeps the device-off premium card visible with the GT helper copy', async ({ page }) => {
     const user = buildMockUser('admin');
     const permissions = [
       'route.home',
@@ -562,6 +562,7 @@ test.describe('SCRUM-184 Home premium CTA E2E', () => {
     const deviceOffCard = getMetricCard(page, '단말 OFF');
 
     await expect(deviceOffCard).toBeVisible();
-    await expect(deviceOffCard).toContainText('데이터 없음');
+    await expect(deviceOffCard).toContainText('0');
+    await expect(deviceOffCard).toContainText('단말 장착 차량만');
   });
 });

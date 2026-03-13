@@ -9,31 +9,28 @@ function readProjectFile(relativePath) {
   return fs.readFileSync(path.join(projectRoot, relativePath), 'utf8');
 }
 
-test('revenue page defines a GT-compatible top KPI taxonomy backed by current totals and derived placeholders', () => {
+test('Revenue matches the GT-visible section contract without company/granularity-only controls or API gap sections', () => {
   const source = readProjectFile('src/app/pages/Revenue.tsx');
 
-  assert.match(source, /GT_PERIOD_OPTIONS/u);
+  assert.match(source, /const GT_PERIOD_OPTIONS/u);
   assert.match(source, /label:\s*'주간'/u);
   assert.match(source, /label:\s*'월간'/u);
   assert.match(source, /label:\s*'연간'/u);
-  assert.match(source, /buildRevenueParityCards/u);
+
   assert.match(source, /title:\s*'총 매출'/u);
   assert.match(source, /title:\s*'총 대여 건수'/u);
   assert.match(source, /title:\s*'평균 대여 금액'/u);
   assert.match(source, /title:\s*'미납금'/u);
   assert.match(source, /title:\s*'활성 차량'/u);
-  assert.match(source, /paidCount > 0 \? Math\.round\(totals\.grossRevenue \/ totals\.paidCount\) : 0/u);
-  assert.match(source, /const unpaidAmount = Math\.max\(totals\.refundAmount, Math\.round\(totals\.grossRevenue \* 0\.08\)\);/u);
-  assert.match(source, /buildRevenuePaymentMethodSlices/u);
-  assert.match(source, /buildRevenueVehicleRows/u);
-});
-
-test('revenue page keeps GT-visible section headings without API-only diagnostic sections', () => {
-  const source = readProjectFile('src/app/pages/Revenue.tsx');
 
   assert.match(source, />월간 매출 추이</u);
   assert.match(source, />결제 방법별 분포</u);
   assert.match(source, />차량별 매출 현황</u);
+
+  assert.doesNotMatch(source, />회사 범위</u);
+  assert.doesNotMatch(source, />조회 기간</u);
+  assert.doesNotMatch(source, />집계 단위</u);
+  assert.doesNotMatch(source, />재조회</u);
   assert.doesNotMatch(source, /Figma parity note/u);
   assert.doesNotMatch(source, />현재 API 기준 기간별 매출</u);
   assert.doesNotMatch(source, />현재 API 기준 순매출 추이</u);

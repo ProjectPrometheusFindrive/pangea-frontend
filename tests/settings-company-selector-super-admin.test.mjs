@@ -5,7 +5,7 @@ import { test } from 'node:test';
 
 const projectRoot = path.resolve(import.meta.dirname, '..');
 
-test('settings page exposes super admin company selector and query-synced guard state', async () => {
+test('settings page auto-resolves super admin company scope without rendering a selector gate', async () => {
   const [settingsServiceSource, settingsPageSource] = await Promise.all([
     readFile(path.join(projectRoot, 'src/services/settings.ts'), 'utf8'),
     readFile(path.join(projectRoot, 'src/app/pages/Settings.tsx'), 'utf8'),
@@ -18,8 +18,9 @@ test('settings page exposes super admin company selector and query-synced guard 
   assert.match(settingsPageSource, /const \[searchParams,\s*setSearchParams\] = useSearchParams\(\)/u);
   assert.match(settingsPageSource, /const isSuperAdmin = \(user\?\.role \?\? ''\)\.trim\(\)\.toLowerCase\(\) === 'super_admin'/u);
   assert.match(settingsPageSource, /listSettingsCompanies\(/u);
-  assert.match(settingsPageSource, /setSearchParams\(\(previousParams\)/u);
-  assert.match(settingsPageSource, /if \(isSuperAdmin && !settingsCompanyId\)/u);
-  assert.match(settingsPageSource, /회사를 선택해 주세요/u);
-  assert.match(settingsPageSource, /value=\{settingsCompanyId \?\? ''\}/u);
+  assert.match(settingsPageSource, /const effectiveSettingsCompanyId = useMemo\(/u);
+  assert.match(settingsPageSource, /settingsCompanyId \?\? \(isSuperAdmin \? companyOptions\[0\]\?\.companyId \?\? null : null\)/u);
+  assert.match(settingsPageSource, /if \(!selectedCompanyId && normalizedItems\.length > 0\) \{/u);
+  assert.match(settingsPageSource, /updateSettingsCompanyScope\(normalizedItems\[0\]\.companyId, true\)/u);
+  assert.doesNotMatch(settingsPageSource, /회사 범위/u);
 });

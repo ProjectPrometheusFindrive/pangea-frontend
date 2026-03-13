@@ -619,24 +619,6 @@ export function PremiumInstallationRequestSection({
     persistReceipt(nextReceipt);
   }, [assetMap, persistReceipt, receipt]);
 
-  const handleCTAClick = useCallback(() => {
-    trackPremiumInstallationEvent('premium_installation_cta_click', {
-      assetsWithoutDevice: assets.length,
-    });
-
-    if (assets.length === 0) {
-      setRequestError({
-        kind: 'unknown',
-        source: 'submit',
-        message: '장착 신청 대상 차량이 없습니다.',
-      });
-      return;
-    }
-
-    setRequestError(null);
-    setIsFormVisible(true);
-  }, [assets.length]);
-
   const handleSubmit = useCallback(async () => {
     if (isSubmitting) {
       return;
@@ -857,8 +839,6 @@ export function PremiumInstallationRequestSection({
     <section className="mb-4">
       <PremiumBanner
         vehiclesWithoutDevice={assets.length}
-        onCTAClick={handleCTAClick}
-        disabled={assets.length === 0}
       />
 
       {requestError && (
