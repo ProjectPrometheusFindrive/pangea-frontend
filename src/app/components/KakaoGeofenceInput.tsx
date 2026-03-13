@@ -65,7 +65,7 @@ export function KakaoGeofenceInput({
                 : 'bg-blue-50 text-blue-700 hover:bg-blue-100'
             } disabled:cursor-not-allowed disabled:opacity-50`}
           >
-            \uC6D0\uD615
+            \원\형
           </button>
           <button
             type="button"
@@ -77,11 +77,11 @@ export function KakaoGeofenceInput({
                 : 'bg-blue-50 text-blue-700 hover:bg-blue-100'
             } disabled:cursor-not-allowed disabled:opacity-50`}
           >
-            \uB2E4\uAC01\uD615
+            \다\각\형
           </button>
           {shapeLocked && (
             <span className="text-xs text-blue-700">
-              \uAE30\uC874 \uC9C0\uC624\uD39C\uC2A4\uB294 \uD604\uC7AC \uD615\uD0DC \uADF8\uB300\uB85C \uD3B8\uC9D1\uD569\uB2C8\uB2E4.
+              \기\존 \지\오\펜\스\는 \현\재 \형\태 \그\대\로 \편\집\합\니\다.
             </span>
           )}
         </div>
@@ -116,7 +116,7 @@ export function KakaoGeofenceInput({
           {errors?.pointsText && <p className="mt-1 text-xs text-red-600">{errors.pointsText}</p>}
 
           <div className="mt-3 rounded-lg bg-blue-50 px-3 py-2 text-sm text-blue-800">
-            \uD55C \uC904\uC5D0 `lat,lng` \uD615\uC2DD\uC73C\uB85C \uC785\uB825\uD558\uC138\uC694. \uCD5C\uC18C 3\uAC1C\uC758 \uAF2D\uC9D3\uC810\uC774 \uD544\uC694\uD569\uB2C8\uB2E4.
+            \한 \줄\에 `lat,lng` \형\식\으\로 \입\력\하\세\요. \최\소 3\개\의 \꼭\짓\점\이 \필\요\합\니\다.
           </div>
 
           {previewPoints.length > 0 && (
@@ -141,7 +141,7 @@ export function KakaoGeofenceInput({
         </div>
       ) : (
         <div className="rounded-xl border border-blue-100 bg-white p-4 text-sm text-blue-800">
-          <p>\uC6D0\uD615 \uC9C0\uC624\uD39C\uC2A4\uB294 \uC544\uB798 \uC911\uC2EC \uC88C\uD45C\uC640 \uBC18\uACBD \uC785\uB825\uB780\uC744 \uC0AC\uC6A9\uD569\uB2C8\uB2E4.</p>
+          <p>\원\형 \지\오\펜\스\는 \아\래 \중\심 \좌\표\와 \반\경 \입\력\란\을 \사\용\합\니\다.</p>
           <p className="mt-2 text-xs text-blue-700">
             Current center: {lat || '-'}, {lng || '-'} / radius {radiusMeter || '-'}
           </p>
