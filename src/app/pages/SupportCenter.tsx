@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, ty
 import { useLocation, useNavigate, useSearchParams } from 'react-router';
 import { CheckCircle2, Loader2, Paperclip, RefreshCw, Search, Send } from 'lucide-react';
 
-import { Layout } from '../components/Layout';
 import { useAuthorization } from '../context/AuthorizationContext';
 import { useAuth } from '../context/AuthContext';
 import { ACTION_PERMISSIONS } from '../authorization';
@@ -703,14 +702,13 @@ function SupportAdminManagementView({
   const statusUpdateErrorActionLabel = getPageErrorActionLabel(statusUpdateError?.kind ?? null);
 
   return (
-    <Layout title="고객센터">
-      <div className="space-y-4 p-6">
-        <div className="rounded-lg bg-gradient-to-r from-slate-800 to-blue-700 px-5 py-4 text-white">
-          <h2 className="text-lg font-bold" data-testid="support-admin-heading">고객센터 문의 관리</h2>
-          <p className="mt-1 text-sm text-blue-100">
-            전체 테넌트 문의를 조회하고 상태를 업데이트할 수 있습니다.
-          </p>
-        </div>
+    <div className="space-y-4 p-6">
+      <div className="rounded-lg bg-gradient-to-r from-slate-800 to-blue-700 px-5 py-4 text-white">
+        <h2 className="text-lg font-bold" data-testid="support-admin-heading">고객센터 문의 관리</h2>
+        <p className="mt-1 text-sm text-blue-100">
+          전체 테넌트 문의를 조회하고 상태를 업데이트할 수 있습니다.
+        </p>
+      </div>
 
         {onOpenSubmitView && (
           <div className="flex justify-end">
@@ -1146,8 +1144,7 @@ function SupportAdminManagementView({
             )}
           </div>
         </div>
-      </div>
-    </Layout>
+    </div>
   );
 }
 
@@ -1492,14 +1489,13 @@ function SupportTicketSubmitView({
   const categoryErrorActionLabel = getPageErrorActionLabel(categoriesErrorKind);
 
   return (
-    <Layout title="고객센터">
-      <div className="space-y-4 p-6">
-        <div className="rounded-lg bg-gradient-to-r from-slate-800 to-blue-700 px-5 py-4 text-white">
-          <h2 className="text-lg font-bold">지원 문의 접수</h2>
-          <p className="mt-1 text-sm text-blue-100">
-            문의 등록 후 접수번호로 상태를 조회할 수 있습니다.
-          </p>
-        </div>
+    <div className="space-y-4 p-6">
+      <div className="rounded-lg bg-gradient-to-r from-slate-800 to-blue-700 px-5 py-4 text-white">
+        <h2 className="text-lg font-bold">지원 문의 접수</h2>
+        <p className="mt-1 text-sm text-blue-100">
+          문의 등록 후 접수번호로 상태를 조회할 수 있습니다.
+        </p>
+      </div>
 
         <div className="rounded-lg bg-white p-5 shadow-sm">
           <div className="mb-4 flex items-start justify-between gap-4">
@@ -1808,8 +1804,7 @@ function SupportTicketSubmitView({
             </p>
           </div>
         )}
-      </div>
-    </Layout>
+    </div>
   );
 }
 
