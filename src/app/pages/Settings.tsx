@@ -73,8 +73,9 @@ import {
   validateInvitationDraft,
 } from './settingsInvitations';
 import { canAccessBulkOcr } from './settingsBulkOcr';
+import SupportCenter from './SupportCenter';
 
-type TabType = 'bulk' | 'company' | 'geofence' | 'accounts';
+type TabType = 'bulk' | 'company' | 'geofence' | 'accounts' | 'support';
 type UploadType = 'vehicles' | 'reservations' | 'ocr';
 type CurrentDataType = Extract<UploadType, 'vehicles' | 'reservations'>;
 type CompanyField = 'name' | 'businessNumber' | 'phone' | 'email' | 'address';
@@ -2554,6 +2555,17 @@ export default function Settings() {
             >
               계정 관리
             </button>
+            <button
+              type="button"
+              onClick={() => handleTabChange('support')}
+              className={`border-b-2 px-6 py-3 text-sm font-medium transition-colors ${
+                activeTab === 'support'
+                  ? 'border-blue-600 text-blue-600'
+                  : 'border-transparent text-gray-600 hover:text-gray-900'
+              }`}
+            >
+              고객센터
+            </button>
           </div>
 
           {activeTab === 'bulk' && (
@@ -3731,6 +3743,12 @@ export default function Settings() {
                   </table>
                 </div>
               </div>
+            </div>
+          )}
+
+          {activeTab === 'support' && (
+            <div>
+              <SupportCenter />
             </div>
           )}
         </div>
