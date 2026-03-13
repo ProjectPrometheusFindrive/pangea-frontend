@@ -767,8 +767,6 @@ export default function ActionRequired() {
       }
 
       if (error instanceof ApiError && error.status === 404) {
-        setIsDetailNotFound(true);
-        setDetailError('선택한 항목이 존재하지 않습니다. 목록 데이터를 기준으로 표시합니다.');
         setSelectedItem(fallbackItem);
         return;
       }
