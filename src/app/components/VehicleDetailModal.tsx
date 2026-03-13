@@ -196,14 +196,10 @@ export function VehicleDetailModal({
                 </div>
               </div>
 
-              <div className="grid grid-cols-3 gap-4">
+              <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="text-xs font-semibold text-gray-500 uppercase">자산 ID</label>
                   <p className="text-sm text-gray-900 mt-1 font-mono">{asset.id ?? '-'}</p>
-                </div>
-                <div>
-                  <label className="text-xs font-semibold text-gray-500 uppercase">버전</label>
-                  <p className="text-sm text-gray-900 mt-1">{asset.version ?? '-'}</p>
                 </div>
                 <div>
                   <label className="text-xs font-semibold text-gray-500 uppercase">최종 갱신</label>
@@ -437,7 +433,6 @@ export function VehicleDetailModal({
                         <tr>
                           <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">시각</th>
                           <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">이벤트</th>
-                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">버전</th>
                           <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">변경 내용</th>
                           <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">작업자</th>
                         </tr>
@@ -452,9 +447,6 @@ export function VehicleDetailModal({
                               <span className="rounded-full bg-blue-100 px-2 py-1 text-xs font-medium text-blue-700">
                                 {entry.event}
                               </span>
-                            </td>
-                            <td className="px-4 py-3 whitespace-nowrap text-xs text-gray-700">
-                              v{entry.versionFrom} → v{entry.versionTo}
                             </td>
                             <td className="px-4 py-3 text-xs text-gray-700">
                               {entry.changes.length > 0 ? (
