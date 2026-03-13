@@ -65,7 +65,7 @@ export function KakaoGeofenceInput({
                 : 'bg-blue-50 text-blue-700 hover:bg-blue-100'
             } disabled:cursor-not-allowed disabled:opacity-50`}
           >
-            \원\형
+            원형
           </button>
           <button
             type="button"
@@ -77,11 +77,11 @@ export function KakaoGeofenceInput({
                 : 'bg-blue-50 text-blue-700 hover:bg-blue-100'
             } disabled:cursor-not-allowed disabled:opacity-50`}
           >
-            \다\각\형
+            다각형
           </button>
           {shapeLocked && (
             <span className="text-xs text-blue-700">
-              \기\존 \지\오\펜\스\는 \현\재 \형\태 \그\대\로 \편\집\합\니\다.
+              기존 지오펜스는 현재 형태 그대로 편집합니다.
             </span>
           )}
         </div>
@@ -116,7 +116,7 @@ export function KakaoGeofenceInput({
           {errors?.pointsText && <p className="mt-1 text-xs text-red-600">{errors.pointsText}</p>}
 
           <div className="mt-3 rounded-lg bg-blue-50 px-3 py-2 text-sm text-blue-800">
-            \한 \줄\에 `lat,lng` \형\식\으\로 \입\력\하\세\요. \최\소 3\개\의 \꼭\짓\점\이 \필\요\합\니\다.
+            한 줄에 `lat,lng` 형식으로 입력하세요. 최소 3개의 꼭짓점이 필요합니다.
           </div>
 
           {previewPoints.length > 0 && (
@@ -141,7 +141,7 @@ export function KakaoGeofenceInput({
         </div>
       ) : (
         <div className="rounded-xl border border-blue-100 bg-white p-4 text-sm text-blue-800">
-          <p>\원\형 \지\오\펜\스\는 \아\래 \중\심 \좌\표\와 \반\경 \입\력\란\을 \사\용\합\니\다.</p>
+          <p>원형 지오펜스는 아래 중심 좌표와 반경 입력란을 사용합니다.</p>
           <p className="mt-2 text-xs text-blue-700">
             Current center: {lat || '-'}, {lng || '-'} / radius {radiusMeter || '-'}
           </p>

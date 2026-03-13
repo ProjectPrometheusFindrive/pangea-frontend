@@ -306,7 +306,7 @@ function normalizeSettingsCompanyOptions(items: SettingsCompanyOption[]): Settin
   }
 
   return Array.from(optionsByCompanyId.values()).sort((left, right) => (
-    `${left.name}\ ${left.companyId}`.localeCompare(`${right.name}\ ${right.companyId}`)
+    `${left.name}\u0000${left.companyId}`.localeCompare(`${right.name}\u0000${right.companyId}`)
   ));
 }
 
@@ -674,7 +674,7 @@ function toCsvCell(value: unknown): string {
 }
 
 function triggerCsvDownload(filename: string, lines: string[]): void {
-  const BOM = '\﻿';
+  const BOM = '\uFEFF';
   const blob = new Blob([BOM + lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
   const link = document.createElement('a');
   const objectUrl = URL.createObjectURL(blob);
@@ -3078,7 +3078,7 @@ export default function Settings() {
                     disabled={!canEditSettings || isCompanySaving || !isCompanyDirty}
                     className="inline-flex items-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    {isCompanySaving ? '\저\장 \중...' : '\회\사 \설\정 \저\장'}
+                    {isCompanySaving ? '저장 중...' : '회사 설정 저장'}
                   </button>
                 </div>
               </div>
@@ -3089,7 +3089,7 @@ export default function Settings() {
             <div className="space-y-6">
               {!canEditSettings && (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-                  \현\재 \계\정\은 \지\오\펜\스\를 \읽\기 \전\용\으\로\만 \볼 \수 \있\습\니\다.
+                  현재 계정은 지오펜스를 읽기 전용으로만 볼 수 있습니다.
                 </div>
               )}
 
@@ -3110,7 +3110,7 @@ export default function Settings() {
                         className="inline-flex items-center gap-1 rounded-md border border-red-200 bg-white px-3 py-1 text-xs font-medium text-red-700 hover:bg-red-100"
                       >
                         <RefreshCw className="h-3.5 w-3.5" />
-                        \다\시 \시\도
+                        다시 시도
                       </button>
                     )}
                   </div>
@@ -3119,7 +3119,7 @@ export default function Settings() {
 
               <div className="rounded-xl bg-white p-6 shadow-sm">
                 <div className="mb-4 flex items-center justify-between">
-                  <h2 className="text-base font-semibold text-[#1e2939]">\지\오\펜\스 \지\도</h2>
+                  <h2 className="text-base font-semibold text-[#1e2939]">지오펜스 지도</h2>
                   <button
                     type="button"
                     onClick={openCreateGeofenceEditor}
@@ -3127,15 +3127,15 @@ export default function Settings() {
                     className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     <Plus className="h-4 w-4" />
-                    \지\오\펜\스 \생\성
+                    지오펜스 생성
                   </button>
                 </div>
 
                 <div className="flex h-[320px] w-full items-center justify-center rounded-lg border-2 border-dashed border-gray-300 bg-gray-100">
                   <div className="text-center">
                     <MapPin className="mx-auto mb-3 h-16 w-16 text-gray-400" />
-                    <p className="font-medium text-gray-600">\지\도 \영\역</p>
-                    <p className="mt-1 text-sm text-gray-500">\지\오\펜\스 \위\치\가 \여\기\에 \표\시\됩\니\다</p>
+                    <p className="font-medium text-gray-600">지도 영역</p>
+                    <p className="mt-1 text-sm text-gray-500">지오펜스 위치가 여기에 표시됩니다</p>
                   </div>
                 </div>
               </div>
@@ -3143,11 +3143,11 @@ export default function Settings() {
               {isGeofenceEditorOpen && (
                 <div className="rounded-xl border border-blue-200 bg-blue-50 p-6">
                   <h3 className="mb-4 text-base font-semibold text-blue-900">
-                    {geofenceEditorMode === 'create' ? '\지\오\펜\스 \생\성' : `\지\오\펜\스 \편\집 (${selectedEditingGeofence?.name ?? '-'})`}
+                    {geofenceEditorMode === 'create' ? '지오펜스 생성' : `지오펜스 편집 (${selectedEditingGeofence?.name ?? '-'})`}
                   </h3>
                   <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                     <div>
-                      <label className="mb-1 block text-sm font-medium text-blue-900">\이\름 *</label>
+                      <label className="mb-1 block text-sm font-medium text-blue-900">이름 *</label>
                       <input
                         type="text"
                         value={geofenceForm.name}
@@ -3201,7 +3201,7 @@ export default function Settings() {
                       />
                     </div>
                     <div>
-                      <label className="mb-1 block text-sm font-medium text-blue-900">\반\경 (m) *</label>
+                      <label className="mb-1 block text-sm font-medium text-blue-900">반경 (m) *</label>
                       <input
                         type="number"
                         min={1}
@@ -3221,7 +3221,7 @@ export default function Settings() {
                       )}
                     </div>
                     <div>
-                      <label className="mb-1 block text-sm font-medium text-blue-900">\위\도 *</label>
+                      <label className="mb-1 block text-sm font-medium text-blue-900">위도 *</label>
                       <input
                         type="number"
                         step="0.000001"
@@ -3239,7 +3239,7 @@ export default function Settings() {
                       {geofenceFieldErrors.lat && <p className="mt-1 text-xs text-red-600">{geofenceFieldErrors.lat}</p>}
                     </div>
                     <div>
-                      <label className="mb-1 block text-sm font-medium text-blue-900">\경\도 *</label>
+                      <label className="mb-1 block text-sm font-medium text-blue-900">경도 *</label>
                       <input
                         type="number"
                         step="0.000001"
@@ -3269,7 +3269,7 @@ export default function Settings() {
                             setGeofenceRetryAction(null);
                           }}
                         />
-                        \활\성 \상\태
+                        활성 상태
                       </label>
                     </div>
                   </div>
@@ -3280,7 +3280,7 @@ export default function Settings() {
                       disabled={isGeofenceSaving}
                       className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      \취\소
+                      취소
                     </button>
                     <button
                       type="button"
@@ -3290,7 +3290,7 @@ export default function Settings() {
                       disabled={!canEditSettings || isGeofenceSaving}
                       className="inline-flex items-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      {isGeofenceSaving ? '\저\장 \중...' : '\저\장'}
+                      {isGeofenceSaving ? '저장 중...' : '저장'}
                     </button>
                   </div>
                 </div>
@@ -3298,25 +3298,25 @@ export default function Settings() {
 
               <div className="overflow-hidden rounded-xl bg-white shadow-sm">
                 <div className="border-b border-gray-200 px-6 py-4">
-                  <h2 className="text-base font-semibold text-[#1e2939]">\지\오\펜\스 \목\록</h2>
+                  <h2 className="text-base font-semibold text-[#1e2939]">지오펜스 목록</h2>
                 </div>
 
                 <div className="overflow-x-auto">
                   <table className="w-full">
                     <thead className="border-b border-gray-200 bg-gray-50">
                       <tr>
-                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">\이\름</th>
-                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">\중\심 \좌\표</th>
-                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">\반\경</th>
-                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">\활\성 \상\태</th>
-                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">\액\션</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">이름</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">중심 좌표</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">반경</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">활성 상태</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">액션</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200">
                       {geofences.length === 0 && (
                         <tr>
                           <td colSpan={5} className="px-6 py-10 text-center text-sm text-gray-500">
-                            \등\록\된 \지\오\펜\스\가 \없\습\니\다.
+                            등록된 지오펜스가 없습니다.
                           </td>
                         </tr>
                       )}
@@ -3350,7 +3350,7 @@ export default function Settings() {
                               disabled={!canEditSettings || isGeofenceSaving || activeToggleTargetId !== null}
                               className="mr-3 font-medium text-blue-600 hover:text-blue-800 disabled:cursor-not-allowed disabled:opacity-50"
                             >
-                              \편\집
+                              편집
                             </button>
                             <button
                               type="button"
@@ -3358,7 +3358,7 @@ export default function Settings() {
                               disabled={!canEditSettings || deletingGeofenceId === geofence.id || isGeofenceSaving}
                               className="font-medium text-red-600 hover:text-red-800 disabled:cursor-not-allowed disabled:opacity-50"
                             >
-                              {deletingGeofenceId === geofence.id ? '\삭\제 \중...' : '\삭\제'}
+                              {deletingGeofenceId === geofence.id ? '삭제 중...' : '삭제'}
                             </button>
                           </td>
                         </tr>
@@ -3374,7 +3374,7 @@ export default function Settings() {
             <div className="space-y-4">
               {!canManageMemberRoles && (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-                  \현\재 \계\정\은 \멤\버 \권\한\을 \읽\기 \전\용\으\로\만 \볼 \수 \있\습\니\다.
+                  현재 계정은 멤버 권한을 읽기 전용으로만 볼 수 있습니다.
                 </div>
               )}
 
@@ -3395,7 +3395,7 @@ export default function Settings() {
                         className="inline-flex items-center gap-1 rounded-md border border-red-200 bg-white px-3 py-1 text-xs font-medium text-red-700 hover:bg-red-100"
                       >
                         <RefreshCw className="h-3.5 w-3.5" />
-                        \다\시 \시\도
+                        다시 시도
                       </button>
                     )}
                   </div>
@@ -3419,7 +3419,7 @@ export default function Settings() {
                         className="inline-flex items-center gap-1 rounded-md border border-red-200 bg-white px-3 py-1 text-xs font-medium text-red-700 hover:bg-red-100"
                       >
                         <RefreshCw className="h-3.5 w-3.5" />
-                        \다\시 \시\도
+                        다시 시도
                       </button>
                     )}
                   </div>
@@ -3429,8 +3429,8 @@ export default function Settings() {
               <div className="overflow-hidden rounded-xl bg-white shadow-sm">
                 <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
                   <div>
-                    <h2 className="text-base font-semibold text-[#1e2939]">\사\용\자 \목\록</h2>
-                    <p className="mt-1 text-sm text-gray-600">\멤\버 \권\한 \변\경\은 \저\장 \버\튼\을 \눌\러\야 \적\용\됩\니\다.</p>
+                    <h2 className="text-base font-semibold text-[#1e2939]">사용자 목록</h2>
+                    <p className="mt-1 text-sm text-gray-600">멤버 권한 변경은 저장 버튼을 눌러야 적용됩니다.</p>
                   </div>
                   <button
                     type="button"
@@ -3439,7 +3439,7 @@ export default function Settings() {
                     className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-600"
                   >
                     <Plus className="h-4 w-4" />
-                    \초\대\하\기
+                    초대하기
                   </button>
                 </div>
 
@@ -3448,7 +3448,7 @@ export default function Settings() {
                     <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_180px]">
                       <div>
                         <label htmlFor="settings-invitation-email" className="mb-1 block text-sm font-medium text-blue-900">
-                          \초\대 \이\메\일
+                          초대 이메일
                         </label>
                         <input
                           id="settings-invitation-email"
@@ -3465,7 +3465,7 @@ export default function Settings() {
                       </div>
                       <div>
                         <label htmlFor="settings-invitation-role" className="mb-1 block text-sm font-medium text-blue-900">
-                          \권\한
+                          권한
                         </label>
                         <select
                           id="settings-invitation-role"
@@ -3474,11 +3474,11 @@ export default function Settings() {
                           disabled={isInvitationSaving}
                           className="w-full rounded-lg border border-blue-200 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 disabled:bg-gray-100"
                         >
-                          <option value="member">\운\영\자</option>
-                          <option value="viewer">\조\회\자</option>
-                          <option value="admin">\관\리\자</option>
+                          <option value="member">운영자</option>
+                          <option value="viewer">조회자</option>
+                          <option value="admin">관리자</option>
                           {isSuperAdmin && (
-                            <option value="installer">\장\착 \기\사</option>
+                            <option value="installer">장착 기사</option>
                           )}
                         </select>
                         {invitationFieldErrors.role && (
@@ -3496,7 +3496,7 @@ export default function Settings() {
                         disabled={isInvitationSaving}
                         className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
                       >
-                        \취\소
+                        취소
                       </button>
                       <button
                         type="button"
@@ -3504,7 +3504,7 @@ export default function Settings() {
                         disabled={!canManageMemberRoles || isInvitationSaving}
                         className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300"
                       >
-                        {isInvitationSaving ? '\발\송 \중...' : '\초\대 \메\일 \발\송'}
+                        {isInvitationSaving ? '발송 중...' : '초대 메일 발송'}
                       </button>
                     </div>
                   </div>
@@ -3514,18 +3514,18 @@ export default function Settings() {
                   <table className="w-full">
                     <thead className="border-b border-gray-200 bg-gray-50">
                       <tr>
-                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">\이\름</th>
-                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">\이\메\일</th>
-                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">\권\한</th>
-                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">\상\태</th>
-                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">\액\션</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">이름</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">이메일</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">권한</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">상태</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">액션</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200">
                       {members.length === 0 && (
                         <tr>
                           <td colSpan={5} className="px-6 py-10 text-center text-sm text-gray-500">
-                            \조\회\된 \멤\버\가 \없\습\니\다.
+                            조회된 멤버가 없습니다.
                           </td>
                         </tr>
                       )}
@@ -3558,9 +3558,9 @@ export default function Settings() {
                                   disabled={isRowSaving}
                                   className="rounded-md border border-gray-300 px-2 py-1 text-xs font-medium text-gray-800 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:opacity-50"
                                 >
-                                  <option value="admin">\관\리\자</option>
-                                  <option value="member">\운\영\자</option>
-                                  <option value="viewer">\조\회\자</option>
+                                  <option value="admin">관리자</option>
+                                  <option value="member">운영자</option>
+                                  <option value="viewer">조회자</option>
                                 </select>
                               ) : (
                                 <span className={`rounded-full px-2 py-1 text-xs font-medium ${getRoleBadgeColor(member.role)}`}>
@@ -3582,7 +3582,7 @@ export default function Settings() {
                                     disabled={isRowSaving}
                                     className="font-medium text-blue-600 hover:text-blue-800 disabled:cursor-not-allowed disabled:opacity-50"
                                   >
-                                    {isRowSaving ? '\저\장 \중...' : '\저\장'}
+                                    {isRowSaving ? '저장 중...' : '저장'}
                                   </button>
                                   <button
                                     type="button"
@@ -3590,12 +3590,12 @@ export default function Settings() {
                                     disabled={isRowSaving}
                                     className="font-medium text-gray-600 hover:text-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
                                   >
-                                    \취\소
+                                    취소
                                   </button>
                                 </div>
                               ) : (
                                 <span className={canReviewPendingMember ? 'hidden text-xs text-gray-400' : 'text-xs text-gray-400'}>
-                                  {canEditRowRole ? '-' : '\권\한 \변\경 \불\가'}
+                                  {canEditRowRole ? '-' : '권한 변경 불가'}
                                 </span>
                               )}
                               {canReviewPendingMember && (
@@ -3608,7 +3608,7 @@ export default function Settings() {
                                     disabled={isRowSaving}
                                     className="font-medium text-green-600 hover:text-green-800 disabled:cursor-not-allowed disabled:opacity-50"
                                   >
-                                    {isRowSaving ? '\처\리 \중...' : '\승\인'}
+                                    {isRowSaving ? '처리 중...' : '승인'}
                                   </button>
                                   <button
                                     type="button"
@@ -3618,7 +3618,7 @@ export default function Settings() {
                                     disabled={isRowSaving}
                                     className="font-medium text-red-600 hover:text-red-800 disabled:cursor-not-allowed disabled:opacity-50"
                                   >
-                                    {isRowSaving ? '\처\리 \중...' : '\거\절'}
+                                    {isRowSaving ? '처리 중...' : '거절'}
                                   </button>
                                 </div>
                               )}
@@ -3634,25 +3634,25 @@ export default function Settings() {
                 </div>
 
                 <div className="border-t border-gray-200 bg-gray-50 px-6 py-4">
-                  <h3 className="mb-2 text-sm font-semibold text-gray-700">\권\한 \설\명</h3>
+                  <h3 className="mb-2 text-sm font-semibold text-gray-700">권한 설명</h3>
                   <div className="space-y-1 text-sm text-gray-600">
-                    <p><span className="font-medium">\관\리\자(admin):</span> \멤\버 \권\한 \및 \운\영 \설\정 \변\경 \가\능</p>
-                    <p><span className="font-medium">\운\영\자(member):</span> \데\이\터 \조\회/\운\영 \기\능 \사\용, \설\정 \변\경 \제\한</p>
-                    <p><span className="font-medium">\조\회\자(viewer):</span> \데\이\터 \조\회 \전\용</p>
-                    <p><span className="font-medium">\상\태:</span> approved(\활\성), pending(\승\인 \대\기), rejected(\거\절), withdrawn(\탈\퇴)</p>
+                    <p><span className="font-medium">관리자(admin):</span> 멤버 권한 및 운영 설정 변경 가능</p>
+                    <p><span className="font-medium">운영자(member):</span> 데이터 조회/운영 기능 사용, 설정 변경 제한</p>
+                    <p><span className="font-medium">조회자(viewer):</span> 데이터 조회 전용</p>
+                    <p><span className="font-medium">상태:</span> approved(활성), pending(승인 대기), rejected(거절), withdrawn(탈퇴)</p>
                   </div>
                 </div>
               </div>
 
               <div className="overflow-hidden rounded-xl bg-white shadow-sm">
                 <div className="border-b border-gray-200 px-6 py-4">
-                  <h2 className="text-base font-semibold text-[#1e2939]">\초\대 \이\력</h2>
-                  <p className="mt-1 text-sm text-gray-600">\상\태\별 \초\대 \이\력\과 \수\락 \정\보\를 \함\께 \확\인\합\니\다.</p>
+                  <h2 className="text-base font-semibold text-[#1e2939]">초대 이력</h2>
+                  <p className="mt-1 text-sm text-gray-600">상태별 초대 이력과 수락 정보를 함께 확인합니다.</p>
                 </div>
 
                 <div className="border-b border-gray-100 bg-gray-50 px-6 py-4">
                   <label className="flex items-center gap-2 text-sm text-gray-600">
-                    <span className="font-medium text-gray-700">\상\태</span>
+                    <span className="font-medium text-gray-700">상태</span>
                     <select
                       value={invitationStatusFilter}
                       onChange={(event) => {
@@ -3662,11 +3662,11 @@ export default function Settings() {
                       disabled={!canManageMemberRoles || isInvitationSaving || resendingInvitationId !== null}
                       className="rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-800 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-gray-100"
                     >
-                      <option value="pending">\대\기 \중</option>
-                      <option value="accepted">\수\락\됨</option>
-                      <option value="expired">\만\료\됨</option>
-                      <option value="revoked">\취\소\됨</option>
-                      <option value="all">\전\체</option>
+                      <option value="pending">대기 중</option>
+                      <option value="accepted">수락됨</option>
+                      <option value="expired">만료됨</option>
+                      <option value="revoked">취소됨</option>
+                      <option value="all">전체</option>
                     </select>
                   </label>
                 </div>
@@ -3675,22 +3675,22 @@ export default function Settings() {
                   <table className="w-full">
                     <thead className="border-b border-gray-200 bg-gray-50">
                       <tr>
-                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">\이\메\일</th>
-                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">\권\한</th>
-                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">\상\태</th>
-                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">\초\대 \시\각</th>
-                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">\만\료 \시\각</th>
-                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">\수\락 \시\각</th>
-                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">\수\락 \사\용\자</th>
-                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">\재\발\송</th>
-                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">\액\션</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">이메일</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">권한</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">상태</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">초대 시각</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">만료 시각</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">수락 시각</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">수락 사용자</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">재발송</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">액션</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200">
                       {invitations.length === 0 && (
                         <tr>
                           <td colSpan={9} className="px-6 py-10 text-center text-sm text-gray-500">
-                            \선\택\한 \상\태\의 \초\대\가 \없\습\니\다.
+                            선택한 상태의 초대가 없습니다.
                           </td>
                         </tr>
                       )}
