@@ -3,7 +3,6 @@ import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
 import {
   Plus,
-  MapPin,
   Upload,
   Download,
   FileSpreadsheet,
@@ -16,6 +15,7 @@ import {
 import Papa from 'papaparse';
 import { toast } from 'sonner';
 import { KakaoGeofenceInput, type KakaoGeofenceShape } from '../components/KakaoGeofenceInput';
+import { KakaoGeofenceOverviewMap } from '../components/KakaoGeofenceOverviewMap';
 import { PageStateBoundary } from '../components/PageStateBoundary';
 import {
   getCollectionFromPayload,
@@ -3131,13 +3131,7 @@ export default function Settings() {
                   </button>
                 </div>
 
-                <div className="flex h-[320px] w-full items-center justify-center rounded-lg border-2 border-dashed border-gray-300 bg-gray-100">
-                  <div className="text-center">
-                    <MapPin className="mx-auto mb-3 h-16 w-16 text-gray-400" />
-                    <p className="font-medium text-gray-600">지도 영역</p>
-                    <p className="mt-1 text-sm text-gray-500">지오펜스 위치가 여기에 표시됩니다</p>
-                  </div>
-                </div>
+                <KakaoGeofenceOverviewMap geofences={geofences} height={320} />
               </div>
 
               {isGeofenceEditorOpen && (
