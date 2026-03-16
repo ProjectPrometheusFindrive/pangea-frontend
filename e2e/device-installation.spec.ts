@@ -65,7 +65,7 @@ test.describe('BK-091 Premium Installation E2E', () => {
       handlers: {
         'GET /api/v2/assets': async ({ route }) => {
           await fulfillSuccess(route, {
-            items: [{ vin: 'KMH12A34560000001', vehicleNumber: '12가3456', model: '쏘나타', year: 2024 }],
+            items: [{ vin: 'KMH12A34560000001', vehicleNumber: 'KMH12A34560000001', model: '쏘나타', year: 2024 }],
             total: 1,
           });
         },
@@ -124,7 +124,7 @@ test.describe('BK-091 Premium Installation E2E', () => {
       handlers: {
         'GET /api/v2/assets': async ({ route }) => {
           await fulfillSuccess(route, {
-            items: [{ vin: 'KMH12A34560000001', vehicleNumber: '12가3456', model: '쏘나타', year: 2024 }],
+            items: [{ vin: 'KMH12A34560000001', vehicleNumber: 'KMH12A34560000001', model: '쏘나타', year: 2024 }],
             total: 1,
           });
         },
@@ -155,7 +155,7 @@ test.describe('BK-091 Premium Installation E2E', () => {
       handlers: {
         'GET /api/v2/assets': async ({ route }) => {
           await fulfillSuccess(route, {
-            items: [{ vin: 'KMH12A34560000001', vehicleNumber: '12가3456', model: '쏘나타', year: 2024 }],
+            items: [{ vin: 'KMH12A34560000001', vehicleNumber: 'KMH12A34560000001', model: '쏘나타', year: 2024 }],
             total: 1,
           });
         },
