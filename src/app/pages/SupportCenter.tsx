@@ -1715,7 +1715,8 @@ function SupportTicketSubmitView({
                 </label>
                 <input
                   id="support-contact-phone"
-                  type="text"
+                  type="tel"
+                  inputMode="tel"
                   value={contactPhone}
                   onChange={(event) => {
                     setContactPhone(event.target.value);
