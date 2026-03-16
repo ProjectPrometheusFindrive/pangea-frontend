@@ -1,12 +1,14 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 export type KakaoGeofenceShape = 'circle' | 'polygon';
+
+export interface GeofencePoint { lat: number; lng: number; }
 
 interface KakaoGeofenceInputErrors {
   lat?: string;
   lng?: string;
   radiusMeter?: string;
-  pointsText?: string;
+  polygon?: string;
 }
 
 interface KakaoGeofenceInputProps {
@@ -14,43 +16,26 @@ interface KakaoGeofenceInputProps {
   lat: string;
   lng: string;
   radiusMeter: string;
-  pointsText: string;
+  polygonPoints?: GeofencePoint[];
   disabled?: boolean;
   shapeLocked?: boolean;
   errors?: KakaoGeofenceInputErrors;
   onShapeChange: (shape: KakaoGeofenceShape) => void;
-  onPointsTextChange: (value: string) => void;
+  onPolygonChange: (points: GeofencePoint[]) => void;
+  onCenterChange?: (lat: number, lng: number) => void;
+  onRadiusChange?: (radiusMeter: number) => void;
 }
 
-function parsePreviewPoints(pointsText: string): Array<{ lat: string; lng: string }> {
-  return pointsText
-    .split(/\r?\n/u)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => {
-      const tokens = line.split(',').map((token) => token.trim());
-      return {
-        lat: tokens[0] ?? '',
-        lng: tokens[1] ?? '',
-      };
-    });
+function haversineMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371000;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-function parsePointsFromText(text: string): Array<{ lat: number; lng: number }> {
-  return text
-    .split(/\r?\n/u)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .flatMap((line) => {
-      const tokens = line.split(',').map((t) => t.trim());
-      const lat = parseFloat(tokens[0] ?? '');
-      const lng = parseFloat(tokens[1] ?? '');
-      if (!isNaN(lat) && !isNaN(lng)) {
-        return [{ lat, lng }];
-      }
-      return [];
-    });
-}
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 function toLatLng(pt: any): { lat: number; lng: number } | null {
@@ -64,24 +49,50 @@ function toLatLng(pt: any): { lat: number; lng: number } | null {
   if (typeof pt.lat === 'number' && typeof pt.lng === 'number') {
     return { lat: pt.lat, lng: pt.lng };
   }
+  // Kakao DrawingManager polygon point format: { x: lng, y: lat }
+  if (typeof pt.y === 'number' && typeof pt.x === 'number') {
+    return { lat: pt.y, lng: pt.x };
+  }
   return null;
+}
+
+/**
+ * Kakao Maps getPath() returns an MVCArray which has getLength()/getAt()
+ * but is NOT a native Array (Array.isArray returns false).
+ * This helper converts any array-like (MVCArray, native Array, iterable) to a plain array.
+ */
+function toPlainArray(arrLike: any): any[] {
+  if (!arrLike) return [];
+  if (Array.isArray(arrLike)) return arrLike;
+  // MVCArray: has getLength() and getAt()
+  if (typeof arrLike.getLength === 'function' && typeof arrLike.getAt === 'function') {
+    const result: any[] = [];
+    const len = arrLike.getLength() as number;
+    for (let i = 0; i < len; i++) result.push(arrLike.getAt(i));
+    return result;
+  }
+  // getArray() fallback
+  if (typeof arrLike.getArray === 'function') {
+    const inner = arrLike.getArray();
+    if (Array.isArray(inner)) return inner;
+  }
+  // Last resort: try Array.from
+  try { return Array.from(arrLike as Iterable<any>); } catch { return []; }
 }
 
 function extractPolygonPath(poly: any): Array<{ lat: number; lng: number }> {
   try {
     if (typeof poly.getPath === 'function') {
-      const path = poly.getPath();
-      const arr = typeof path?.getArray === 'function' ? path.getArray() : path;
-      return (Array.isArray(arr) ? arr : []).map(toLatLng).filter(Boolean) as Array<{ lat: number; lng: number }>;
+      return toPlainArray(poly.getPath()).map(toLatLng).filter(Boolean) as Array<{ lat: number; lng: number }>;
     }
     if (typeof poly.getPoints === 'function') {
-      return (poly.getPoints() as any[]).map(toLatLng).filter(Boolean) as Array<{ lat: number; lng: number }>;
+      return toPlainArray(poly.getPoints()).map(toLatLng).filter(Boolean) as Array<{ lat: number; lng: number }>;
     }
-    if (Array.isArray(poly.path)) {
-      return (poly.path as any[]).map(toLatLng).filter(Boolean) as Array<{ lat: number; lng: number }>;
+    if (poly.path != null) {
+      return toPlainArray(poly.path).map(toLatLng).filter(Boolean) as Array<{ lat: number; lng: number }>;
     }
-    if (Array.isArray(poly.points)) {
-      return (poly.points as any[]).map(toLatLng).filter(Boolean) as Array<{ lat: number; lng: number }>;
+    if (poly.points != null) {
+      return toPlainArray(poly.points).map(toLatLng).filter(Boolean) as Array<{ lat: number; lng: number }>;
     }
   } catch {
     // ignore
@@ -95,12 +106,14 @@ export function KakaoGeofenceInput({
   lat,
   lng,
   radiusMeter,
-  pointsText,
+  polygonPoints,
   disabled = false,
   shapeLocked = false,
   errors,
   onShapeChange,
-  onPointsTextChange,
+  onPolygonChange,
+  onCenterChange,
+  onRadiusChange,
 }: KakaoGeofenceInputProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -111,14 +124,32 @@ export function KakaoGeofenceInput({
   const existingPolygonsRef = useRef<any[]>([]);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const circleOverlayRef = useRef<any>(null);
-  const onPointsTextChangeRef = useRef(onPointsTextChange);
-  onPointsTextChangeRef.current = onPointsTextChange;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const circleCenterMarkerRef = useRef<any>(null);
+  const circleDrawingRef = useRef<{ lat: number; lng: number } | null>(null);
+  const onPolygonChangeRef = useRef(onPolygonChange);
+  onPolygonChangeRef.current = onPolygonChange;
+  // Exposed so mouseup handler can call syncFromData without recreating DM
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const syncFromDataRef = useRef<(() => void) | null>(null);
+  const onCenterChangeRef = useRef(onCenterChange);
+  onCenterChangeRef.current = onCenterChange;
+  const onRadiusChangeRef = useRef(onRadiusChange);
+  onRadiusChangeRef.current = onRadiusChange;
+  const shapeRef = useRef(shape);
+  shapeRef.current = shape;
+  // Capture initial polygonPoints for one-time map load (editing existing geofence).
+  // Never updated after mount — prevents feedback loop when user draws.
+  const initialPolygonPointsRef = useRef(polygonPoints);
+
+  const [circleDrawingPhase, setCircleDrawingPhase] = useState<'idle' | 'setting-radius'>('idle');
 
   const [isMapsReady, setIsMapsReady] = useState(false);
   const [isDrawingReady, setIsDrawingReady] = useState(false);
   const [isMapInitialized, setIsMapInitialized] = useState(false);
-
-  const previewPoints = useMemo(() => parsePreviewPoints(pointsText), [pointsText]);
+  const [drawnPointCount, setDrawnPointCount] = useState(
+    Array.isArray(polygonPoints) ? polygonPoints.length : 0,
+  );
 
   // Load Kakao Maps SDK
   useEffect(() => {
@@ -249,22 +280,50 @@ export function KakaoGeofenceInput({
       });
       drawingManagerRef.current = dm;
 
-      const syncToText = () => {
+      const syncFromData = () => {
         try {
           const data = dm.getData();
-          if (!Array.isArray(data.polygon) || data.polygon.length === 0) return;
-          const paths = data.polygon.map(extractPolygonPath).filter((pts: Array<{ lat: number; lng: number }>) => pts.length > 0);
-          if (paths.length === 0) return;
-          const text = (paths[0] as Array<{ lat: number; lng: number }>).map((p) => `${p.lat},${p.lng}`).join('\n');
-          onPointsTextChangeRef.current(text);
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const polygons: any[] = Array.isArray(data?.polygon) ? data.polygon : [];
+          if (polygons.length === 0) {
+            onPolygonChangeRef.current([]);
+            setDrawnPointCount(0);
+            return;
+          }
+          const paths = polygons.map(extractPolygonPath).filter((pts: Array<{ lat: number; lng: number }>) => pts.length > 0);
+          if (paths.length === 0) {
+            onPolygonChangeRef.current([]);
+            setDrawnPointCount(0);
+            return;
+          }
+          const pts = paths[0] as GeofencePoint[];
+          onPolygonChangeRef.current(pts);
+          setDrawnPointCount(pts.length);
         } catch (error) {
-          console.error('Error syncing drawing data:', error);
+          console.error('syncFromData error:', error);
         }
       };
 
-      kakao.maps.event.addListener(dm, 'drawend', syncToText);
-      kakao.maps.event.addListener(dm, 'remove', syncToText);
-      kakao.maps.event.addListener(dm, 'edit', syncToText);
+      // drawend receives the just-drawn overlay as first argument.
+      // We try direct extraction first, then fall back to getData() with a delay
+      // because the DM may not have committed the polygon to its data store yet.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const onDrawEnd = (overlay: any) => {
+        const pts = overlay ? extractPolygonPath(overlay) : [];
+        if (pts.length >= 3) {
+          onPolygonChangeRef.current(pts);
+          setDrawnPointCount(pts.length);
+        } else {
+          // Give the DM a tick to commit the polygon, then sync from getData()
+          setTimeout(syncFromData, 50);
+        }
+      };
+
+      syncFromDataRef.current = syncFromData;
+
+      kakao.maps.event.addListener(dm, 'drawend', onDrawEnd);
+      kakao.maps.event.addListener(dm, 'remove', () => setTimeout(syncFromData, 50));
+      kakao.maps.event.addListener(dm, 'edit', () => setTimeout(syncFromData, 50));
 
       return () => {
         try { dm.cancel(); } catch { /* ignore */ }
@@ -276,20 +335,101 @@ export function KakaoGeofenceInput({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isMapInitialized, isDrawingReady, disabled]);
 
-  // Activate/deactivate polygon drawing based on shape
+  // Activate/deactivate polygon drawing based on shape (with delay for DM readiness).
+  // When shapeLocked (editing existing geofence), skip dm.select() — dm.put() already
+  // places the polygon in editable state; calling select() would start a new drawing session.
   useEffect(() => {
-    const dm = drawingManagerRef.current;
-    if (!dm) return;
+    const timer = setTimeout(() => {
+      const dm = drawingManagerRef.current;
+      if (!dm) return;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const kakao = (window as any).kakao;
+      try {
+        if (shape === 'polygon' && !shapeLocked) {
+          dm.select(kakao.maps.drawing.OverlayType.POLYGON);
+        } else if (shape !== 'polygon') {
+          dm.cancel();
+        }
+      } catch { /* ignore */ }
+    }, 150);
+    return () => clearTimeout(timer);
+  }, [shape, isMapInitialized, isDrawingReady, shapeLocked]);
+
+  // Circle mode: 1st click = set center, mousemove = preview radius, 2nd click = confirm radius
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !isMapInitialized || shape !== 'circle' || disabled) return;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const kakao = (window as any).kakao;
-    try {
-      if (shape === 'polygon') {
-        dm.select(kakao.maps.drawing.OverlayType.POLYGON);
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const clickHandler = (mouseEvent: any) => {
+      const latlng = mouseEvent.latLng;
+      const clickLat = latlng.getLat() as number;
+      const clickLng = latlng.getLng() as number;
+
+      if (!circleDrawingRef.current) {
+        // Phase 1: set center
+        circleDrawingRef.current = { lat: clickLat, lng: clickLng };
+        setCircleDrawingPhase('setting-radius');
+        onCenterChangeRef.current?.(clickLat, clickLng);
+
+        // Place/move marker at center
+        if (circleCenterMarkerRef.current) {
+          circleCenterMarkerRef.current.setPosition(latlng);
+        } else {
+          circleCenterMarkerRef.current = new kakao.maps.Marker({ position: latlng, map });
+        }
+
+        // Create circle with tiny initial radius so it's visible
+        if (circleOverlayRef.current) {
+          circleOverlayRef.current.setPosition(latlng);
+          circleOverlayRef.current.setRadius(1);
+        } else {
+          const circle = new kakao.maps.Circle({
+            center: latlng,
+            radius: 1,
+            strokeWeight: 3, strokeColor: '#0066ff', strokeOpacity: 0.8, strokeStyle: 'solid',
+            fillColor: '#0066ff', fillOpacity: 0.15,
+          });
+          circle.setMap(map);
+          circleOverlayRef.current = circle;
+        }
       } else {
-        dm.cancel();
+        // Phase 2: confirm radius
+        const dist = Math.round(haversineMeters(
+          circleDrawingRef.current.lat, circleDrawingRef.current.lng,
+          clickLat, clickLng,
+        ));
+        const radius = Math.max(dist, 1);
+        circleDrawingRef.current = null;
+        setCircleDrawingPhase('idle');
+        onRadiusChangeRef.current?.(radius);
+        if (circleOverlayRef.current) circleOverlayRef.current.setRadius(radius);
       }
-    } catch { /* ignore */ }
-  }, [shape, isMapInitialized, isDrawingReady]);
+    };
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const moveHandler = (mouseEvent: any) => {
+      if (!circleDrawingRef.current || !circleOverlayRef.current) return;
+      const latlng = mouseEvent.latLng;
+      const dist = Math.max(Math.round(haversineMeters(
+        circleDrawingRef.current.lat, circleDrawingRef.current.lng,
+        latlng.getLat() as number, latlng.getLng() as number,
+      )), 1);
+      circleOverlayRef.current.setRadius(dist);
+    };
+
+    kakao.maps.event.addListener(map, 'click', clickHandler);
+    kakao.maps.event.addListener(map, 'mousemove', moveHandler);
+    return () => {
+      kakao.maps.event.removeListener(map, 'click', clickHandler);
+      kakao.maps.event.removeListener(map, 'mousemove', moveHandler);
+      circleDrawingRef.current = null;
+      setCircleDrawingPhase('idle');
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shape, isMapInitialized, disabled]);
 
   // Helper: clear polygon overlays from map
   const clearPolygonOverlays = () => {
@@ -313,14 +453,29 @@ export function KakaoGeofenceInput({
     existingPolygonsRef.current = [];
   };
 
-  // Load polygon from pointsText into map
+  // When editing an existing polygon (shapeLocked), sync state after every pointerup on
+  // the map container. DrawingManager does not fire any event when a vertex is dragged,
+  // so we use a native DOM pointerup to detect when a drag has finished.
+  useEffect(() => {
+    if (!isMapInitialized || !shapeLocked || shape !== 'polygon') return;
+    const container = mapContainerRef.current;
+    if (!container) return;
+    const handler = () => { setTimeout(() => syncFromDataRef.current?.(), 150); };
+    container.addEventListener('pointerup', handler);
+    return () => { container.removeEventListener('pointerup', handler); };
+  }, [isMapInitialized, shapeLocked, shape]);
+
+  // Load polygon from initial polygonPoints prop into map (one-time, for editing existing geofence).
+  // Uses initialPolygonPointsRef so user drawing doesn't re-trigger this effect.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || shape !== 'polygon' || !isMapInitialized) return;
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const kakao = (window as any).kakao;
-    const points = parsePointsFromText(pointsText);
+    const points = Array.isArray(initialPolygonPointsRef.current)
+      ? initialPolygonPointsRef.current.filter((p) => !isNaN(p.lat) && !isNaN(p.lng))
+      : [];
     clearPolygonOverlays();
 
     if (points.length < 3) return;
@@ -330,10 +485,8 @@ export function KakaoGeofenceInput({
 
     if (dm) {
       try {
+        // dm.put() places the polygon in editable state; no need to call dm.select()
         dm.put(kakao.maps.drawing.OverlayType.POLYGON, latLngs);
-        setTimeout(() => {
-          try { dm.select(kakao.maps.drawing.OverlayType.POLYGON); } catch { /* ignore */ }
-        }, 100);
       } catch {
         const polygon = new kakao.maps.Polygon({
           path: latLngs,
@@ -357,12 +510,13 @@ export function KakaoGeofenceInput({
     latLngs.forEach((ll: unknown) => bounds.extend(ll));
     if (!bounds.isEmpty()) map.setBounds(bounds);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pointsText, shape, isDrawingReady, isMapInitialized]);
+  }, [shape, isDrawingReady, isMapInitialized]); // intentionally omit polygonPoints — uses initialPolygonPointsRef
 
-  // Circle preview on map
+  // Circle preview from props (editing existing geofence)
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || shape !== 'circle' || !isMapInitialized) return;
+    // Skip while user is actively drawing (mouse interaction handles it directly)
+    if (!map || shape !== 'circle' || !isMapInitialized || circleDrawingRef.current) return;
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const kakao = (window as any).kakao;
@@ -375,6 +529,10 @@ export function KakaoGeofenceInput({
         circleOverlayRef.current.setMap(null);
         circleOverlayRef.current = null;
       }
+      if (circleCenterMarkerRef.current) {
+        circleCenterMarkerRef.current.setMap(null);
+        circleCenterMarkerRef.current = null;
+      }
       return;
     }
 
@@ -386,23 +544,37 @@ export function KakaoGeofenceInput({
       const circle = new kakao.maps.Circle({
         center,
         radius: radiusNum,
-        strokeWeight: 4, strokeColor: '#0066ff', strokeOpacity: 0.8, strokeStyle: 'solid',
-        fillColor: '#0066ff', fillOpacity: 0.2,
+        strokeWeight: 3, strokeColor: '#0066ff', strokeOpacity: 0.8, strokeStyle: 'solid',
+        fillColor: '#0066ff', fillOpacity: 0.15,
       });
       circle.setMap(map);
       circleOverlayRef.current = circle;
     }
-    // Zoom level based on radius: smaller radius → higher zoom
+    // Place marker at center
+    if (circleCenterMarkerRef.current) {
+      circleCenterMarkerRef.current.setPosition(center);
+    } else {
+      circleCenterMarkerRef.current = new kakao.maps.Marker({ position: center, map });
+    }
+    // Auto-zoom based on radius
     const level = radiusNum <= 200 ? 4 : radiusNum <= 500 ? 5 : radiusNum <= 1000 ? 6 : radiusNum <= 3000 ? 7 : radiusNum <= 10000 ? 9 : 11;
     map.setLevel(level);
     map.setCenter(center);
   }, [lat, lng, radiusMeter, shape, isMapInitialized]);
 
-  // Remove circle when switching to polygon
+  // Remove circle + marker when switching to polygon
   useEffect(() => {
-    if (shape !== 'circle' && circleOverlayRef.current) {
-      circleOverlayRef.current.setMap(null);
-      circleOverlayRef.current = null;
+    if (shape !== 'circle') {
+      if (circleOverlayRef.current) {
+        try { circleOverlayRef.current.setMap(null); } catch { /* ignore */ }
+        circleOverlayRef.current = null;
+      }
+      if (circleCenterMarkerRef.current) {
+        try { circleCenterMarkerRef.current.setMap(null); } catch { /* ignore */ }
+        circleCenterMarkerRef.current = null;
+      }
+      circleDrawingRef.current = null;
+      setCircleDrawingPhase('idle');
     }
   }, [shape]);
 
@@ -413,6 +585,10 @@ export function KakaoGeofenceInput({
       if (circleOverlayRef.current) {
         try { circleOverlayRef.current.setMap(null); } catch { /* ignore */ }
         circleOverlayRef.current = null;
+      }
+      if (circleCenterMarkerRef.current) {
+        try { circleCenterMarkerRef.current.setMap(null); } catch { /* ignore */ }
+        circleCenterMarkerRef.current = null;
       }
       if (drawingManagerRef.current) {
         try { drawingManagerRef.current.cancel(); } catch { /* ignore */ }
@@ -460,73 +636,39 @@ export function KakaoGeofenceInput({
         {!isMapsReady && (
           <div className="mb-2 text-sm text-gray-500">카카오 지도를 로딩 중입니다...</div>
         )}
-        {isMapsReady && !disabled && shape === 'polygon' && (
+        {isMapsReady && !disabled && (
           <div className="mb-2 flex items-center gap-2 rounded-lg bg-blue-50 px-3 py-2 text-xs text-blue-800">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <circle cx="12" cy="12" r="10" />
               <line x1="12" y1="16" x2="12" y2="12" />
               <line x1="12" y1="8" x2="12.01" y2="8" />
             </svg>
-            <span>지도를 클릭해 점을 추가하고, 마지막 점을 한 번 더 클릭하면 그리기가 종료됩니다.</span>
+            {shape === 'polygon'
+              ? shapeLocked
+                ? <span>꼭짓점을 드래그해 위치를 조정하거나, ✕ 버튼으로 삭제 후 새로 그릴 수 있습니다.</span>
+                : <span>지도를 클릭해 꼭짓점을 추가하고, 마지막 점을 한 번 더 클릭하면 그리기가 종료됩니다.</span>
+              : circleDrawingPhase === 'setting-radius'
+                ? <span>마우스를 움직여 반경을 조절하고, 클릭해 확정하세요.</span>
+                : <span>지도를 클릭해 원형 지오펜스의 중심을 설정하세요.</span>
+            }
           </div>
         )}
 
         <div
           ref={mapContainerRef}
           style={{ height: '400px' }}
-          className={`w-full rounded-lg border border-gray-300 ${!disabled && shape === 'polygon' ? 'cursor-crosshair' : ''}`}
+          className={`w-full rounded-lg border border-gray-300 ${!disabled ? 'cursor-crosshair' : ''}`}
         />
       </div>
 
-      {shape === 'polygon' ? (
-        <div className="rounded-xl border border-blue-100 bg-white p-4">
-          <label className="mb-1 block text-sm font-medium text-blue-900">다각형 꼭짓점 *</label>
-          <textarea
-            value={pointsText}
-            disabled={disabled}
-            onChange={(event) => onPointsTextChange(event.target.value)}
-            rows={6}
-            spellCheck={false}
-            placeholder={'37.566500,126.978000\n37.567100,126.979300\n37.565700,126.980200'}
-            className="w-full rounded-lg border border-blue-200 px-3 py-2 font-mono text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 disabled:bg-gray-100"
-          />
-          {errors?.pointsText && <p className="mt-1 text-xs text-red-600">{errors.pointsText}</p>}
-
-          <div className="mt-3 rounded-lg bg-blue-50 px-3 py-2 text-sm text-blue-800">
-            한 줄에 `lat,lng` 형식으로 입력하세요. 최소 3개의 꼭짓점이 필요합니다.
-          </div>
-
-          {previewPoints.length > 0 && (
-            <div className="mt-4 space-y-2">
-              <p className="text-sm font-medium text-blue-900">
-                꼭짓점: {previewPoints.length}개
-              </p>
-              <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
-                {previewPoints.map((point, index) => (
-                  <div
-                    key={`${point.lat}-${point.lng}-${index}`}
-                    className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-800"
-                  >
-                    <span className="font-semibold">P{index + 1}</span>
-                    {' '}
-                    {point.lat || '-'}, {point.lng || '-'}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      ) : (
-        <div className="rounded-xl border border-blue-100 bg-white p-4 text-sm text-blue-800">
-          <p>원형 지오펜스는 아래 중심 좌표와 반경 입력란을 사용합니다.</p>
-          <p className="mt-2 text-xs text-blue-700">
-            현재 중심: {lat || '-'}, {lng || '-'} / 반경 {radiusMeter || '-'}m
-          </p>
-          {(errors?.lat || errors?.lng || errors?.radiusMeter) && (
-            <p className="mt-2 text-xs text-red-600">
-              {errors?.lat ?? errors?.lng ?? errors?.radiusMeter}
-            </p>
-          )}
+      {shape === 'polygon' && (
+        <div className="rounded-xl border border-blue-100 bg-white px-4 py-3 text-sm">
+          {errors?.polygon
+            ? <p className="text-red-600">{errors.polygon}</p>
+            : drawnPointCount >= 3
+              ? <span className="text-blue-700">꼭짓점 {drawnPointCount}개 · 지도에서 수정 가능합니다.</span>
+              : <span className="text-blue-500">지도에서 다각형을 그려주세요. (최소 3개 꼭짓점)</span>
+          }
         </div>
       )}
     </div>

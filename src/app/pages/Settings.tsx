@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 import Papa from 'papaparse';
 import { toast } from 'sonner';
-import { KakaoGeofenceInput, type KakaoGeofenceShape } from '../components/KakaoGeofenceInput';
+import { KakaoGeofenceInput, type KakaoGeofenceShape, type GeofencePoint } from '../components/KakaoGeofenceInput';
 import { KakaoGeofenceOverviewMap } from '../components/KakaoGeofenceOverviewMap';
 import { PageStateBoundary } from '../components/PageStateBoundary';
 import {
@@ -79,7 +79,7 @@ type TabType = 'bulk' | 'company' | 'geofence' | 'accounts' | 'support';
 type UploadType = 'vehicles' | 'reservations' | 'ocr';
 type CurrentDataType = Extract<UploadType, 'vehicles' | 'reservations'>;
 type CompanyField = 'name' | 'businessNumber' | 'phone' | 'email' | 'address';
-type GeofenceField = 'name' | 'lat' | 'lng' | 'radiusMeter' | 'pointsText';
+type GeofenceField = 'name' | 'lat' | 'lng' | 'radiusMeter' | 'polygon';
 type MemberRoleField = 'role';
 type InvitationField = 'email' | 'role' | 'companyId';
 type InvitationStatusFilter = 'pending' | 'accepted' | 'expired' | 'revoked' | 'all';
@@ -113,7 +113,7 @@ interface GeofenceFormState {
   lat: string;
   lng: string;
   radiusMeter: string;
-  pointsText: string;
+  polygonPoints: GeofencePoint[];
   active: boolean;
 }
 
@@ -167,7 +167,7 @@ const DEFAULT_GEOFENCE_FORM_STATE: GeofenceFormState = {
   lat: '',
   lng: '',
   radiusMeter: '',
-  pointsText: '',
+  polygonPoints: [],
   active: true,
 };
 
@@ -450,56 +450,11 @@ function toGeofenceForm(geofence: SettingsGeofence): GeofenceFormState {
     lat: String(geofence.center.lat),
     lng: String(geofence.center.lng),
     radiusMeter: hasPolygonPoints && geofence.radiusMeter <= 0 ? '' : String(geofence.radiusMeter),
-    pointsText: hasPolygonPoints
-      ? geofence.points.map((point) => `${point.lat},${point.lng}`).join('\n')
-      : '',
+    polygonPoints: hasPolygonPoints ? (geofence.points ?? []) : [],
     active: geofence.active,
   };
 }
 
-function parseGeofencePolygonPoints(pointsText: string): {
-  points: SettingsGeofencePoint[];
-  error: string | null;
-} {
-  const lines = pointsText
-    .split(/\r?\n/u)
-    .map((line) => line.trim())
-    .filter(Boolean);
-
-  if (lines.length < 3) {
-    return {
-      points: [],
-      error: '꼭짓점 좌표는 최소 3개가 필요합니다.',
-    };
-  }
-
-  const points: SettingsGeofencePoint[] = [];
-  for (const [index, line] of lines.entries()) {
-    const tokens = line.split(',').map((token) => token.trim());
-    if (tokens.length !== 2) {
-      return {
-        points: [],
-        error: `${index + 1}번째 줄은 lat,lng 형식이어야 합니다.`,
-      };
-    }
-
-    const lat = toNumberValue(tokens[0]);
-    const lng = toNumberValue(tokens[1]);
-    if (lat === null || lng === null) {
-      return {
-        points: [],
-        error: `${index + 1}번째 줄 좌표를 숫자로 입력해 주세요.`,
-      };
-    }
-
-    points.push({ lat, lng });
-  }
-
-  return {
-    points,
-    error: null,
-  };
-}
 
 function areGeofencePointsEqual(
   left: SettingsGeofencePoint[] | undefined,
@@ -1209,7 +1164,7 @@ export default function Settings() {
         || Boolean(geofenceForm.lat.trim())
         || Boolean(geofenceForm.lng.trim())
         || Boolean(geofenceForm.radiusMeter.trim())
-        || Boolean(geofenceForm.pointsText.trim())
+        || geofenceForm.polygonPoints.length > 0
         || geofenceForm.active !== DEFAULT_GEOFENCE_FORM_STATE.active
       );
     }
@@ -1221,11 +1176,10 @@ export default function Settings() {
     const baseline = toGeofenceForm(selectedEditingGeofence);
     return (
       geofenceForm.shape !== baseline.shape
-      ||
-      geofenceForm.lat.trim() !== baseline.lat.trim()
+      || geofenceForm.lat.trim() !== baseline.lat.trim()
       || geofenceForm.lng.trim() !== baseline.lng.trim()
       || geofenceForm.radiusMeter.trim() !== baseline.radiusMeter.trim()
-      || geofenceForm.pointsText.trim() !== baseline.pointsText.trim()
+      || !areGeofencePointsEqual(geofenceForm.polygonPoints, baseline.polygonPoints)
       || geofenceForm.active !== baseline.active
     );
   }, [geofenceEditorMode, geofenceForm, isGeofenceEditorOpen, selectedEditingGeofence]);
@@ -1495,11 +1449,8 @@ export default function Settings() {
     const latValue = toNumberValue(geofenceForm.lat.trim());
     const lngValue = toNumberValue(geofenceForm.lng.trim());
     const radiusValue = toNumberValue(geofenceForm.radiusMeter.trim());
-    const parsedPolygon = geofenceForm.shape === 'polygon'
-      ? parseGeofencePolygonPoints(geofenceForm.pointsText)
-      : { points: [], error: null };
-    if (geofenceForm.shape === 'polygon' && parsedPolygon.error) {
-      fieldErrors.pointsText = parsedPolygon.error;
+    if (geofenceForm.shape === 'polygon' && geofenceForm.polygonPoints.length < 3) {
+      fieldErrors.polygon = '지도에서 다각형을 그려주세요. (최소 3개 꼭짓점)';
     }
 
     if (geofenceEditorMode === 'create' && !trimmedName) {
@@ -1532,7 +1483,7 @@ export default function Settings() {
       mutationTask = geofenceForm.shape === 'polygon'
         ? createSettingsGeofence({
           name: trimmedName,
-          points: parsedPolygon.points,
+          points: geofenceForm.polygonPoints,
           active: geofenceForm.active,
         }, {
           companyId: settingsCompanyId ?? undefined,
@@ -1560,8 +1511,8 @@ export default function Settings() {
         points?: SettingsGeofencePoint[];
         active?: boolean;
       } = {};
-      if (geofenceForm.shape === 'polygon' && !areGeofencePointsEqual(selectedEditingGeofence.points, parsedPolygon.points)) {
-        payload.points = parsedPolygon.points;
+      if (geofenceForm.shape === 'polygon' && !areGeofencePointsEqual(selectedEditingGeofence.points, geofenceForm.polygonPoints)) {
+        payload.points = geofenceForm.polygonPoints;
       }
 
       if (
@@ -1639,7 +1590,7 @@ export default function Settings() {
             'center.lng': 'lng',
             lng: 'lng',
             radiusMeter: 'radiusMeter',
-            points: 'pointsText',
+            points: 'polygon',
           });
           if (Object.keys(mappedErrors).length > 0) {
             setGeofenceFieldErrors(mappedErrors);
@@ -3117,30 +3068,32 @@ export default function Settings() {
                 </div>
               )}
 
-              <div className="rounded-xl bg-white p-6 shadow-sm">
-                <div className="mb-4 flex items-center justify-between">
-                  <h2 className="text-base font-semibold text-[#1e2939]">지오펜스 지도</h2>
-                  <button
-                    type="button"
-                    onClick={openCreateGeofenceEditor}
-                    disabled={!canEditSettings || isGeofenceSaving}
-                    className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    <Plus className="h-4 w-4" />
-                    지오펜스 생성
-                  </button>
-                </div>
+              {!isGeofenceEditorOpen && (
+                <div className="rounded-xl bg-white p-6 shadow-sm">
+                  <div className="mb-4 flex items-center justify-between">
+                    <h2 className="text-base font-semibold text-[#1e2939]">지오펜스 지도</h2>
+                    <button
+                      type="button"
+                      onClick={openCreateGeofenceEditor}
+                      disabled={!canEditSettings || isGeofenceSaving}
+                      className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <Plus className="h-4 w-4" />
+                      지오펜스 생성
+                    </button>
+                  </div>
 
-                <KakaoGeofenceOverviewMap geofences={geofences} height={320} />
-              </div>
+                  <KakaoGeofenceOverviewMap geofences={geofences} height={320} />
+                </div>
+              )}
 
               {isGeofenceEditorOpen && (
                 <div className="rounded-xl border border-blue-200 bg-blue-50 p-6">
                   <h3 className="mb-4 text-base font-semibold text-blue-900">
                     {geofenceEditorMode === 'create' ? '지오펜스 생성' : `지오펜스 편집 (${selectedEditingGeofence?.name ?? '-'})`}
                   </h3>
-                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                    <div>
+                  <div className="mb-4 flex items-start gap-3">
+                    <div className="flex-1">
                       <label className="mb-1 block text-sm font-medium text-blue-900">이름 *</label>
                       <input
                         type="text"
@@ -3157,135 +3110,93 @@ export default function Settings() {
                       />
                       {geofenceFieldErrors.name && <p className="mt-1 text-xs text-red-600">{geofenceFieldErrors.name}</p>}
                     </div>
-                    <div className="md:col-span-2">
+                    <div className="flex shrink-0 items-center gap-2 pt-6">
+                      <button
+                        type="button"
+                        onClick={closeGeofenceEditor}
+                        disabled={isGeofenceSaving}
+                        className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        취소
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void handleGeofenceSave();
+                        }}
+                        disabled={!canEditSettings || isGeofenceSaving}
+                        className="inline-flex items-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {isGeofenceSaving ? '저장 중...' : '저장'}
+                      </button>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 gap-4">
+                    <div>
                       <KakaoGeofenceInput
                         shape={geofenceForm.shape}
                         shapeLocked={geofenceEditorMode === 'edit'}
                         lat={geofenceForm.lat}
                         lng={geofenceForm.lng}
                         radiusMeter={geofenceForm.radiusMeter}
-                        pointsText={geofenceForm.pointsText}
+                        polygonPoints={geofenceForm.polygonPoints}
                         disabled={!canEditSettings || isGeofenceSaving}
                         errors={{
                           lat: geofenceFieldErrors.lat,
                           lng: geofenceFieldErrors.lng,
                           radiusMeter: geofenceFieldErrors.radiusMeter,
-                          pointsText: geofenceFieldErrors.pointsText,
+                          polygon: geofenceFieldErrors.polygon,
                         }}
                         onShapeChange={(shape) => {
-                          setGeofenceForm((prevState) => ({ ...prevState, shape }));
+                          setGeofenceForm((prevState) => ({ ...prevState, shape, polygonPoints: [] }));
                           setGeofenceFieldErrors((prevErrors) => ({
                             ...prevErrors,
                             lat: undefined,
                             lng: undefined,
                             radiusMeter: undefined,
-                            pointsText: undefined,
+                            polygon: undefined,
                           }));
                           setGeofenceSaveError(null);
                           setGeofenceSaveSuccess(null);
                           setGeofenceRetryAction(null);
                         }}
-                        onPointsTextChange={(value) => {
-                          setGeofenceForm((prevState) => ({ ...prevState, pointsText: value }));
-                          setGeofenceFieldErrors((prevErrors) => ({ ...prevErrors, pointsText: undefined }));
+                        onPolygonChange={(points) => {
+                          setGeofenceForm((prevState) => ({ ...prevState, polygonPoints: points }));
+                          setGeofenceFieldErrors((prevErrors) => ({ ...prevErrors, polygon: undefined }));
+                          setGeofenceSaveError(null);
+                          setGeofenceSaveSuccess(null);
+                          setGeofenceRetryAction(null);
+                        }}
+                        onCenterChange={(lat, lng) => {
+                          setGeofenceForm((prevState) => ({
+                            ...prevState,
+                            lat: String(lat),
+                            lng: String(lng),
+                          }));
+                          setGeofenceFieldErrors((prevErrors) => ({
+                            ...prevErrors,
+                            lat: undefined,
+                            lng: undefined,
+                          }));
+                          setGeofenceSaveError(null);
+                          setGeofenceSaveSuccess(null);
+                          setGeofenceRetryAction(null);
+                        }}
+                        onRadiusChange={(radiusMeter) => {
+                          setGeofenceForm((prevState) => ({
+                            ...prevState,
+                            radiusMeter: String(radiusMeter),
+                          }));
+                          setGeofenceFieldErrors((prevErrors) => ({
+                            ...prevErrors,
+                            radiusMeter: undefined,
+                          }));
                           setGeofenceSaveError(null);
                           setGeofenceSaveSuccess(null);
                           setGeofenceRetryAction(null);
                         }}
                       />
                     </div>
-                    <div>
-                      <label className="mb-1 block text-sm font-medium text-blue-900">반경 (m) *</label>
-                      <input
-                        type="number"
-                        min={1}
-                        value={geofenceForm.radiusMeter}
-                        disabled={geofenceForm.shape === 'polygon' || !canEditSettings || isGeofenceSaving}
-                        onChange={(event) => {
-                          setGeofenceForm((prevState) => ({ ...prevState, radiusMeter: event.target.value }));
-                          setGeofenceFieldErrors((prevErrors) => ({ ...prevErrors, radiusMeter: undefined }));
-                          setGeofenceSaveError(null);
-                          setGeofenceSaveSuccess(null);
-                          setGeofenceRetryAction(null);
-                        }}
-                        className="w-full rounded-lg border border-blue-200 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 disabled:bg-gray-100"
-                      />
-                      {geofenceFieldErrors.radiusMeter && (
-                        <p className="mt-1 text-xs text-red-600">{geofenceFieldErrors.radiusMeter}</p>
-                      )}
-                    </div>
-                    <div>
-                      <label className="mb-1 block text-sm font-medium text-blue-900">위도 *</label>
-                      <input
-                        type="number"
-                        step="0.000001"
-                        value={geofenceForm.lat}
-                        disabled={geofenceForm.shape === 'polygon' || !canEditSettings || isGeofenceSaving}
-                        onChange={(event) => {
-                          setGeofenceForm((prevState) => ({ ...prevState, lat: event.target.value }));
-                          setGeofenceFieldErrors((prevErrors) => ({ ...prevErrors, lat: undefined }));
-                          setGeofenceSaveError(null);
-                          setGeofenceSaveSuccess(null);
-                          setGeofenceRetryAction(null);
-                        }}
-                        className="w-full rounded-lg border border-blue-200 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 disabled:bg-gray-100"
-                      />
-                      {geofenceFieldErrors.lat && <p className="mt-1 text-xs text-red-600">{geofenceFieldErrors.lat}</p>}
-                    </div>
-                    <div>
-                      <label className="mb-1 block text-sm font-medium text-blue-900">경도 *</label>
-                      <input
-                        type="number"
-                        step="0.000001"
-                        value={geofenceForm.lng}
-                        disabled={geofenceForm.shape === 'polygon' || !canEditSettings || isGeofenceSaving}
-                        onChange={(event) => {
-                          setGeofenceForm((prevState) => ({ ...prevState, lng: event.target.value }));
-                          setGeofenceFieldErrors((prevErrors) => ({ ...prevErrors, lng: undefined }));
-                          setGeofenceSaveError(null);
-                          setGeofenceSaveSuccess(null);
-                          setGeofenceRetryAction(null);
-                        }}
-                        className="w-full rounded-lg border border-blue-200 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 disabled:bg-gray-100"
-                      />
-                      {geofenceFieldErrors.lng && <p className="mt-1 text-xs text-red-600">{geofenceFieldErrors.lng}</p>}
-                    </div>
-                    <div className="md:col-span-2">
-                      <label className="inline-flex items-center gap-2 text-sm text-blue-900">
-                        <input
-                          type="checkbox"
-                          checked={geofenceForm.active}
-                          disabled={!canEditSettings || isGeofenceSaving}
-                          onChange={(event) => {
-                            setGeofenceForm((prevState) => ({ ...prevState, active: event.target.checked }));
-                            setGeofenceSaveError(null);
-                            setGeofenceSaveSuccess(null);
-                            setGeofenceRetryAction(null);
-                          }}
-                        />
-                        활성 상태
-                      </label>
-                    </div>
-                  </div>
-                  <div className="mt-4 flex justify-end gap-2">
-                    <button
-                      type="button"
-                      onClick={closeGeofenceEditor}
-                      disabled={isGeofenceSaving}
-                      className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      취소
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        void handleGeofenceSave();
-                      }}
-                      disabled={!canEditSettings || isGeofenceSaving}
-                      className="inline-flex items-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      {isGeofenceSaving ? '저장 중...' : '저장'}
-                    </button>
                   </div>
                 </div>
               )}
