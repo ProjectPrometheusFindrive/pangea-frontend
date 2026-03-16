@@ -43,7 +43,6 @@ async function fillInstallationForm(page: Page): Promise<void> {
       await vinField.fill('KMH12A34560000001');
     }
   }
-  await page.getByTestId('device-installation-scheduled-at-input').fill('2025-02-20T09:00');
   await page.getByTestId('device-installation-serial-input').fill('DEV-2026-0001');
   await page.getByTestId('device-installation-photo-file-input').setInputFiles(TEST_IMAGE_FILE);
   await page.getByTestId('device-installation-serial-photo-file-input').setInputFiles(TEST_IMAGE_FILE);
@@ -108,8 +107,8 @@ test.describe('BK-091 Premium Installation E2E', () => {
     await fillInstallationForm(page);
     await page.getByTestId('device-installation-submit').click();
 
-    await expect(page.getByTestId('device-installation-submit')).toContainText('장착 신청');
-    await expect(page.getByTestId('device-installation-action-message')).toContainText('장착 신청이 등록되었습니다. 상태가 대기로 반영됩니다.');
+    await expect(page.getByTestId('device-installation-submit')).toContainText('장착 완료');
+    await expect(page.getByTestId('device-installation-action-message')).toContainText('장착 완료가 등록되었습니다.');
     await expect(page.getByRole('table').getByText('KMH12A34560000001')).toBeVisible();
   });
 
