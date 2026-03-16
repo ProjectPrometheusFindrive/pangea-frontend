@@ -14,10 +14,8 @@ import { ACTION_PERMISSIONS } from '../authorization';
 import { ApiError } from '../../services/api';
 import { getAssetsList } from '../../services/assets';
 import {
-  cancelDeviceInstallation,
   createDeviceInstallation,
   getDeviceInstallationList,
-  patchDeviceInstallationStatus,
   type DeviceInstallationItem,
   type DeviceInstallationStatus,
 } from '../../services/deviceInstallations';
@@ -62,7 +60,6 @@ const EMPTY_SUMMARY: DeviceInstallationSummary = {
 const FILTER_OPTIONS: { value: DeviceInstallationStatusFilter; label: string }[] = [
   { value: 'all', label: '전체' },
   { value: 'scheduled', label: '대기' },
-  { value: 'in_progress', label: '진행중' },
   { value: 'completed', label: '완료' },
   { value: 'cancelled', label: '취소' },
 ];
@@ -148,32 +145,6 @@ function formatDateTime(value?: string): string {
   });
 }
 
-function toDateTimeLocalValue(date: Date): string {
-  const pad = (value: number) => String(value).padStart(2, '0');
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
-}
-
-function toIsoDateTime(value: string): string | null {
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
-    return null;
-  }
-  return parsed.toISOString();
-}
-
-function toDateTimeLocalFromValue(value?: string): string | null {
-  if (!value) {
-    return null;
-  }
-
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
-    return null;
-  }
-
-  return toDateTimeLocalValue(parsed);
-}
-
 function toDisplayStatus(status: DeviceInstallationStatus): DeviceInstallationDisplayStatus {
   if (status === 'completed') {
     return 'completed';
@@ -214,16 +185,10 @@ function getStatusBadge(status: DeviceInstallationStatus) {
   return getDisplayStatusBadge(toDisplayStatus(status));
 }
 
-function toActionErrorMessage(action: 'create' | 'cancel' | 'start' | 'complete', error: unknown): string {
+function toActionErrorMessage(error: unknown): string {
   if (error instanceof ApiError) {
     if (error.status === 400) {
-      return action === 'create'
-        ? '입력 값을 확인해 주세요. VIN/예약 시간/사진 형식이 올바른지 확인이 필요합니다.'
-        : action === 'start'
-          ? '작업 시작 요청 값이 유효하지 않습니다.'
-          : action === 'complete'
-            ? '작업 완료 요청 값이 유효하지 않습니다.'
-        : '취소 요청 값이 유효하지 않습니다.';
+      return '입력 값을 확인해 주세요. VIN/사진 형식이 올바른지 확인이 필요합니다.';
     }
     if (error.status === 401) {
       return '세션이 만료되었습니다. 다시 로그인해 주세요.';
@@ -235,13 +200,7 @@ function toActionErrorMessage(action: 'create' | 'cancel' | 'start' | 'complete'
       return '요청한 장착 작업을 찾을 수 없습니다.';
     }
     if (error.status === 409) {
-      return action === 'create'
-        ? '이미 처리 중인 장착 작업입니다. 최신 목록으로 다시 확인해 주세요.'
-        : action === 'start'
-          ? '이미 시작되었거나 진행할 수 없는 작업입니다. 최신 목록을 확인해 주세요.'
-          : action === 'complete'
-            ? '이미 완료되었거나 완료 처리할 수 없는 작업입니다. 최신 목록을 확인해 주세요.'
-        : '이미 취소되었거나 완료된 작업입니다. 최신 상태로 새로고침합니다.';
+      return '이미 처리 중인 장착 작업입니다. 최신 목록으로 다시 확인해 주세요.';
     }
     if (error.status !== undefined && error.status >= 500) {
       return '서버 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.';
@@ -258,18 +217,6 @@ function toActionErrorMessage(action: 'create' | 'cancel' | 'start' | 'complete'
   }
 
   return '요청 처리 중 오류가 발생했습니다.';
-}
-
-function isCancellable(status: DeviceInstallationStatus): boolean {
-  return status === 'scheduled' || status === 'in_progress';
-}
-
-function isStartable(status: DeviceInstallationStatus): boolean {
-  return status === 'scheduled';
-}
-
-function isCompletable(status: DeviceInstallationStatus): boolean {
-  return status === 'in_progress';
 }
 
 function readFileAsDataUrl(file: File): Promise<string> {
@@ -297,15 +244,12 @@ export default function DeviceInstallation() {
   const [totalCount, setTotalCount] = useState(0);
   const [summary, setSummary] = useState<DeviceInstallationSummary>(EMPTY_SUMMARY);
   const [summaryError, setSummaryError] = useState<string | null>(null);
-  const [scheduledTaskOptions, setScheduledTaskOptions] = useState<DeviceInstallationItem[]>([]);
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [vehicleOptions, setVehicleOptions] = useState<DeviceInstallationVehicleOption[]>([]);
   const [statusFilter, setStatusFilter] = useState<DeviceInstallationStatusFilter>('all');
   const [page, setPage] = useState(1);
   const [pageNotice, setPageNotice] = useState<string | null>(null);
 
   const [vin, setVin] = useState('');
-  const [scheduledAt, setScheduledAt] = useState('');
   const [deviceSerial, setDeviceSerial] = useState('');
   const [installationPhotoFile, setInstallationPhotoFile] = useState<File | null>(null);
   const [installationPhotoPreview, setInstallationPhotoPreview] = useState<string>('');
@@ -314,8 +258,6 @@ export default function DeviceInstallation() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [cancellingInstallationId, setCancellingInstallationId] = useState<string | null>(null);
-  const [transitioningInstallationId, setTransitioningInstallationId] = useState<string | null>(null);
 
   useEffect(() => () => {
     if (installationPhotoPreview) {
@@ -327,10 +269,6 @@ export default function DeviceInstallation() {
   }, [installationPhotoPreview, serialPhotoPreview]);
 
   const listStatus = statusFilter === 'all' ? undefined : statusFilter;
-  const selectedTask = useMemo(
-    () => scheduledTaskOptions.find((task) => task.id === selectedTaskId) ?? null,
-    [scheduledTaskOptions, selectedTaskId],
-  );
   const vehicleOptionsByVin = useMemo(() => {
     const entries = new Map<string, DeviceInstallationVehicleOption>();
 
@@ -338,7 +276,7 @@ export default function DeviceInstallation() {
       entries.set(option.vin, option);
     }
 
-    for (const installation of [...scheduledTaskOptions, ...installations]) {
+    for (const installation of installations) {
       if (!entries.has(installation.vin)) {
         entries.set(installation.vin, {
           vin: installation.vin,
@@ -350,7 +288,7 @@ export default function DeviceInstallation() {
     }
 
     return entries;
-  }, [installations, scheduledTaskOptions, vehicleOptions]);
+  }, [installations, vehicleOptions]);
   const vehicleSelectOptions = useMemo(
     () => Array.from(vehicleOptionsByVin.values()).sort((left, right) => left.vehicleNumber.localeCompare(right.vehicleNumber, 'ko-KR')),
     [vehicleOptionsByVin],
@@ -415,25 +353,6 @@ export default function DeviceInstallation() {
     isEmpty: isInstallationListEmpty,
   });
 
-  const hydrateScheduledTaskOptions = useCallback(async () => {
-    try {
-      const scheduledTasks = await getDeviceInstallationList({
-        page: 1,
-        pageSize: 5,
-        status: 'scheduled',
-      });
-      setScheduledTaskOptions(scheduledTasks.items);
-      setSelectedTaskId((currentTaskId) => (
-        currentTaskId && scheduledTasks.items.some((task) => task.id === currentTaskId)
-          ? currentTaskId
-          : null
-      ));
-    } catch {
-      setScheduledTaskOptions([]);
-      setSelectedTaskId(null);
-    }
-  }, []);
-
   const hydrateVehicleOptions = useCallback(async () => {
     try {
       const payload = await getAssetsList({
@@ -478,21 +397,16 @@ export default function DeviceInstallation() {
   }, [hydrateSummary]);
 
   useEffect(() => {
-    void hydrateScheduledTaskOptions();
-  }, [hydrateScheduledTaskOptions]);
-
-  useEffect(() => {
     void hydrateVehicleOptions();
   }, [hydrateVehicleOptions]);
 
   const refreshAll = useCallback(async () => {
     await Promise.all([
       hydrateInstallations(),
-      hydrateScheduledTaskOptions(),
       hydrateSummary(),
       hydrateVehicleOptions(),
     ]);
-  }, [hydrateInstallations, hydrateScheduledTaskOptions, hydrateSummary, hydrateVehicleOptions]);
+  }, [hydrateInstallations, hydrateSummary, hydrateVehicleOptions]);
 
   const handleRetry = useCallback(() => {
     void refreshAll();
@@ -530,9 +444,7 @@ export default function DeviceInstallation() {
     }
 
     setVin('');
-    setScheduledAt('');
     setDeviceSerial('');
-    setSelectedTaskId(null);
     setInstallationPhotoFile(null);
     setInstallationPhotoPreview('');
     setSerialPhotoFile(null);
@@ -552,40 +464,14 @@ export default function DeviceInstallation() {
     const normalizedVin = vin.trim().toUpperCase();
     const normalizedDeviceSerial = deviceSerial.trim().toUpperCase();
 
-    if (!normalizedVin || !scheduledAt || !normalizedDeviceSerial || !installationPhotoFile || !serialPhotoFile) {
-      setActionError('VIN, 예약 시간, 단말 시리얼, 장착/시리얼 사진을 모두 입력해 주세요.');
-      return;
-    }
-
-    const scheduledAtIso = toIsoDateTime(scheduledAt);
-    if (!scheduledAtIso) {
-      setActionError('예약 시간 형식이 올바르지 않습니다.');
+    if (!normalizedVin || !normalizedDeviceSerial || !installationPhotoFile || !serialPhotoFile) {
+      setActionError('VIN, 단말 시리얼, 장착/시리얼 사진을 모두 입력해 주세요.');
       return;
     }
 
     setIsSubmitting(true);
 
     try {
-      const [scheduledTasks, inProgressTasks] = await Promise.all([
-        getDeviceInstallationList({
-          page: 1,
-          pageSize: 1,
-          status: 'scheduled',
-          vin: normalizedVin,
-        }),
-        getDeviceInstallationList({
-          page: 1,
-          pageSize: 1,
-          status: 'in_progress',
-          vin: normalizedVin,
-        }),
-      ]);
-
-      if (scheduledTasks.total > 0 || inProgressTasks.total > 0) {
-        setActionError('이미 진행 중인 장착 작업이 있습니다. 기존 작업을 완료/취소한 뒤 다시 시도해 주세요.');
-        return;
-      }
-
       const [installationPhotoDataUrl, serialPhotoDataUrl] = await Promise.all([
         readFileAsDataUrl(installationPhotoFile),
         readFileAsDataUrl(serialPhotoFile),
@@ -593,18 +479,18 @@ export default function DeviceInstallation() {
 
       await createDeviceInstallation({
         vin: normalizedVin,
-        scheduledAt: scheduledAtIso,
+        scheduledAt: new Date().toISOString(),
         installer: user?.name ?? undefined,
         deviceSerial: normalizedDeviceSerial,
         photos: [installationPhotoDataUrl, serialPhotoDataUrl],
       });
 
-      setActionMessage('장착 신청이 등록되었습니다. 상태가 대기로 반영됩니다.');
+      setActionMessage('장착 완료가 등록되었습니다.');
       resetForm();
       setPage(1);
       await refreshAll();
     } catch (error) {
-      setActionError(toActionErrorMessage('create', error));
+      setActionError(toActionErrorMessage(error));
       if (error instanceof ApiError && (error.status === 409 || error.status === 404)) {
         await refreshAll();
       }
@@ -617,159 +503,12 @@ export default function DeviceInstallation() {
     installationPhotoFile,
     refreshAll,
     resetForm,
-    scheduledAt,
     serialPhotoFile,
     user?.name,
     vin,
   ]);
 
-  const handleCancelInstallation = useCallback(async (installationId: string) => {
-    if (!canWriteDeviceInstallation) {
-      setActionError('단말 장착 취소 권한이 없습니다.');
-      setActionMessage(null);
-      return;
-    }
-
-    setActionError(null);
-    setActionMessage(null);
-    setCancellingInstallationId(installationId);
-
-    try {
-      await cancelDeviceInstallation(installationId);
-      setActionMessage('장착 작업이 취소되었습니다.');
-      await refreshAll();
-    } catch (error) {
-      if (error instanceof ApiError && error.status === 404) {
-        setActionError('이미 삭제되었거나 존재하지 않는 작업입니다. 최신 목록으로 갱신합니다.');
-        await refreshAll();
-        return;
-      }
-
-      setActionError(toActionErrorMessage('cancel', error));
-      if (error instanceof ApiError && error.status === 409) {
-        await refreshAll();
-      }
-    } finally {
-      setCancellingInstallationId(null);
-    }
-  }, [canWriteDeviceInstallation, refreshAll]);
-
-  const handleStartSelectedTask = useCallback(async () => {
-    if (!selectedTask) {
-      return;
-    }
-
-    if (!canWriteDeviceInstallation) {
-      setActionError('단말 장착 작업 시작 권한이 없습니다.');
-      setActionMessage(null);
-      return;
-    }
-
-    setActionError(null);
-    setActionMessage(null);
-    setTransitioningInstallationId(selectedTask.id);
-
-    try {
-      await patchDeviceInstallationStatus(selectedTask.id, { status: 'in_progress' });
-      setActionMessage('선택한 예정 작업을 시작했습니다.');
-      setStatusFilter('all');
-      setPage(1);
-      await refreshAll();
-    } catch (error) {
-      setActionError(toActionErrorMessage('start', error));
-      if (error instanceof ApiError && (error.status === 404 || error.status === 409)) {
-        await refreshAll();
-      }
-    } finally {
-      setTransitioningInstallationId(null);
-    }
-  }, [canWriteDeviceInstallation, refreshAll, selectedTask]);
-
-  const handleStartInstallation = useCallback(async (installationId: string) => {
-    if (!canWriteDeviceInstallation) {
-      setActionError('단말 장착 작업 시작 권한이 없습니다.');
-      setActionMessage(null);
-      return;
-    }
-
-    setActionError(null);
-    setActionMessage(null);
-    setTransitioningInstallationId(installationId);
-
-    try {
-      await patchDeviceInstallationStatus(installationId, {
-        status: 'in_progress',
-      });
-      setActionMessage('장착 작업을 시작했습니다.');
-      await refreshAll();
-    } catch (error) {
-      setActionError(toActionErrorMessage('start', error));
-      if (error instanceof ApiError && (error.status === 404 || error.status === 409)) {
-        await refreshAll();
-      }
-    } finally {
-      setTransitioningInstallationId(null);
-    }
-  }, [canWriteDeviceInstallation, refreshAll]);
-
-  const handleCompleteInstallation = useCallback(async (installationId: string) => {
-    if (!canWriteDeviceInstallation) {
-      setActionError('단말 장착 작업 완료 권한이 없습니다.');
-      setActionMessage(null);
-      return;
-    }
-
-    setActionError(null);
-    setActionMessage(null);
-    setTransitioningInstallationId(installationId);
-
-    try {
-      await patchDeviceInstallationStatus(installationId, {
-        status: 'completed',
-        installedAt: new Date().toISOString(),
-      });
-      setActionMessage('장착 작업을 완료했습니다.');
-      await refreshAll();
-    } catch (error) {
-      setActionError(toActionErrorMessage('complete', error));
-      if (error instanceof ApiError && (error.status === 404 || error.status === 409)) {
-        await refreshAll();
-      }
-    } finally {
-      setTransitioningInstallationId(null);
-    }
-  }, [canWriteDeviceInstallation, refreshAll]);
-
   const totalPages = useMemo(() => Math.max(1, Math.ceil(totalCount / PAGE_SIZE)), [totalCount]);
-
-  const applyScheduledTaskSelection = useCallback((installation: DeviceInstallationItem) => {
-    const task = installation;
-    setSelectedTaskId(task.id);
-    setVin(task.vin);
-
-    const scheduledAtValue = toDateTimeLocalFromValue(task.scheduledAt);
-    if (scheduledAtValue) {
-      setScheduledAt(scheduledAtValue);
-    }
-
-    if (task.deviceSerial) {
-      setDeviceSerial(task.deviceSerial.toUpperCase());
-    }
-
-    setActionError(null);
-    setActionMessage(null);
-  }, []);
-
-  useEffect(() => {
-    if (!selectedTaskId) {
-      return;
-    }
-
-    const selectedTaskExists = scheduledTaskOptions.some((installation) => installation.id === selectedTaskId);
-    if (!selectedTaskExists) {
-      setSelectedTaskId(null);
-    }
-  }, [scheduledTaskOptions, selectedTaskId]);
 
   return (
     <Layout title="단말 장착/관리">
@@ -814,75 +553,6 @@ export default function DeviceInstallation() {
             </div>
           )}
 
-          {scheduledTaskOptions.length > 0 && (
-            <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <h3 className="text-sm font-semibold text-slate-900">예정된 작업에서 선택</h3>
-                  <p className="mt-1 text-xs text-slate-600">선택한 작업의 VIN과 예약 시각을 먼저 채우고 현장에서 사진만 추가할 수 있습니다.</p>
-                </div>
-                {selectedTaskId && (
-                  <button
-                    type="button"
-                    onClick={() => setSelectedTaskId(null)}
-                    className="rounded-md border border-slate-300 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-white"
-                  >
-                    수기 입력으로 계속
-                  </button>
-                )}
-              </div>
-
-              <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                {scheduledTaskOptions.map((installation) => {
-                  const isSelected = selectedTaskId === installation.id;
-
-                  return (
-                    <button
-                      key={installation.id}
-                      type="button"
-                      data-testid={`device-installation-task-select-${installation.id}`}
-                      onClick={() => applyScheduledTaskSelection(installation)}
-                      className={`rounded-lg border px-4 py-3 text-left transition-colors ${
-                        isSelected
-                          ? 'border-blue-500 bg-blue-50 shadow-sm'
-                          : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-100'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between gap-3">
-                        <span className="font-mono text-xs font-semibold text-slate-900">{installation.vin}</span>
-                        {getStatusBadge(installation.status)}
-                      </div>
-                      <div className="mt-2 space-y-1 text-xs text-slate-600">
-                        <p>작업 ID: {installation.id}</p>
-                        <p>예약 시각: {formatDateTime(installation.scheduledAt)}</p>
-                        <p>단말 시리얼: {installation.deviceSerial ?? '현장 입력'}</p>
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-              {selectedTask && (
-                <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3">
-                  <div className="text-xs text-blue-900">
-                    <p className="font-semibold">{selectedTask.vin}</p>
-                    <p className="mt-1">선택한 작업에서 바로 시작하거나, 선택을 해제하고 수기 등록으로 전환할 수 있습니다.</p>
-                  </div>
-                  <button
-                    type="button"
-                    data-testid="device-installation-start-selected-task"
-                    onClick={() => {
-                      void handleStartSelectedTask();
-                    }}
-                    disabled={!canWriteDeviceInstallation || transitioningInstallationId === selectedTask.id}
-                    className="rounded-md bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300"
-                  >
-                    {transitioningInstallationId === selectedTask.id ? '작업 시작 중...' : '선택한 작업 시작'}
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
-
           <div className="flex gap-3 items-end flex-wrap">
             <div className="flex-shrink-0" style={{ width: '180px' }}>
               <label className="block text-xs font-semibold text-gray-700 mb-1">
@@ -892,13 +562,12 @@ export default function DeviceInstallation() {
                 data-testid="device-installation-vin-input"
                 value={vin}
                 onChange={(event) => {
-                  setSelectedTaskId(null);
                   setVin(event.target.value.toUpperCase());
                 }}
                 disabled={!canWriteDeviceInstallation || isSubmitting}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
               >
-                <option value="">장착 대상 차량 선택</option>
+                <option value="">선택하세요</option>
                 {vehicleSelectOptions.map((option) => (
                   <option key={option.vin} value={option.vin}>
                     {option.vehicleNumber} · {option.model}
@@ -908,42 +577,6 @@ export default function DeviceInstallation() {
               {selectedVehicleOption && (
                 <p className="mt-1 text-[11px] text-gray-500">
                   {selectedVehicleOption.model} · {selectedVehicleOption.year}
-                </p>
-              )}
-              <input
-                data-testid="device-installation-manual-vin-input"
-                type="text"
-                value={vin}
-                onChange={(event) => {
-                  setSelectedTaskId(null);
-                  setVin(event.target.value.toUpperCase());
-                }}
-                placeholder="목록에 없으면 차량번호를 직접 입력"
-                disabled={!canWriteDeviceInstallation || isSubmitting}
-                className="mt-2 w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-              />
-              {vehicleSelectOptions.length > 0 && (
-                <p className="mt-1 text-[11px] text-gray-500">
-                  목록에 원하는 차량이 없으면 차량번호를 직접 입력할 수 있습니다.
-                </p>
-              )}
-            </div>
-
-            <div className="flex-shrink-0" style={{ width: '200px' }}>
-              <label className="block text-xs font-semibold text-gray-700 mb-1">
-                예약 시각
-              </label>
-              <input
-                data-testid="device-installation-scheduled-at-input"
-                type="datetime-local"
-                value={scheduledAt}
-                onChange={(event) => setScheduledAt(event.target.value)}
-                disabled={!canWriteDeviceInstallation || isSubmitting || !!selectedTaskId}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-              />
-              {selectedTaskId && (
-                <p className="mt-1 text-[11px] text-gray-500">
-                  선택한 예약 작업의 시각을 그대로 사용합니다.
                 </p>
               )}
             </div>
@@ -1097,7 +730,7 @@ export default function DeviceInstallation() {
                   void handleCreateInstallation();
                 }}
                 data-testid="device-installation-submit"
-                disabled={!canWriteDeviceInstallation || isSubmitting || !!selectedTaskId || !vin || !deviceSerial || !installationPhotoFile || !serialPhotoFile}
+                disabled={!canWriteDeviceInstallation || isSubmitting || !vin || !deviceSerial || !installationPhotoFile || !serialPhotoFile}
                 className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-bold text-sm disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
               >
                 {isSubmitting ? (
@@ -1105,7 +738,7 @@ export default function DeviceInstallation() {
                 ) : (
                   <Zap className="w-4 h-4" />
                 )}
-                장착 신청
+                장착 완료
               </button>
             </div>
           </div>
@@ -1169,7 +802,6 @@ export default function DeviceInstallation() {
                     <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">Health Check</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">장착사진</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">시리얼사진</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">작업</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
@@ -1229,7 +861,7 @@ export default function DeviceInstallation() {
                             onClick={() => window.open(row.installationPhoto, '_blank', 'noopener,noreferrer')}
                             className="text-blue-600 hover:text-blue-700 text-xs underline text-left"
                           >
-                            장착사진
+                            보기
                           </button>
                         ) : (
                           <span className="text-xs text-gray-400">-</span>
@@ -1242,52 +874,8 @@ export default function DeviceInstallation() {
                             onClick={() => window.open(row.serialPhoto, '_blank', 'noopener,noreferrer')}
                             className="text-blue-600 hover:text-blue-700 text-xs underline text-left"
                           >
-                            시리얼사진
+                            보기
                           </button>
-                        ) : (
-                          <span className="text-xs text-gray-400">-</span>
-                        )}
-                      </td>
-
-                      <td className="px-4 py-3">
-                        {isCancellable(installation.status) ? (
-                          <div className="flex flex-wrap items-center gap-2">
-                            {isStartable(installation.status) && (
-                              <button
-                                onClick={() => {
-                                  void handleStartInstallation(installation.id);
-                                }}
-                                disabled={!canWriteDeviceInstallation || transitioningInstallationId === installation.id}
-                                className="rounded-md border border-blue-200 px-2 py-1 text-xs text-blue-700 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
-                              >
-                                {transitioningInstallationId === installation.id ? '처리 중...' : '작업 시작'}
-                              </button>
-                            )}
-                            {isCompletable(installation.status) && (
-                              <button
-                                onClick={() => {
-                                  void handleCompleteInstallation(installation.id);
-                                }}
-                                disabled={!canWriteDeviceInstallation || transitioningInstallationId === installation.id}
-                                className="rounded-md border border-emerald-200 px-2 py-1 text-xs text-emerald-700 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-50"
-                              >
-                                {transitioningInstallationId === installation.id ? '처리 중...' : '작업 완료'}
-                              </button>
-                            )}
-                            <button
-                              onClick={() => {
-                                void handleCancelInstallation(installation.id);
-                              }}
-                              disabled={
-                                !canWriteDeviceInstallation
-                                || cancellingInstallationId === installation.id
-                                || transitioningInstallationId === installation.id
-                              }
-                              className="rounded-md border border-red-200 px-2 py-1 text-xs text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
-                            >
-                              {cancellingInstallationId === installation.id ? '취소 중...' : '취소'}
-                            </button>
-                          </div>
                         ) : (
                           <span className="text-xs text-gray-400">-</span>
                         )}
