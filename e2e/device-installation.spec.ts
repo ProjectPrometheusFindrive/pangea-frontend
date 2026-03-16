@@ -63,6 +63,12 @@ test.describe('BK-091 Premium Installation E2E', () => {
     await installApiMocks(page, {
       user: { role: 'installer', userId: 'installer-001', name: 'E2E Installer' },
       handlers: {
+        'GET /api/v2/assets': async ({ route }) => {
+          await fulfillSuccess(route, {
+            items: [{ vin: 'KMH12A34560000001', vehicleNumber: '12가3456', model: '쏘나타', year: 2024 }],
+            total: 1,
+          });
+        },
         'GET /api/v2/device-installations/tasks': async ({ route, request }) => {
           if (firstListDelay) {
             firstListDelay = false;
@@ -116,6 +122,12 @@ test.describe('BK-091 Premium Installation E2E', () => {
     await installApiMocks(page, {
       user: { role: 'installer', userId: 'installer-001', name: 'E2E Installer' },
       handlers: {
+        'GET /api/v2/assets': async ({ route }) => {
+          await fulfillSuccess(route, {
+            items: [{ vin: 'KMH12A34560000001', vehicleNumber: '12가3456', model: '쏘나타', year: 2024 }],
+            total: 1,
+          });
+        },
         'GET /api/v2/device-installations/tasks': async ({ route }) => {
           await fulfillSuccess(route, {
             items: [],
@@ -141,6 +153,12 @@ test.describe('BK-091 Premium Installation E2E', () => {
     await installApiMocks(page, {
       user: { role: 'installer', userId: 'installer-001', name: 'E2E Installer' },
       handlers: {
+        'GET /api/v2/assets': async ({ route }) => {
+          await fulfillSuccess(route, {
+            items: [{ vin: 'KMH12A34560000001', vehicleNumber: '12가3456', model: '쏘나타', year: 2024 }],
+            total: 1,
+          });
+        },
         'GET /api/v2/device-installations/tasks': async ({ route }) => {
           await fulfillSuccess(route, {
             items: [],
