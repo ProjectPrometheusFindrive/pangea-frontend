@@ -46,3 +46,4 @@ _legacy/
 
 # Windows ADS artifacts
 *:Zone.Identifier
+.worktrees

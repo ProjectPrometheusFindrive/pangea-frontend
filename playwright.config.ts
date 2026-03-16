@@ -1,6 +1,6 @@
 import { defineConfig, devices } from '@playwright/test';
 
-const E2E_BASE_URL = 'http://127.0.0.1:4173';
+const E2E_BASE_URL = 'http://localhost:5173';
 const IS_CI = Boolean(process.env.CI);
 
 export default defineConfig({
@@ -37,7 +37,7 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: 'VITE_API_BASE_URL=http://127.0.0.1:4173 npm run dev -- --host 127.0.0.1 --port 4173 --strictPort',
+    command: 'npm run dev -- --port 5173',
     url: E2E_BASE_URL,
     reuseExistingServer: !IS_CI,
     timeout: 120_000,
