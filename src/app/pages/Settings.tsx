@@ -2544,17 +2544,20 @@ export default function Settings() {
             >
               지오펜스
             </button>
-            <button
-              type="button"
-              onClick={() => handleTabChange('accounts')}
-              className={`border-b-2 px-6 py-3 text-sm font-medium transition-colors ${
-                activeTab === 'accounts'
-                  ? 'border-blue-600 text-blue-600'
-                  : 'border-transparent text-gray-600 hover:text-gray-900'
-              }`}
-            >
-              계정 관리
-            </button>
+            {canManageMemberRoles && (
+              <button
+                type="button"
+                onClick={() => handleTabChange('accounts')}
+                data-testid="settings-tab-accounts"
+                className={`border-b-2 px-6 py-3 text-sm font-medium transition-colors ${
+                  activeTab === 'accounts'
+                    ? 'border-blue-600 text-blue-600'
+                    : 'border-transparent text-gray-600 hover:text-gray-900'
+                }`}
+              >
+                계정 관리
+              </button>
+            )}
             <button
               type="button"
               onClick={() => handleTabChange('support')}
