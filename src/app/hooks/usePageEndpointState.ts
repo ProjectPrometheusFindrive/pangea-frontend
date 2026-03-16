@@ -195,7 +195,8 @@ export function getPageErrorActionLabel(errorKind: PageErrorKind | null): string
 
 export function handlePageErrorAction(errorKind: PageErrorKind | null, navigate: NavigateFunction): void {
   if (errorKind === 'unauthorized') {
-    navigate('/login', { replace: true });
+    const returnUrl = encodeURIComponent(`${window.location.pathname}${window.location.search}`);
+    navigate(`/login?returnUrl=${returnUrl}`, { replace: true });
     return;
   }
 

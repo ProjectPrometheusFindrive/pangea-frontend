@@ -2464,6 +2464,7 @@ export default function Settings() {
           <div className="mb-6 flex gap-2 border-b border-gray-200">
             <button
               type="button"
+              data-testid="settings-tab-bulk"
               onClick={() => handleTabChange('bulk')}
               className={`border-b-2 px-6 py-3 text-sm font-medium transition-colors ${
                 activeTab === 'bulk'
@@ -2486,6 +2487,7 @@ export default function Settings() {
             </button>
             <button
               type="button"
+              data-testid="settings-tab-geofence"
               onClick={() => handleTabChange('geofence')}
               className={`border-b-2 px-6 py-3 text-sm font-medium transition-colors ${
                 activeTab === 'geofence'
@@ -2497,6 +2499,7 @@ export default function Settings() {
             </button>
             <button
               type="button"
+              data-testid="settings-tab-accounts"
               onClick={() => handleTabChange('accounts')}
               className={`border-b-2 px-6 py-3 text-sm font-medium transition-colors ${
                 activeTab === 'accounts'
@@ -3339,6 +3342,7 @@ export default function Settings() {
                   </div>
                   <button
                     type="button"
+                    data-testid="settings-invite-open-button"
                     onClick={openInvitationEditor}
                     disabled={!canManageMemberRoles || isInvitationSaving || resendingInvitationId !== null}
                     className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-600"
@@ -3357,6 +3361,7 @@ export default function Settings() {
                         </label>
                         <input
                           id="settings-invitation-email"
+                          data-testid="settings-invitation-email"
                           type="email"
                           value={invitationForm.email}
                           onChange={(event) => handleInvitationFieldChange('email', event.target.value)}
@@ -3374,6 +3379,7 @@ export default function Settings() {
                         </label>
                         <select
                           id="settings-invitation-role"
+                          data-testid="settings-invitation-role"
                           value={invitationForm.role}
                           onChange={(event) => handleInvitationFieldChange('role', event.target.value)}
                           disabled={isInvitationSaving}
@@ -3405,6 +3411,7 @@ export default function Settings() {
                       </button>
                       <button
                         type="button"
+                        data-testid="settings-invitation-send-button"
                         onClick={handleInvitationCreate}
                         disabled={!canManageMemberRoles || isInvitationSaving}
                         className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300"
