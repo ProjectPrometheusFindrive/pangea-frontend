@@ -45,7 +45,15 @@ export function RequireAuth({ allowedRoles, requiredPermission }: RequireAuthPro
   }
 
   if (!isAuthenticated) {
-    const returnUrl = encodeURIComponent(`${location.pathname}${location.search}${location.hash}`);
+    const currentParams = new URLSearchParams(location.search);
+    // For the reservations list, ensure default pagination is preserved in returnUrl
+    // so users return to the right page after re-login on 401.
+    if (location.pathname === '/reservations' && !currentParams.get('size')) {
+      currentParams.set('size', '20');
+      currentParams.set('page', '1');
+    }
+    const returnSearch = currentParams.toString() ? `?${currentParams.toString()}` : location.search;
+    const returnUrl = encodeURIComponent(`${location.pathname}${returnSearch}${location.hash}`);
     return <Navigate to={`/login?returnUrl=${returnUrl}`} replace />;
   }
 

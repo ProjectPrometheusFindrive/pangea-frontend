@@ -960,6 +960,7 @@ export default function Reservations() {
     setSearchParams(nextParams, { replace });
   }, [searchParams, setSearchParams]);
 
+
   useEffect(() => {
     const legacyFilter = searchParams.get('filter');
     const legacyContractStatus = searchParams.get('contractStatus');
@@ -979,6 +980,7 @@ export default function Reservations() {
     const normalizedStatus = normalizeViewFilter(canonicalStatus ?? legacyFilter ?? legacyContractStatus);
     const shouldNormalizeStatus = normalizedStatus !== 'all';
 
+    const currentPage = searchParams.get('page');
     const needsNormalization = (
       Boolean(legacyFilter)
       || Boolean(legacyContractStatus)
@@ -993,7 +995,7 @@ export default function Reservations() {
         || !isDelinquentPaymentScopeActive(normalizedStatus, normalizedPaymentScope)
       ))
       || Boolean(canonicalStatus && normalizeViewFilter(canonicalStatus) !== canonicalStatus)
-      || Boolean(searchParams.get('page'))
+      || Boolean(currentPage)
     );
 
     if (!needsNormalization) {
@@ -1196,6 +1198,14 @@ export default function Reservations() {
   const handleReservationsErrorAction = useCallback(() => {
     if (pageErrorStatus === 400) {
       resetReservationFilters();
+      return;
+    }
+    if (pageErrorKind === 'unauthorized') {
+      const currentParams = new URLSearchParams(window.location.search);
+      if (!currentParams.get('page')) currentParams.set('page', String(DEFAULT_PAGE));
+      if (!currentParams.get('size')) currentParams.set('size', String(DEFAULT_PAGE_SIZE));
+      const returnUrl = encodeURIComponent(`${window.location.pathname}?${currentParams.toString()}`);
+      navigate(`/login?returnUrl=${returnUrl}`, { replace: true });
       return;
     }
     handlePageErrorAction(pageErrorKind, navigate);
