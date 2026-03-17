@@ -127,6 +127,20 @@ function pickString(source: Record<string, unknown>, keys: string[]): string | n
   return null;
 }
 
+// vehicleNumber 전용 추출: '?' 문자가 포함된 값(한글 깨짐)보다 정상 값을 우선 선택
+function pickVehicleNumber(source: Record<string, unknown>): string | null {
+  const keys = ['vehicleNumber', 'plateNumber', 'vehicleNo', 'plate'];
+  // 첫 번째 패스: '?' 없는 정상 값 우선
+  for (const key of keys) {
+    const candidate = toStringValue(source[key]);
+    if (candidate && !candidate.includes('?')) {
+      return candidate;
+    }
+  }
+  // 폴백: '?' 포함 여부 관계없이 첫 번째 유효 값 반환
+  return pickString(source, keys);
+}
+
 function formatActionDate(rawValue: string): string {
   const normalized = rawValue.trim();
   if (!normalized || normalized === '-') {
@@ -461,7 +475,7 @@ function toActionItem(row: unknown, index: number, fallbackId?: string): ActionI
     pickString(row, ['type', 'category', 'issueType', 'issue', 'title']),
     Boolean(paymentInfo),
   );
-  const vehicleNumber = pickString(row, ['vehicleNumber', 'plateNumber', 'vehicleNo', 'plate']);
+  const vehicleNumber = pickVehicleNumber(row);
 
   if (!type || !vehicleNumber) {
     return null;
