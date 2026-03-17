@@ -53,6 +53,7 @@ import {
   returnReservation,
   transitionReservation,
 } from '../../services/reservations';
+import { listSettingsGarages } from '../../services/settings';
 
 // 드래그 선택 타입 정의
 type DragSelection = {
@@ -886,6 +887,7 @@ export default function Reservations() {
   const [showAccidentModal, setShowAccidentModal] = useState(false);
   const [reservationsData, setReservationsData] = useState<Reservation[]>([]);
   const [vehicleAssets, setVehicleAssets] = useState<VehicleAsset[]>([]);
+  const [garageLocationOptions, setGarageLocationOptions] = useState<string[]>([]);
   const [targetDate, setTargetDate] = useState(() => toDateLabelFromOffset(0));
   const [totalReservationCount, setTotalReservationCount] = useState(0);
   const [pageErrorStatus, setPageErrorStatus] = useState<number | null>(null);
@@ -1144,6 +1146,16 @@ export default function Reservations() {
   useEffect(() => {
     void hydrateReservationsData();
   }, [hydrateReservationsData]);
+
+  useEffect(() => {
+    listSettingsGarages().then((payload) => {
+      if (Array.isArray(payload.items) && payload.items.length > 0) {
+        setGarageLocationOptions(payload.items.map((g) => g.name));
+      }
+    }).catch(() => {
+      // garage loading is best-effort; fall back to free-text input
+    });
+  }, []);
 
   useEffect(() => () => {
     detailControllerRef.current?.abort();
@@ -1565,6 +1577,8 @@ export default function Reservations() {
         paymentStatus: formValues.paymentStatus,
         amount: toCurrencyNumberFromInput(formValues.amount),
         deposit: toCurrencyNumberFromInput(formValues.deposit),
+        pickupLocation: formValues.pickupLocation.trim() || undefined,
+        returnLocation: formValues.returnLocation.trim() || undefined,
         memo: [
           `pickup=${formValues.pickupLocation.trim()}`,
           `return=${formValues.returnLocation.trim()}`,
@@ -2836,6 +2850,7 @@ export default function Reservations() {
           }}
           vehicles={vehicles}
           vehicleAssets={vehicleAssets}
+          locationOptions={garageLocationOptions}
           dragSelection={dragSelection}
           onSubmit={handleCreateReservation}
         />

@@ -54,6 +54,7 @@ interface NewContractModalProps {
   onClose: () => void;
   vehicles: string[];
   vehicleAssets: VehicleAsset[];
+  locationOptions?: string[];
   dragSelection?: DragSelection | null;
   onSubmit: (formValues: NewContractFormValues) => Promise<NewContractSubmitFeedback | null>;
 }
@@ -81,6 +82,7 @@ export function NewContractModal({
   isOpen,
   onClose,
   vehicleAssets,
+  locationOptions,
   dragSelection,
   onSubmit,
 }: NewContractModalProps) {
@@ -674,36 +676,72 @@ export function NewContractModal({
                     <label className="block text-sm font-semibold text-gray-600 mb-2">
                       대여 장소 <span className="text-red-600">*</span>
                     </label>
-                    <input
-                      data-testid="new-contract-pickup-location-input"
-                      type="text"
-                      value={pickupLocation}
-                      onChange={(event) => {
-                        setPickupLocation(event.target.value);
-                        clearFieldError('pickupLocation');
-                      }}
-                      placeholder="서울특별시 강남구 테헤란로 123"
-                      className={fieldInputClass('pickupLocation')}
-                      disabled={isSubmitting}
-                    />
+                    {locationOptions && locationOptions.length > 0 ? (
+                      <select
+                        data-testid="new-contract-pickup-location-input"
+                        value={pickupLocation}
+                        onChange={(event) => {
+                          setPickupLocation(event.target.value);
+                          clearFieldError('pickupLocation');
+                        }}
+                        className={fieldInputClass('pickupLocation')}
+                        disabled={isSubmitting}
+                      >
+                        <option value="">장소를 선택하세요</option>
+                        {locationOptions.map((loc) => (
+                          <option key={loc} value={loc}>{loc}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        data-testid="new-contract-pickup-location-input"
+                        type="text"
+                        value={pickupLocation}
+                        onChange={(event) => {
+                          setPickupLocation(event.target.value);
+                          clearFieldError('pickupLocation');
+                        }}
+                        placeholder="서울특별시 강남구 테헤란로 123"
+                        className={fieldInputClass('pickupLocation')}
+                        disabled={isSubmitting}
+                      />
+                    )}
                     {fieldErrors.pickupLocation && <p className="mt-1 text-xs text-red-600">{fieldErrors.pickupLocation}</p>}
                   </div>
                   <div>
                     <label className="block text-sm font-semibold text-gray-600 mb-2">
                       반납 장소 <span className="text-red-600">*</span>
                     </label>
-                    <input
-                      data-testid="new-contract-return-location-input"
-                      type="text"
-                      value={returnLocation}
-                      onChange={(event) => {
-                        setReturnLocation(event.target.value);
-                        clearFieldError('returnLocation');
-                      }}
-                      placeholder="서울특별시 강남구 테헤란로 123"
-                      className={fieldInputClass('returnLocation')}
-                      disabled={isSubmitting}
-                    />
+                    {locationOptions && locationOptions.length > 0 ? (
+                      <select
+                        data-testid="new-contract-return-location-input"
+                        value={returnLocation}
+                        onChange={(event) => {
+                          setReturnLocation(event.target.value);
+                          clearFieldError('returnLocation');
+                        }}
+                        className={fieldInputClass('returnLocation')}
+                        disabled={isSubmitting}
+                      >
+                        <option value="">장소를 선택하세요</option>
+                        {locationOptions.map((loc) => (
+                          <option key={loc} value={loc}>{loc}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        data-testid="new-contract-return-location-input"
+                        type="text"
+                        value={returnLocation}
+                        onChange={(event) => {
+                          setReturnLocation(event.target.value);
+                          clearFieldError('returnLocation');
+                        }}
+                        placeholder="서울특별시 강남구 테헤란로 123"
+                        className={fieldInputClass('returnLocation')}
+                        disabled={isSubmitting}
+                      />
+                    )}
                     {fieldErrors.returnLocation && <p className="mt-1 text-xs text-red-600">{fieldErrors.returnLocation}</p>}
                   </div>
                 </div>

@@ -34,6 +34,8 @@ export interface CreateReservationPayload {
   amount?: number;
   deposit?: number;
   memo?: string;
+  pickupLocation?: string;
+  returnLocation?: string;
 }
 
 export interface ReturnReservationPayload {

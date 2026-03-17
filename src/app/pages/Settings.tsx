@@ -46,6 +46,10 @@ import {
   createSettingsGeofence,
   updateSettingsGeofence,
   deleteSettingsGeofence,
+  listSettingsGarages,
+  createSettingsGarage,
+  updateSettingsGarage,
+  deleteSettingsGarage,
   listSettingsMembers,
   patchSettingsMemberRole,
   patchSettingsMemberStatus,
@@ -54,6 +58,7 @@ import {
   type SettingsCompanyUpdateRequest,
   type SettingsGeofence,
   type SettingsGeofencePoint,
+  type SettingsGarage,
   type SettingsMember,
 } from '../../services/settings';
 import {
@@ -75,11 +80,12 @@ import {
 import { canAccessBulkOcr } from './settingsBulkOcr';
 import SupportCenter from './SupportCenter';
 
-type TabType = 'bulk' | 'company' | 'geofence' | 'accounts' | 'support';
+type TabType = 'bulk' | 'company' | 'geofence' | 'garage' | 'accounts' | 'support';
 type UploadType = 'vehicles' | 'reservations' | 'ocr';
 type CurrentDataType = Extract<UploadType, 'vehicles' | 'reservations'>;
 type CompanyField = 'name' | 'businessNumber' | 'phone' | 'email' | 'address';
 type GeofenceField = 'name' | 'lat' | 'lng' | 'radiusMeter' | 'polygon';
+type GarageField = 'name' | 'address';
 type MemberRoleField = 'role';
 type InvitationField = 'email' | 'role' | 'companyId';
 type InvitationStatusFilter = 'pending' | 'accepted' | 'expired' | 'revoked' | 'all';
@@ -117,6 +123,11 @@ interface GeofenceFormState {
   active: boolean;
 }
 
+interface GarageFormState {
+  name: string;
+  address: string;
+}
+
 interface InvitationFormState {
   email: string;
   role: InvitationRole;
@@ -125,6 +136,8 @@ interface InvitationFormState {
 interface SettingsHydrationPayload {
   company: SettingsCompanyProfile;
   geofences: SettingsGeofence[];
+  garages: SettingsGarage[];
+  garageCompanyAddress: string;
   members: SettingsMember[];
   invitations: Invitation[];
   invitationLoadError: string | null;
@@ -171,6 +184,11 @@ const DEFAULT_GEOFENCE_FORM_STATE: GeofenceFormState = {
   active: true,
 };
 
+const DEFAULT_GARAGE_FORM_STATE: GarageFormState = {
+  name: '',
+  address: '',
+};
+
 const DEFAULT_INVITATION_FORM_STATE: InvitationFormState = {
   email: '',
   role: 'member',
@@ -204,6 +222,8 @@ function createEmptySettingsHydrationPayload(): SettingsHydrationPayload {
       schemaVersion: DEFAULT_SETTINGS_SCHEMA_VERSION,
     },
     geofences: [],
+    garages: [],
+    garageCompanyAddress: '',
     members: [],
     invitations: [],
     invitationLoadError: null,
@@ -722,6 +742,18 @@ export default function Settings() {
   const [activeToggleTargetId, setActiveToggleTargetId] = useState<string | null>(null);
   const [deletingGeofenceId, setDeletingGeofenceId] = useState<string | null>(null);
 
+  const [garages, setGarages] = useState<SettingsGarage[]>([]);
+  const [garageCompanyAddress, setGarageCompanyAddress] = useState('');
+  const [garageForm, setGarageForm] = useState<GarageFormState>(DEFAULT_GARAGE_FORM_STATE);
+  const [garageEditorMode, setGarageEditorMode] = useState<'create' | 'edit'>('create');
+  const [editingGarageId, setEditingGarageId] = useState<string | null>(null);
+  const [isGarageEditorOpen, setIsGarageEditorOpen] = useState(false);
+  const [garageFieldErrors, setGarageFieldErrors] = useState<FieldErrorMap<GarageField>>({});
+  const [garageSaveError, setGarageSaveError] = useState<string | null>(null);
+  const [garageSaveSuccess, setGarageSaveSuccess] = useState<string | null>(null);
+  const [isGarageSaving, setIsGarageSaving] = useState(false);
+  const [deletingGarageId, setDeletingGarageId] = useState<string | null>(null);
+
   const [members, setMembers] = useState<SettingsMember[]>([]);
   const [memberRoleDrafts, setMemberRoleDrafts] = useState<Record<string, string>>({});
   const [memberFieldErrors, setMemberFieldErrors] = useState<Record<string, string>>({});
@@ -846,6 +878,14 @@ export default function Settings() {
       companyId: settingsCompanyId ?? undefined,
     });
     setGeofences(Array.isArray(geofencesPayload.items) ? geofencesPayload.items : []);
+  }, [settingsCompanyId]);
+
+  const hydrateGaragesOnly = useCallback(async () => {
+    const garagesPayload = await listSettingsGarages({
+      companyId: settingsCompanyId ?? undefined,
+    });
+    setGarages(Array.isArray(garagesPayload.items) ? garagesPayload.items : []);
+    setGarageCompanyAddress(garagesPayload.companyAddress ?? '');
   }, [settingsCompanyId]);
 
   const refreshCurrentDataCounts = useCallback(async () => {
@@ -1034,9 +1074,10 @@ export default function Settings() {
 
   const requestSettingsHydration = useCallback(async (signal: AbortSignal): Promise<SettingsHydrationPayload> => {
     const invitationStatusFilterQuery = toInvitationStatusQuery(invitationStatusFilter);
-    const [companyPayload, geofencesPayload, membersPayload, invitationsResult] = await Promise.all([
+    const [companyPayload, geofencesPayload, garagesPayload, membersPayload, invitationsResult] = await Promise.all([
       getSettingsCompany({ signal, companyId: settingsCompanyId ?? undefined }),
       listSettingsGeofences({ signal, companyId: settingsCompanyId ?? undefined }),
+      listSettingsGarages({ signal, companyId: settingsCompanyId ?? undefined }),
       listSettingsMembers(undefined, { signal, companyId: settingsCompanyId ?? undefined }),
       canManageMemberRoles
         ? listInvitations(invitationStatusFilterQuery, { signal, companyId: settingsCompanyId ?? undefined })
@@ -1056,6 +1097,8 @@ export default function Settings() {
     return {
       company: companyPayload,
       geofences: Array.isArray(geofencesPayload.items) ? geofencesPayload.items : [],
+      garages: Array.isArray(garagesPayload.items) ? garagesPayload.items : [],
+      garageCompanyAddress: garagesPayload.companyAddress ?? '',
       members: Array.isArray(membersPayload.items) ? membersPayload.items : [],
       invitations: Array.isArray(invitationsResult.payload.items)
         ? sortInvitations(invitationsResult.payload.items)
@@ -1084,6 +1127,16 @@ export default function Settings() {
     setGeofenceSaveError(null);
     setGeofenceSaveSuccess(null);
     setGeofenceRetryAction(null);
+
+    setGarages(payload.garages);
+    setGarageCompanyAddress(payload.garageCompanyAddress);
+    setIsGarageEditorOpen(false);
+    setGarageEditorMode('create');
+    setEditingGarageId(null);
+    setGarageForm(DEFAULT_GARAGE_FORM_STATE);
+    setGarageFieldErrors({});
+    setGarageSaveError(null);
+    setGarageSaveSuccess(null);
 
     setMembers(payload.members);
     setMemberRoleDrafts({});
@@ -1742,6 +1795,191 @@ export default function Settings() {
 
     void runGeofenceDelete(geofenceId);
   }, [canEditSettings, deletingGeofenceId, isGeofenceSaving, runGeofenceDelete]);
+
+  const handleGarageSave = useCallback(async () => {
+    if (!canEditSettings || isGarageSaving) {
+      return;
+    }
+
+    const fieldErrors: FieldErrorMap<GarageField> = {};
+    const trimmedName = garageForm.name.trim();
+    const trimmedAddress = garageForm.address.trim();
+
+    if (!trimmedName) {
+      fieldErrors.name = '차고지 이름을 입력해 주세요.';
+    }
+    if (!trimmedAddress) {
+      fieldErrors.address = '주소를 입력해 주세요.';
+    }
+
+    if (Object.keys(fieldErrors).length > 0) {
+      setGarageFieldErrors(fieldErrors);
+      setGarageSaveError('입력값을 확인해 주세요.');
+      setGarageSaveSuccess(null);
+      return;
+    }
+
+    let mutationTask: Promise<SettingsGarage>;
+    if (garageEditorMode === 'create') {
+      mutationTask = createSettingsGarage({
+        name: trimmedName,
+        address: trimmedAddress,
+      }, {
+        companyId: settingsCompanyId ?? undefined,
+      });
+    } else {
+      if (!editingGarageId) {
+        setGarageSaveError('편집 대상을 찾을 수 없습니다. 목록을 새로고침해 주세요.');
+        return;
+      }
+
+      const existingGarage = garages.find((g) => g.id === editingGarageId);
+      const payload: { name?: string; address?: string } = {};
+      if (existingGarage?.name !== trimmedName) {
+        payload.name = trimmedName;
+      }
+      if (existingGarage?.address !== trimmedAddress) {
+        payload.address = trimmedAddress;
+      }
+
+      if (Object.keys(payload).length === 0) {
+        toast.info('변경된 차고지 정보가 없습니다.');
+        return;
+      }
+
+      mutationTask = updateSettingsGarage(editingGarageId, payload, {
+        companyId: settingsCompanyId ?? undefined,
+      });
+    }
+
+    setIsGarageSaving(true);
+    setGarageFieldErrors({});
+    setGarageSaveError(null);
+    setGarageSaveSuccess(null);
+
+    try {
+      const savedGarage = await mutationTask;
+      setGarages((prevItems) => {
+        const existingIndex = prevItems.findIndex((item) => item.id === savedGarage.id);
+        if (existingIndex < 0) {
+          return [...prevItems, savedGarage];
+        }
+        const nextItems = [...prevItems];
+        nextItems[existingIndex] = savedGarage;
+        return nextItems;
+      });
+
+      setGarageSaveSuccess(
+        garageEditorMode === 'create' ? '차고지가 생성되었습니다.' : '차고지가 저장되었습니다.',
+      );
+      toast.success(
+        garageEditorMode === 'create' ? '차고지가 생성되었습니다.' : '차고지가 저장되었습니다.',
+      );
+
+      setIsGarageEditorOpen(false);
+      setGarageEditorMode('create');
+      setEditingGarageId(null);
+      setGarageForm(DEFAULT_GARAGE_FORM_STATE);
+      setGarageFieldErrors({});
+    } catch (error) {
+      if (error instanceof ApiError) {
+        if (error.status === 400) {
+          const mappedErrors = mapFieldErrors<GarageField>(toErrorFieldEntries(error), {
+            name: 'name',
+            address: 'address',
+          });
+          if (Object.keys(mappedErrors).length > 0) {
+            setGarageFieldErrors(mappedErrors);
+          }
+          setGarageSaveError(error.message || '입력값을 확인해 주세요.');
+          return;
+        }
+        if (error.status === 403) {
+          setGarageSaveError('차고지 수정 권한이 없습니다. 관리자에게 권한을 요청해 주세요.');
+          return;
+        }
+        if (error.status === 409) {
+          setGarageSaveError('다른 사용자 변경사항과 충돌했습니다. 최신 목록을 다시 불러옵니다.');
+          void hydrateGaragesOnly();
+          return;
+        }
+        if (isRetryableMutationError(error)) {
+          setGarageSaveError('일시적인 오류로 저장에 실패했습니다. 다시 시도해 주세요.');
+          return;
+        }
+      }
+      setGarageSaveError(toErrorMessage(error, '차고지 저장에 실패했습니다.'));
+    } finally {
+      setIsGarageSaving(false);
+    }
+  }, [
+    canEditSettings,
+    editingGarageId,
+    garageEditorMode,
+    garageForm,
+    garages,
+    hydrateGaragesOnly,
+    isGarageSaving,
+    settingsCompanyId,
+  ]);
+
+  const runGarageDelete = useCallback(async (garageId: string) => {
+    if (!canEditSettings) {
+      return;
+    }
+    setDeletingGarageId(garageId);
+    setGarageSaveError(null);
+    setGarageSaveSuccess(null);
+
+    try {
+      await deleteSettingsGarage(garageId, {
+        companyId: settingsCompanyId ?? undefined,
+      });
+      setGarages((prevItems) => prevItems.filter((item) => item.id !== garageId));
+      setGarageSaveSuccess('차고지가 삭제되었습니다.');
+      if (editingGarageId === garageId) {
+        setIsGarageEditorOpen(false);
+        setEditingGarageId(null);
+        setGarageEditorMode('create');
+        setGarageForm(DEFAULT_GARAGE_FORM_STATE);
+      }
+      toast.success('차고지가 삭제되었습니다.');
+    } catch (error) {
+      if (error instanceof ApiError) {
+        if (error.status === 403) {
+          setGarageSaveError('차고지 삭제 권한이 없습니다.');
+          return;
+        }
+        if (error.status === 409) {
+          setGarageSaveError('충돌이 발생해 최신 차고지 목록을 다시 불러옵니다.');
+          void hydrateGaragesOnly();
+          return;
+        }
+        if (isRetryableMutationError(error)) {
+          setGarageSaveError('일시적인 오류로 삭제에 실패했습니다. 다시 시도해 주세요.');
+          return;
+        }
+      }
+      setGarageSaveError(toErrorMessage(error, '차고지 삭제에 실패했습니다.'));
+    } finally {
+      setDeletingGarageId(null);
+    }
+  }, [canEditSettings, editingGarageId, hydrateGaragesOnly, settingsCompanyId]);
+
+  const handleGarageDelete = useCallback((garageId: string) => {
+    if (!canEditSettings || deletingGarageId !== null || isGarageSaving) {
+      return;
+    }
+
+    if (typeof window !== 'undefined') {
+      const shouldDelete = window.confirm('해당 차고지를 삭제하시겠습니까?');
+      if (!shouldDelete) {
+        return;
+      }
+    }
+
+    void runGarageDelete(garageId);
+  }, [canEditSettings, deletingGarageId, isGarageSaving, runGarageDelete]);
 
   const handleMemberRoleChange = useCallback((memberId: string, role: 'admin' | 'member' | 'viewer') => {
     setMemberRoleDrafts((prevDrafts) => ({
@@ -2496,6 +2734,18 @@ export default function Settings() {
               }`}
             >
               지오펜스
+            </button>
+            <button
+              type="button"
+              data-testid="settings-tab-garage"
+              onClick={() => handleTabChange('garage')}
+              className={`border-b-2 px-6 py-3 text-sm font-medium transition-colors ${
+                activeTab === 'garage'
+                  ? 'border-blue-600 text-blue-600'
+                  : 'border-transparent text-gray-600 hover:text-gray-900'
+              }`}
+            >
+              차고지
             </button>
             {canManageMemberRoles && (
               <button
@@ -3276,6 +3526,207 @@ export default function Settings() {
                     </tbody>
                   </table>
                 </div>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'garage' && (
+            <div className="space-y-6">
+              {!canEditSettings && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                  현재 계정은 차고지를 읽기 전용으로만 볼 수 있습니다.
+                </div>
+              )}
+
+              {(garageSaveError || garageSaveSuccess) && (
+                <div
+                  className={`rounded-lg border px-4 py-3 text-sm ${
+                    garageSaveError
+                      ? 'border-red-200 bg-red-50 text-red-700'
+                      : 'border-green-200 bg-green-50 text-green-700'
+                  }`}
+                >
+                  <p>{garageSaveError ?? garageSaveSuccess}</p>
+                </div>
+              )}
+
+              {garageCompanyAddress && (
+                <div className="rounded-lg border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+                  회사 주소: {garageCompanyAddress}
+                </div>
+              )}
+
+              {isGarageEditorOpen && (
+                <div className="rounded-xl bg-white p-6 shadow-sm">
+                  <div className="mb-4 flex items-center justify-between">
+                    <h2 className="text-base font-semibold text-[#1e2939]">
+                      {garageEditorMode === 'create' ? '차고지 추가' : '차고지 편집'}
+                    </h2>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsGarageEditorOpen(false);
+                        setGarageEditorMode('create');
+                        setEditingGarageId(null);
+                        setGarageForm(DEFAULT_GARAGE_FORM_STATE);
+                        setGarageFieldErrors({});
+                        setGarageSaveError(null);
+                        setGarageSaveSuccess(null);
+                      }}
+                      className="text-sm text-gray-500 hover:text-gray-700"
+                    >
+                      닫기
+                    </button>
+                  </div>
+
+                  <div className="space-y-4">
+                    <div>
+                      <label className="mb-1 block text-sm font-medium text-gray-700">차고지 이름 *</label>
+                      <input
+                        type="text"
+                        value={garageForm.name}
+                        placeholder="차고지 이름을 입력하세요"
+                        disabled={!canEditSettings || isGarageSaving}
+                        onChange={(event) => {
+                          setGarageForm((prev) => ({ ...prev, name: event.target.value }));
+                          setGarageFieldErrors((prev) => ({ ...prev, name: undefined }));
+                          setGarageSaveError(null);
+                          setGarageSaveSuccess(null);
+                        }}
+                        className={`w-full rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                          garageFieldErrors.name ? 'border-red-400 bg-red-50' : 'border-gray-300'
+                        } disabled:cursor-not-allowed disabled:bg-gray-50`}
+                      />
+                      {garageFieldErrors.name && (
+                        <p className="mt-1 text-xs text-red-600">{garageFieldErrors.name}</p>
+                      )}
+                    </div>
+
+                    <div>
+                      <label className="mb-1 block text-sm font-medium text-gray-700">주소 *</label>
+                      <input
+                        type="text"
+                        value={garageForm.address}
+                        placeholder="주소를 입력하세요"
+                        disabled={!canEditSettings || isGarageSaving}
+                        onChange={(event) => {
+                          setGarageForm((prev) => ({ ...prev, address: event.target.value }));
+                          setGarageFieldErrors((prev) => ({ ...prev, address: undefined }));
+                          setGarageSaveError(null);
+                          setGarageSaveSuccess(null);
+                        }}
+                        className={`w-full rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                          garageFieldErrors.address ? 'border-red-400 bg-red-50' : 'border-gray-300'
+                        } disabled:cursor-not-allowed disabled:bg-gray-50`}
+                      />
+                      {garageFieldErrors.address && (
+                        <p className="mt-1 text-xs text-red-600">{garageFieldErrors.address}</p>
+                      )}
+                    </div>
+
+                    <div className="flex justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsGarageEditorOpen(false);
+                          setGarageEditorMode('create');
+                          setEditingGarageId(null);
+                          setGarageForm(DEFAULT_GARAGE_FORM_STATE);
+                          setGarageFieldErrors({});
+                          setGarageSaveError(null);
+                          setGarageSaveSuccess(null);
+                        }}
+                        disabled={isGarageSaving}
+                        className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        취소
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { void handleGarageSave(); }}
+                        disabled={!canEditSettings || isGarageSaving}
+                        className="inline-flex items-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {isGarageSaving ? '저장 중...' : garageEditorMode === 'create' ? '차고지 추가' : '저장'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div className="rounded-xl bg-white p-6 shadow-sm">
+                <div className="mb-4 flex items-center justify-between">
+                  <h2 className="text-base font-semibold text-[#1e2939]">차고지 목록</h2>
+                  {canEditSettings && !isGarageEditorOpen && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setGarageEditorMode('create');
+                        setEditingGarageId(null);
+                        setGarageForm(DEFAULT_GARAGE_FORM_STATE);
+                        setGarageFieldErrors({});
+                        setGarageSaveError(null);
+                        setGarageSaveSuccess(null);
+                        setIsGarageEditorOpen(true);
+                      }}
+                      className="inline-flex items-center gap-1 rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-blue-700"
+                    >
+                      차고지 추가
+                    </button>
+                  )}
+                </div>
+
+                {garages.length === 0 ? (
+                  <p className="py-4 text-center text-sm text-gray-500">등록된 차고지가 없습니다.</p>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-gray-200 text-left text-xs font-medium text-gray-500">
+                          <th className="pb-2 pr-4">이름</th>
+                          <th className="pb-2 pr-4">주소</th>
+                          {canEditSettings && <th className="pb-2 text-right">관리</th>}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {garages.map((garage) => (
+                          <tr key={garage.id} className="text-gray-700">
+                            <td className="py-2.5 pr-4 font-medium">{garage.name}</td>
+                            <td className="py-2.5 pr-4 text-gray-500">{garage.address}</td>
+                            {canEditSettings && (
+                              <td className="py-2.5 text-right">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setGarageEditorMode('edit');
+                                    setEditingGarageId(garage.id);
+                                    setGarageForm({ name: garage.name, address: garage.address });
+                                    setGarageFieldErrors({});
+                                    setGarageSaveError(null);
+                                    setGarageSaveSuccess(null);
+                                    setIsGarageEditorOpen(true);
+                                  }}
+                                  disabled={deletingGarageId === garage.id || isGarageSaving}
+                                  className="mr-2 text-xs text-blue-600 hover:text-blue-800 disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                  편집
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleGarageDelete(garage.id)}
+                                  disabled={deletingGarageId !== null || isGarageSaving}
+                                  className="text-xs text-red-600 hover:text-red-800 disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                  {deletingGarageId === garage.id ? '삭제 중...' : '삭제'}
+                                </button>
+                              </td>
+                            )}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
             </div>
           )}
