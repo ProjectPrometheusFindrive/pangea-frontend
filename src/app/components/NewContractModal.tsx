@@ -66,6 +66,7 @@ function createTodayBaseDate(): Date {
 
 const CALENDAR_BASE_DATE = createTodayBaseDate();
 const PHONE_REGEX = /^010-\d{4}-\d{4}$/;
+const LICENSE_REGEX = /^\d{2}-\d{6}-\d{2}$/;
 
 function hasTextValue(value: string): boolean {
   return value.trim().length > 0;
@@ -237,9 +238,13 @@ export function NewContractModal({
     }
     if (!hasTextValue(customerLicense)) {
       nextErrors.customerLicense = '면허번호를 입력해 주세요.';
+    } else if (!LICENSE_REGEX.test(customerLicense.trim())) {
+      nextErrors.customerLicense = '면허번호는 XX-XXXXXX-XX 형식으로 입력해 주세요. (예: 11-123456-78)';
     }
     if (!hasTextValue(customerAddress)) {
       nextErrors.customerAddress = '주소를 입력해 주세요.';
+    } else if (customerAddress.trim().length < 5) {
+      nextErrors.customerAddress = '주소는 5자 이상 입력해 주세요.';
     }
     if (!hasTextValue(pickupLocation)) {
       nextErrors.pickupLocation = '대여 장소를 입력해 주세요.';
@@ -642,7 +647,7 @@ export function NewContractModal({
                     setCustomerLicense(event.target.value);
                     clearFieldError('customerLicense');
                   }}
-                  placeholder="1234567890123"
+                  placeholder="11-123456-78"
                   className={fieldInputClass('customerLicense')}
                   disabled={isSubmitting}
                 />

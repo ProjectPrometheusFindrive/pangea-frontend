@@ -195,6 +195,9 @@ function toCreateFieldErrors(error: ApiError): FieldErrorMap<NewContractField> {
     startAt: 'startDate',
     endAt: 'endDate',
     customerName: 'customerName',
+    phone: 'customerPhone',
+    licenseNumber: 'customerLicense',
+    address: 'customerAddress',
   });
 }
 
@@ -1573,6 +1576,8 @@ export default function Reservations() {
         plate: formValues.selectedVehicle,
         customerName: formValues.customerName.trim(),
         phone: formValues.customerPhone.trim(),
+        licenseNumber: formValues.customerLicense.trim() || undefined,
+        address: formValues.customerAddress.trim() || undefined,
         paymentMethod: formValues.paymentMethod,
         paymentStatus: formValues.paymentStatus,
         amount: toCurrencyNumberFromInput(formValues.amount),
