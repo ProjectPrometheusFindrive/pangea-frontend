@@ -41,4 +41,10 @@ export interface VehicleAsset {
   deviceStatus?: VehicleDeviceStatus;
   dtcHistory?: DTCRecord[];
   deviceSerialNumber?: string;
+  make?: string;
+  fuelType?: string;
+  vehicleValue?: string | number;
+  registrationStatus?: string;
+  registrationDate?: string | null;
+  purchaseDate?: string | null;
 }

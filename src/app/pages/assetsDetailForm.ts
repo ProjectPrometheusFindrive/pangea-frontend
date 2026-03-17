@@ -26,6 +26,12 @@ export interface AssetEditForm {
   color: string;
   category: string;
   vehicleType: string;
+  make: string;
+  fuelType: string;
+  vehicleValue: string;
+  registrationStatus: string;
+  registrationDate: string;
+  purchaseDate: string;
 }
 
 export type AssetEditField = keyof AssetEditForm;
@@ -41,6 +47,12 @@ export interface AssetEditFormSource {
   color?: string;
   category?: string;
   vehicleType?: string;
+  make?: string;
+  fuelType?: string;
+  vehicleValue?: string | number;
+  registrationStatus?: string;
+  registrationDate?: string | null;
+  purchaseDate?: string | null;
 }
 
 export interface AssetEditPatchAsset extends AssetEditFormSource {
@@ -58,6 +70,12 @@ export interface AssetPatchPayload {
   color?: string;
   category?: string;
   vehicleType?: string;
+  make?: string;
+  fuelType?: string;
+  vehicleValue?: string | number | null;
+  registrationStatus?: string;
+  registrationDate?: string | null;
+  purchaseDate?: string | null;
 }
 
 export const EMPTY_ASSET_EDIT_FORM: AssetEditForm = {
@@ -69,6 +87,12 @@ export const EMPTY_ASSET_EDIT_FORM: AssetEditForm = {
   color: '',
   category: '',
   vehicleType: '',
+  make: '',
+  fuelType: '',
+  vehicleValue: '',
+  registrationStatus: '',
+  registrationDate: '',
+  purchaseDate: '',
 };
 
 export function toAssetEditForm(asset: AssetEditFormSource): AssetEditForm {
@@ -81,6 +105,12 @@ export function toAssetEditForm(asset: AssetEditFormSource): AssetEditForm {
     color: toTrimmedString(asset.color),
     category: toTrimmedString(asset.category),
     vehicleType: toTrimmedString(asset.vehicleType),
+    make: toTrimmedString(asset.make),
+    fuelType: toTrimmedString(asset.fuelType),
+    vehicleValue: toTrimmedString(asset.vehicleValue),
+    registrationStatus: toTrimmedString(asset.registrationStatus),
+    registrationDate: asset.registrationDate != null ? toTrimmedString(asset.registrationDate) : '',
+    purchaseDate: asset.purchaseDate != null ? toTrimmedString(asset.purchaseDate) : '',
   };
 }
 
@@ -95,6 +125,12 @@ export function isAssetEditFormDirty(asset: AssetEditFormSource, form: AssetEdit
     || baseline.color !== form.color.trim()
     || baseline.category !== form.category.trim()
     || baseline.vehicleType !== form.vehicleType.trim()
+    || baseline.make !== form.make.trim()
+    || baseline.fuelType !== form.fuelType.trim()
+    || baseline.vehicleValue !== form.vehicleValue.trim()
+    || baseline.registrationStatus !== form.registrationStatus.trim()
+    || baseline.registrationDate !== form.registrationDate.trim()
+    || baseline.purchaseDate !== form.purchaseDate.trim()
   );
 }
 
@@ -114,6 +150,12 @@ export function buildAssetPatchPayload({
   const nextColor = form.color.trim();
   const nextCategory = form.category.trim();
   const nextVehicleType = form.vehicleType.trim();
+  const nextMake = form.make.trim();
+  const nextFuelType = form.fuelType.trim();
+  const nextVehicleValue = form.vehicleValue.trim();
+  const nextRegistrationStatus = form.registrationStatus.trim();
+  const nextRegistrationDate = form.registrationDate.trim();
+  const nextPurchaseDate = form.purchaseDate.trim();
 
   if (!nextPlate) {
     fieldErrors.plate = '차량번호를 입력해 주세요.';
@@ -160,6 +202,24 @@ export function buildAssetPatchPayload({
   if (baseline.vehicleType !== nextVehicleType) {
     payload.vehicleType = nextVehicleType;
   }
+  if (baseline.make !== nextMake) {
+    payload.make = nextMake;
+  }
+  if (baseline.fuelType !== nextFuelType) {
+    payload.fuelType = nextFuelType;
+  }
+  if (baseline.vehicleValue !== nextVehicleValue) {
+    payload.vehicleValue = nextVehicleValue || undefined;
+  }
+  if (baseline.registrationStatus !== nextRegistrationStatus) {
+    payload.registrationStatus = nextRegistrationStatus;
+  }
+  if (baseline.registrationDate !== nextRegistrationDate) {
+    payload.registrationDate = nextRegistrationDate === '' ? null : nextRegistrationDate;
+  }
+  if (baseline.purchaseDate !== nextPurchaseDate) {
+    payload.purchaseDate = nextPurchaseDate === '' ? null : nextPurchaseDate;
+  }
 
   return {
     payload,
@@ -180,6 +240,12 @@ export function mapAssetEditFieldErrors(
     color: 'color',
     category: 'category',
     vehicleType: 'vehicleType',
+    make: 'make',
+    fuelType: 'fuelType',
+    vehicleValue: 'vehicleValue',
+    registrationStatus: 'registrationStatus',
+    registrationDate: 'registrationDate',
+    purchaseDate: 'purchaseDate',
   };
 
   const mapped: AssetEditFieldErrors = {};
