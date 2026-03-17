@@ -554,7 +554,7 @@ export default function Home() {
       params.set('to', todayDate);
       params.set('due', 'return');
     } else {
-      params.set('filter', 'rental');
+      params.set('filter', 'overdue');
     }
 
     navigateWithRoutePermission(
