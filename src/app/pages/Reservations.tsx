@@ -186,7 +186,7 @@ function mapFieldErrors<TField extends string>(
 }
 
 function toCreateFieldErrors(error: ApiError): FieldErrorMap<NewContractField> {
-  return mapFieldErrors<NewContractField>(toErrorFieldEntries(error), {
+  const mapped = mapFieldErrors<NewContractField>(toErrorFieldEntries(error), {
     reservationId: 'selectedVehicle',
     vin: 'selectedVehicle',
     vehicleNumber: 'selectedVehicle',
@@ -195,6 +195,16 @@ function toCreateFieldErrors(error: ApiError): FieldErrorMap<NewContractField> {
     endAt: 'endDate',
     customerName: 'customerName',
   });
+
+  const msg = error.message ?? '';
+  if (!mapped.startDate && msg.includes('현재 시간 이전')) {
+    mapped.startDate = msg;
+  }
+  if (!mapped.selectedVehicle && msg.includes('사용가능한 상태가 아닙니다')) {
+    mapped.selectedVehicle = msg;
+  }
+
+  return mapped;
 }
 
 function toAccidentFieldErrors(error: ApiError): FieldErrorMap<AccidentReportField> {
