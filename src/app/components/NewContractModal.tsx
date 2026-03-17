@@ -214,6 +214,8 @@ export function NewContractModal({
       const endAt = new Date(`${endDate}T${endTime}`);
       if (Number.isNaN(startAt.getTime()) || Number.isNaN(endAt.getTime()) || endAt < startAt) {
         nextErrors.endDate = '반납 일시는 픽업 일시보다 빠를 수 없습니다.';
+      } else if (startAt < new Date()) {
+        nextErrors.startDate = '대여 시작 일시는 현재 시간 이후로 입력해 주세요.';
       }
     }
 
@@ -469,6 +471,7 @@ export function NewContractModal({
                           data-testid="new-contract-start-date-input"
                           type="date"
                           value={startDate}
+                          min={new Date().toISOString().split('T')[0]}
                           onChange={(event) => {
                             setStartDate(event.target.value);
                             clearFieldError('startDate');
