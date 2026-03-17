@@ -88,12 +88,15 @@ export function VehicleDetailModal({
   onConflictRefresh,
   isOpen,
   onClose,
+  editForm,
+  fieldErrors,
   saveError,
   conflictNotice,
   isSaving,
   isDeleting,
   isDirty,
   canEdit,
+  onEditFieldChange,
   handleSave,
   getStatusColor,
 }: VehicleDetailModalProps) {
@@ -256,6 +259,96 @@ export function VehicleDetailModal({
                 )}
 
                 <div className="space-y-4">
+                  <div>
+                    <label className="mb-2 block text-sm font-semibold text-gray-600">{'제조사'}</label>
+                    <input
+                      data-testid="asset-detail-make-input"
+                      type="text"
+                      value={editForm.make}
+                      onChange={(e) => onEditFieldChange('make', e.target.value)}
+                      disabled={!canEdit || isSaving}
+                      className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-500"
+                    />
+                    {fieldErrors.make && (
+                      <p className="mt-1 text-xs text-red-600">{fieldErrors.make}</p>
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="mb-2 block text-sm font-semibold text-gray-600">{'연료 타입'}</label>
+                    <input
+                      data-testid="asset-detail-fuel-type-input"
+                      type="text"
+                      value={editForm.fuelType}
+                      onChange={(e) => onEditFieldChange('fuelType', e.target.value)}
+                      disabled={!canEdit || isSaving}
+                      className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-500"
+                    />
+                    {fieldErrors.fuelType && (
+                      <p className="mt-1 text-xs text-red-600">{fieldErrors.fuelType}</p>
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="mb-2 block text-sm font-semibold text-gray-600">{'차량 가액'}</label>
+                    <input
+                      data-testid="asset-detail-vehicle-value-input"
+                      type="text"
+                      value={editForm.vehicleValue}
+                      onChange={(e) => onEditFieldChange('vehicleValue', e.target.value)}
+                      disabled={!canEdit || isSaving}
+                      className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-500"
+                    />
+                    {fieldErrors.vehicleValue && (
+                      <p className="mt-1 text-xs text-red-600">{fieldErrors.vehicleValue}</p>
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="mb-2 block text-sm font-semibold text-gray-600">{'등록 상태'}</label>
+                    <input
+                      data-testid="asset-detail-registration-status-input"
+                      type="text"
+                      value={editForm.registrationStatus}
+                      onChange={(e) => onEditFieldChange('registrationStatus', e.target.value)}
+                      disabled={!canEdit || isSaving}
+                      className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-500"
+                    />
+                    {fieldErrors.registrationStatus && (
+                      <p className="mt-1 text-xs text-red-600">{fieldErrors.registrationStatus}</p>
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="mb-2 block text-sm font-semibold text-gray-600">{'등록일'}</label>
+                    <input
+                      data-testid="asset-detail-registration-date-input"
+                      type="date"
+                      value={formatDateInputValue(editForm.registrationDate)}
+                      onChange={(e) => onEditFieldChange('registrationDate', e.target.value)}
+                      disabled={!canEdit || isSaving}
+                      className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-500"
+                    />
+                    {fieldErrors.registrationDate && (
+                      <p className="mt-1 text-xs text-red-600">{fieldErrors.registrationDate}</p>
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="mb-2 block text-sm font-semibold text-gray-600">{'구매일'}</label>
+                    <input
+                      data-testid="asset-detail-purchase-date-input"
+                      type="date"
+                      value={formatDateInputValue(editForm.purchaseDate)}
+                      onChange={(e) => onEditFieldChange('purchaseDate', e.target.value)}
+                      disabled={!canEdit || isSaving}
+                      className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-500"
+                    />
+                    {fieldErrors.purchaseDate && (
+                      <p className="mt-1 text-xs text-red-600">{fieldErrors.purchaseDate}</p>
+                    )}
+                  </div>
+
                   <div>
                     <label className="mb-2 block text-sm font-semibold text-gray-600">{'보험가입증서 업로드'}</label>
                     <div className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700">{'파일 선택'}</div>

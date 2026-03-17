@@ -36,6 +36,12 @@ export interface PatchAssetPayload {
   status?: string;
   contractStatus?: string;
   memo?: string;
+  make?: string;
+  fuelType?: string;
+  vehicleValue?: string | number | null;
+  registrationStatus?: string;
+  registrationDate?: string | null;
+  purchaseDate?: string | null;
 }
 
 export interface GetAssetHistoryParams extends AssetsRequestOptions {
