@@ -195,6 +195,80 @@ export function deleteSettingsGeofence(geofenceId: string, options: SettingsRequ
   });
 }
 
+export interface SettingsGarage {
+  id: string;
+  name: string;
+  address: string;
+}
+
+export interface SettingsGarageListData {
+  companyAddress: string;
+  items: SettingsGarage[];
+}
+
+export interface SettingsGarageCreateRequest {
+  name: string;
+  address: string;
+}
+
+export interface SettingsGarageUpdateRequest {
+  name?: string;
+  address?: string;
+}
+
+export function listSettingsGarages(options: SettingsRequestOptions = {}): Promise<SettingsGarageListData> {
+  return apiClient.requestData<SettingsGarageListData>({
+    path: '/api/v2/settings/garages',
+    method: 'GET',
+    query: {
+      companyId: options.companyId,
+    },
+    signal: options.signal,
+  });
+}
+
+export function createSettingsGarage(
+  payload: SettingsGarageCreateRequest,
+  options: SettingsRequestOptions = {},
+): Promise<SettingsGarage> {
+  return apiClient.requestData<SettingsGarage>({
+    path: '/api/v2/settings/garages',
+    method: 'POST',
+    body: payload,
+    query: {
+      companyId: options.companyId,
+    },
+    signal: options.signal,
+  });
+}
+
+export function updateSettingsGarage(
+  garageId: string,
+  payload: SettingsGarageUpdateRequest,
+  options: SettingsRequestOptions = {},
+): Promise<SettingsGarage> {
+  return apiClient.requestData<SettingsGarage>({
+    path: `/api/v2/settings/garages/${encodeURIComponent(garageId)}`,
+    method: 'PUT',
+    body: payload,
+    query: {
+      companyId: options.companyId,
+    },
+    signal: options.signal,
+  });
+}
+
+export function deleteSettingsGarage(garageId: string, options: SettingsRequestOptions = {}): Promise<void> {
+  return apiClient.requestData<void>({
+    path: `/api/v2/settings/garages/${encodeURIComponent(garageId)}`,
+    method: 'DELETE',
+    query: {
+      companyId: options.companyId,
+    },
+    signal: options.signal,
+  });
+}
+
 export function listSettingsMembers(
   status?: 'approved' | 'pending' | 'rejected' | 'withdrawn',
   options: SettingsRequestOptions = {},
