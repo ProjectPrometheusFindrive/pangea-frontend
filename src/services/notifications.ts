@@ -11,6 +11,7 @@ export interface NotificationItem {
   isRead: boolean;
   path: string;
   createdAt: string;
+  vehicleNumber?: string;
 }
 
 export interface NotificationListData {
@@ -208,6 +209,14 @@ function normalizeNotification(payload: unknown, index: number): NotificationIte
     new Date().toISOString(),
   );
   const path = resolveNotificationPath(payload);
+  const vehicleNumber = toText(
+    payload.vehicleNumber
+      ?? payload.vehicle_number
+      ?? payload.plateNumber
+      ?? payload.carNumber
+      ?? payload.plate,
+    '',
+  ) || undefined;
 
   const readAtValue = payload.readAt;
   const hasReadAt = (
@@ -231,6 +240,7 @@ function normalizeNotification(payload: unknown, index: number): NotificationIte
         isRead,
         path,
         createdAt,
+        vehicleNumber,
       };
 }
 
