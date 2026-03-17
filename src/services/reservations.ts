@@ -29,6 +29,8 @@ export interface CreateReservationPayload {
   status?: string;
   customerName?: string;
   phone?: string;
+  licenseNumber?: string;
+  address?: string;
   paymentMethod?: string;
   paymentStatus?: string;
   amount?: number;
