@@ -136,10 +136,12 @@ export async function uploadFileToSignedUrl(
   options: AssetOcrRequestOptions = {},
 ): Promise<void> {
   let response: Response;
+  const isEmulatorJsonUpload = uploadUrl.includes('/upload/storage/v1/b/');
+  const method = isEmulatorJsonUpload ? 'POST' : 'PUT';
 
   try {
     response = await fetch(uploadUrl, {
-      method: 'PUT',
+      method,
       headers: {
         'Content-Type': contentType,
       },
