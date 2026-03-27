@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import React, { useState } from 'react';
 import { X, Activity, History, Info, Zap, AlertTriangle, Loader2 } from 'lucide-react';
 import type { VehicleAsset } from '../types/assets';
 import { useNavigate } from 'react-router';
@@ -47,6 +47,9 @@ interface VehicleDetailModalProps {
   handleSave: () => void;
   handleDelete: () => void;
   getStatusColor: (status: string) => string;
+  detailUploadedFiles: { insurance: File | null; loanSchedule: File | null };
+  onDetailInsuranceFileSelect: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onDetailLoanScheduleFileSelect: (e: React.ChangeEvent<HTMLInputElement>) => void;
 }
 
 function formatDateInputValue(value: string | undefined): string {
@@ -99,6 +102,9 @@ export function VehicleDetailModal({
   onEditFieldChange,
   handleSave,
   getStatusColor,
+  detailUploadedFiles,
+  onDetailInsuranceFileSelect,
+  onDetailLoanScheduleFileSelect,
 }: VehicleDetailModalProps) {
   const [detailTab, setDetailTab] = useState<'info' | 'history' | 'sensor'>('info');
   const navigate = useNavigate();
@@ -260,99 +266,23 @@ export function VehicleDetailModal({
 
                 <div className="space-y-4">
                   <div>
-                    <label className="mb-2 block text-sm font-semibold text-gray-600">{'제조사'}</label>
-                    <input
-                      data-testid="asset-detail-make-input"
-                      type="text"
-                      value={editForm.make}
-                      onChange={(e) => onEditFieldChange('make', e.target.value)}
-                      disabled={!canEdit || isSaving}
-                      className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-500"
-                    />
-                    {fieldErrors.make && (
-                      <p className="mt-1 text-xs text-red-600">{fieldErrors.make}</p>
-                    )}
-                  </div>
-
-                  <div>
-                    <label className="mb-2 block text-sm font-semibold text-gray-600">{'연료 타입'}</label>
-                    <input
-                      data-testid="asset-detail-fuel-type-input"
-                      type="text"
-                      value={editForm.fuelType}
-                      onChange={(e) => onEditFieldChange('fuelType', e.target.value)}
-                      disabled={!canEdit || isSaving}
-                      className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-500"
-                    />
-                    {fieldErrors.fuelType && (
-                      <p className="mt-1 text-xs text-red-600">{fieldErrors.fuelType}</p>
-                    )}
-                  </div>
-
-                  <div>
-                    <label className="mb-2 block text-sm font-semibold text-gray-600">{'차량 가액'}</label>
-                    <input
-                      data-testid="asset-detail-vehicle-value-input"
-                      type="text"
-                      value={editForm.vehicleValue}
-                      onChange={(e) => onEditFieldChange('vehicleValue', e.target.value)}
-                      disabled={!canEdit || isSaving}
-                      className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-500"
-                    />
-                    {fieldErrors.vehicleValue && (
-                      <p className="mt-1 text-xs text-red-600">{fieldErrors.vehicleValue}</p>
-                    )}
-                  </div>
-
-                  <div>
-                    <label className="mb-2 block text-sm font-semibold text-gray-600">{'등록 상태'}</label>
-                    <input
-                      data-testid="asset-detail-registration-status-input"
-                      type="text"
-                      value={editForm.registrationStatus}
-                      onChange={(e) => onEditFieldChange('registrationStatus', e.target.value)}
-                      disabled={!canEdit || isSaving}
-                      className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-500"
-                    />
-                    {fieldErrors.registrationStatus && (
-                      <p className="mt-1 text-xs text-red-600">{fieldErrors.registrationStatus}</p>
-                    )}
-                  </div>
-
-                  <div>
-                    <label className="mb-2 block text-sm font-semibold text-gray-600">{'등록일'}</label>
-                    <input
-                      data-testid="asset-detail-registration-date-input"
-                      type="date"
-                      value={formatDateInputValue(editForm.registrationDate)}
-                      onChange={(e) => onEditFieldChange('registrationDate', e.target.value)}
-                      disabled={!canEdit || isSaving}
-                      className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-500"
-                    />
-                    {fieldErrors.registrationDate && (
-                      <p className="mt-1 text-xs text-red-600">{fieldErrors.registrationDate}</p>
-                    )}
-                  </div>
-
-                  <div>
-                    <label className="mb-2 block text-sm font-semibold text-gray-600">{'구매일'}</label>
-                    <input
-                      data-testid="asset-detail-purchase-date-input"
-                      type="date"
-                      value={formatDateInputValue(editForm.purchaseDate)}
-                      onChange={(e) => onEditFieldChange('purchaseDate', e.target.value)}
-                      disabled={!canEdit || isSaving}
-                      className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-500"
-                    />
-                    {fieldErrors.purchaseDate && (
-                      <p className="mt-1 text-xs text-red-600">{fieldErrors.purchaseDate}</p>
-                    )}
-                  </div>
-
-                  <div>
                     <label className="mb-2 block text-sm font-semibold text-gray-600">{'보험가입증서 업로드'}</label>
-                    <div className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700">{'파일 선택'}</div>
-                    <p className="mt-1 text-xs text-gray-500">{'선택된 파일 없음'}</p>
+                    <label className="cursor-pointer">
+                      <div className="flex items-center gap-2">
+                        <div className="rounded-lg bg-gray-100 px-4 py-2 font-medium text-gray-700 hover:bg-gray-200">{'파일 선택'}</div>
+                        {detailUploadedFiles.insurance ? (
+                          <span className="text-sm text-green-600">{'✓ '}{detailUploadedFiles.insurance.name}</span>
+                        ) : (
+                          <span className="text-sm text-gray-500">{'선택된 파일 없음'}</span>
+                        )}
+                      </div>
+                      <input
+                        type="file"
+                        accept="image/*,application/pdf"
+                        onChange={onDetailInsuranceFileSelect}
+                        className="hidden"
+                      />
+                    </label>
                   </div>
 
                   <div>
@@ -360,8 +290,8 @@ export function VehicleDetailModal({
                     <input
                       data-testid="asset-detail-insurance-expiry-input"
                       type="date"
-                      value={formatDateInputValue(asset.insuranceExpiry)}
-                      readOnly
+                      value={formatDateInputValue(editForm.insuranceExpiry)}
+                      onChange={(e) => onEditFieldChange('insuranceExpiry', e.target.value)}
                       disabled={!canEdit || isSaving}
                       className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-500"
                     />
@@ -369,8 +299,17 @@ export function VehicleDetailModal({
 
                   <div>
                     <label className="mb-2 block text-sm font-semibold text-gray-600">{'자동차종합검사 결과표 업로드'}</label>
-                    <div className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700">{'파일 선택'}</div>
-                    <p className="mt-1 text-xs text-gray-500">{'선택된 파일 없음'}</p>
+                    <label className="cursor-pointer">
+                      <div className="flex items-center gap-2">
+                        <div className="rounded-lg bg-gray-100 px-4 py-2 font-medium text-gray-700 hover:bg-gray-200">{'파일 선택'}</div>
+                        <span className="text-sm text-gray-500">{'선택된 파일 없음'}</span>
+                      </div>
+                      <input
+                        type="file"
+                        accept=".pdf,.jpg,.jpeg,.png"
+                        className="hidden"
+                      />
+                    </label>
                   </div>
 
                   <div>
@@ -378,8 +317,8 @@ export function VehicleDetailModal({
                     <input
                       data-testid="asset-detail-next-inspection-input"
                       type="date"
-                      value={formatDateInputValue(asset.nextInspection)}
-                      readOnly
+                      value={formatDateInputValue(editForm.nextInspection)}
+                      onChange={(e) => onEditFieldChange('nextInspection', e.target.value)}
                       disabled={!canEdit || isSaving}
                       className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-500"
                     />
@@ -387,8 +326,22 @@ export function VehicleDetailModal({
 
                   <div>
                     <label className="mb-2 block text-sm font-semibold text-gray-600">{'차량구매 대출 상환계획서 업로드'}</label>
-                    <div className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700">{'파일 선택'}</div>
-                    <p className="mt-1 text-xs text-gray-500">{'선택된 파일 없음'}</p>
+                    <label className="cursor-pointer">
+                      <div className="flex items-center gap-2">
+                        <div className="rounded-lg bg-gray-100 px-4 py-2 font-medium text-gray-700 hover:bg-gray-200">{'파일 선택'}</div>
+                        {detailUploadedFiles.loanSchedule ? (
+                          <span className="text-sm text-green-600">{'✓ '}{detailUploadedFiles.loanSchedule.name}</span>
+                        ) : (
+                          <span className="text-sm text-gray-500">{'선택된 파일 없음'}</span>
+                        )}
+                      </div>
+                      <input
+                        type="file"
+                        accept="application/pdf,image/*"
+                        onChange={onDetailLoanScheduleFileSelect}
+                        className="hidden"
+                      />
+                    </label>
                   </div>
                 </div>
               </div>

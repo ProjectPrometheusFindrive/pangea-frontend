@@ -32,6 +32,8 @@ export interface AssetEditForm {
   registrationStatus: string;
   registrationDate: string;
   purchaseDate: string;
+  insuranceExpiry: string;
+  nextInspection: string;
 }
 
 export type AssetEditField = keyof AssetEditForm;
@@ -53,6 +55,8 @@ export interface AssetEditFormSource {
   registrationStatus?: string;
   registrationDate?: string | null;
   purchaseDate?: string | null;
+  insuranceExpiry?: string | null;
+  nextInspection?: string | null;
 }
 
 export interface AssetEditPatchAsset extends AssetEditFormSource {
@@ -76,6 +80,8 @@ export interface AssetPatchPayload {
   registrationStatus?: string;
   registrationDate?: string | null;
   purchaseDate?: string | null;
+  insuranceExpiry?: string | null;
+  nextInspection?: string | null;
 }
 
 export const EMPTY_ASSET_EDIT_FORM: AssetEditForm = {
@@ -93,6 +99,8 @@ export const EMPTY_ASSET_EDIT_FORM: AssetEditForm = {
   registrationStatus: '',
   registrationDate: '',
   purchaseDate: '',
+  insuranceExpiry: '',
+  nextInspection: '',
 };
 
 export function toAssetEditForm(asset: AssetEditFormSource): AssetEditForm {
@@ -111,6 +119,8 @@ export function toAssetEditForm(asset: AssetEditFormSource): AssetEditForm {
     registrationStatus: toTrimmedString(asset.registrationStatus),
     registrationDate: asset.registrationDate != null ? toTrimmedString(asset.registrationDate) : '',
     purchaseDate: asset.purchaseDate != null ? toTrimmedString(asset.purchaseDate) : '',
+    insuranceExpiry: asset.insuranceExpiry != null ? toTrimmedString(asset.insuranceExpiry) : '',
+    nextInspection: asset.nextInspection != null ? toTrimmedString(asset.nextInspection) : '',
   };
 }
 
@@ -131,6 +141,8 @@ export function isAssetEditFormDirty(asset: AssetEditFormSource, form: AssetEdit
     || baseline.registrationStatus !== form.registrationStatus.trim()
     || baseline.registrationDate !== form.registrationDate.trim()
     || baseline.purchaseDate !== form.purchaseDate.trim()
+    || baseline.insuranceExpiry !== form.insuranceExpiry.trim()
+    || baseline.nextInspection !== form.nextInspection.trim()
   );
 }
 
@@ -156,6 +168,8 @@ export function buildAssetPatchPayload({
   const nextRegistrationStatus = form.registrationStatus.trim();
   const nextRegistrationDate = form.registrationDate.trim();
   const nextPurchaseDate = form.purchaseDate.trim();
+  const nextInsuranceExpiry = form.insuranceExpiry.trim();
+  const nextNextInspection = form.nextInspection.trim();
 
   if (!nextPlate) {
     fieldErrors.plate = '차량번호를 입력해 주세요.';
@@ -219,6 +233,12 @@ export function buildAssetPatchPayload({
   }
   if (baseline.purchaseDate !== nextPurchaseDate) {
     payload.purchaseDate = nextPurchaseDate === '' ? null : nextPurchaseDate;
+  }
+  if (baseline.insuranceExpiry !== nextInsuranceExpiry) {
+    payload.insuranceExpiry = nextInsuranceExpiry === '' ? null : nextInsuranceExpiry;
+  }
+  if (baseline.nextInspection !== nextNextInspection) {
+    payload.nextInspection = nextNextInspection === '' ? null : nextNextInspection;
   }
 
   return {
