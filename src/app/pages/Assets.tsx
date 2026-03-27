@@ -995,6 +995,7 @@ export default function Assets() {
   const [assetHistory, setAssetHistory] = useState<AssetHistoryEntry[]>([]);
   const [isAssetHistoryLoading, setIsAssetHistoryLoading] = useState(false);
   const [assetHistoryError, setAssetHistoryError] = useState<string | null>(null);
+  const [detailUploadedFiles, setDetailUploadedFiles] = useState<{ insurance: File | null; loanSchedule: File | null }>({ insurance: null, loanSchedule: null });
   const detailRequestSequenceRef = useRef(0);
   const detailAbortControllerRef = useRef<AbortController | null>(null);
   const historyRequestSequenceRef = useRef(0);
@@ -1248,6 +1249,7 @@ export default function Assets() {
     setAssetHistory([]);
     setAssetHistoryError(null);
     setIsAssetHistoryLoading(false);
+    setDetailUploadedFiles({ insurance: null, loanSchedule: null });
     updateAssetsSearchParams((params) => {
       params.delete('assetId');
       params.delete('vehicle');
@@ -1609,6 +1611,20 @@ export default function Assets() {
       });
     }
   }, [detailFieldErrors]);
+
+  const handleDetailInsuranceFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setDetailUploadedFiles((prev) => ({ ...prev, insurance: file }));
+    }
+  }, []);
+
+  const handleDetailLoanScheduleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setDetailUploadedFiles((prev) => ({ ...prev, loanSchedule: file }));
+    }
+  }, []);
 
   const pollOcrJobUntilTerminal = useCallback(async (
     jobId: string,
@@ -2861,6 +2877,9 @@ export default function Assets() {
             handleSave={handleDetailSave}
             handleDelete={handleDeleteAsset}
             getStatusColor={getStatusColor}
+            detailUploadedFiles={detailUploadedFiles}
+            onDetailInsuranceFileSelect={handleDetailInsuranceFileSelect}
+            onDetailLoanScheduleFileSelect={handleDetailLoanScheduleFileSelect}
           />
         )}
       </div>
