@@ -549,7 +549,7 @@ export default function Home() {
       params.set('due', 'pickup');
     } else if (target === 'return') {
       const todayDate = toIsoDate(new Date());
-      params.set('status', 'rental');
+      params.set('status', 'return');
       params.set('from', todayDate);
       params.set('to', todayDate);
       params.set('due', 'return');
@@ -696,23 +696,17 @@ export default function Home() {
 
   const assetData = useMemo<DashboardDistributionItem[]>(() => {
     const palette = ['#1e3a8a', '#60a5fa', '#22c55e', '#f59e0b'];
-    const bucketOrder = ['대여중', '예약', '가용', '정비중'];
-    const entries = Object.entries(normalizedManagementStageCounts)
-      .filter(([, value]) => value > 0)
-      .sort((left, right) => bucketOrder.indexOf(left[0]) - bucketOrder.indexOf(right[0]));
+    const bucketOrder = ['대여중', '예약', '가용', '정비중'] as const;
+    const fallbackCounts: Record<(typeof bucketOrder)[number], number> = {
+      대여중: kpis.activeContracts,
+      예약: 0,
+      가용: Math.max(0, kpis.totalAssets - kpis.activeContracts),
+      정비중: 0,
+    };
 
-    if (entries.length === 0) {
-      return [
-        { name: '대여중', value: kpis.activeContracts, color: palette[0], status: 'rental', unit: '대' },
-        { name: '예약', value: 0, color: palette[1], status: 'reserved', unit: '대' },
-        { name: '가용', value: Math.max(0, kpis.totalAssets - kpis.activeContracts), color: palette[2], status: 'available', unit: '대' },
-        { name: '정비', value: 0, color: palette[3], status: 'maintenance', unit: '대' },
-      ];
-    }
-
-    return entries.slice(0, 4).map(([name, value], index) => ({
+    return bucketOrder.map((name, index) => ({
       name: name === '정비중' ? '정비' : name,
-      value: Math.max(0, Math.trunc(value)),
+      value: Math.max(0, Math.trunc(normalizedManagementStageCounts[name] ?? fallbackCounts[name])),
       color: palette[index % palette.length],
       status: toAssetStatusFilter(name),
       unit: '대' as const,

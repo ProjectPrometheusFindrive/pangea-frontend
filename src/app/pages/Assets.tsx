@@ -545,16 +545,18 @@ function normalizeAssetStatus(statusValue: string | null): VehicleAsset['status'
     return statusValue;
   }
 
-  if (statusValue === 'reserved' || statusValue === '예약됨' || statusValue === '예약중') {
+  const normalized = statusValue?.trim().toLowerCase();
+
+  if (normalized === 'reserved' || statusValue === '예약됨' || statusValue === '예약중') {
     return '예약';
   }
-  if (statusValue === 'rental' || statusValue === 'in_use') {
+  if (normalized === 'rental' || normalized === 'in_use' || normalized === 'rented') {
     return '대여중';
   }
-  if (statusValue === 'available' || statusValue === 'idle') {
+  if (normalized === 'available' || normalized === 'idle') {
     return '가용';
   }
-  if (statusValue === 'maintenance' || statusValue === 'repair') {
+  if (normalized === 'maintenance' || normalized === 'repair') {
     return '정비중';
   }
 
