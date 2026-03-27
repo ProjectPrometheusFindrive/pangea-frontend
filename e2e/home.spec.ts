@@ -152,6 +152,133 @@ test.describe('SCRUM-183 Home E2E', () => {
       unpaidCard.click(),
     ]);
   });
+
+  test('오늘 반납 클릭 시 대여 예약 페이지 반납 필터로 이동한다', async ({ page }) => {
+    const user = buildMockUser('member');
+    const permissions = [
+      'route.home',
+      'route.action-required',
+      'route.assets',
+      'route.reservations',
+      'route.revenue',
+      'route.support-center',
+      'route.settings',
+      'action.assets.write',
+      'action.reservations.write',
+      'action.action-required.write',
+    ];
+
+    await seedAuthSession(page, 'member', {
+      userId: user.userId,
+      email: user.email,
+      role: user.role,
+      companyId: user.companyId,
+      company: user.company,
+      name: user.name,
+    });
+    await page.addInitScript(
+      ({ key, value }: { key: string; value: string }) => {
+        window.localStorage.setItem(key, value);
+      },
+      {
+        key: 'pangea.authorization.v2',
+        value: JSON.stringify({
+          version: 2,
+          userId: user.userId,
+          companyId: user.companyId,
+          role: user.role,
+          source: 'api',
+          fetchedAt: Date.now(),
+          permissions,
+        }),
+      },
+    );
+
+    await installApiMocks(page, {
+      user,
+      handlers: {
+        'GET /api/v2/home/summary': async ({ route }) => {
+          await fulfillSuccess(route, {
+            tenantId: user.companyId,
+            from: '2026-03-01',
+            to: '2026-03-07',
+            kpis: {
+              totalAssets: 8,
+              totalContracts: 5,
+              activeContracts: 2,
+              completedContracts: 1,
+              overdueContracts: 0,
+              unpaidContracts: 0,
+              utilizationRate: 0.42,
+            },
+            statusCounts: {
+              contractStatus: {},
+              managementStage: {},
+              alerts: {
+                overdue: 0,
+                stolen: 0,
+              },
+            },
+            today: {
+              pickupDueCount: 1,
+              returnDueCount: 2,
+              overdueCount: 0,
+            },
+            recentChanges: [],
+          });
+        },
+        'GET /api/v2/action-items': async ({ route }) => {
+          await fulfillSuccess(route, buildActionItemsPayload([]));
+        },
+        'GET /api/v2/auth/me': async ({ route }) => {
+          await fulfillSuccess(route, user);
+        },
+        'GET /api/v2/permissions/me': async ({ route }) => {
+          await fulfillSuccess(route, {
+            permissions,
+          });
+        },
+        'GET /api/v2/notifications': async ({ route }) => {
+          await fulfillSuccess(route, {
+            items: [],
+            totalCount: 0,
+            unreadCount: 0,
+          });
+        },
+        'GET /api/v2/notifications/summary': async ({ route }) => {
+          await fulfillSuccess(route, {
+            totalCount: 0,
+            unreadCount: 0,
+          });
+        },
+        'GET /api/v2/reservations': async ({ route, request }) => {
+          const url = new URL(request.url());
+          expect(url.searchParams.get('status')).toBe('rental');
+          expect(url.searchParams.get('contractStatus')).toBe('대여중');
+          expect(url.searchParams.get('due')).toBe('return');
+          await fulfillSuccess(route, {
+            items: [],
+            totalCount: 0,
+          });
+        },
+        'GET /api/v2/assets': async ({ route }) => {
+          await fulfillSuccess(route, {
+            items: [],
+            totalCount: 0,
+          });
+        },
+      },
+    });
+
+    await page.goto('/');
+
+    await Promise.all([
+      page.waitForURL(/\/reservations\?.*status=return.*due=return/),
+      page.getByTestId('home-today-card-return').click(),
+    ]);
+
+    await expect(page.getByRole('button', { name: '반납' })).toHaveClass(/bg-blue-600/);
+  });
 });
 
 test.describe('SCRUM-184 Home premium CTA E2E', () => {

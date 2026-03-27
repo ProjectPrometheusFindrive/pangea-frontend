@@ -603,14 +603,20 @@ function normalizePaymentScope(value: string | null): PaymentScope {
   return 'all';
 }
 
-function toStatusQueryValue(filterValue: ViewFilter): string | undefined {
+function toStatusQueryValue(filterValue: ViewFilter, dueFilter: DueFilter): string | undefined {
+  if (filterValue === 'return' && dueFilter === 'return') {
+    return 'rental';
+  }
   if (filterValue === 'all' || filterValue === 'unpaid' || filterValue === 'overdue') {
     return undefined;
   }
   return filterValue;
 }
 
-function toApiContractStatus(filterValue: ViewFilter): string | undefined {
+function toApiContractStatus(filterValue: ViewFilter, dueFilter: DueFilter): string | undefined {
+  if (filterValue === 'return' && dueFilter === 'return') {
+    return '대여중';
+  }
   if (filterValue === 'reservation') {
     return '예약중';
   }
@@ -1081,8 +1087,8 @@ export default function Reservations() {
           const payload = await getReservationsList({
             page: nextPage,
             size: pageSize,
-            status: toStatusQueryValue(viewFilter),
-            contractStatus: toApiContractStatus(viewFilter),
+            status: toStatusQueryValue(viewFilter, dueFilter),
+            contractStatus: toApiContractStatus(viewFilter, dueFilter),
             paymentScope: isDelinquentPaymentScopeActive(viewFilter, paymentScope) ? 'delinquent' : undefined,
             from: fromDate ?? undefined,
             to: toDate ?? undefined,

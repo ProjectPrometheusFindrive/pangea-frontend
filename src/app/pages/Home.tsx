@@ -549,7 +549,7 @@ export default function Home() {
       params.set('due', 'pickup');
     } else if (target === 'return') {
       const todayDate = toIsoDate(new Date());
-      params.set('status', 'rental');
+      params.set('status', 'return');
       params.set('from', todayDate);
       params.set('to', todayDate);
       params.set('due', 'return');
