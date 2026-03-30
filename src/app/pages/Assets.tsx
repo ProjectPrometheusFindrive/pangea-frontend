@@ -83,11 +83,13 @@ interface Asset extends VehicleAsset {
 interface AssetReservationEntry {
   id: string;
   customerName: string;
+  phone: string | null;
   type: 'reservation' | 'rental' | 'return';
   startAt: string;
   endAt: string;
   paymentMethod: string;
   amount: string;
+  deposit: string;
   contractStatus: string;
 }
 
@@ -721,11 +723,13 @@ function toAssetReservationEntries(payload: unknown): AssetReservationEntry[] {
       return {
         id,
         customerName,
+        phone: toStringValue(row.phone) ?? toStringValue(row.phoneNumber) ?? null,
         type: toReservationType(toStringValue(row.contractStatus) ?? toStringValue(row.type) ?? toStringValue(row.status)),
         startAt,
         endAt,
         paymentMethod: toReservationPaymentMethod(toStringValue(row.paymentMethod) ?? toStringValue(row.paymentType)),
         amount: toReservationAmount(row.amount),
+        deposit: toReservationAmount(row.deposit),
         contractStatus,
       } satisfies AssetReservationEntry;
     })

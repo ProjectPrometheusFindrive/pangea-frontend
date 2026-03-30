@@ -8,12 +8,32 @@ import { navigateToPremiumInquiry } from '../utils/premiumInquiry';
 interface AssetReservationEntry {
   id: string;
   customerName: string;
+  phone: string | null;
   type: 'reservation' | 'rental' | 'return';
   startAt: string;
   endAt: string;
   paymentMethod: string;
   amount: string;
+  deposit: string;
   contractStatus: string;
+}
+
+function formatReservationDate(isoString: string): string {
+  if (!isoString) return '-';
+  const d = new Date(isoString);
+  if (Number.isNaN(d.getTime())) return isoString;
+  return d.toLocaleString('ko-KR', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+}
+
+function getContractStatusBadge(status: string): { label: string; className: string } {
+  switch (status) {
+    case '예약중': return { label: '예약중', className: 'bg-purple-100 text-purple-700' };
+    case '대여중': return { label: '대여중', className: 'bg-blue-100 text-blue-700' };
+    case '완료':
+    case '반납완료': return { label: '완료', className: 'bg-green-100 text-green-700' };
+    case '취소': return { label: '취소', className: 'bg-gray-100 text-gray-500' };
+    default: return { label: status || '-', className: 'bg-gray-100 text-gray-600' };
+  }
 }
 
 interface VehicleDetailModalProps {
@@ -359,13 +379,13 @@ export function VehicleDetailModal({
                     <table className="w-full">
                       <thead className="border-b border-gray-200 bg-gray-50">
                         <tr>
-                          <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">{'예약번호'}</th>
-                          <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">{'고객명'}</th>
-                          <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">{'유형'}</th>
-                          <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">{'대여 기간'}</th>
-                          <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">{'결제 방법'}</th>
-                          <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-gray-600">{'대여료'}</th>
-                          <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">{'상태'}</th>
+                          <th className="whitespace-nowrap px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">{'예약번호'}</th>
+                          <th className="whitespace-nowrap px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">{'고객명'}</th>
+                          <th className="whitespace-nowrap px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">{'유형'}</th>
+                          <th className="whitespace-nowrap px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">{'대여 기간'}</th>
+                          <th className="whitespace-nowrap px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">{'결제 방법'}</th>
+                          <th className="whitespace-nowrap px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-gray-600">{'대여료'}</th>
+                          <th className="whitespace-nowrap px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">{'상태'}</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-200">
@@ -384,7 +404,10 @@ export function VehicleDetailModal({
                                 {entry.id}
                               </button>
                             </td>
-                            <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-900">{entry.customerName}</td>
+                            <td className="whitespace-nowrap px-4 py-3">
+                              <div className="text-sm font-medium text-gray-900">{entry.customerName}</div>
+                              {entry.phone && <div className="text-xs text-gray-500">{entry.phone}</div>}
+                            </td>
                             <td className="whitespace-nowrap px-4 py-3">
                               <span className={`rounded-full px-2 py-1 text-xs font-medium ${
                                 entry.type === 'rental'
@@ -397,13 +420,18 @@ export function VehicleDetailModal({
                               </span>
                             </td>
                             <td className="px-4 py-3 text-sm text-gray-900">
-                              <div className="whitespace-nowrap">{entry.startAt}</div>
-                              <div className="whitespace-nowrap text-xs text-gray-500">{'~ '}{entry.endAt}</div>
+                              <div className="whitespace-nowrap">{formatReservationDate(entry.startAt)}</div>
+                              <div className="whitespace-nowrap text-xs text-gray-500">{'~ '}{formatReservationDate(entry.endAt)}</div>
                             </td>
                             <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-900">{entry.paymentMethod}</td>
-                            <td className="whitespace-nowrap px-4 py-3 text-right text-sm font-bold text-blue-600">{entry.amount}</td>
+                            <td className="whitespace-nowrap px-4 py-3 text-right">
+                              <div className="text-sm font-bold text-blue-600">{entry.amount}</div>
+                              <div className="text-xs text-gray-500">{'선금: '}{entry.deposit}</div>
+                            </td>
                             <td className="whitespace-nowrap px-4 py-3">
-                              <span className="text-xs text-gray-700">{entry.contractStatus}</span>
+                              <span className={`rounded-full px-2 py-1 text-xs font-medium ${getContractStatusBadge(entry.contractStatus).className}`}>
+                                {getContractStatusBadge(entry.contractStatus).label}
+                              </span>
                             </td>
                           </tr>
                         ))}
