@@ -123,3 +123,20 @@ export function getAssetHistory(
     signal,
   });
 }
+
+export interface GetAssetReservationsParams extends AssetsRequestOptions {
+  page?: number;
+  size?: number;
+}
+
+export function getAssetReservations(
+  assetId: string,
+  { page, size, signal }: GetAssetReservationsParams = {},
+): Promise<unknown> {
+  return apiClient.requestData<unknown>({
+    path: `/api/v2/assets/${encodeURIComponent(assetId)}/reservations`,
+    method: 'GET',
+    query: { page, size },
+    signal,
+  });
+}
