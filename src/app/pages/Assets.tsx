@@ -52,7 +52,7 @@ import {
   createAsset,
   deleteAsset,
   getAssetDetail,
-  getAssetHistory,
+  getAssetReservations,
   getAssetsList,
   patchAsset,
 } from '../../services/assets';
@@ -80,19 +80,15 @@ interface Asset extends VehicleAsset {
   contractStatus?: string;
 }
 
-interface AssetHistoryChange {
-  field: string;
-  before?: unknown;
-  after?: unknown;
-}
-
-interface AssetHistoryEntry {
-  event: string;
-  at: string;
-  actor: string | null;
-  versionFrom: number;
-  versionTo: number;
-  changes: AssetHistoryChange[];
+interface AssetReservationEntry {
+  id: string;
+  customerName: string;
+  type: 'reservation' | 'rental' | 'return';
+  startAt: string;
+  endAt: string;
+  paymentMethod: string;
+  amount: string;
+  contractStatus: string;
 }
 
 interface CreateFormState {
@@ -141,7 +137,6 @@ interface OcrDocConfig {
 
 const DEFAULT_PAGE = 1;
 const DEFAULT_PAGE_SIZE = 20;
-const ASSET_HISTORY_PAGE_SIZE = 20;
 const MODEL_CATALOG_PAGE_SIZE = 200;
 const PAGE_SIZE_OPTIONS = [10, 20, 50];
 const TOTAL_COUNT_KEYS = ['total', 'totalCount', 'count', 'itemsCount', 'totalElements'];
@@ -675,8 +670,34 @@ function toAssetDetail(payload: unknown): Asset | null {
   return toAssetRecord(unwrapAssetDetail(payload), 0);
 }
 
-function toAssetHistoryEntries(payload: unknown): AssetHistoryEntry[] {
-  const rows = getCollectionFromPayload(payload, ['items', 'rows', 'list', 'history']);
+function toReservationType(value: string | null): AssetReservationEntry['type'] {
+  if (!value) return 'reservation';
+  const v = value.toLowerCase();
+  if (v === 'rental' || v === 'in_use' || v === '대여' || v === '대여중') return 'rental';
+  if (v === 'return' || v === 'returned' || v === '반납' || v === '반납완료' || v === '완료') return 'return';
+  return 'reservation';
+}
+
+function toReservationPaymentMethod(value: string | null): string {
+  if (!value) return '-';
+  if (value === '카드' || value.toLowerCase() === 'card') return '카드';
+  if (value === '현금' || value.toLowerCase() === 'cash') return '현금';
+  if (value === '계좌이체' || value.toLowerCase() === 'transfer' || value.toLowerCase() === 'bank_transfer') return '계좌이체';
+  return value;
+}
+
+function toReservationAmount(value: unknown): string {
+  const num = toNumberValue(value);
+  if (num !== null) return `${num.toLocaleString('ko-KR')}원`;
+  const str = toStringValue(value);
+  if (!str) return '0원';
+  return str.endsWith('원') ? str : `${str}원`;
+}
+
+const ASSET_RESERVATIONS_PAGE_SIZE = 50;
+
+function toAssetReservationEntries(payload: unknown): AssetReservationEntry[] {
+  const rows = getCollectionFromPayload(payload, ['items', 'rows', 'list', 'reservations']);
   if (!rows || rows.length === 0) {
     return [];
   }
@@ -687,43 +708,28 @@ function toAssetHistoryEntries(payload: unknown): AssetHistoryEntry[] {
         return null;
       }
 
-      const rawChanges = Array.isArray(row.changes) ? row.changes : [];
-      const changes = rawChanges
-        .map((entry) => {
-          if (!isRecord(entry)) {
-            return null;
-          }
-          const field = toStringValue(entry.field);
-          if (!field) {
-            return null;
-          }
-          return {
-            field,
-            before: entry.before,
-            after: entry.after,
-          };
-        })
-        .filter((entry): entry is AssetHistoryChange => entry !== null);
-
-      const event = toStringValue(row.event);
-      const at = toStringValue(row.at);
-      const versionFrom = toNumberValue(row.versionFrom);
-      const versionTo = toNumberValue(row.versionTo);
-
-      if (!event || !at || versionFrom === null || versionTo === null) {
+      const id = toStringValue(row.id) ?? toStringValue(row.reservationId) ?? toStringValue(row.rentalId);
+      if (!id) {
         return null;
       }
 
+      const customerName = toStringValue(row.customerName) ?? toStringValue(row.customer) ?? '고객 미확인';
+      const contractStatus = toStringValue(row.contractStatus) ?? toStringValue(row.status) ?? '';
+      const startAt = toStringValue(row.startAt) ?? toStringValue(row.startDate) ?? '';
+      const endAt = toStringValue(row.endAt) ?? toStringValue(row.endDate) ?? '';
+
       return {
-        event,
-        at,
-        actor: toStringValue(row.actor),
-        versionFrom,
-        versionTo,
-        changes,
-      } satisfies AssetHistoryEntry;
+        id,
+        customerName,
+        type: toReservationType(toStringValue(row.contractStatus) ?? toStringValue(row.type) ?? toStringValue(row.status)),
+        startAt,
+        endAt,
+        paymentMethod: toReservationPaymentMethod(toStringValue(row.paymentMethod) ?? toStringValue(row.paymentType)),
+        amount: toReservationAmount(row.amount),
+        contractStatus,
+      } satisfies AssetReservationEntry;
     })
-    .filter((entry): entry is AssetHistoryEntry => entry !== null);
+    .filter((entry): entry is AssetReservationEntry => entry !== null);
 }
 
 function toErrorFieldEntries(error: ApiError): Array<{ name: string; reason: string }> {
@@ -994,14 +1000,14 @@ export default function Assets() {
   const [detailConflictNotice, setDetailConflictNotice] = useState<string | null>(null);
   const [isDetailSaving, setIsDetailSaving] = useState(false);
   const [isDetailDeleting, setIsDetailDeleting] = useState(false);
-  const [assetHistory, setAssetHistory] = useState<AssetHistoryEntry[]>([]);
-  const [isAssetHistoryLoading, setIsAssetHistoryLoading] = useState(false);
-  const [assetHistoryError, setAssetHistoryError] = useState<string | null>(null);
+  const [assetReservations, setAssetReservations] = useState<AssetReservationEntry[]>([]);
+  const [isAssetReservationsLoading, setIsAssetReservationsLoading] = useState(false);
+  const [assetReservationsError, setAssetReservationsError] = useState<string | null>(null);
   const [detailUploadedFiles, setDetailUploadedFiles] = useState<{ insurance: File | null; loanSchedule: File | null }>({ insurance: null, loanSchedule: null });
   const detailRequestSequenceRef = useRef(0);
   const detailAbortControllerRef = useRef<AbortController | null>(null);
-  const historyRequestSequenceRef = useRef(0);
-  const historyAbortControllerRef = useRef<AbortController | null>(null);
+  const reservationsRequestSequenceRef = useRef(0);
+  const reservationsAbortControllerRef = useRef<AbortController | null>(null);
   const ocrRequestSequenceRef = useRef(0);
   const ocrAbortControllerRef = useRef<AbortController | null>(null);
   const loanScheduleReplaceInputRef = useRef<HTMLInputElement | null>(null);
@@ -1174,7 +1180,7 @@ export default function Assets() {
 
   useEffect(() => () => {
     detailAbortControllerRef.current?.abort();
-    historyAbortControllerRef.current?.abort();
+    reservationsAbortControllerRef.current?.abort();
     abortOcrProcessing();
   }, [abortOcrProcessing]);
 
@@ -1237,7 +1243,7 @@ export default function Assets() {
 
   const closeDetailModalState = useCallback(() => {
     detailAbortControllerRef.current?.abort();
-    historyAbortControllerRef.current?.abort();
+    reservationsAbortControllerRef.current?.abort();
     setShowDetailModal(false);
     setSelectedAsset(null);
     setIsDetailLoading(false);
@@ -1248,9 +1254,9 @@ export default function Assets() {
     setDetailFieldErrors({});
     setDetailSaveError(null);
     setDetailConflictNotice(null);
-    setAssetHistory([]);
-    setAssetHistoryError(null);
-    setIsAssetHistoryLoading(false);
+    setAssetReservations([]);
+    setAssetReservationsError(null);
+    setIsAssetReservationsLoading(false);
     setDetailUploadedFiles({ insurance: null, loanSchedule: null });
     updateAssetsSearchParams((params) => {
       params.delete('assetId');
@@ -1312,38 +1318,38 @@ export default function Assets() {
     vehicleQuery,
   ]);
 
-  const hydrateAssetHistory = useCallback(async (assetId: string) => {
-    const requestSequence = historyRequestSequenceRef.current + 1;
-    historyRequestSequenceRef.current = requestSequence;
-    historyAbortControllerRef.current?.abort();
+  const hydrateAssetReservations = useCallback(async (assetId: string) => {
+    const requestSequence = reservationsRequestSequenceRef.current + 1;
+    reservationsRequestSequenceRef.current = requestSequence;
+    reservationsAbortControllerRef.current?.abort();
     const controller = new AbortController();
-    historyAbortControllerRef.current = controller;
+    reservationsAbortControllerRef.current = controller;
 
-    setIsAssetHistoryLoading(true);
-    setAssetHistoryError(null);
+    setIsAssetReservationsLoading(true);
+    setAssetReservationsError(null);
 
     try {
-      const payload = await getAssetHistory(assetId, {
+      const payload = await getAssetReservations(assetId, {
         page: 1,
-        pageSize: ASSET_HISTORY_PAGE_SIZE,
+        size: ASSET_RESERVATIONS_PAGE_SIZE,
         signal: controller.signal,
       });
-      if (controller.signal.aborted || historyRequestSequenceRef.current !== requestSequence) {
+      if (controller.signal.aborted || reservationsRequestSequenceRef.current !== requestSequence) {
         return;
       }
-      setAssetHistory(toAssetHistoryEntries(payload));
+      setAssetReservations(toAssetReservationEntries(payload));
     } catch (error) {
-      if (controller.signal.aborted || historyRequestSequenceRef.current !== requestSequence) {
+      if (controller.signal.aborted || reservationsRequestSequenceRef.current !== requestSequence) {
         return;
       }
-      const historyErrorMessage = error instanceof ApiError
+      const errorMessage = error instanceof ApiError
         ? error.message
-        : '변경 이력을 불러오지 못했습니다.';
-      setAssetHistoryError(`이력 조회 실패: ${historyErrorMessage}`);
-      setAssetHistory([]);
+        : '예약 히스토리를 불러오지 못했습니다.';
+      setAssetReservationsError(`이력 조회 실패: ${errorMessage}`);
+      setAssetReservations([]);
     } finally {
-      if (!controller.signal.aborted && historyRequestSequenceRef.current === requestSequence) {
-        setIsAssetHistoryLoading(false);
+      if (!controller.signal.aborted && reservationsRequestSequenceRef.current === requestSequence) {
+        setIsAssetReservationsLoading(false);
       }
     }
   }, []);
@@ -1386,7 +1392,7 @@ export default function Assets() {
       }
 
       setShowDetailModal(true);
-      void hydrateAssetHistory(nextAsset.id);
+      void hydrateAssetReservations(nextAsset.id);
     } catch (error) {
       if (controller.signal.aborted || detailRequestSequenceRef.current !== requestSequence) {
         return;
@@ -1413,7 +1419,7 @@ export default function Assets() {
         setIsDetailLoading(false);
       }
     }
-  }, [hydrateAssetHistory, updateAssetsSearchParams]);
+  }, [hydrateAssetReservations, updateAssetsSearchParams]);
 
   useEffect(() => {
     if (!selectedAssetId) {
@@ -1423,12 +1429,12 @@ export default function Assets() {
     void hydrateAssetDetail(selectedAssetId);
   }, [hydrateAssetDetail, selectedAssetId]);
 
-  const handleHistoryRetry = useCallback(() => {
+  const handleReservationsRetry = useCallback(() => {
     if (!selectedAsset) {
       return;
     }
-    void hydrateAssetHistory(selectedAsset.id);
-  }, [hydrateAssetHistory, selectedAsset]);
+    void hydrateAssetReservations(selectedAsset.id);
+  }, [hydrateAssetReservations, selectedAsset]);
 
   const handleConflictRefresh = useCallback(() => {
     if (!selectedAsset) {
@@ -2161,7 +2167,7 @@ export default function Assets() {
       setDetailSaveError(null);
       setDetailConflictNotice(null);
       setAssets((prevAssets) => prevAssets.map((asset) => (asset.id === updatedAsset.id ? { ...asset, ...updatedAsset } : asset)));
-      void hydrateAssetHistory(updatedAsset.id);
+      void hydrateAssetReservations(updatedAsset.id);
       void hydrateAssets();
       toast.success('차량 정보가 업데이트되었습니다.');
     } catch (error) {
@@ -2195,7 +2201,7 @@ export default function Assets() {
     canWriteAssets,
     detailForm,
     hydrateAssetDetail,
-    hydrateAssetHistory,
+    hydrateAssetReservations,
     hydrateAssets,
     isDetailDirty,
     isDetailSaving,
@@ -2860,10 +2866,10 @@ export default function Assets() {
         {selectedAsset && (
           <VehicleDetailModal
             asset={selectedAsset}
-            historyEntries={assetHistory}
-            isHistoryLoading={isAssetHistoryLoading}
-            historyError={assetHistoryError}
-            onHistoryRetry={handleHistoryRetry}
+            reservationEntries={assetReservations}
+            isReservationsLoading={isAssetReservationsLoading}
+            reservationsError={assetReservationsError}
+            onReservationsRetry={handleReservationsRetry}
             onConflictRefresh={handleConflictRefresh}
             isOpen={showDetailModal}
             onClose={handleDetailModalClose}
