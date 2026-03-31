@@ -491,6 +491,89 @@ function toDateLabelFromOffset(offset: number): string {
   return formatDateAsYmd(toDateFromOffset(offset));
 }
 
+type ReservationCalendarSegment = {
+  kind: 'scheduled' | 'overdue';
+  startDate: number;
+  endDate: number;
+};
+
+function getReservationReturnedDateOffset(reservation: Reservation): number | null {
+  if (typeof reservation.returnedAt !== 'string' || !reservation.returnedAt.trim()) {
+    return null;
+  }
+
+  return toDateOffset(reservation.returnedAt);
+}
+
+export function getReservationOverdueSegment(
+  reservation: Reservation,
+  todayOffset = 0,
+): ReservationCalendarSegment | null {
+  if (reservation.type === 'reservation') {
+    return null;
+  }
+
+  const overdueStartDate = reservation.endDate + 1;
+  const returnedDateOffset = getReservationReturnedDateOffset(reservation);
+  if (returnedDateOffset !== null) {
+    const overdueEndDate = Math.min(returnedDateOffset, todayOffset);
+    if (overdueEndDate < overdueStartDate) {
+      return null;
+    }
+
+    return {
+      kind: 'overdue',
+      startDate: overdueStartDate,
+      endDate: overdueEndDate,
+    };
+  }
+
+  const currentContractStatus = normalizeReservationContractStatus(reservation.contractStatus ?? null);
+  const isCompleted = reservation.type === 'return'
+    || (currentContractStatus !== null && TERMINAL_CONTRACT_STATUSES.has(currentContractStatus));
+  if (isCompleted || todayOffset < overdueStartDate) {
+    return null;
+  }
+
+  return {
+    kind: 'overdue',
+    startDate: overdueStartDate,
+    endDate: todayOffset,
+  };
+}
+
+export function getReservationCalendarSegments(
+  reservation: Reservation,
+  todayOffset = 0,
+): ReservationCalendarSegment[] {
+  const segments: ReservationCalendarSegment[] = [
+    {
+      kind: 'scheduled',
+      startDate: reservation.startDate,
+      endDate: reservation.endDate,
+    },
+  ];
+
+  const overdueSegment = getReservationOverdueSegment(reservation, todayOffset);
+  if (overdueSegment) {
+    segments.push(overdueSegment);
+  }
+
+  return segments;
+}
+
+function getReservationOccupiedEndDate(reservation: Reservation, todayOffset = 0): number {
+  return getReservationOverdueSegment(reservation, todayOffset)?.endDate ?? reservation.endDate;
+}
+
+function doesReservationSegmentOverlapView(
+  segment: ReservationCalendarSegment,
+  viewStart: number,
+  viewEnd: number,
+): boolean {
+  return !(segment.endDate < viewStart || segment.startDate > viewEnd);
+}
+
 function toCurrencyValue(value: unknown): string {
   const numericValue = toNumberValue(value);
   if (numericValue !== null) {
@@ -719,6 +802,7 @@ function toReservationRow(row: unknown, index: number): Reservation | null {
     customer,
     startDate: startDateOffset,
     endDate: endDateOffset,
+    returnedAt: toStringValue(row.returnedAt) ?? undefined,
     scheduledStartAt: toStringValue(startSource) ?? undefined,
     contractStatus: contractStatus ?? undefined,
     type: normalizeReservationType(contractStatus ?? toStringValue(row.type) ?? toStringValue(row.status)),
@@ -1373,6 +1457,7 @@ export default function Reservations() {
   // 0 = 월요일, 1 = 화요일, ... 6 = 일요일
   const daysOfWeek = ['월', '화', '수', '목', '금', '토', '일'];
   const dates = Array.from({ length: totalDaysToShow }, (_, i) => currentWeekStart + i); // 동적으로 날짜 생성
+  const currentViewEnd = currentWeekStart + totalDaysToShow - 1;
 
   const reservations: Reservation[] = useMemo(() => (
     reservationsData.map((reservation) => {
@@ -2378,10 +2463,10 @@ export default function Reservations() {
                           cellDate <= Math.max(dragStart.date, dragEnd.date);
 
                         // 충돌 검증: 이 셀에 기존 예약이 있는지 확인
-                        const hasConflict = vehicleReservations.some(res =>
-                          cellDate >= res.startDate &&
-                          cellDate <= res.endDate
-                        );
+                        const hasConflict = vehicleReservations.some((res) => {
+                          const occupiedEndDate = getReservationOccupiedEndDate(res);
+                          return cellDate >= res.startDate && cellDate <= occupiedEndDate;
+                        });
 
                         return (
                           <div
@@ -2406,9 +2491,10 @@ export default function Reservations() {
                                 const endDate = Math.max(dragStart.date, dragEnd.date);
 
                                 // 충돌 검사
-                                const conflicts = vehicleReservations.filter(res =>
-                                  !(endDate < res.startDate || startDate > res.endDate)
-                                );
+                                const conflicts = vehicleReservations.filter((res) => {
+                                  const occupiedEndDate = getReservationOccupiedEndDate(res);
+                                  return !(endDate < res.startDate || startDate > occupiedEndDate);
+                                });
 
                                 if (conflicts.length > 0) {
                                   alert(`선택한 기간에 이미 예약이 있습니다.\\n\\n${conflicts.map(c => `${c.customer}: ${c.startDateFull} ~ ${c.endDateFull}`).join('\\n')}`);
@@ -2434,46 +2520,54 @@ export default function Reservations() {
                     {/* 예약 블록 오버레이 - absolute로 전체 행 위에 배치 */}
                     <div className="absolute inset-0 left-[120px] pointer-events-none">
                       {vehicleReservations
-                        .filter(res => {
-                          // 현재 보이는 범위와 겹치는 예약만 표시
-                          const viewEnd = currentWeekStart + totalDaysToShow - 1;
-                          return !(res.endDate < currentWeekStart || res.startDate > viewEnd);
-                        })
-                        .map(res => {
-                          // 블록의 시작 위치 계산 (현재 뷰 기준)
-                          const blockStart = Math.max(res.startDate, currentWeekStart);
-                          const blockEnd = Math.min(res.endDate, currentWeekStart + totalDaysToShow - 1);
-                          const startIndex = blockStart - currentWeekStart;
-                          const duration = blockEnd - blockStart + 1;
-
-                          // 셀 너비 계산
-                          const cellWidth = 100 / totalDaysToShow;
-                          const left = startIndex * cellWidth;
-                          const width = duration * cellWidth;
-
+                        .filter((res) => (
+                          getReservationCalendarSegments(res).some((segment) => (
+                            doesReservationSegmentOverlapView(segment, currentWeekStart, currentViewEnd)
+                          ))
+                        ))
+                        .flatMap((res) => {
                           const isHighlighted = searchQuery && res.customer.includes(searchQuery);
 
-                          return (
-                            <div
-                              key={res.id}
-                              onClick={() => handleReservationClick(res)}
-                              data-testid={`reservation-block-${res.id}`}
-                              className={`absolute top-1.5 h-11 ${getBlockColor(res)} rounded px-2 py-1 text-white text-xs flex flex-col justify-between cursor-pointer hover:opacity-90 transition-opacity pointer-events-auto ${
-                                isHighlighted ? 'ring-4 ring-yellow-400' : ''
-                              }`}
-                              style={{
-                                left: `${left}%`,
-                                width: `${width}%`,
-                              }}
-                            >
-                              <span className="font-medium truncate">{res.customer}</span>
-                              {res.issues && res.issues.length > 0 && (
-                                <span className="bg-white/30 px-1 rounded text-[10px]">
-                                  {res.issues[0]}
-                                </span>
-                              )}
-                            </div>
-                          );
+                          return getReservationCalendarSegments(res)
+                            .filter((segment) => doesReservationSegmentOverlapView(segment, currentWeekStart, currentViewEnd))
+                            .map((segment) => {
+                              const blockStart = Math.max(segment.startDate, currentWeekStart);
+                              const blockEnd = Math.min(segment.endDate, currentViewEnd);
+                              const startIndex = blockStart - currentWeekStart;
+                              const duration = blockEnd - blockStart + 1;
+                              const cellWidth = 100 / totalDaysToShow;
+                              const left = startIndex * cellWidth;
+                              const width = duration * cellWidth;
+                              const segmentIssueLabel = segment.kind === 'overdue'
+                                ? '반납 지연'
+                                : res.issues?.[0];
+
+                              return (
+                                <div
+                                  key={`${res.id}-${segment.kind}-${segment.startDate}-${segment.endDate}`}
+                                  onClick={() => handleReservationClick(res)}
+                                  data-testid={segment.kind === 'overdue'
+                                    ? `reservation-overdue-block-${res.id}`
+                                    : `reservation-block-${res.id}`}
+                                  className={`absolute top-1.5 h-11 ${
+                                    segment.kind === 'overdue' ? 'bg-red-500' : getBlockColor(res)
+                                  } rounded px-2 py-1 text-white text-xs flex flex-col justify-between cursor-pointer hover:opacity-90 transition-opacity pointer-events-auto ${
+                                    isHighlighted ? 'ring-4 ring-yellow-400' : ''
+                                  }`}
+                                  style={{
+                                    left: `${left}%`,
+                                    width: `${width}%`,
+                                  }}
+                                >
+                                  <span className="font-medium truncate">{res.customer}</span>
+                                  {segmentIssueLabel && (
+                                    <span className="bg-white/30 px-1 rounded text-[10px]">
+                                      {segmentIssueLabel}
+                                    </span>
+                                  )}
+                                </div>
+                              );
+                            });
                         })}
                     </div>
                   </div>
@@ -2500,7 +2594,7 @@ export default function Reservations() {
           </div>
           <div className="flex items-center gap-1.5">
             <div className="w-3 h-3 bg-red-500 rounded"></div>
-            <span className="text-xs text-gray-600">미납</span>
+            <span className="text-xs text-gray-600">미납 / 반납 지연</span>
           </div>
         </div>
 
