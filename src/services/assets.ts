@@ -17,10 +17,13 @@ export interface CreateAssetPayload {
   plate: string;
   vehicleNumber?: string;
   companyId?: string;
+  owner?: string;
   category?: string;
   color?: string;
   model?: string;
   year?: number;
+  insuranceExpiry?: string | null;
+  nextInspection?: string | null;
 }
 
 export interface PatchAssetPayload {
@@ -28,6 +31,7 @@ export interface PatchAssetPayload {
   companyId?: string;
   plate?: string;
   vehicleNumber?: string;
+  owner?: string;
   category?: string;
   color?: string;
   model?: string;
@@ -42,6 +46,8 @@ export interface PatchAssetPayload {
   registrationStatus?: string;
   registrationDate?: string | null;
   purchaseDate?: string | null;
+  insuranceExpiry?: string | null;
+  nextInspection?: string | null;
 }
 
 export interface GetAssetHistoryParams extends AssetsRequestOptions {

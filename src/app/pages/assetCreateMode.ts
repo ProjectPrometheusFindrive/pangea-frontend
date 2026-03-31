@@ -8,6 +8,7 @@ interface CreateFormState {
   year: string;
   owner: string;
   insuranceExpiry: string;
+  nextInspection: string;
 }
 
 interface UploadedFilesState {
@@ -24,6 +25,7 @@ function hasTextInput(form: CreateFormState): boolean {
     || Boolean(form.year.trim())
     || Boolean(form.owner.trim())
     || Boolean(form.insuranceExpiry.trim())
+    || Boolean(form.nextInspection.trim())
   );
 }
 

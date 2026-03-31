@@ -100,6 +100,7 @@ interface CreateFormState {
   year: string;
   owner: string;
   insuranceExpiry: string;
+  nextInspection: string;
 }
 
 interface UploadedFiles {
@@ -149,6 +150,7 @@ const DEFAULT_CREATE_FORM_STATE: CreateFormState = {
   year: '',
   owner: '',
   insuranceExpiry: '',
+  nextInspection: '',
 };
 const STATUS_TO_QUERY_MAP: Record<string, Exclude<StatusFilterCode, 'all'>> = {
   rental: 'rental',
@@ -475,6 +477,15 @@ function applyOcrFieldsToCreateForm(
       }
       if (normalizedName === 'insuranceexpirydate' || normalizedName === 'insuranceexpiry') {
         applyField('insuranceExpiry', normalizeDateText(suggestionValue));
+        continue;
+      }
+      if (
+        normalizedName === 'nextinspection'
+        || normalizedName === 'nextinspectiondate'
+        || normalizedName === 'inspectiondate'
+        || normalizedName === 'regularinspectiondate'
+      ) {
+        applyField('nextInspection', normalizeDateText(suggestionValue));
         continue;
       }
       if (normalizedName === 'rentername' || normalizedName === 'owner' || normalizedName === 'name') {
@@ -822,8 +833,11 @@ function toCreatePayload(form: CreateFormState, companyId: string | null): {
     plate: string;
     vehicleNumber: string;
     companyId?: string;
+    owner?: string;
     model?: string;
     year?: number;
+    insuranceExpiry?: string | null;
+    nextInspection?: string | null;
   } | null;
   fieldErrors: FieldErrorMap<CreateField>;
 } {
@@ -833,6 +847,9 @@ function toCreatePayload(form: CreateFormState, companyId: string | null): {
   const vin = form.vin.trim();
   const model = form.model.trim();
   const yearText = form.year.trim();
+  const owner = form.owner.trim();
+  const insuranceExpiry = form.insuranceExpiry.trim();
+  const nextInspection = form.nextInspection.trim();
 
   if (!vehicleNumber) {
     fieldErrors.vehicleNumber = '차량번호를 입력해 주세요.';
@@ -861,8 +878,11 @@ function toCreatePayload(form: CreateFormState, companyId: string | null): {
       plate: vehicleNumber,
       vehicleNumber,
       companyId: companyId ?? undefined,
+      owner: owner || undefined,
       model: model || undefined,
       year,
+      insuranceExpiry: insuranceExpiry || undefined,
+      nextInspection: nextInspection || undefined,
     },
     fieldErrors,
   };
@@ -2842,6 +2862,16 @@ export default function Assets() {
                         type="text"
                         value={createForm.insuranceExpiry}
                         onChange={(e) => handleCreateFieldChange('insuranceExpiry', e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-600 mb-2">다음 정기점검일</label>
+                      <input
+                        type="text"
+                        value={createForm.nextInspection}
+                        onChange={(e) => handleCreateFieldChange('nextInspection', e.target.value)}
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                       />
                     </div>
