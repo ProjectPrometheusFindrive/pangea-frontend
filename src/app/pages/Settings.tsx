@@ -338,8 +338,11 @@ function toBulkOcrCreatePayload(
   plate: string;
   vehicleNumber: string;
   companyId: string;
+  owner?: string;
   model?: string;
   year?: number;
+  insuranceExpiry?: string | null;
+  nextInspection?: string | null;
 } | null {
   const values = new Map<string, string>();
 
@@ -368,8 +371,15 @@ function toBulkOcrCreatePayload(
     plate,
     vehicleNumber: plate,
     companyId,
+    owner: values.get('owner') ?? values.get('ownername') ?? values.get('name') ?? undefined,
     model: values.get('model') || undefined,
     year: Number.isInteger(parsedYear) ? parsedYear : undefined,
+    insuranceExpiry: values.get('insuranceexpirydate') ?? values.get('insuranceexpiry') ?? undefined,
+    nextInspection: values.get('nextinspectiondate')
+      ?? values.get('nextinspection')
+      ?? values.get('inspectiondate')
+      ?? values.get('regularinspectiondate')
+      ?? undefined,
   };
 }
 
