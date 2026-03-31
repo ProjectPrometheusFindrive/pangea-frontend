@@ -69,6 +69,16 @@ type ActionStatusFilter = 'all' | 'pending' | 'in-progress' | 'resolved';
 type ActionPriorityFilter = 'all' | 'high' | 'medium' | 'low';
 type ActionWriteKind = 'status' | 'memo' | 'resolve';
 
+const ACTION_REQUIRED_DATETIME_FORMATTER = new Intl.DateTimeFormat('sv-SE', {
+  timeZone: 'Asia/Seoul',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  hour12: false,
+});
+
 const STATUS_OPTIONS = ['대기중', '진행중', '완료'] as const;
 const LIST_COLLECTION_KEYS = ['items', 'rows', 'list', 'actionRequired', 'actionItems'];
 const ACTION_PRIORITY_LABELS: Record<ActionItem['severity'], string> = {
@@ -152,10 +162,7 @@ function formatActionDate(rawValue: string): string {
     return normalized;
   }
 
-  const year = parsed.getFullYear();
-  const month = String(parsed.getMonth() + 1).padStart(2, '0');
-  const day = String(parsed.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
+  return ACTION_REQUIRED_DATETIME_FORMATTER.format(parsed);
 }
 
 function normalizeSeverity(rawValue: string | null): ActionItem['severity'] {
@@ -1652,13 +1659,7 @@ export default function ActionRequired() {
                           <div className="flex items-center gap-2 mb-2">
                             <Clock className="w-3 h-3 text-gray-500" />
                             <span className="text-xs text-gray-500">
-                              {new Date(memo.timestamp).toLocaleString('ko-KR', {
-                                year: 'numeric',
-                                month: '2-digit',
-                                day: '2-digit',
-                                hour: '2-digit',
-                                minute: '2-digit',
-                              })}
+                              {formatActionDate(memo.timestamp)}
                             </span>
                           </div>
                           <div className="flex items-center gap-2 mb-2">
