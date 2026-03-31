@@ -23,6 +23,7 @@ export interface HomeSummaryStatusCounts {
 
 export interface HomeSummaryToday {
   pickupDueCount: number;
+  rentalCount: number;
   returnDueCount: number;
   overdueCount: number;
 }
@@ -172,6 +173,7 @@ function normalizeToday(value: unknown): HomeSummaryToday {
   if (!isRecord(value)) {
     return {
       pickupDueCount: 0,
+      rentalCount: 0,
       returnDueCount: 0,
       overdueCount: 0,
     };
@@ -179,6 +181,7 @@ function normalizeToday(value: unknown): HomeSummaryToday {
 
   return {
     pickupDueCount: toInteger(value.pickupDueCount),
+    rentalCount: toInteger(value.rentalCount),
     returnDueCount: toInteger(value.returnDueCount),
     overdueCount: toInteger(value.overdueCount),
   };

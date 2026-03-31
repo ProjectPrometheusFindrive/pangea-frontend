@@ -98,6 +98,7 @@ const DEFAULT_KPIS = {
 
 const DEFAULT_TODAY = {
   pickupDueCount: 0,
+  rentalCount: 0,
   returnDueCount: 0,
   overdueCount: 0,
 };
@@ -539,7 +540,7 @@ export default function Home() {
     TrendingUp,
   };
 
-  const handleTaskClick = useCallback((target: 'pickup' | 'return' | 'overdue') => {
+  const handleTaskClick = useCallback((target: 'pickup' | 'rental' | 'return' | 'overdue') => {
     const params = new URLSearchParams();
     if (target === 'pickup') {
       const todayDate = toIsoDate(new Date());
@@ -547,6 +548,11 @@ export default function Home() {
       params.set('from', todayDate);
       params.set('to', todayDate);
       params.set('due', 'pickup');
+    } else if (target === 'rental') {
+      const todayDate = toIsoDate(new Date());
+      params.set('status', 'rental');
+      params.set('from', todayDate);
+      params.set('to', todayDate);
     } else if (target === 'return') {
       const todayDate = toIsoDate(new Date());
       params.set('status', 'return');
@@ -598,10 +604,10 @@ export default function Home() {
         testId: 'home-today-card-pickup',
       },
       {
-        label: '기간 초과 미반납',
-        count: today.overdueCount,
+        label: '오늘 대여',
+        count: today.rentalCount,
         icon: 'Clock',
-        filter: 'overdue' as const,
+        filter: 'rental' as const,
         testId: 'home-today-card-rental',
       },
       {
@@ -612,7 +618,7 @@ export default function Home() {
         testId: 'home-today-card-return',
       },
     ];
-  }, [kpis.activeContracts, today.pickupDueCount, today.returnDueCount]);
+  }, [today.pickupDueCount, today.rentalCount, today.returnDueCount]);
 
   const actionItemsForHome = useMemo<HomeStatCard[]>(() => {
     return [
@@ -667,7 +673,7 @@ export default function Home() {
         bg: 'bg-orange-50',
         color: 'text-orange-600',
         icon: 'Wrench',
-        description: '프리미엄 단말 연동 필요',
+        description: '서비스 신청',
         onClick: () => setShowPremiumModal(true),
         testId: 'home-issue-card-vehicle-anomaly',
       },
@@ -677,7 +683,7 @@ export default function Home() {
         bg: 'bg-orange-50',
         color: 'text-orange-600',
         icon: 'Signal',
-        description: '단말 장착 차량만',
+        description: '서비스 신청',
         onClick: () => setShowPremiumModal(true),
         testId: 'home-issue-card-device-off',
       },
@@ -687,8 +693,8 @@ export default function Home() {
         bg: 'bg-purple-50',
         color: 'text-purple-600',
         icon: 'AlertOctagon',
-        description: '단말 장착 차량만',
-        onClick: () => handleIssueClick('도난 의심'),
+        description: '서비스 신청',
+        onClick: () => setShowPremiumModal(true),
         testId: 'home-issue-card-stolen',
       },
     ];
@@ -870,16 +876,11 @@ const operationScores = useMemo(() => ([
                           <Icon className={`h-4 w-4 ${issue.color}`} />
                         </div>
                       </div>
-                      <div className="space-y-1">
-                        <p className="text-[10px] text-[#4a5565]">이슈명</p>
-                        <p className="text-xs font-bold text-[#101828]">{issue.label}</p>
-                      </div>
-
-                      <div className="mt-2 space-y-1">
-                        <p className="text-[10px] text-[#4a5565]">이슈 건 수</p>
+                      <div className="space-y-2">
                         <p className="text-2xl font-bold text-[#101828]">
                           {formatStatCardCount(issue.count, issue.unit)}
                         </p>
+                        <p className="text-xs font-bold text-[#4a5565]">{issue.label}</p>
                       </div>
                       {issue.description && (
                         <p className="mt-1 text-[10px] leading-tight text-gray-500">
