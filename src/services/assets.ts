@@ -26,6 +26,19 @@ export interface CreateAssetPayload {
   nextInspection?: string | null;
 }
 
+export interface BatchCreateAssetItem extends CreateAssetPayload {
+  contractStatus?: string;
+}
+
+export interface BatchCreateAssetsPayload {
+  items: BatchCreateAssetItem[];
+}
+
+export interface BatchCreateAssetsResponse {
+  items: unknown[];
+  totalCreated: number;
+}
+
 export interface PatchAssetPayload {
   version: number;
   companyId?: string;
@@ -88,6 +101,18 @@ export function getAssetDetail(assetId: string, options: AssetsRequestOptions = 
 export function createAsset(payload: CreateAssetPayload, options: AssetsRequestOptions = {}): Promise<unknown> {
   return apiClient.requestData<unknown>({
     path: '/api/v2/assets',
+    method: 'POST',
+    body: payload,
+    signal: options.signal,
+  });
+}
+
+export function createAssetsBatch(
+  payload: BatchCreateAssetsPayload,
+  options: AssetsRequestOptions = {},
+): Promise<BatchCreateAssetsResponse> {
+  return apiClient.requestData<BatchCreateAssetsResponse>({
+    path: '/api/v2/assets/batch',
     method: 'POST',
     body: payload,
     signal: options.signal,
