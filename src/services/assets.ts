@@ -146,3 +146,20 @@ export function getAssetReservations(
     signal,
   });
 }
+
+export interface GetAssetActivitiesParams extends AssetsRequestOptions {
+  page?: number;
+  size?: number;
+}
+
+export function getAssetActivities(
+  assetId: string,
+  { page, size, signal }: GetAssetActivitiesParams = {},
+): Promise<unknown> {
+  return apiClient.requestData<unknown>({
+    path: `/api/v2/assets/${encodeURIComponent(assetId)}/activities`,
+    method: 'GET',
+    query: { page, size },
+    signal,
+  });
+}
