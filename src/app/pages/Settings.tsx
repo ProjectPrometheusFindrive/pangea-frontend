@@ -2080,7 +2080,7 @@ export default function Settings() {
     }
 
     const nextRoleValue = memberRoleDrafts[memberId] ?? originalMember.role;
-    if (nextRoleValue !== 'admin' && nextRoleValue !== 'member') {
+    if (nextRoleValue !== 'admin' && nextRoleValue !== 'member' && nextRoleValue !== 'viewer') {
       setMemberFieldErrors((prevErrors) => ({
         ...prevErrors,
         [memberId]: 'role 값은 admin 또는 member만 허용됩니다.',

@@ -48,13 +48,14 @@ test('settings viewer role taxonomy is available across FE services, labels, and
   assert.match(settingsSource, /export type SettingsMemberRole = 'admin' \| 'member' \| 'viewer' \| 'installer' \| string;/u);
   assert.match(settingsSource, /role: 'admin' \| 'member' \| 'viewer';/u);
   assert.match(authServiceSource, /export type KnownAuthRole = 'super_admin' \| 'admin' \| 'member' \| 'viewer' \| 'installer';/u);
-  assert.match(authServiceSource, /role === 'super_admin' \|\| role === 'admin' \|\| role === 'member' \|\| role === 'viewer'/u);
+  assert.match(authServiceSource, /isSuperAdminRole\(role\) \|\| role === 'admin' \|\| role === 'member' \|\| role === 'viewer'/u);
 
   assert.match(settingsPageSource, /if \(role === 'viewer'\) \{\s*return '조회자';/u);
   assert.match(settingsPageSource, /case 'viewer':\s*return 'bg-slate-100 text-slate-700';/u);
   assert.match(settingsPageSource, /<option value="viewer">조회자<\/option>/u);
   assert.match(settingsPageSource, /draftRole === 'admin' \|\| draftRole === 'viewer' \? draftRole : 'member'/u);
   assert.match(settingsPageSource, /member\.role === 'admin' \|\| member\.role === 'member' \|\| member\.role === 'viewer'/u);
+  assert.match(settingsPageSource, /if \(nextRoleValue !== 'admin' && nextRoleValue !== 'member' && nextRoleValue !== 'viewer'\)/u);
   assert.match(settingsPageSource, /조회자\(viewer\):<\/span>\s*데이터 조회 전용/u);
 
   assert.match(signUpSource, /value=\{toInvitationRoleLabel\(invitationRoleValue\)\}/u);
