@@ -423,6 +423,51 @@ function toMemoLogs(value: unknown): MemoLog[] {
     .filter((entry): entry is MemoLog => entry !== null);
 }
 
+function memoTimestampValue(timestamp: string): number {
+  const parsed = Date.parse(timestamp);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function sortMemoLogsLatestFirst(memos: MemoLog[]): MemoLog[] {
+  return [...memos].sort((left, right) => memoTimestampValue(right.timestamp) - memoTimestampValue(left.timestamp));
+}
+
+function mergeCurrentMemo(
+  memos: MemoLog[],
+  row: Record<string, unknown>,
+  actionId: string,
+): MemoLog[] {
+  const latestMemo = pickString(row, ['memo']);
+  if (!latestMemo) {
+    return memos;
+  }
+
+  const latestTimestamp = pickString(row, ['updatedAt', 'createdAt']) ?? new Date().toISOString();
+  const latestAuthor = pickString(row, ['memoUpdatedBy', 'updatedBy', 'createdBy']) ?? '-';
+  const statusValue = pickString(row, ['status', 'statusLabel']);
+  const alreadyIncluded = memos.some((memo) => (
+    memo.content === latestMemo
+    && memo.timestamp === latestTimestamp
+    && memo.author === latestAuthor
+  ));
+
+  if (alreadyIncluded) {
+    return memos;
+  }
+
+  return sortMemoLogsLatestFirst([
+    ...memos,
+    {
+      id: `memo-inline-${actionId}`,
+      content: latestMemo,
+      timestamp: latestTimestamp,
+      author: latestAuthor,
+      status: normalizeMemoStatus(statusValue),
+      statusLabel: normalizeStatusLabel(statusValue),
+    },
+  ]);
+}
+
 function toPaymentInfo(source: Record<string, unknown>): ActionItem['paymentInfo'] | undefined {
   const paymentSource = isRecord(source.paymentInfo)
     ? source.paymentInfo
@@ -488,19 +533,7 @@ function toActionItem(row: unknown, index: number, fallbackId?: string): ActionI
     return null;
   }
 
-  const memos = toMemoLogs(row.memos ?? row.memoHistory);
-  const latestMemo = pickString(row, ['memo']);
-  if (memos.length === 0 && latestMemo) {
-    const statusValue = pickString(row, ['status', 'statusLabel']);
-    memos.push({
-      id: `memo-inline-${id}`,
-      content: latestMemo,
-      timestamp: pickString(row, ['updatedAt', 'createdAt']) ?? new Date().toISOString(),
-      author: pickString(row, ['updatedBy', 'createdBy']) ?? '-',
-      status: normalizeMemoStatus(statusValue),
-      statusLabel: normalizeStatusLabel(statusValue),
-    });
-  }
+  const memos = sortMemoLogsLatestFirst(mergeCurrentMemo(toMemoLogs(row.memos ?? row.memoHistory), row, id));
 
   const statusRawValue = pickString(row, ['status', 'statusLabel']);
 
@@ -1172,7 +1205,7 @@ export default function ActionRequired() {
       {
         status: nextStatusLabel,
         statusCode: nextStatusCode,
-        memos: [...(targetItem.memos ?? []), createdMemo],
+        memos: sortMemoLogsLatestFirst([createdMemo, ...(targetItem.memos ?? [])]),
         ...(currentAssignee ? { assignee: currentAssignee } : {}),
       },
       shouldRemoveFromList,
@@ -1201,7 +1234,7 @@ export default function ActionRequired() {
         ...targetItem,
         status: nextStatusLabel,
         statusCode: nextStatusCode,
-        memos: [...(targetItem.memos ?? []), createdMemo],
+        memos: sortMemoLogsLatestFirst([createdMemo, ...(targetItem.memos ?? [])]),
         ...(currentAssignee ? { assignee: currentAssignee } : {}),
       };
       void hydrateActionItems();
