@@ -28,6 +28,7 @@ export interface ActionRequiredMemoPatchOptions {
 
 export interface ActionRequiredTypeCountOptions {
   pageSize?: number;
+  status?: string;
   signal?: AbortSignal;
 }
 
@@ -195,14 +196,14 @@ export function getActionRequiredList(options: ActionRequiredListRequestOptions 
 export async function getActionItemTypeCounts(
   options: ActionRequiredTypeCountOptions = {},
 ): Promise<Record<string, number>> {
-  const { pageSize = 100, signal } = options;
+  const { pageSize = 100, status, signal } = options;
   const counts: Record<string, number> = {};
   const seenActionIds = new Set<string>();
   let page = 1;
   let expectedTotal = 0;
 
   while (true) {
-    const payload = await getActionRequiredList({ page, pageSize, signal });
+    const payload = await getActionRequiredList({ page, pageSize, status, signal });
     const rows = getCollectionFromPayload(payload) ?? [];
     expectedTotal = Math.max(expectedTotal, toTotalCount(payload, rows.length));
 
