@@ -118,6 +118,11 @@ interface BulkOcrResult {
   assetId?: string;
 }
 
+interface ParsedCsvResult {
+  data: Record<string, unknown>[];
+  encoding: string;
+}
+
 interface CompanyFormState {
   name: string;
   businessNumber: string;
@@ -428,6 +433,56 @@ function toBulkVehicleCreateItem(row: Record<string, unknown>): BulkVehicleCreat
     insuranceExpiry: insuranceExpiry ?? undefined,
     nextInspection: nextInspection ?? undefined,
   };
+}
+
+function containsReplacementCharacter(value: string): boolean {
+  return value.includes('\uFFFD');
+}
+
+function parseCsvText(text: string): Promise<Record<string, unknown>[]> {
+  return new Promise((resolve, reject) => {
+    Papa.parse<Record<string, unknown>>(text, {
+      header: true,
+      skipEmptyLines: true,
+      complete: (results) => {
+        const rows = Array.isArray(results.data) ? results.data : [];
+        resolve(rows.filter((row) => Object.values(row).some((cell) => cell !== '')));
+      },
+      error: (error) => {
+        reject(error);
+      },
+    });
+  });
+}
+
+async function parseCsvFileWithEncodingFallback(file: File): Promise<ParsedCsvResult> {
+  const buffer = await file.arrayBuffer();
+  const decoders = [
+    { encoding: 'utf-8', decoder: new TextDecoder('utf-8') },
+    { encoding: 'euc-kr', decoder: new TextDecoder('euc-kr') },
+  ];
+
+  let fallbackResult: ParsedCsvResult | null = null;
+
+  for (const { encoding, decoder } of decoders) {
+    const text = decoder.decode(buffer);
+    const data = await parseCsvText(text);
+    const sample = text.slice(0, 200);
+
+    if (!containsReplacementCharacter(sample)) {
+      return { data, encoding };
+    }
+
+    if (!fallbackResult) {
+      fallbackResult = { data, encoding };
+    }
+  }
+
+  if (fallbackResult) {
+    return fallbackResult;
+  }
+
+  return { data: [], encoding: 'utf-8' };
 }
 
 function isRetryableMutationError(error: ApiError): boolean {
@@ -2722,53 +2777,51 @@ export default function Settings() {
     }
   }, [canWriteAssets, isBulkVehicleSaving, validatedVehicleRows, isSuperAdmin, settingsCompanyId, refreshCurrentDataCounts]);
 
-  const handleFileUpload = (file: File) => {
+  const handleFileUpload = async (file: File) => {
     if (!canEditSettings) {
-      toast.error('설정 CSV 검증 권한이 없습니다.');
+      toast.error('??? CSV ???????????????.');
       return;
     }
 
     if (!file.name.endsWith('.csv')) {
-      alert('CSV 파일만 업로드 가능합니다');
+      alert('CSV ??????????????????');
       return;
     }
 
-    Papa.parse(file, {
-      header: true,
-      encoding: 'UTF-8',
-      complete: (results) => {
-        const data = results.data.filter((row: any) => Object.values(row).some((value) => value !== ''));
+    try {
+      const { data, encoding } = await parseCsvFileWithEncodingFallback(file);
 
-        if (data.length === 0) {
-          alert('유효한 데이터가 없습니다');
-          return;
-        }
+      if (data.length === 0) {
+        alert('??????????? ??????');
+        return;
+      }
 
-        setBulkVehicleSaveProgress(null);
-        setBulkVehicleSaveError(null);
-        setBulkVehicleSaveSuccess(null);
-        setPreviewData(data.slice(0, 5));
+      setBulkVehicleSaveProgress(null);
+      setBulkVehicleSaveError(null);
+      setBulkVehicleSaveSuccess(null);
+      setPreviewData(data.slice(0, 5));
 
-        const validation = uploadType === 'vehicles'
-          ? validateVehicleData(data)
-          : validateReservationData(data);
+      const validation = uploadType === 'vehicles'
+        ? validateVehicleData(data)
+        : validateReservationData(data);
 
-        setValidatedVehicleRows(uploadType === 'vehicles' ? validation.valid : []);
+      setValidatedVehicleRows(uploadType === 'vehicles' ? validation.valid : []);
 
-        setUploadResult({
-          success: validation.errors.length === 0,
-          total: data.length,
-          valid: validation.valid.length,
-          errors: validation.errors.slice(0, 10),
-        });
-      },
-      error: (error) => {
-        alert(`파일 파싱 오류: ${error.message}`);
-      },
-    });
+      setUploadResult({
+        success: validation.errors.length === 0,
+        total: data.length,
+        valid: validation.valid.length,
+        errors: validation.errors.slice(0, 10),
+      });
+
+      if (encoding !== 'utf-8') {
+        toast.success('CSV? ' + encoding + ' ????? ?????.');
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'CSV parsing error';
+      alert('??? ??? ???: ' + message);
+    }
   };
-
-  // 드래그앤드롭
   const handleDragOver = (event: React.DragEvent) => {
     event.preventDefault();
     if (!canEditSettings) {
