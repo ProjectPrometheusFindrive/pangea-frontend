@@ -87,6 +87,7 @@ type CompanyField = 'name' | 'businessNumber' | 'phone' | 'email' | 'address';
 type GeofenceField = 'name' | 'lat' | 'lng' | 'radiusMeter' | 'polygon';
 type GarageField = 'name' | 'address';
 type MemberRoleField = 'role';
+type MemberRoleDraftValue = 'admin' | 'member' | 'viewer' | 'delete';
 type InvitationField = 'email' | 'role' | 'companyId';
 type InvitationStatusFilter = 'pending' | 'accepted' | 'expired' | 'revoked' | 'all';
 type FieldErrorMap<TField extends string> = Partial<Record<TField, string>>;
@@ -2011,7 +2012,7 @@ export default function Settings() {
     void runGarageDelete(garageId);
   }, [canEditSettings, deletingGarageId, isGarageSaving, runGarageDelete]);
 
-  const handleMemberRoleChange = useCallback((memberId: string, role: 'admin' | 'member' | 'viewer') => {
+  const handleMemberRoleChange = useCallback((memberId: string, role: MemberRoleDraftValue) => {
     setMemberRoleDrafts((prevDrafts) => ({
       ...prevDrafts,
       [memberId]: role,
@@ -2100,6 +2101,18 @@ export default function Settings() {
     }
 
     const nextRoleValue = memberRoleDrafts[memberId] ?? originalMember.role;
+    if (nextRoleValue === 'delete') {
+      if (typeof window !== 'undefined') {
+        const shouldDelete = window.confirm('해당 멤버 계정을 삭제하시겠습니까?');
+        if (!shouldDelete) {
+          return;
+        }
+      }
+
+      void runMemberStatusSave(memberId, 'withdrawn');
+      return;
+    }
+
     if (nextRoleValue !== 'admin' && nextRoleValue !== 'member' && nextRoleValue !== 'viewer') {
       setMemberFieldErrors((prevErrors) => ({
         ...prevErrors,
@@ -2211,24 +2224,6 @@ export default function Settings() {
       setSavingMemberId(null);
     }
   }, [canManageMemberRoles, hydrateMembersOnly, settingsCompanyId]);
-
-  const handleMemberDelete = useCallback((memberId: string) => {
-    const member = members.find((candidate) => candidate.userId === memberId);
-    if (!member) {
-      return;
-    }
-
-    if (!canDeleteManagedMember(member, user?.userId, canManageMemberRoles) || savingMemberId === memberId) {
-      return;
-    }
-
-    const shouldDelete = window.confirm('해당 멤버 계정을 삭제하시겠습니까?');
-    if (!shouldDelete) {
-      return;
-    }
-
-    void runMemberStatusSave(memberId, 'withdrawn');
-  }, [canManageMemberRoles, members, runMemberStatusSave, savingMemberId, user?.userId]);
 
   const openInvitationEditor = useCallback(() => {
     if (!canManageMemberRoles || isInvitationSaving || resendingInvitationId !== null) {
@@ -3953,7 +3948,7 @@ export default function Settings() {
                       )}
                       {members.map((member) => {
                         const draftRole = memberRoleDrafts[member.userId] ?? member.role;
-                        const normalizedDraftRole = draftRole === 'admin' || draftRole === 'viewer' ? draftRole : 'member';
+                        const normalizedDraftRole = draftRole === 'admin' || draftRole === 'viewer' || draftRole === 'delete' ? draftRole : 'member';
                         const normalizedCurrentRole = member.role === 'admin' || member.role === 'viewer' ? member.role : 'member';
                         const isRoleDirty = normalizedDraftRole !== normalizedCurrentRole;
                         const isRowSaving = savingMemberId === member.userId;
@@ -3977,13 +3972,16 @@ export default function Settings() {
                               {canEditRowRole ? (
                                 <select
                                   value={normalizedDraftRole}
-                                  onChange={(event) => handleMemberRoleChange(member.userId, event.target.value as 'admin' | 'member' | 'viewer')}
+                                  onChange={(event) => handleMemberRoleChange(member.userId, event.target.value as MemberRoleDraftValue)}
                                   disabled={isRowSaving}
                                   className="rounded-md border border-gray-300 px-2 py-1 text-xs font-medium text-gray-800 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:opacity-50"
                                 >
                                   <option value="admin">관리자</option>
                                   <option value="member">운영자</option>
                                   <option value="viewer">조회자</option>
+                                  {canDeleteMember && (
+                                    <option value="delete">삭제</option>
+                                  )}
                                 </select>
                               ) : (
                                 <span className={`rounded-full px-2 py-1 text-xs font-medium ${getRoleBadgeColor(member.role)}`}>
@@ -4042,18 +4040,6 @@ export default function Settings() {
                                     className="font-medium text-red-600 hover:text-red-800 disabled:cursor-not-allowed disabled:opacity-50"
                                   >
                                     {isRowSaving ? '처리 중...' : '거절'}
-                                  </button>
-                                </div>
-                              )}
-                              {canDeleteMember && !canReviewPendingMember && !isRoleDirty && (
-                                <div className="space-x-2">
-                                  <button
-                                    type="button"
-                                    onClick={() => handleMemberDelete(member.userId)}
-                                    disabled={isRowSaving}
-                                    className="font-medium text-red-600 hover:text-red-800 disabled:cursor-not-allowed disabled:opacity-50"
-                                  >
-                                    {isRowSaving ? '泥섎━ 以?..' : '삭제'}
                                   </button>
                                 </div>
                               )}
