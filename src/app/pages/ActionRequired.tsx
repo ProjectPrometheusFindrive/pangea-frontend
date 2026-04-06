@@ -21,6 +21,7 @@ import {
   patchActionRequiredMemo,
   patchActionRequiredStatus,
 } from '../../services/actionRequired';
+import { listSettingsMembers, type SettingsMember } from '../../services/settings';
 import { paymentStatusToLabel, toCanonicalPaymentStatus } from '../utils/paymentStatusSync';
 
 type ActionStatusCode = 'pending' | 'in-progress' | 'resolved';
@@ -32,6 +33,9 @@ interface MemoLog {
   author: string;
   status: ActionStatusCode;
   statusLabel: string;
+  sortTimestamp: number;
+  sortTimestampRaw: string;
+  sortSequence: number;
 }
 
 interface ActionItem {
@@ -44,6 +48,7 @@ interface ActionItem {
   status: string;
   statusCode: ActionStatusCode;
   assignee: string;
+  assigneeId?: string;
   reservationId?: string;
   paymentId?: string;
   description?: string;
@@ -67,7 +72,7 @@ type SortField = 'type' | 'vehicleNumber' | 'customerName' | 'date' | 'severity'
 type SortDirection = 'asc' | 'desc' | null;
 type ActionStatusFilter = 'all' | 'pending' | 'in-progress' | 'resolved';
 type ActionPriorityFilter = 'all' | 'high' | 'medium' | 'low';
-type ActionWriteKind = 'status' | 'memo' | 'resolve';
+type ActionWriteKind = 'status' | 'memo' | 'resolve' | 'assignee';
 type ActionIssueFilter =
   | '사고 접수'
   | '반납 지연'
@@ -117,6 +122,11 @@ interface OptimisticActionSnapshot {
   selectedItem: ActionItem | null;
   sourceActionItems: ActionItem[];
   totalItems: number;
+}
+
+interface AssigneeOption {
+  userId: string;
+  name: string;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -349,6 +359,13 @@ function normalizeMemoStatus(rawValue: string | null): MemoLog['status'] {
 function toActionWriteError(kind: ActionWriteKind, error: unknown): ActionWriteErrorState {
   if (error instanceof ApiError) {
     if (error.status === 400) {
+      if (kind === 'assignee') {
+        return {
+          kind,
+          message: '담당자 값이 올바르지 않습니다. 회사 계정을 다시 선택해 주세요.',
+          retryable: false,
+        };
+      }
       if (kind === 'memo') {
         return {
           kind,
@@ -458,61 +475,90 @@ function toMemoLogs(value: unknown): MemoLog[] {
       }
 
       const statusValue = pickString(entry, ['status']);
+      const timestamp = pickString(entry, ['timestamp', 'createdAt', 'changedAt', 'updatedAt']) ?? new Date().toISOString();
       return {
         id: pickString(entry, ['id', 'memoId']) ?? `memo-${index + 1}`,
         content,
-        timestamp: pickString(entry, ['timestamp', 'createdAt', 'changedAt', 'updatedAt']) ?? new Date().toISOString(),
-        author: pickString(entry, ['author', 'createdBy', 'changedBy', 'updatedBy']) ?? '-',
+        timestamp,
+        author: pickString(entry, ['author', 'changedByName', 'createdByName', 'updatedByName', 'createdBy', 'changedBy', 'updatedBy']) ?? '-',
         status: normalizeMemoStatus(statusValue),
         statusLabel: pickString(entry, ['statusLabel']) ?? normalizeStatusLabel(statusValue),
+        sortTimestamp: memoTimestampValue(timestamp),
+        sortTimestampRaw: timestamp,
+        sortSequence: index,
       };
     })
     .filter((entry): entry is MemoLog => entry !== null);
 }
 
 function memoTimestampValue(timestamp: string): number {
-  const parsed = Date.parse(timestamp);
-  return Number.isFinite(parsed) ? parsed : 0;
+  const normalized = timestamp.trim();
+  if (!normalized) {
+    return 0;
+  }
+
+  const isoMatch = normalized.match(
+    /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,6}))?)?(Z|[+-]\d{2}:\d{2})?$/,
+  );
+  if (isoMatch) {
+    const [
+      ,
+      yearText,
+      monthText,
+      dayText,
+      hourText,
+      minuteText,
+      secondText = '0',
+      fractionalText = '',
+      timezoneText = 'Z',
+    ] = isoMatch;
+
+    const year = Number(yearText);
+    const month = Number(monthText);
+    const day = Number(dayText);
+    const hour = Number(hourText);
+    const minute = Number(minuteText);
+    const second = Number(secondText);
+    const microseconds = Number(fractionalText.padEnd(6, '0').slice(0, 6));
+
+    let offsetMinutes = 0;
+    if (timezoneText !== 'Z') {
+      const sign = timezoneText.startsWith('-') ? -1 : 1;
+      const [offsetHourText, offsetMinuteText] = timezoneText.slice(1).split(':');
+      offsetMinutes = sign * ((Number(offsetHourText) * 60) + Number(offsetMinuteText));
+    }
+
+    const utcMilliseconds = Date.UTC(year, month - 1, day, hour, minute, second, 0) - (offsetMinutes * 60_000);
+    return (utcMilliseconds * 1000) + microseconds;
+  }
+
+  const parsed = Date.parse(normalized);
+  return Number.isFinite(parsed) ? parsed * 1000 : 0;
 }
 
 function sortMemoLogsLatestFirst(memos: MemoLog[]): MemoLog[] {
-  return [...memos].sort((left, right) => memoTimestampValue(right.timestamp) - memoTimestampValue(left.timestamp));
+  return [...memos].sort((left, right) => {
+    if (right.sortTimestamp !== left.sortTimestamp) {
+      return right.sortTimestamp - left.sortTimestamp;
+    }
+    if (right.sortTimestampRaw !== left.sortTimestampRaw) {
+      return right.sortTimestampRaw.localeCompare(left.sortTimestampRaw);
+    }
+    return right.sortSequence - left.sortSequence;
+  });
 }
 
-function mergeCurrentMemo(
-  memos: MemoLog[],
-  row: Record<string, unknown>,
-  actionId: string,
-): MemoLog[] {
-  const latestMemo = pickString(row, ['memo']);
-  if (!latestMemo) {
-    return memos;
+function toHistoryLogs(source: Record<string, unknown>): MemoLog[] {
+  if (Array.isArray(source.history)) {
+    return toMemoLogs(source.history);
   }
-
-  const latestTimestamp = pickString(row, ['updatedAt', 'createdAt']) ?? new Date().toISOString();
-  const latestAuthor = pickString(row, ['memoUpdatedBy', 'updatedBy', 'createdBy']) ?? '-';
-  const statusValue = pickString(row, ['status', 'statusLabel']);
-  const alreadyIncluded = memos.some((memo) => (
-    memo.content === latestMemo
-    && memo.timestamp === latestTimestamp
-    && memo.author === latestAuthor
-  ));
-
-  if (alreadyIncluded) {
-    return memos;
+  if (Array.isArray(source.memos)) {
+    return toMemoLogs(source.memos);
   }
-
-  return sortMemoLogsLatestFirst([
-    ...memos,
-    {
-      id: `memo-inline-${actionId}`,
-      content: latestMemo,
-      timestamp: latestTimestamp,
-      author: latestAuthor,
-      status: normalizeMemoStatus(statusValue),
-      statusLabel: normalizeStatusLabel(statusValue),
-    },
-  ]);
+  if (Array.isArray(source.memoHistory)) {
+    return sortMemoLogsLatestFirst(toMemoLogs(source.memoHistory));
+  }
+  return [];
 }
 
 function toPaymentInfo(source: Record<string, unknown>): ActionItem['paymentInfo'] | undefined {
@@ -580,7 +626,7 @@ function toActionItem(row: unknown, index: number, fallbackId?: string): ActionI
     return null;
   }
 
-  const memos = sortMemoLogsLatestFirst(mergeCurrentMemo(toMemoLogs(row.memos ?? row.memoHistory), row, id));
+  const memos = toHistoryLogs(row);
 
   const statusRawValue = pickString(row, ['status', 'statusLabel']);
 
@@ -594,6 +640,7 @@ function toActionItem(row: unknown, index: number, fallbackId?: string): ActionI
     status: normalizeStatusLabel(statusRawValue),
     statusCode: normalizeStatusCode(statusRawValue),
     assignee: pickString(row, ['assignee', 'assigneeName', 'owner', 'assignedTo']) ?? '-',
+    assigneeId: pickString(row, ['assigneeId']) ?? undefined,
     reservationId: reservationId ?? undefined,
     paymentId: paymentId ?? undefined,
     description: pickString(row, ['description', 'detail']),
@@ -711,6 +758,7 @@ export default function ActionRequired() {
   const [sortDirection, setSortDirection] = useState<SortDirection>(null);
   const [currentMemo, setCurrentMemo] = useState('');
   const [currentStatus, setCurrentStatus] = useState('');
+  const [currentAssigneeId, setCurrentAssigneeId] = useState('');
   const [sourceActionItems, setSourceActionItems] = useState<ActionItem[]>([]);
   const [totalItems, setTotalItems] = useState(0);
   const [writeError, setWriteError] = useState<ActionWriteErrorState | null>(null);
@@ -718,6 +766,8 @@ export default function ActionRequired() {
   const [isStatusSaving, setIsStatusSaving] = useState(false);
   const [isMemoSaving, setIsMemoSaving] = useState(false);
   const [isResolveSaving, setIsResolveSaving] = useState(false);
+  const [isAssigneeSaving, setIsAssigneeSaving] = useState(false);
+  const [assigneeOptions, setAssigneeOptions] = useState<AssigneeOption[]>([]);
 
   const [isDetailLoading, setIsDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
@@ -727,7 +777,7 @@ export default function ActionRequired() {
   const detailControllerRef = useRef<AbortController | null>(null);
   const retryActionRef = useRef<(() => Promise<void>) | null>(null);
 
-  const isWriteSaving = isStatusSaving || isMemoSaving || isResolveSaving;
+  const isWriteSaving = isStatusSaving || isMemoSaving || isResolveSaving || isAssigneeSaving;
 
   const paymentSyncTargets = useMemo(() => (
     sourceActionItems
@@ -796,6 +846,38 @@ export default function ActionRequired() {
   useEffect(() => () => {
     detailControllerRef.current?.abort();
   }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void listSettingsMembers('approved', { signal: controller.signal })
+      .then((payload) => {
+        const items = Array.isArray(payload?.items) ? payload.items : [];
+        const nextOptions = items
+          .map((member: SettingsMember) => {
+            const userId = (member.userId ?? '').trim();
+            const name = (member.name ?? member.email ?? userId).trim();
+            if (!userId || !name) {
+              return null;
+            }
+            return { userId, name };
+          })
+          .filter((option): option is AssigneeOption => option !== null)
+          .sort((left, right) => left.name.localeCompare(right.name, 'ko'));
+        setAssigneeOptions(nextOptions);
+      })
+      .catch(() => {
+        setAssigneeOptions([]);
+      });
+    return () => controller.abort();
+  }, []);
+
+  useEffect(() => {
+    if (!selectedItem) {
+      setCurrentAssigneeId('');
+      return;
+    }
+    setCurrentAssigneeId(selectedItem.assigneeId ?? '');
+  }, [selectedItem?.id, selectedItem?.assigneeId]);
 
   useEffect(() => {
     const filterParam = searchParams.get('filter');
@@ -897,6 +979,7 @@ export default function ActionRequired() {
     setSelectedItem(item);
     setCurrentMemo('');
     setCurrentStatus('');
+    setCurrentAssigneeId(item.assigneeId ?? '');
     clearWriteFeedback();
     void hydrateActionDetail(item.id, item);
   }, [clearWriteFeedback, hydrateActionDetail]);
@@ -909,6 +992,7 @@ export default function ActionRequired() {
     setSelectedItem(null);
     setCurrentMemo('');
     setCurrentStatus('');
+    setCurrentAssigneeId('');
     setIsDetailLoading(false);
     setDetailError(null);
     setIsDetailNotFound(false);
@@ -1118,14 +1202,19 @@ export default function ActionRequired() {
 
     const nextStatusLabel = toStatusLabel(nextStatusCode);
     const shouldRemoveFromList = !matchesVisibleStatusFilters(nextStatusCode, statusFilter, includeCompleted);
-
-    const optimisticAssignee = user?.name ?? user?.email ?? user?.userId;
+    const selectedAssignee = assigneeOptions.find((option) => option.userId === currentAssigneeId);
+    const existingAssignee = targetItem.assignee && targetItem.assignee !== '-' ? targetItem.assignee : undefined;
+    const optimisticAssignee = selectedAssignee?.name ?? existingAssignee;
+    const shouldAutoAssignActor = !currentAssigneeId && (!targetItem.assignee || targetItem.assignee === '-');
+    const fallbackActorAssignee = shouldAutoAssignActor ? (user?.name ?? user?.email ?? user?.userId ?? undefined) : undefined;
+    const fallbackActorAssigneeId = shouldAutoAssignActor ? (user?.userId ?? user?.email ?? undefined) : undefined;
     applyOptimisticActionPatch(
       actionId,
       {
         status: nextStatusLabel,
         statusCode: nextStatusCode,
-        ...(optimisticAssignee ? { assignee: optimisticAssignee } : {}),
+        ...(optimisticAssignee ? { assignee: optimisticAssignee, assigneeId: currentAssigneeId } : {}),
+        ...(fallbackActorAssignee ? { assignee: fallbackActorAssignee, assigneeId: fallbackActorAssigneeId } : {}),
       },
       shouldRemoveFromList,
     );
@@ -1138,10 +1227,8 @@ export default function ActionRequired() {
     }
 
     try {
-      const currentAssignee = user?.name ?? user?.email ?? user?.userId;
       await patchActionRequiredStatus(actionId, {
         status: toStatusPatchValue(nextStatusCode),
-        assignee: currentAssignee,
       });
       setCurrentStatus('');
       setWriteNotice(
@@ -1157,7 +1244,8 @@ export default function ActionRequired() {
         ...targetItem,
         status: nextStatusLabel,
         statusCode: nextStatusCode,
-        ...(currentAssignee ? { assignee: currentAssignee } : {}),
+        ...(optimisticAssignee ? { assignee: optimisticAssignee, assigneeId: currentAssigneeId } : {}),
+        ...(fallbackActorAssignee ? { assignee: fallbackActorAssignee, assigneeId: fallbackActorAssigneeId } : {}),
       };
       void hydrateActionItems();
       void hydrateActionDetail(actionId, fallbackItem);
@@ -1182,6 +1270,84 @@ export default function ActionRequired() {
       } else {
         setIsStatusSaving(false);
       }
+    }
+  }
+
+  async function runAssigneeUpdate(actionId: string, nextAssigneeId: string): Promise<void> {
+    if (!canWriteActionRequired) {
+      setWriteError({
+        kind: 'assignee',
+        message: '권한이 없어 담당자를 변경할 수 없습니다.',
+        retryable: false,
+      });
+      return;
+    }
+
+    if (isWriteSaving) {
+      return;
+    }
+
+    const targetItem = selectedItem?.id === actionId
+      ? selectedItem
+      : sourceActionItems.find((item) => item.id === actionId);
+    if (!targetItem) {
+      return;
+    }
+
+    const previousSelectedItem = targetItem;
+    const previousCurrentAssigneeId = currentAssigneeId;
+    const optimisticSnapshot: OptimisticActionSnapshot = {
+      selectedItem,
+      sourceActionItems,
+      totalItems,
+    };
+
+    clearWriteFeedback();
+
+    const nextAssignee = assigneeOptions.find((option) => option.userId === nextAssigneeId);
+    applyOptimisticActionPatch(
+      actionId,
+      {
+        assignee: nextAssignee?.name ?? '-',
+        assigneeId: nextAssigneeId || undefined,
+      },
+      false,
+    );
+    setCurrentAssigneeId(nextAssigneeId);
+    setIsAssigneeSaving(true);
+
+    try {
+      await patchActionRequiredStatus(actionId, {
+        status: toStatusPatchValue(targetItem.statusCode),
+        assignee: nextAssigneeId,
+      });
+      setWriteNotice(nextAssigneeId ? '담당자를 저장했습니다.' : '담당자를 해제했습니다.');
+      retryActionRef.current = null;
+
+      const fallbackItem: ActionItem = {
+        ...targetItem,
+        assignee: nextAssignee?.name ?? '-',
+        assigneeId: nextAssigneeId || undefined,
+      };
+      void hydrateActionItems();
+      void hydrateActionDetail(actionId, fallbackItem);
+    } catch (error) {
+      setCurrentAssigneeId(previousCurrentAssigneeId);
+      restoreOptimisticActionSnapshot(optimisticSnapshot);
+
+      const mappedError = toActionWriteError('assignee', error);
+      setWriteError(mappedError);
+
+      if (mappedError.retryable) {
+        retryActionRef.current = () => runAssigneeUpdate(actionId, nextAssigneeId);
+      } else {
+        retryActionRef.current = null;
+      }
+
+      void hydrateActionItems();
+      void hydrateActionDetail(actionId, previousSelectedItem);
+    } finally {
+      setIsAssigneeSaving(false);
     }
   }
 
@@ -1228,23 +1394,27 @@ export default function ActionRequired() {
 
     const nextStatusLabel = toStatusLabel(nextStatusCode);
     const shouldRemoveFromList = !matchesVisibleStatusFilters(nextStatusCode, statusFilter, includeCompleted);
+    const createdAt = new Date().toISOString();
     const createdMemo: MemoLog = {
       id: `memo-${Date.now()}`,
       content: trimmedMemo,
-      timestamp: new Date().toISOString(),
+      timestamp: createdAt,
       author: user?.name ?? user?.userId ?? '-',
       status: normalizeMemoStatus(nextStatusLabel),
       statusLabel: nextStatusLabel,
+      sortTimestamp: memoTimestampValue(createdAt),
+      sortTimestampRaw: createdAt,
+      sortSequence: Number.MAX_SAFE_INTEGER,
     };
 
-    const currentAssignee = user?.name ?? user?.email ?? user?.userId;
+    const selectedAssignee = assigneeOptions.find((option) => option.userId === currentAssigneeId);
     applyOptimisticActionPatch(
       actionId,
       {
         status: nextStatusLabel,
         statusCode: nextStatusCode,
-        memos: sortMemoLogsLatestFirst([createdMemo, ...(targetItem.memos ?? [])]),
-        ...(currentAssignee ? { assignee: currentAssignee } : {}),
+        memos: [createdMemo, ...(targetItem.memos ?? [])],
+        ...(selectedAssignee ? { assignee: selectedAssignee.name, assigneeId: currentAssigneeId } : {}),
       },
       shouldRemoveFromList,
     );
@@ -1254,10 +1424,9 @@ export default function ActionRequired() {
       if (targetItem.statusCode !== nextStatusCode) {
         await patchActionRequiredStatus(actionId, {
           status: toStatusPatchValue(nextStatusCode),
-          assignee: currentAssignee,
         });
       }
-      await patchActionRequiredMemo(actionId, { memo: trimmedMemo, assignee: currentAssignee });
+      await patchActionRequiredMemo(actionId, { memo: trimmedMemo });
 
       setCurrentMemo('');
       setCurrentStatus('');
@@ -1272,8 +1441,8 @@ export default function ActionRequired() {
         ...targetItem,
         status: nextStatusLabel,
         statusCode: nextStatusCode,
-        memos: sortMemoLogsLatestFirst([createdMemo, ...(targetItem.memos ?? [])]),
-        ...(currentAssignee ? { assignee: currentAssignee } : {}),
+        memos: [createdMemo, ...(targetItem.memos ?? [])],
+        ...(selectedAssignee ? { assignee: selectedAssignee.name, assigneeId: currentAssigneeId } : {}),
       };
       void hydrateActionItems();
       void hydrateActionDetail(actionId, fallbackItem);
@@ -1674,6 +1843,35 @@ export default function ActionRequired() {
                     </div>
                   </div>
                 )}
+
+                <div>
+                  <label className="text-sm font-semibold text-gray-600">담당자</label>
+                  <div className="mt-1">
+                    <select
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      value={currentAssigneeId}
+                      onChange={(e) => {
+                        const nextAssigneeId = e.target.value;
+                        setCurrentAssigneeId(nextAssigneeId);
+                        if (!canWriteActionRequired || isWriteSaving || !selectedItem) {
+                          return;
+                        }
+                        if ((selectedItem.assigneeId ?? '') === nextAssigneeId) {
+                          return;
+                        }
+                        void runAssigneeUpdate(selectedItem.id, nextAssigneeId);
+                      }}
+                      disabled={!canWriteActionRequired || isWriteSaving}
+                    >
+                      <option value="">담당자 선택</option>
+                      {assigneeOptions.map((option) => (
+                        <option key={option.userId} value={option.userId}>
+                          {option.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
 
                 <div>
                   <label className="text-sm font-semibold text-gray-600">상태 변경</label>
