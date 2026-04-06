@@ -29,7 +29,7 @@ import { useAuthorization } from '../context/AuthorizationContext';
 import { useAuth } from '../context/AuthContext';
 import { useCompany } from '../context/CompanyContext';
 import { ACTION_PERMISSIONS } from '../authorization';
-import { createAsset, getAssetsList } from '../../services/assets';
+import { createAsset, createAssetsBatch, getAssetsList } from '../../services/assets';
 import { getReservationsList } from '../../services/reservations';
 import {
   getOcrExtractJob,
@@ -97,6 +97,18 @@ interface UploadResult {
   total: number;
   valid: number;
   errors: string[];
+}
+
+interface BulkVehicleCreateItem {
+  vin: string;
+  plate: string;
+  vehicleNumber: string;
+  model?: string;
+  year?: number;
+  owner?: string;
+  contractStatus?: string;
+  insuranceExpiry?: string | null;
+  nextInspection?: string | null;
 }
 
 interface BulkOcrResult {
@@ -381,6 +393,40 @@ function toBulkOcrCreatePayload(
       ?? values.get('inspectiondate')
       ?? values.get('regularinspectiondate')
       ?? undefined,
+  };
+}
+
+function toBulkVehicleCreateItem(row: Record<string, unknown>): BulkVehicleCreateItem | null {
+  const cells = Object.values(row);
+  const vehicleNumber = toStringValue(cells[0]);
+  const model = toStringValue(cells[1]) ?? undefined;
+  const contractStatusRaw = toStringValue(cells[2]);
+  const contractStatus = contractStatusRaw === '대여중'
+    ? '대여중'
+    : contractStatusRaw === '예약' || contractStatusRaw === '예약됨'
+      ? '예약중'
+      : contractStatusRaw === '가용' || contractStatusRaw === '정비중'
+        ? '완료'
+        : contractStatusRaw ?? undefined;
+  const insuranceExpiry = toStringValue(cells[3]);
+  const nextInspection = toStringValue(cells[4]);
+  const vin = toStringValue(cells[5]);
+  const yearValue = toNumberValue(cells[6]);
+  const owner = toStringValue(cells[7]) ?? undefined;
+  if (!vehicleNumber || !model || !vin) {
+    return null;
+  }
+
+  return {
+    vin,
+    plate: vehicleNumber,
+    vehicleNumber,
+    model,
+    year: yearValue !== null ? Math.trunc(yearValue) : undefined,
+    owner,
+    contractStatus,
+    insuranceExpiry: insuranceExpiry ?? undefined,
+    nextInspection: nextInspection ?? undefined,
   };
 }
 
@@ -743,6 +789,12 @@ export default function Settings() {
   const [uploadResult, setUploadResult] = useState<UploadResult | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [previewData, setPreviewData] = useState<any[]>([]);
+  const [validatedVehicleRows, setValidatedVehicleRows] = useState<BulkVehicleCreateItem[]>([]);
+  const [isBulkVehicleSaving, setIsBulkVehicleSaving] = useState(false);
+  const [bulkVehicleSaveProgress, setBulkVehicleSaveProgress] = useState<string | null>(null);
+  const [bulkVehicleSaveError, setBulkVehicleSaveError] = useState<string | null>(null);
+  const [bulkVehicleSaveSuccess, setBulkVehicleSaveSuccess] = useState<string | null>(null);
+  const [bulkVehicleRowErrors, setBulkVehicleRowErrors] = useState<Record<number, string[]>>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
   const bulkOcrAbortControllerRef = useRef<AbortController | null>(null);
   const [isBulkOcrProcessing, setIsBulkOcrProcessing] = useState(false);
@@ -2536,31 +2588,28 @@ export default function Settings() {
     }
   }, [activeCurrentDownloadType, fetchAllCurrentDataRows, refreshCurrentDataCounts]);
 
-  // 파일 검증
-  const validateVehicleData = (data: any[]): { valid: any[]; errors: string[] } => {
-    const valid: any[] = [];
+  // CSV validation
+  const validateVehicleData = (data: any[]): { valid: BulkVehicleCreateItem[]; errors: string[] } => {
+    const valid: BulkVehicleCreateItem[] = [];
     const errors: string[] = [];
 
     data.forEach((row, index) => {
       const rowNum = index + 2;
+      const normalizedRow = toBulkVehicleCreateItem(row);
 
-      if (!row['차량번호']) {
-        errors.push(`${rowNum}행: 차량번호가 없습니다`);
-        return;
-      }
-      if (!row['차종']) {
-        errors.push(`${rowNum}행: 차종이 없습니다`);
-        return;
-      }
-      if (!['대여중', '예약', '예약됨', '가용', '정비중'].includes(row['상태'])) {
-        errors.push(`${rowNum}행: 상태는 '대여중', '예약', '가용', '정비중' 중 하나여야 합니다 (호환값 '예약됨' 허용)`);
+      if (!normalizedRow) {
+        errors.push(`Row ${rowNum}: vehicle number, model, and vin are required.`);
         return;
       }
 
-      valid.push({
-        ...row,
-        상태: row['상태'] === '예약됨' ? '예약' : row['상태'],
-      });
+      const cells = Object.values(row);
+      const statusValue = toStringValue(cells[2]);
+      if (!statusValue || !['대여중', '예약', '예약됨', '가용', '정비중'].includes(statusValue)) {
+        errors.push(`Row ${rowNum}: status must be one of 대여중, 예약, 가용, 정비중.`);
+        return;
+      }
+
+      valid.push(normalizedRow);
     });
 
     return { valid, errors };
@@ -2600,6 +2649,79 @@ export default function Settings() {
   };
 
   // 파일 업로드 처리
+  const resetBulkCsvFeedback = useCallback(() => {
+    setUploadResult(null);
+    setPreviewData([]);
+    setValidatedVehicleRows([]);
+    setBulkVehicleSaveProgress(null);
+    setBulkVehicleSaveError(null);
+    setBulkVehicleSaveSuccess(null);
+    setBulkVehicleRowErrors({});
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  }, []);
+
+  const handleBulkVehicleSave = useCallback(async () => {
+    if (!canWriteAssets || isBulkVehicleSaving || validatedVehicleRows.length === 0) {
+      return;
+    }
+
+    setIsBulkVehicleSaving(true);
+    setBulkVehicleSaveProgress(`Saving ${validatedVehicleRows.length} items...`);
+    setBulkVehicleSaveError(null);
+    setBulkVehicleSaveSuccess(null);
+    setBulkVehicleRowErrors({});
+
+    try {
+      const items = validatedVehicleRows.map((row) => ({
+        ...row,
+        companyId: isSuperAdmin ? settingsCompanyId ?? undefined : undefined,
+      }));
+      const response = await createAssetsBatch({ items });
+      const totalCreated = toNumberValue(response.totalCreated) ?? items.length;
+
+      setBulkVehicleSaveSuccess(`차량 자산 ${totalCreated}건을 저장했습니다.`);
+      setBulkVehicleSaveProgress(null);
+      setValidatedVehicleRows([]);
+      setUploadResult(null);
+      setPreviewData([]);
+      toast.success(`차량 자산 ${totalCreated}건을 저장했습니다.`);
+      void refreshCurrentDataCounts();
+    } catch (error) {
+      if (error instanceof ApiError) {
+        const nextRowErrors: Record<number, string[]> = {};
+        for (const entry of toErrorFieldEntries(error)) {
+          const matchedIndex = entry.name.match(/^items\[(\d+)\]\./);
+          if (!matchedIndex) {
+            continue;
+          }
+          const rowIndex = Number(matchedIndex[1]);
+          if (!Number.isInteger(rowIndex)) {
+            continue;
+          }
+          if (!nextRowErrors[rowIndex]) {
+            nextRowErrors[rowIndex] = [];
+          }
+          nextRowErrors[rowIndex].push(entry.reason);
+        }
+        setBulkVehicleRowErrors(nextRowErrors);
+        const rowErrors = toErrorFieldEntries(error)
+          .map((entry) => `${entry.name}: ${entry.reason}`)
+          .slice(0, 10);
+        const message = rowErrors.length > 0
+          ? rowErrors.join('\n')
+          : toErrorMessage(error, '차량 자산 저장에 실패했습니다.');
+        setBulkVehicleSaveError(message);
+      } else {
+        setBulkVehicleSaveError(toErrorMessage(error, '차량 자산 저장에 실패했습니다.'));
+      }
+      setBulkVehicleSaveProgress(null);
+    } finally {
+      setIsBulkVehicleSaving(false);
+    }
+  }, [canWriteAssets, isBulkVehicleSaving, validatedVehicleRows, isSuperAdmin, settingsCompanyId, refreshCurrentDataCounts]);
+
   const handleFileUpload = (file: File) => {
     if (!canEditSettings) {
       toast.error('설정 CSV 검증 권한이 없습니다.');
@@ -2622,11 +2744,16 @@ export default function Settings() {
           return;
         }
 
+        setBulkVehicleSaveProgress(null);
+        setBulkVehicleSaveError(null);
+        setBulkVehicleSaveSuccess(null);
         setPreviewData(data.slice(0, 5));
 
         const validation = uploadType === 'vehicles'
           ? validateVehicleData(data)
           : validateReservationData(data);
+
+        setValidatedVehicleRows(uploadType === 'vehicles' ? validation.valid : []);
 
         setUploadResult({
           success: validation.errors.length === 0,
@@ -2689,9 +2816,10 @@ export default function Settings() {
     }
 
     if (uploadResult && uploadResult.valid > 0) {
-      toast.info(CSV_VALIDATION_ONLY_NOTICE);
-      setUploadResult(null);
-      setPreviewData([]);
+      if (uploadType !== 'vehicles') {
+        toast.info(CSV_VALIDATION_ONLY_NOTICE);
+      }
+      resetBulkCsvFeedback();
       fileInputRef.current?.click();
       return;
     }
@@ -2850,8 +2978,7 @@ export default function Settings() {
                     type="button"
                     onClick={() => {
                       setUploadType('vehicles');
-                      setUploadResult(null);
-                      setPreviewData([]);
+                      resetBulkCsvFeedback();
                     }}
                     className={`rounded-lg border-2 p-4 transition-all ${
                       uploadType === 'vehicles'
@@ -2875,8 +3002,7 @@ export default function Settings() {
                     type="button"
                     onClick={() => {
                       setUploadType('reservations');
-                      setUploadResult(null);
-                      setPreviewData([]);
+                      resetBulkCsvFeedback();
                     }}
                     className={`rounded-lg border-2 p-4 transition-all ${
                       uploadType === 'reservations'
@@ -2900,8 +3026,7 @@ export default function Settings() {
                     type="button"
                     onClick={() => {
                       setUploadType('ocr');
-                      setUploadResult(null);
-                      setPreviewData([]);
+                      resetBulkCsvFeedback();
                     }}
                     className={`rounded-lg border-2 p-4 transition-all ${
                       uploadType === 'ocr'
@@ -3038,6 +3163,19 @@ export default function Settings() {
                     </div>
                   </div>
 
+                  {(bulkVehicleSaveError || bulkVehicleSaveSuccess || bulkVehicleSaveProgress) && uploadType === 'vehicles' && (
+                    <div
+                      className={bulkVehicleSaveError
+                        ? 'mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 whitespace-pre-line'
+                        : bulkVehicleSaveSuccess
+                          ? 'mb-4 rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700 whitespace-pre-line'
+                          : 'mb-4 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-700 whitespace-pre-line'
+                      }
+                    >
+                      {bulkVehicleSaveError ?? bulkVehicleSaveSuccess ?? bulkVehicleSaveProgress}
+                    </div>
+                  )}
+
                   <input
                     ref={fileInputRef}
                     type="file"
@@ -3076,8 +3214,22 @@ export default function Settings() {
                             {uploadResult.success ? '검증 완료 (저장되지 않음)' : '검증 실패'}
                           </p>
                           <p className="mb-3 text-sm text-gray-600">전체 {uploadResult.total}건 중 {uploadResult.valid}건 유효</p>
-                          {uploadResult.success && (
+                          {uploadResult.success && uploadType !== 'vehicles' && (
                             <p className="mb-3 text-sm text-amber-700">{CSV_VALIDATION_ONLY_NOTICE}</p>
+                          )}
+                          {uploadResult.success && uploadType === 'vehicles' && (
+                            <div className="mb-3 flex items-center justify-center gap-3">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  void handleBulkVehicleSave();
+                                }}
+                                disabled={!canWriteAssets || isBulkVehicleSaving || validatedVehicleRows.length === 0 || (isSuperAdmin && !settingsCompanyId)}
+                                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+                              >
+                                {isBulkVehicleSaving ? '저장 중...' : '저장'}
+                              </button>
+                            </div>
                           )}
                           {uploadResult.errors.length > 0 && (
                             <div className="mx-auto max-w-md rounded-lg bg-white p-4 text-left">
@@ -3112,6 +3264,9 @@ export default function Settings() {
                                   {key}
                                 </th>
                               ))}
+                              {uploadType === 'vehicles' && (
+                                <th className="px-4 py-2 text-left text-xs font-semibold text-gray-600">오류</th>
+                              )}
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-gray-200">
@@ -3122,6 +3277,11 @@ export default function Settings() {
                                     {cellValue}
                                   </td>
                                 ))}
+                                {uploadType === 'vehicles' && (
+                                  <td className="px-4 py-2 text-xs text-red-600">
+                                    {(bulkVehicleRowErrors[rowIndex] ?? []).join(', ')}
+                                  </td>
+                                )}
                               </tr>
                             ))}
                           </tbody>
