@@ -488,9 +488,11 @@ function SupportAttachmentList({
 
 function SupportAdminManagementView({
   canUpdateStatus,
+  isSuperAdmin,
   onOpenSubmitView,
 }: {
   canUpdateStatus: boolean;
+  isSuperAdmin: boolean;
   onOpenSubmitView?: () => void;
 }) {
   const navigate = useNavigate();
@@ -1116,7 +1118,7 @@ function SupportAdminManagementView({
                   )}
                 </div>
 
-                {selectedTicket.statusHistory.length > 0 && (
+                {isSuperAdmin && selectedTicket.statusHistory.length > 0 && (
                   <div className="rounded-xl border border-gray-200 bg-white p-4">
                     <h4 className="text-sm font-semibold text-gray-900">상태 이력</h4>
                     <ul className="mt-3 space-y-2">
@@ -1825,6 +1827,7 @@ export default function SupportCenter() {
     return (
       <SupportAdminManagementView
         canUpdateStatus={isSuperAdmin}
+        isSuperAdmin={isSuperAdmin}
         onOpenSubmitView={() => navigate('?mode=submit')}
       />
     );
