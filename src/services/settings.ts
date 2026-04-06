@@ -101,7 +101,7 @@ export interface SettingsMemberRolePatchRequest {
 }
 
 export interface SettingsMemberStatusPatchRequest {
-  status: 'approved' | 'rejected';
+  status: 'approved' | 'rejected' | 'withdrawn';
   reason?: string;
 }
 

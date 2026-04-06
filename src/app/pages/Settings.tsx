@@ -566,6 +566,26 @@ function canReviewPendingMemberStatus(
   return false;
 }
 
+function canDeleteManagedMember(
+  member: Pick<SettingsMember, 'userId' | 'role' | 'status'>,
+  actorUserId: string | null | undefined,
+  canManageMemberRoles: boolean,
+): boolean {
+  if (!canManageMemberRoles) {
+    return false;
+  }
+
+  if (member.status !== 'approved') {
+    return false;
+  }
+
+  if (member.userId === actorUserId) {
+    return false;
+  }
+
+  return member.role === 'member' || member.role === 'viewer';
+}
+
 function toMemberStatusLabel(status: string): string {
   switch (status) {
     case 'approved':
@@ -2109,7 +2129,7 @@ export default function Settings() {
     });
   }, []);
 
-  const runMemberStatusSave = useCallback(async (memberId: string, status: 'approved' | 'rejected') => {
+  const runMemberStatusSave = useCallback(async (memberId: string, status: 'approved' | 'rejected' | 'withdrawn') => {
     if (!canManageMemberRoles) {
       return;
     }
@@ -2127,7 +2147,9 @@ export default function Settings() {
     try {
       const payload = status === 'approved'
         ? { status: 'approved' as const }
-        : { status: 'rejected' as const };
+        : status === 'rejected'
+          ? { status: 'rejected' as const }
+          : { status: 'withdrawn' as const };
       const updatedMember = await patchSettingsMemberStatus(memberId, payload, {
         companyId: settingsCompanyId ?? undefined,
       });
@@ -2140,9 +2162,16 @@ export default function Settings() {
         return nextDrafts;
       });
 
-      const successMessage = status === 'approved'
+      let successMessage = status === 'approved'
         ? '가입 대기 계정을 승인했습니다.'
         : '가입 대기 계정을 거절했습니다.';
+      if (status === 'approved') {
+        successMessage = '가입 대기 계정을 승인했습니다.';
+      } else if (status === 'rejected') {
+        successMessage = '가입 대기 계정을 거절했습니다.';
+      } else {
+        successMessage = '멤버 계정을 삭제했습니다.';
+      }
       setMemberSaveSuccess(successMessage);
       toast.success(successMessage);
     } catch (error) {
@@ -2182,6 +2211,24 @@ export default function Settings() {
       setSavingMemberId(null);
     }
   }, [canManageMemberRoles, hydrateMembersOnly, settingsCompanyId]);
+
+  const handleMemberDelete = useCallback((memberId: string) => {
+    const member = members.find((candidate) => candidate.userId === memberId);
+    if (!member) {
+      return;
+    }
+
+    if (!canDeleteManagedMember(member, user?.userId, canManageMemberRoles) || savingMemberId === memberId) {
+      return;
+    }
+
+    const shouldDelete = window.confirm('해당 멤버 계정을 삭제하시겠습니까?');
+    if (!shouldDelete) {
+      return;
+    }
+
+    void runMemberStatusSave(memberId, 'withdrawn');
+  }, [canManageMemberRoles, members, runMemberStatusSave, savingMemberId, user?.userId]);
 
   const openInvitationEditor = useCallback(() => {
     if (!canManageMemberRoles || isInvitationSaving || resendingInvitationId !== null) {
@@ -3916,6 +3963,7 @@ export default function Settings() {
                           && (member.role === 'admin' || member.role === 'member' || member.role === 'viewer')
                         );
                         const canReviewPendingMember = canReviewPendingMemberStatus(member, user?.role, canManageMemberRoles);
+                        const canDeleteMember = canDeleteManagedMember(member, user?.userId, canManageMemberRoles);
 
                         return (
                           <tr key={member.userId} className="hover:bg-gray-50">
@@ -3994,6 +4042,18 @@ export default function Settings() {
                                     className="font-medium text-red-600 hover:text-red-800 disabled:cursor-not-allowed disabled:opacity-50"
                                   >
                                     {isRowSaving ? '처리 중...' : '거절'}
+                                  </button>
+                                </div>
+                              )}
+                              {canDeleteMember && !canReviewPendingMember && !isRoleDirty && (
+                                <div className="space-x-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleMemberDelete(member.userId)}
+                                    disabled={isRowSaving}
+                                    className="font-medium text-red-600 hover:text-red-800 disabled:cursor-not-allowed disabled:opacity-50"
+                                  >
+                                    {isRowSaving ? '泥섎━ 以?..' : '삭제'}
                                   </button>
                                 </div>
                               )}
