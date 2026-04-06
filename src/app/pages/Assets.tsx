@@ -341,6 +341,17 @@ function toRetryAfterSeconds(error: ApiError): number | null {
   return null;
 }
 
+function isCrossTenantAssetConflictError(error: ApiError): boolean {
+  const message = (error.message || '').trim().toLowerCase();
+  const code = String(error.code || '').trim().toUpperCase();
+
+  if (code === 'TENANT_MISMATCH') {
+    return true;
+  }
+
+  return message.includes('tenant context mismatch');
+}
+
 function isRetryableOcrError(error: unknown): boolean {
   if (error instanceof ApiError) {
     if (error.status !== undefined && [429, 500, 502, 503, 504].includes(error.status)) {
@@ -2051,6 +2062,10 @@ export default function Assets() {
           return;
         }
         if (error.status === 403) {
+          if (isCrossTenantAssetConflictError(error)) {
+            setCreateSaveError('다른 회사에 등록된 차량일 수 있습니다. 차량번호와 VIN을 확인하시고 고객센터로 문의 주세요.');
+            return;
+          }
           setCreateSaveError('차량 자산 등록 권한이 없습니다. 관리자에게 권한을 요청해 주세요.');
           return;
         }
