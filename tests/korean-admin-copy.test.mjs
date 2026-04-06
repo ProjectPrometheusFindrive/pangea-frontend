@@ -20,17 +20,20 @@ test('ActionRequired exposes Korean severity labels instead of raw English optio
   assert.doesNotMatch(source, /<option value="low">Low<\/option>/u);
 });
 
-test('notifications service contains Korean fallback copy for known notification events', () => {
+test('notifications service contains concise Korean copy for notification codes', () => {
   const source = readProjectFile('src/services/notifications.ts');
 
   for (const phrase of [
-    '새 예약이 생성되었습니다.',
-    '예약 상태가 변경되었습니다.',
-    '예약이 반납 처리되었습니다.',
-    '사고가 접수되었습니다.',
-    '새 문의가 접수되었습니다.',
-    '문의 상태가 변경되었습니다.',
+    '오늘 대여 시작',
+    '예약 상태 변경',
+    '반납 완료',
+    '사고 접수',
+    '새 지원 티켓',
+    '문의 상태 변경',
   ]) {
     assert.match(source, new RegExp(phrase, 'u'));
   }
+
+  assert.match(source, /notificationCode/u);
+  assert.match(source, /NOTIFICATION_TITLE_BY_CODE/u);
 });

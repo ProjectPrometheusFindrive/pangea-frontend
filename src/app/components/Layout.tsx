@@ -572,9 +572,7 @@ export function Layout({ children, title }: LayoutProps) {
                                 <div className="flex-1 min-w-0">
                                   <div className="flex items-center justify-between gap-2 mb-1">
                                     <h4 className="text-sm font-bold text-gray-900 truncate">
-                                      {notification.vehicleNumber
-                                        ? `${notification.vehicleNumber} - ${notification.title}`
-                                        : notification.title}
+                                      {notification.title}
                                     </h4>
                                     {!notification.isRead && (
                                       <div className="w-2 h-2 bg-blue-600 rounded-full shrink-0" />
