@@ -60,7 +60,7 @@ export function patchPaymentStatus(
   options: PatchPaymentStatusOptions = {},
 ): Promise<unknown> {
   return apiClient.requestData<unknown>({
-    path: `/api/v2/payments/${encodeURIComponent(paymentId)}`,
+    path: `/api/v2/payments/${encodeURIComponent(paymentId)}/status`,
     method: 'PATCH',
     body: payload,
     signal: options.signal,

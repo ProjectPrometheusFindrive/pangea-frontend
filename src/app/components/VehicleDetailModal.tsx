@@ -5,32 +5,43 @@ import { useNavigate } from 'react-router';
 import type { AssetEditForm } from '../pages/assetsDetailForm';
 import { navigateToPremiumInquiry } from '../utils/premiumInquiry';
 
-interface AssetReservationEntry {
+interface AssetActivityEntry {
   id: string;
-  customerName: string;
-  phone: string | null;
-  type: 'reservation' | 'rental' | 'return';
-  startAt: string;
-  endAt: string;
-  paymentMethod: string;
-  amount: string;
-  deposit: string;
-  contractStatus: string;
+  timestamp: string;
+  category: string;
+  event: string;
+  details: string;
+  actorName: string | null;
+  status: string | null;
+  reservationId: string | null;
+  customerName: string | null;
 }
 
-function formatReservationDate(isoString: string): string {
+function formatActivityDate(isoString: string): string {
   if (!isoString) return '-';
   const d = new Date(isoString);
   if (Number.isNaN(d.getTime())) return isoString;
-  return d.toLocaleString('ko-KR', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+  return d.toLocaleString('ko-KR', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+    timeZone: 'Asia/Seoul',
+  });
 }
 
-function getContractStatusBadge(status: string): { label: string; className: string } {
+function getActivityStatusBadge(status: string | null): { label: string; className: string } {
   switch (status) {
     case '예약중': return { label: '예약중', className: 'bg-purple-100 text-purple-700' };
     case '대여중': return { label: '대여중', className: 'bg-blue-100 text-blue-700' };
     case '완료':
-    case '반납완료': return { label: '완료', className: 'bg-green-100 text-green-700' };
+    case '결제 완료':
+    case '해소': return { label: status, className: 'bg-green-100 text-green-700' };
+    case '반납 지연':
+    case '미납/결제 문제':
+    case '접수됨': return { label: status, className: 'bg-amber-100 text-amber-700' };
     case '취소': return { label: '취소', className: 'bg-gray-100 text-gray-500' };
     default: return { label: status || '-', className: 'bg-gray-100 text-gray-600' };
   }
@@ -44,10 +55,10 @@ interface VehicleDetailModalProps {
     memo?: string;
     plate?: string;
   };
-  reservationEntries: AssetReservationEntry[];
-  isReservationsLoading: boolean;
-  reservationsError: string | null;
-  onReservationsRetry: () => void;
+  activityEntries: AssetActivityEntry[];
+  isActivityLoading: boolean;
+  activityError: string | null;
+  onActivityRetry: () => void;
   onConflictRefresh: () => void;
   isOpen: boolean;
   onClose: () => boolean;
@@ -87,10 +98,10 @@ function formatDateInputValue(value: string | undefined): string {
 
 export function VehicleDetailModal({
   asset,
-  reservationEntries,
-  isReservationsLoading,
-  reservationsError,
-  onReservationsRetry,
+  activityEntries,
+  isActivityLoading,
+  activityError,
+  onActivityRetry,
   onConflictRefresh,
   isOpen,
   onClose,
@@ -125,7 +136,7 @@ export function VehicleDetailModal({
 
   return (
     <div data-testid="asset-detail-modal" className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="flex max-h-[85vh] w-[700px] flex-col rounded-xl bg-white">
+      <div className="flex max-h-[85vh] w-[1100px] max-w-[92vw] flex-col rounded-xl bg-white">
         <div className="border-b border-gray-200 p-6">
           <div className="flex items-center justify-between">
             <h2 className="text-xl font-bold text-[#1e2939]">{'차량 상세 정보'}</h2>
@@ -153,7 +164,7 @@ export function VehicleDetailModal({
               <History className="h-4 w-4" />
               {'예약 히스토리'}
               <span className="rounded-full bg-gray-200 px-2 py-0.5 text-xs font-semibold text-gray-700">
-                {reservationEntries.length}
+                {activityEntries.length}
               </span>
             </button>
             <button
@@ -353,19 +364,19 @@ export function VehicleDetailModal({
 
           {detailTab === 'history' && (
             <div className="space-y-4">
-              {isReservationsLoading && (
+              {isActivityLoading && (
                 <div className="flex items-center justify-center gap-2 rounded-lg border border-blue-200 bg-blue-50 py-6 text-sm text-blue-700">
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  {'예약 히스토리를 불러오는 중입니다.'}
+                  {'활동 이력을 불러오는 중입니다.'}
                 </div>
               )}
 
-              {reservationsError && (
+              {activityError && (
                 <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                  <p>{reservationsError}</p>
+                  <p>{activityError}</p>
                   <button
                     type="button"
-                    onClick={onReservationsRetry}
+                    onClick={onActivityRetry}
                     className="mt-2 text-xs font-semibold text-red-700 underline underline-offset-2"
                   >
                     {'다시 시도'}
@@ -373,64 +384,55 @@ export function VehicleDetailModal({
                 </div>
               )}
 
-              {!isReservationsLoading && !reservationsError && reservationEntries.length > 0 ? (
+              {!isActivityLoading && !activityError && activityEntries.length > 0 ? (
                 <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
                   <div className="overflow-x-auto">
                     <table className="w-full">
                       <thead className="border-b border-gray-200 bg-gray-50">
                         <tr>
-                          <th className="whitespace-nowrap px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">{'예약번호'}</th>
-                          <th className="whitespace-nowrap px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">{'고객명'}</th>
-                          <th className="whitespace-nowrap px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">{'유형'}</th>
-                          <th className="whitespace-nowrap px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">{'대여 기간'}</th>
-                          <th className="whitespace-nowrap px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">{'결제 방법'}</th>
-                          <th className="whitespace-nowrap px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-gray-600">{'대여료'}</th>
-                          <th className="whitespace-nowrap px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">{'상태'}</th>
+                          <th className="w-[150px] whitespace-nowrap px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">{'시각'}</th>
+                          <th className="w-[90px] whitespace-nowrap px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">{'구분'}</th>
+                          <th className="w-[140px] whitespace-nowrap px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">{'이벤트'}</th>
+                          <th className="min-w-[380px] px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">{'상세 내용'}</th>
+                          <th className="w-[120px] whitespace-nowrap px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">{'작업자'}</th>
+                          <th className="w-[110px] whitespace-nowrap px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">{'상태'}</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-200">
-                        {reservationEntries.map((entry) => (
+                        {activityEntries.map((entry) => (
                           <tr key={entry.id} className="hover:bg-gray-50">
-                            <td className="whitespace-nowrap px-4 py-3 text-sm font-medium">
-                              <button
-                                onClick={() => {
-                                  const closed = onClose();
-                                  if (closed) {
-                                    navigate(`/reservations?search=${encodeURIComponent(entry.id)}`);
-                                  }
-                                }}
-                                className="font-semibold text-blue-600 hover:text-blue-800 hover:underline"
-                              >
-                                {entry.id}
-                              </button>
+                            <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-900">
+                              {formatActivityDate(entry.timestamp)}
+                            </td>
+                            <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-700">
+                              {entry.category}
                             </td>
                             <td className="whitespace-nowrap px-4 py-3">
-                              <div className="text-sm font-medium text-gray-900">{entry.customerName}</div>
-                              {entry.phone && <div className="text-xs text-gray-500">{entry.phone}</div>}
+                              {entry.reservationId ? (
+                                <button
+                                  onClick={() => {
+                                    navigate(`/reservations?search=${encodeURIComponent(entry.reservationId)}`);
+                                  }}
+                                  className="text-sm font-semibold text-blue-600 hover:text-blue-800 hover:underline"
+                                >
+                                  {entry.event}
+                                </button>
+                              ) : (
+                                <span className="text-sm font-medium text-gray-900">{entry.event}</span>
+                              )}
+                            </td>
+                            <td className="min-w-[380px] px-4 py-3 text-sm text-gray-700">
+                              <div className="whitespace-pre-line break-words leading-6">{entry.details}</div>
+                              {entry.customerName && (
+                                <div className="mt-1 text-xs text-gray-500">{`고객: ${entry.customerName}`}</div>
+                              )}
+                            </td>
+                            <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-900">
+                              {entry.actorName || '-'}
                             </td>
                             <td className="whitespace-nowrap px-4 py-3">
-                              <span className={`rounded-full px-2 py-1 text-xs font-medium ${
-                                entry.type === 'rental'
-                                  ? 'bg-blue-100 text-blue-700'
-                                  : entry.type === 'return'
-                                    ? 'bg-green-100 text-green-700'
-                                    : 'bg-purple-100 text-purple-700'
-                              }`}>
-                                {entry.type === 'rental' ? '대여' : entry.type === 'return' ? '반납' : '예약'}
-                              </span>
-                            </td>
-                            <td className="px-4 py-3 text-sm text-gray-900">
-                              <div className="whitespace-nowrap">{formatReservationDate(entry.startAt)}</div>
-                              <div className="whitespace-nowrap text-xs text-gray-500">{'~ '}{formatReservationDate(entry.endAt)}</div>
-                            </td>
-                            <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-900">{entry.paymentMethod}</td>
-                            <td className="whitespace-nowrap px-4 py-3 text-right">
-                              <div className="text-sm font-bold text-blue-600">{entry.amount}</div>
-                              <div className="text-xs text-gray-500">{'선금: '}{entry.deposit}</div>
-                            </td>
-                            <td className="whitespace-nowrap px-4 py-3">
-                              <span className={`rounded-full px-2 py-1 text-xs font-medium ${getContractStatusBadge(entry.contractStatus).className}`}>
-                                {getContractStatusBadge(entry.contractStatus).label}
+                              <span className={`rounded-full px-2 py-1 text-xs font-medium ${getActivityStatusBadge(entry.status).className}`}>
+                                {getActivityStatusBadge(entry.status).label}
                               </span>
                             </td>
                           </tr>
@@ -440,10 +442,10 @@ export function VehicleDetailModal({
                   </div>
                 </div>
               ) : (
-                !isReservationsLoading && !reservationsError && (
+                !isActivityLoading && !activityError && (
                   <div className="py-12 text-center text-gray-400">
                     <History className="mx-auto mb-3 h-12 w-12 opacity-30" />
-                    <p className="text-sm">{'이 차량의 예약 히스토리가 없습니다.'}</p>
+                    <p className="text-sm">{'이 차량의 활동 이력이 없습니다.'}</p>
                   </div>
                 )
               )}
