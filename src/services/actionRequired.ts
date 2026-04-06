@@ -266,7 +266,7 @@ function requestStatusPatch(
   if (memo !== undefined) {
     body.memo = memo;
   }
-  if (assignee) {
+  if (assignee !== undefined) {
     body.assignee = assignee;
   }
 
@@ -285,10 +285,14 @@ function requestMemoPatch(
   assignee?: string,
   signal?: AbortSignal,
 ): Promise<unknown> {
+  const body: Record<string, unknown> = { memo };
+  if (assignee !== undefined) {
+    body.assignee = assignee;
+  }
   return apiClient.requestData<unknown>({
     path,
     method,
-    body: { memo, ...(assignee ? { assignee } : {}) },
+    body,
     signal,
   });
 }
