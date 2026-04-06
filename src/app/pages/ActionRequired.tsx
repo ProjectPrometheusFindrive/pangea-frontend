@@ -68,6 +68,15 @@ type SortDirection = 'asc' | 'desc' | null;
 type ActionStatusFilter = 'all' | 'pending' | 'in-progress' | 'resolved';
 type ActionPriorityFilter = 'all' | 'high' | 'medium' | 'low';
 type ActionWriteKind = 'status' | 'memo' | 'resolve';
+type ActionIssueFilter =
+  | '사고 접수'
+  | '반납 지연'
+  | '미납/결제 문제'
+  | '단말 OFF'
+  | '도난 의심'
+  | '정기점검'
+  | '차량이상'
+  | '보험 만료 임박';
 
 const ACTION_REQUIRED_DATETIME_FORMATTER = new Intl.DateTimeFormat('sv-SE', {
   timeZone: 'Asia/Seoul',
@@ -81,6 +90,17 @@ const ACTION_REQUIRED_DATETIME_FORMATTER = new Intl.DateTimeFormat('sv-SE', {
 
 const STATUS_OPTIONS = ['대기중', '진행중', '완료'] as const;
 const LIST_COLLECTION_KEYS = ['items', 'rows', 'list', 'actionRequired', 'actionItems'];
+const ACTIVE_ACTION_STATUS_QUERY = 'open,in_progress';
+const ISSUE_FILTER_CHIPS: ActionIssueFilter[] = [
+  '사고 접수',
+  '반납 지연',
+  '미납/결제 문제',
+  '단말 OFF',
+  '도난 의심',
+  '정기점검',
+  '차량이상',
+  '보험 만료 임박',
+];
 const ACTION_PRIORITY_LABELS: Record<ActionItem['severity'], string> = {
   High: '높음',
   Medium: '보통',
@@ -272,6 +292,33 @@ function normalizeStatusCode(rawValue: string | null): ActionStatusCode {
   }
 
   return 'pending';
+}
+
+function getListStatusQuery(statusFilter: ActionStatusFilter, includeCompleted: boolean): string | undefined {
+  if (includeCompleted && statusFilter === 'all') {
+    return 'done';
+  }
+  if (statusFilter === 'pending') {
+    return 'open';
+  }
+  if (statusFilter === 'in-progress') {
+    return 'in_progress';
+  }
+  if (statusFilter === 'resolved') {
+    return 'done';
+  }
+  return includeCompleted ? undefined : ACTIVE_ACTION_STATUS_QUERY;
+}
+
+function matchesVisibleStatusFilters(
+  nextStatusCode: ActionStatusCode,
+  statusFilter: ActionStatusFilter,
+  includeCompleted: boolean,
+): boolean {
+  if (statusFilter === 'all') {
+    return includeCompleted ? nextStatusCode === 'resolved' : nextStatusCode !== 'resolved';
+  }
+  return statusFilter === nextStatusCode;
 }
 
 function toStatusLabel(statusCode: ActionStatusCode): string {
@@ -650,7 +697,8 @@ export default function ActionRequired() {
   const canViewAssets = canAccessRoute(ROUTE_PERMISSIONS.assets);
   const canViewReservations = canAccessRoute(ROUTE_PERMISSIONS.reservations);
 
-  const [selectedFilters, setSelectedFilters] = useState<string[]>([]);
+  const [selectedFilters, setSelectedFilters] = useState<ActionIssueFilter[]>([]);
+  const [includeCompleted, setIncludeCompleted] = useState(false);
   const [statusFilter, setStatusFilter] = useState<ActionStatusFilter>('all');
   const [priorityFilter, setPriorityFilter] = useState<ActionPriorityFilter>('all');
   const [assigneeFilter, setAssigneeFilter] = useState('all');
@@ -681,17 +729,6 @@ export default function ActionRequired() {
 
   const isWriteSaving = isStatusSaving || isMemoSaving || isResolveSaving;
 
-  const filterChips = [
-    '사고 접수',
-    '반납 지연',
-    '미납/결제 문제',
-    '단말 OFF',
-    '도난 의심',
-    '정기점검',
-    '차량이상',
-    '보험 만료 임박',
-  ];
-
   const paymentSyncTargets = useMemo(() => (
     sourceActionItems
       .filter((item) => item.type === '미납/결제 문제' || Boolean(item.paymentInfo))
@@ -720,11 +757,11 @@ export default function ActionRequired() {
   const requestActionItems = useCallback((signal: AbortSignal) => getActionRequiredList({
     page,
     pageSize,
-    status: statusFilter === 'all' ? undefined : statusFilter,
+    status: getListStatusQuery(statusFilter, includeCompleted),
     priority: priorityFilter === 'all' ? undefined : priorityFilter,
     assignee: assigneeFilter === 'all' ? undefined : assigneeFilter,
     signal,
-  }), [assigneeFilter, page, pageSize, priorityFilter, statusFilter]);
+  }), [assigneeFilter, includeCompleted, page, pageSize, priorityFilter, statusFilter]);
 
   const handleActionItemsSuccess = useCallback((payload: unknown) => {
     const { items, total } = toActionItemCollection(payload);
@@ -768,8 +805,8 @@ export default function ActionRequired() {
       ? '정기점검'
       : filterParam;
 
-    if (normalizedFilterParam && filterChips.includes(normalizedFilterParam)) {
-      setSelectedFilters([normalizedFilterParam]);
+    if (normalizedFilterParam && ISSUE_FILTER_CHIPS.includes(normalizedFilterParam as ActionIssueFilter)) {
+      setSelectedFilters([normalizedFilterParam as ActionIssueFilter]);
     }
 
     if (searchParam) {
@@ -783,6 +820,7 @@ export default function ActionRequired() {
 
   const resetActionFilters = useCallback(() => {
     setSelectedFilters([]);
+    setIncludeCompleted(false);
     setSearchQuery('');
     setStatusFilter('all');
     setPriorityFilter('all');
@@ -942,7 +980,7 @@ export default function ActionRequired() {
     });
   }, [allItems]);
 
-  const toggleFilter = (filter: string) => {
+  const toggleFilter = (filter: ActionIssueFilter) => {
     setSelectedFilters((prev) =>
       prev.includes(filter)
         ? prev.filter((entry) => entry !== filter)
@@ -1079,7 +1117,7 @@ export default function ActionRequired() {
     clearWriteFeedback();
 
     const nextStatusLabel = toStatusLabel(nextStatusCode);
-    const shouldRemoveFromList = statusFilter !== 'all' && statusFilter !== nextStatusCode;
+    const shouldRemoveFromList = !matchesVisibleStatusFilters(nextStatusCode, statusFilter, includeCompleted);
 
     const optimisticAssignee = user?.name ?? user?.email ?? user?.userId;
     applyOptimisticActionPatch(
@@ -1189,7 +1227,7 @@ export default function ActionRequired() {
     clearWriteFeedback();
 
     const nextStatusLabel = toStatusLabel(nextStatusCode);
-    const shouldRemoveFromList = statusFilter !== 'all' && statusFilter !== nextStatusCode;
+    const shouldRemoveFromList = !matchesVisibleStatusFilters(nextStatusCode, statusFilter, includeCompleted);
     const createdMemo: MemoLog = {
       id: `memo-${Date.now()}`,
       content: trimmedMemo,
@@ -1320,7 +1358,7 @@ export default function ActionRequired() {
           </div>
 
           <div className="flex flex-wrap gap-2">
-            {filterChips.map((chip) => {
+            {ISSUE_FILTER_CHIPS.map((chip) => {
               const isSelected = selectedFilters.includes(chip);
               return (
                 <button
@@ -1337,6 +1375,18 @@ export default function ActionRequired() {
                 </button>
               );
             })}
+            <button
+              type="button"
+              onClick={() => setIncludeCompleted((prev) => !prev)}
+              className={`px-4 py-2 rounded-full text-sm font-medium transition-colors ${
+                includeCompleted
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              }`}
+            >
+              완료
+              {includeCompleted && <X className="inline-block ml-1 w-3 h-3" />}
+            </button>
           </div>
 
           <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-gray-600">

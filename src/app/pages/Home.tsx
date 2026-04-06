@@ -412,6 +412,7 @@ export default function Home() {
         }),
         getActionItemTypeCounts({
           pageSize: 100,
+          status: 'open,in_progress',
           signal: controller.signal,
         }),
       ]);
