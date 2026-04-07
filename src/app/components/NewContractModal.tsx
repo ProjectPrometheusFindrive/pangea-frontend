@@ -72,6 +72,15 @@ function hasTextValue(value: string): boolean {
   return value.trim().length > 0;
 }
 
+function formatCurrencyInput(value: string): string {
+  const digitsOnly = value.replace(/\D/g, '');
+  if (!digitsOnly) {
+    return '';
+  }
+
+  return Number(digitsOnly).toLocaleString('ko-KR');
+}
+
 function formatDateAsYmd(date: Date): string {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -765,7 +774,7 @@ export function NewContractModal({
                     type="text"
                     value={amount}
                     onChange={(event) => {
-                      setAmount(event.target.value);
+                      setAmount(formatCurrencyInput(event.target.value));
                       clearFieldError('amount');
                     }}
                     placeholder="450,000"
@@ -783,7 +792,7 @@ export function NewContractModal({
                     type="text"
                     value={deposit}
                     onChange={(event) => {
-                      setDeposit(event.target.value);
+                      setDeposit(formatCurrencyInput(event.target.value));
                       clearFieldError('deposit');
                     }}
                     placeholder="500,000"

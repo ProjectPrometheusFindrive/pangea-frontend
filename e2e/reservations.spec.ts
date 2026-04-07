@@ -85,12 +85,14 @@ async function fillContractStep1(page: Page): Promise<void> {
 async function fillContractStep2(page: Page): Promise<void> {
   await page.getByTestId('new-contract-customer-name-input').fill('테스트고객');
   await page.getByTestId('new-contract-customer-phone-input').fill('010-2222-3333');
-  await page.getByTestId('new-contract-customer-license-input').fill('11-22-333333-44');
+  await page.getByTestId('new-contract-customer-license-input').fill('11-123456-78');
   await page.getByTestId('new-contract-customer-address-input').fill('서울특별시 강남구');
   await page.getByTestId('new-contract-pickup-location-input').fill('강남지점');
   await page.getByTestId('new-contract-return-location-input').fill('서초지점');
   await page.getByTestId('new-contract-amount-input').fill('350000');
+  await expect(page.getByTestId('new-contract-amount-input')).toHaveValue('350,000');
   await page.getByTestId('new-contract-deposit-input').fill('50000');
+  await expect(page.getByTestId('new-contract-deposit-input')).toHaveValue('50,000');
   await page.getByTestId('new-contract-step2-next').click();
 }
 
