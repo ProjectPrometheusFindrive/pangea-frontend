@@ -45,6 +45,11 @@ import { ApiError } from '../../services/api';
 import { getAssetsList } from '../../services/assets';
 import { patchPaymentStatus } from '../../services/payments';
 import {
+  getActionRequiredList,
+  patchActionRequiredMemo,
+  patchActionRequiredStatus,
+} from '../../services/actionRequired';
+import {
   cancelReservation,
   createReservation,
   getReservationDetail,
@@ -76,6 +81,7 @@ const DEFAULT_PAGE_SIZE = 20;
 const ASSET_FALLBACK_PAGE_SIZE = 500;
 const TOTAL_COUNT_KEYS = ['total', 'totalCount', 'count', 'size', 'itemsCount', 'totalElements'];
 const RETRY_TOAST_MESSAGE = '일시적인 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.';
+const ACTIVE_ACTION_STATUS_QUERY = 'open,in_progress';
 
 type FieldErrorMap<TField extends string> = Partial<Record<TField, string>>;
 type ReservationsHydrationPayload = {
@@ -872,6 +878,36 @@ function toReservationDetail(payload: unknown, fallbackReservation: Reservation)
   return fallbackReservation;
 }
 
+function isLateReturnIssueLabel(value: string | null): boolean {
+  return value?.replace(/\s+/g, '') === '반납지연';
+}
+
+function extractActionItemId(row: unknown, fallbackIndex: number): string | null {
+  if (!isRecord(row)) {
+    return null;
+  }
+  return (
+    toStringValue(row.id)
+    ?? toStringValue(row.actionId)
+    ?? toStringValue(row.actionItemId)
+    ?? toStringValue(row.paymentId)
+    ?? `action-${fallbackIndex + 1}`
+  );
+}
+
+function extractActionItemType(row: unknown): string | null {
+  if (!isRecord(row)) {
+    return null;
+  }
+  return (
+    toStringValue(row.type)
+    ?? toStringValue(row.category)
+    ?? toStringValue(row.issueType)
+    ?? toStringValue(row.issue)
+    ?? toStringValue(row.title)
+  );
+}
+
 function normalizeVehicleStatus(statusValue: string | null): VehicleAsset['status'] {
   if (statusValue === '대여중' || statusValue === '예약' || statusValue === '가용' || statusValue === '정비중') {
     return statusValue;
@@ -896,6 +932,16 @@ function toVehicleStatusFromReservation(reservationType: Reservation['type']): V
     return '대여중';
   }
   return '가용';
+}
+
+function isReservationLateReturn(reservation: Reservation | null): boolean {
+  if (!reservation || reservation.type !== 'rental') {
+    return false;
+  }
+  if (reservation.issues?.includes('반납 지연')) {
+    return true;
+  }
+  return reservation.endDate < 0;
 }
 
 function createFallbackVehicleAsset(reservation: Reservation): VehicleAsset {
@@ -999,6 +1045,12 @@ export default function Reservations() {
   const [isDetailNotFound, setIsDetailNotFound] = useState(false);
   const [isReturnSubmitting, setIsReturnSubmitting] = useState(false);
   const [returnSubmitError, setReturnSubmitError] = useState<string | null>(null);
+  const [pendingLateReturnActionItemId, setPendingLateReturnActionItemId] = useState<string | null>(null);
+  const [resolvedLateReturnActionItemId, setResolvedLateReturnActionItemId] = useState<string | null>(null);
+  const [lateReturnMemoDraft, setLateReturnMemoDraft] = useState('');
+  const [lateReturnMemoSaveError, setLateReturnMemoSaveError] = useState<string | null>(null);
+  const [isLateReturnMemoSaving, setIsLateReturnMemoSaving] = useState(false);
+  const [isLateReturnMemoSaved, setIsLateReturnMemoSaved] = useState(false);
   const [isPaymentCompleting, setIsPaymentCompleting] = useState(false);
   const [activeReservationAction, setActiveReservationAction] = useState<'start' | 'cancel' | null>(null);
   const [reservationActionError, setReservationActionError] = useState<string | null>(null);
@@ -1064,6 +1116,44 @@ export default function Reservations() {
 
     setSearchParams(nextParams, { replace });
   }, [searchParams, setSearchParams]);
+
+  const closeReturnConfirm = useCallback(() => {
+    setShowReturnConfirm(false);
+    setReturnSubmitError(null);
+    setPendingLateReturnActionItemId(null);
+    setResolvedLateReturnActionItemId(null);
+    setLateReturnMemoDraft('');
+    setLateReturnMemoSaveError(null);
+    setIsLateReturnMemoSaving(false);
+    setIsLateReturnMemoSaved(false);
+  }, []);
+
+  const findLateReturnActionItemId = useCallback(async (reservationId: string): Promise<string | null> => {
+    const payload = await getActionRequiredList({
+      page: 1,
+      pageSize: 50,
+      status: ACTIVE_ACTION_STATUS_QUERY,
+      reservationId,
+    });
+    const rows = getCollectionFromPayload(payload, ['items', 'rows', 'list', 'actionRequired', 'actionItems']);
+    if (!rows) {
+      return null;
+    }
+
+    for (let index = 0; index < rows.length; index += 1) {
+      const row = rows[index];
+      const type = extractActionItemType(row);
+      if (!isLateReturnIssueLabel(type)) {
+        continue;
+      }
+      const actionItemId = extractActionItemId(row, index);
+      if (actionItemId) {
+        return actionItemId;
+      }
+    }
+
+    return null;
+  }, []);
 
 
   useEffect(() => {
@@ -1994,6 +2084,12 @@ export default function Reservations() {
       setReturnSubmitError('반납은 대여중 상태에서만 처리할 수 있습니다.');
       return;
     }
+    setPendingLateReturnActionItemId(null);
+    setResolvedLateReturnActionItemId(null);
+    setLateReturnMemoDraft('');
+    setLateReturnMemoSaveError(null);
+    setIsLateReturnMemoSaving(false);
+    setIsLateReturnMemoSaved(false);
     setReturnSubmitError(null);
     setShowReturnConfirm(true);
   }, [canWriteReservations, selectedReservation]);
@@ -2013,10 +2109,21 @@ export default function Reservations() {
       return;
     }
 
+    const isLateReturnReservation = isReservationLateReturn(selectedReservation);
     setIsReturnSubmitting(true);
     setReturnSubmitError(null);
+    setLateReturnMemoSaveError(null);
 
     try {
+      let lateReturnActionItemId: string | null = null;
+      if (isLateReturnReservation) {
+        lateReturnActionItemId = await findLateReturnActionItemId(selectedReservation.id);
+        if (!lateReturnActionItemId) {
+          setReturnSubmitError('반납 지연 이슈를 찾을 수 없어 함께 완료 처리할 수 없습니다.');
+          return;
+        }
+      }
+
       const payload = await returnReservation(selectedReservation.id, {
         returnedAt: new Date().toISOString(),
       });
@@ -2024,8 +2131,15 @@ export default function Reservations() {
         ...selectedReservation,
         contractStatus: '완료',
         type: 'return',
+        issues: withoutIssueLabel(selectedReservation.issues, '반납 지연'),
       };
-      const updatedReservation = toReservationDetail(payload, fallbackReservation);
+      let updatedReservation = toReservationDetail(payload, fallbackReservation);
+      if (isLateReturnReservation) {
+        updatedReservation = {
+          ...updatedReservation,
+          issues: withoutIssueLabel(updatedReservation.issues, '반납 지연'),
+        };
+      }
 
       setReservationsData((prev) => prev.map((reservation) => (
         reservation.id === updatedReservation.id ? updatedReservation : reservation
@@ -2036,15 +2150,23 @@ export default function Reservations() {
         setSelectedVehicleAsset({
           ...matchedAsset,
           status: toVehicleStatusFromReservation(updatedReservation.type),
+          issues: isLateReturnReservation
+            ? withoutIssueLabel(matchedAsset.issues, '반납 지연')
+            : matchedAsset.issues,
         });
       } else {
         setSelectedVehicleAsset(createReservationFallbackVehicleAsset(updatedReservation));
       }
 
-      setShowReturnConfirm(false);
       await hydrateReservationsData();
       void hydrateReservationDetail(updatedReservation.id, updatedReservation);
-      toast.success('차량이 반납 처리되었습니다.');
+      if (lateReturnActionItemId) {
+        setPendingLateReturnActionItemId(lateReturnActionItemId);
+        toast.success('차량이 반납 처리되었습니다.');
+      } else {
+        setShowReturnConfirm(false);
+        toast.success('차량이 반납 처리되었습니다.');
+      }
     } catch (error) {
       if (error instanceof ApiError) {
         if (error.status === 400) {
@@ -2076,7 +2198,65 @@ export default function Reservations() {
     } finally {
       setIsReturnSubmitting(false);
     }
-  }, [canWriteReservations, hydrateReservationDetail, hydrateReservationsData, isReturnSubmitting, selectedReservation, vehicleAssets]);
+  }, [
+    canWriteReservations,
+    findLateReturnActionItemId,
+    hydrateReservationDetail,
+    hydrateReservationsData,
+    isReturnSubmitting,
+    selectedReservation,
+    vehicleAssets,
+  ]);
+
+  const handleConfirmLateReturnIssueResolution = useCallback(async () => {
+    if (!pendingLateReturnActionItemId || isReturnSubmitting) {
+      return;
+    }
+
+    setIsReturnSubmitting(true);
+    setReturnSubmitError(null);
+    setLateReturnMemoSaveError(null);
+    try {
+      await patchActionRequiredStatus(pendingLateReturnActionItemId, { status: 'resolved' });
+      setPendingLateReturnActionItemId(null);
+      setResolvedLateReturnActionItemId(pendingLateReturnActionItemId);
+      setLateReturnMemoDraft('');
+      setIsLateReturnMemoSaved(false);
+      toast.success('반납 지연 이슈가 완료 처리되었습니다.');
+    } catch (error) {
+      if (error instanceof ApiError) {
+        setReturnSubmitError(error.message || '반납 지연 이슈 완료 처리 중 오류가 발생했습니다.');
+      } else {
+        setReturnSubmitError('반납 지연 이슈 완료 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.');
+      }
+    } finally {
+      setIsReturnSubmitting(false);
+    }
+  }, [isReturnSubmitting, pendingLateReturnActionItemId]);
+
+  const handleSaveLateReturnMemo = useCallback(async () => {
+    if (!resolvedLateReturnActionItemId || !lateReturnMemoDraft.trim() || isLateReturnMemoSaving) {
+      return;
+    }
+
+    setIsLateReturnMemoSaving(true);
+    setLateReturnMemoSaveError(null);
+    try {
+      await patchActionRequiredMemo(resolvedLateReturnActionItemId, {
+        memo: lateReturnMemoDraft.trim(),
+      });
+      setIsLateReturnMemoSaved(true);
+      toast.success('메모가 저장되었습니다.');
+    } catch (error) {
+      if (error instanceof ApiError) {
+        setLateReturnMemoSaveError(error.message || '메모 저장 중 오류가 발생했습니다.');
+      } else {
+        setLateReturnMemoSaveError('메모 저장 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.');
+      }
+    } finally {
+      setIsLateReturnMemoSaving(false);
+    }
+  }, [isLateReturnMemoSaving, lateReturnMemoDraft, resolvedLateReturnActionItemId]);
 
   const handleAccidentReport = useCallback(async (
     report: AccidentReportFormValues,
@@ -2976,14 +3156,17 @@ export default function Reservations() {
             <div className="bg-white rounded-xl w-[400px] max-h-[80vh] overflow-y-auto">
               <div className="p-6">
                 <div className="flex items-center justify-between mb-6">
-                  <h2 className="text-xl font-bold text-[#1e2939]">차량 반납 확인</h2>
+                  <h2 className="text-xl font-bold text-[#1e2939]">
+                    {resolvedLateReturnActionItemId
+                      ? '반납 지연 이슈 메모'
+                      : pendingLateReturnActionItemId
+                        ? '반납 지연 이슈 완료'
+                        : '차량 반납 확인'}
+                  </h2>
                   <button
-                    onClick={() => {
-                      setShowReturnConfirm(false);
-                      setReturnSubmitError(null);
-                    }}
+                    onClick={closeReturnConfirm}
                     className="p-2 hover:bg-gray-100 rounded-lg"
-                    disabled={isReturnSubmitting}
+                    disabled={isReturnSubmitting || isLateReturnMemoSaving}
                   >
                     <X className="w-5 h-5" />
                   </button>
@@ -2996,31 +3179,97 @@ export default function Reservations() {
                   </div>
                 )}
 
-                <p className="text-sm text-gray-700 mb-4">
-                  {selectedReservation?.customer}님의 차량({selectedReservation?.vehicleNumber})을(를) 반납 처리하시겠습니까?
-                </p>
+                {resolvedLateReturnActionItemId ? (
+                  <>
+                    {lateReturnMemoSaveError && (
+                      <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                        {lateReturnMemoSaveError}
+                      </div>
+                    )}
+                    {isLateReturnMemoSaved ? (
+                      <p className="mb-4 text-sm font-medium text-green-700">메모가 저장되었습니다.</p>
+                    ) : (
+                      <>
+                        <p className="text-sm text-gray-700 mb-4">이슈카드에 추가할 메모가 있으면 남겨주세요.</p>
+                        <textarea
+                          rows={4}
+                          value={lateReturnMemoDraft}
+                          onChange={(e) => setLateReturnMemoDraft(e.target.value)}
+                          className="mb-4 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                          placeholder="메모를 입력하세요."
+                          disabled={isLateReturnMemoSaving}
+                        />
+                      </>
+                    )}
 
-                <div className="flex gap-3">
-                  <button
-                    onClick={handleConfirmReturn}
-                    data-testid="reservation-return-confirm-button"
-                    className="flex-1 px-4 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium flex items-center justify-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
-                    disabled={isReturnSubmitting}
-                  >
-                    {isReturnSubmitting && <Loader2 className="h-4 w-4 animate-spin" />}
-                    {isReturnSubmitting ? '처리 중...' : '확인'}
-                  </button>
-                  <button
-                    onClick={() => {
-                      setShowReturnConfirm(false);
-                      setReturnSubmitError(null);
-                    }}
-                    className="flex-1 px-4 py-3 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 font-medium"
-                    disabled={isReturnSubmitting}
-                  >
-                    취소
-                  </button>
-                </div>
+                    <div className="flex gap-3">
+                      <button
+                        onClick={closeReturnConfirm}
+                        className="flex-1 px-4 py-3 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 font-medium"
+                        disabled={isLateReturnMemoSaving}
+                      >
+                        닫기
+                      </button>
+                      {!isLateReturnMemoSaved && (
+                        <button
+                          onClick={handleSaveLateReturnMemo}
+                          className="flex-1 px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium flex items-center justify-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
+                          disabled={isLateReturnMemoSaving || !lateReturnMemoDraft.trim()}
+                        >
+                          {isLateReturnMemoSaving && <Loader2 className="h-4 w-4 animate-spin" />}
+                          {isLateReturnMemoSaving ? '저장 중...' : '메모 저장'}
+                        </button>
+                      )}
+                    </div>
+                  </>
+                ) : pendingLateReturnActionItemId ? (
+                  <>
+                    <p className="text-sm text-gray-700 mb-4">반납 지연 이슈를 완료하겠습니까?</p>
+
+                    <div className="flex gap-3">
+                      <button
+                        onClick={handleConfirmLateReturnIssueResolution}
+                        className="flex-1 px-4 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium flex items-center justify-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
+                        disabled={isReturnSubmitting}
+                      >
+                        {isReturnSubmitting && <Loader2 className="h-4 w-4 animate-spin" />}
+                        {isReturnSubmitting ? '처리 중...' : '예'}
+                      </button>
+                      <button
+                        onClick={closeReturnConfirm}
+                        className="flex-1 px-4 py-3 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 font-medium"
+                        disabled={isReturnSubmitting}
+                      >
+                        아니오
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-sm text-gray-700 mb-4">
+                      {`${selectedReservation?.customer}님의 차량(${selectedReservation?.vehicleNumber})을(를) 반납 처리하시겠습니까?`}
+                    </p>
+
+                    <div className="flex gap-3">
+                      <button
+                        onClick={handleConfirmReturn}
+                        data-testid="reservation-return-confirm-button"
+                        className="flex-1 px-4 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium flex items-center justify-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
+                        disabled={isReturnSubmitting}
+                      >
+                        {isReturnSubmitting && <Loader2 className="h-4 w-4 animate-spin" />}
+                        {isReturnSubmitting ? '처리 중...' : '예'}
+                      </button>
+                      <button
+                        onClick={closeReturnConfirm}
+                        className="flex-1 px-4 py-3 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 font-medium"
+                        disabled={isReturnSubmitting}
+                      >
+                        아니오
+                      </button>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
           </div>
