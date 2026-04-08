@@ -6,6 +6,7 @@ export interface ActionRequiredListRequestOptions {
   status?: string;
   priority?: string;
   assignee?: string;
+  reservationId?: string;
   signal?: AbortSignal;
 }
 
@@ -177,7 +178,15 @@ function normalizeActionItemType(rawValue: string | null, paymentInfoPresent: bo
 }
 
 export function getActionRequiredList(options: ActionRequiredListRequestOptions = {}): Promise<unknown> {
-  const { page, pageSize, status, priority, assignee, signal } = options;
+  const {
+    page,
+    pageSize,
+    status,
+    priority,
+    assignee,
+    reservationId,
+    signal,
+  } = options;
 
   return apiClient.requestData<unknown>({
     path: '/api/v2/action-items',
@@ -188,6 +197,7 @@ export function getActionRequiredList(options: ActionRequiredListRequestOptions 
       status,
       priority,
       assignee,
+      reservationId,
     },
     signal,
   });

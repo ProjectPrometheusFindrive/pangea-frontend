@@ -21,6 +21,10 @@ import {
   patchActionRequiredMemo,
   patchActionRequiredStatus,
 } from '../../services/actionRequired';
+import {
+  getReservationDetail,
+  returnReservation,
+} from '../../services/reservations';
 import { listSettingsMembers, type SettingsMember } from '../../services/settings';
 import { paymentStatusToLabel, toCanonicalPaymentStatus } from '../utils/paymentStatusSync';
 
@@ -128,6 +132,8 @@ interface AssigneeOption {
   userId: string;
   name: string;
 }
+
+type LateReturnResolveDialogState = 'confirm-returned' | 'return-required' | null;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
@@ -302,6 +308,28 @@ function normalizeStatusCode(rawValue: string | null): ActionStatusCode {
   }
 
   return 'pending';
+}
+
+function normalizeReservationContractStatus(rawValue: string | null): string | null {
+  if (!rawValue) {
+    return null;
+  }
+
+  const normalized = rawValue.trim().toLowerCase();
+  if (!normalized) {
+    return null;
+  }
+  if (normalized === 'reservation' || normalized === 'reserved' || normalized === '예약' || normalized === '예약중') {
+    return '예약중';
+  }
+  if (normalized === 'rental' || normalized === 'in_use' || normalized === '대여중') {
+    return '대여중';
+  }
+  if (normalized === 'return' || normalized === 'returned' || normalized === '반납' || normalized === '반납완료' || normalized === '완료') {
+    return '완료';
+  }
+
+  return rawValue.trim();
 }
 
 function getListStatusQuery(statusFilter: ActionStatusFilter, includeCompleted: boolean): string | undefined {
@@ -768,6 +796,7 @@ export default function ActionRequired() {
   const [isResolveSaving, setIsResolveSaving] = useState(false);
   const [isAssigneeSaving, setIsAssigneeSaving] = useState(false);
   const [assigneeOptions, setAssigneeOptions] = useState<AssigneeOption[]>([]);
+  const [lateReturnResolveDialog, setLateReturnResolveDialog] = useState<LateReturnResolveDialogState>(null);
 
   const [isDetailLoading, setIsDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
@@ -873,6 +902,7 @@ export default function ActionRequired() {
 
   useEffect(() => {
     if (!selectedItem) {
+      setLateReturnResolveDialog(null);
       setCurrentAssigneeId('');
       return;
     }
@@ -1478,6 +1508,9 @@ export default function ActionRequired() {
       retryActionRef.current = null;
       return;
     }
+    if (handleLateReturnStatusIntent(selectedItem, nextStatusCode)) {
+      return;
+    }
     void runStatusUpdate(selectedItem.id, nextStatusCode, 'status');
   };
 
@@ -1498,15 +1531,92 @@ export default function ActionRequired() {
       return;
     }
 
-    if (typeof window !== 'undefined') {
-      const confirmed = window.confirm(`"${selectedItem.type}" 이슈를 해결 완료 처리하시겠습니까?`);
-      if (!confirmed) {
-        return;
-      }
+    if (selectedItem.type === '반납 지연') {
+      setLateReturnResolveDialog('confirm-returned');
+      return;
     }
 
     void runStatusUpdate(selectedItem.id, 'resolved', 'resolve');
   };
+
+  const handleLateReturnStatusIntent = (item: ActionItem, nextStatusCode: ActionStatusCode) => {
+    if (nextStatusCode === 'resolved' && item.type === '반납 지연') {
+      setLateReturnResolveDialog('confirm-returned');
+      return true;
+    }
+    return false;
+  };
+
+  const handleLateReturnResolveConfirm = useCallback(async () => {
+    if (!selectedItem || selectedItem.type !== '반납 지연' || isWriteSaving) {
+      return;
+    }
+    if (!canWriteActionRequired) {
+      setWriteError({
+        kind: 'resolve',
+        message: '권한이 없어 이슈를 해결 처리할 수 없습니다.',
+        retryable: false,
+      });
+      return;
+    }
+    if (!selectedItem.reservationId) {
+      setLateReturnResolveDialog(null);
+      setWriteError({
+        kind: 'resolve',
+        message: '연결된 예약 정보를 찾을 수 없어 차량 반납을 함께 처리할 수 없습니다.',
+        retryable: false,
+      });
+      return;
+    }
+
+    const targetItem = selectedItem;
+    setIsResolveSaving(true);
+    setWriteError(null);
+    setWriteNotice(null);
+
+    try {
+      const reservationPayload = await getReservationDetail(targetItem.reservationId);
+      const reservationSource = isRecord(reservationPayload)
+        ? (reservationPayload.data ?? reservationPayload.reservation ?? reservationPayload.item ?? reservationPayload)
+        : reservationPayload;
+      const reservationStatus = isRecord(reservationSource)
+        ? normalizeReservationContractStatus(pickString(reservationSource, ['contractStatus', 'status', 'type']))
+        : null;
+
+      if (reservationStatus !== '완료') {
+        await returnReservation(targetItem.reservationId, {
+          returnedAt: new Date().toISOString(),
+        });
+      }
+
+      await patchActionRequiredStatus(targetItem.id, {
+        status: toStatusPatchValue('resolved'),
+      });
+
+      setLateReturnResolveDialog(null);
+      setCurrentStatus('');
+      setWriteNotice('이슈를 완료 처리하고 차량도 반납 처리했습니다.');
+      retryActionRef.current = null;
+
+      const fallbackItem: ActionItem = {
+        ...targetItem,
+        status: '완료',
+        statusCode: 'resolved',
+      };
+      await hydrateActionItems();
+      void hydrateActionDetail(targetItem.id, fallbackItem);
+    } catch (error) {
+      const mappedError = toActionWriteError('resolve', error);
+      setWriteError(mappedError);
+      if (mappedError.retryable) {
+        retryActionRef.current = () => handleLateReturnResolveConfirm();
+      } else {
+        retryActionRef.current = null;
+      }
+    } finally {
+      setIsResolveSaving(false);
+    }
+  }, [canWriteActionRequired, hydrateActionDetail, hydrateActionItems, isWriteSaving, selectedItem]);
 
   return (
     <Layout title="조치 필요 항목">
@@ -1881,14 +1991,20 @@ export default function ActionRequired() {
                       value={currentStatus || selectedItem.status}
                       onChange={(e) => {
                         const nextStatus = e.target.value;
-                        setCurrentStatus(nextStatus);
                         if (!canWriteActionRequired || isWriteSaving || !selectedItem) {
+                          setCurrentStatus(nextStatus);
                           return;
                         }
                         const nextStatusCode = normalizeStatusCode(nextStatus);
                         if (nextStatusCode === selectedItem.statusCode) {
+                          setCurrentStatus(nextStatus);
                           return;
                         }
+                        if (handleLateReturnStatusIntent(selectedItem, nextStatusCode)) {
+                          setCurrentStatus('');
+                          return;
+                        }
+                        setCurrentStatus(nextStatus);
                         void runStatusUpdate(selectedItem.id, nextStatusCode, 'status');
                       }}
                       disabled={!canWriteActionRequired || isWriteSaving}
@@ -2011,6 +2127,52 @@ export default function ActionRequired() {
                     </button>
                   )}
                 </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {lateReturnResolveDialog === 'confirm-returned' && selectedItem && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50">
+            <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+              <h2 className="text-lg font-bold text-[#1e2939]">해당 차량이 반납되었습니까?</h2>
+              <p className="mt-3 text-sm text-gray-600">
+                예를 누르면 이슈카드를 완료 상태로 바꾸고 차량도 함께 반납 처리합니다.
+              </p>
+              <div className="mt-6 flex gap-3">
+                <button
+                  type="button"
+                  onClick={handleLateReturnResolveConfirm}
+                  disabled={isResolveSaving}
+                  className="flex-1 rounded-lg bg-blue-600 px-4 py-3 font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {isResolveSaving ? '처리 중...' : '예'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLateReturnResolveDialog('return-required')}
+                  disabled={isResolveSaving}
+                  className="flex-1 rounded-lg bg-gray-100 px-4 py-3 font-medium text-gray-700 hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  아니오
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {lateReturnResolveDialog === 'return-required' && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50">
+            <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+              <h2 className="text-lg font-bold text-[#1e2939]">차량이 반납된 다음 완료 처리해주세요</h2>
+              <div className="mt-6">
+                <button
+                  type="button"
+                  onClick={() => setLateReturnResolveDialog(null)}
+                  className="w-full rounded-lg bg-gray-100 px-4 py-3 font-medium text-gray-700 hover:bg-gray-200"
+                >
+                  닫기
+                </button>
               </div>
             </div>
           </div>
