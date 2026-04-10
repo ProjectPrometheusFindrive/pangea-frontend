@@ -23,3 +23,20 @@ test('new contract modal no longer collects unsupported ssn input', () => {
   assert.doesNotMatch(source, /customerSSN/u);
   assert.doesNotMatch(source, /new-contract-customer-ssn-input/u);
 });
+
+test('new contract modal allows today as the rental start date', () => {
+  const source = readProjectFile('src/app/components/NewContractModal.tsx');
+
+  assert.match(source, /min=\{formatDateAsYmd\(new Date\(\)\)\}/u);
+  assert.match(source, /else if \(startDay < today\)/u);
+  assert.doesNotMatch(source, /else if \(startAt < new Date\(\)\)/u);
+});
+
+test('new contract modal appends failing field details to the submit error summary', () => {
+  const source = readProjectFile('src/app/components/NewContractModal.tsx');
+
+  assert.match(source, /function buildSubmitErrorMessage\(/u);
+  assert.match(source, /return `\$\{baseMessage\} \$\{summary\}`;/u);
+  assert.match(source, /setSubmitError\(buildSubmitErrorMessage\('필수 입력값을 확인해 주세요\.', nextErrors\)\);/u);
+  assert.match(source, /setSubmitError\(buildSubmitErrorMessage\(feedback\.formError, feedback\.fieldErrors \?\? \{\}\)\);/u);
+});

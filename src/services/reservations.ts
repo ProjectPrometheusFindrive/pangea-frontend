@@ -50,6 +50,7 @@ export interface TransitionReservationPayload {
   to: '예약중' | '대여중' | '완료';
   reason?: string;
   expectedVersion?: number;
+  force?: boolean;
 }
 
 export interface CancelReservationPayload {

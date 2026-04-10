@@ -67,6 +67,22 @@ function createTodayBaseDate(): Date {
 const CALENDAR_BASE_DATE = createTodayBaseDate();
 const PHONE_REGEX = /^010-\d{4}-\d{4}$/;
 const LICENSE_REGEX = /^\d{2}-\d{6}-\d{2}$/;
+const FIELD_LABELS: Record<NewContractField, string> = {
+  selectedVehicle: '차량',
+  startDate: '대여 시작일',
+  endDate: '대여 종료일',
+  startTime: '픽업 시간',
+  endTime: '반납 시간',
+  customerName: '고객명',
+  customerPhone: '연락처',
+  customerLicense: '면허번호',
+  customerAddress: '주소',
+  pickupLocation: '대여 장소',
+  returnLocation: '반납 장소',
+  amount: '대여 요금',
+  deposit: '선금',
+  licenseFile: '운전면허증 파일',
+};
 
 function hasTextValue(value: string): boolean {
   return value.trim().length > 0;
@@ -86,6 +102,38 @@ function formatDateAsYmd(date: Date): string {
   const month = String(date.getMonth() + 1).padStart(2, '0');
   const day = String(date.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
+}
+
+function parseLocalDate(value: string): Date | null {
+  const parsed = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+  return parsed;
+}
+
+function buildValidationSummary(fieldErrors: Partial<Record<NewContractField, string>>): string {
+  const messages = Object.entries(fieldErrors)
+    .flatMap(([field, message]) => {
+      if (!message) {
+        return [];
+      }
+      const label = FIELD_LABELS[field as NewContractField] ?? field;
+      return [`${label}: ${message}`];
+    });
+
+  return Array.from(new Set(messages)).join(' / ');
+}
+
+function buildSubmitErrorMessage(
+  baseMessage: string,
+  fieldErrors: Partial<Record<NewContractField, string>>,
+): string {
+  const summary = buildValidationSummary(fieldErrors);
+  if (!summary) {
+    return baseMessage;
+  }
+  return `${baseMessage} ${summary}`;
 }
 
 export function NewContractModal({
@@ -221,16 +269,20 @@ export function NewContractModal({
     ) {
       const startAt = new Date(`${startDate}T${startTime}`);
       const endAt = new Date(`${endDate}T${endTime}`);
-      if (Number.isNaN(startAt.getTime()) || Number.isNaN(endAt.getTime()) || endAt < startAt) {
+      const startDay = parseLocalDate(startDate);
+      const today = createTodayBaseDate();
+      if (Number.isNaN(startAt.getTime()) || Number.isNaN(endAt.getTime()) || !startDay) {
+        nextErrors.startDate = '유효한 날짜를 입력해 주세요.';
+      } else if (endAt < startAt) {
         nextErrors.endDate = '반납 일시는 픽업 일시보다 빠를 수 없습니다.';
-      } else if (startAt < new Date()) {
-        nextErrors.startDate = '대여 시작 일시는 현재 시간 이후로 입력해 주세요.';
+      } else if (startDay < today) {
+        nextErrors.startDate = '대여 시작일은 오늘 이후로 입력해 주세요.';
       }
     }
 
     if (Object.keys(nextErrors).length > 0) {
       setFieldErrors((prev) => ({ ...prev, ...nextErrors }));
-      setSubmitError('필수 입력값을 확인해 주세요.');
+      setSubmitError(buildSubmitErrorMessage('필수 입력값을 확인해 주세요.', nextErrors));
       return;
     }
 
@@ -272,7 +324,7 @@ export function NewContractModal({
 
     if (Object.keys(nextErrors).length > 0) {
       setFieldErrors((prev) => ({ ...prev, ...nextErrors }));
-      setSubmitError('필수 입력값을 확인해 주세요.');
+      setSubmitError(buildSubmitErrorMessage('필수 입력값을 확인해 주세요.', nextErrors));
       return;
     }
 
@@ -291,7 +343,7 @@ export function NewContractModal({
 
     if (Object.keys(nextErrors).length > 0) {
       setFieldErrors((prev) => ({ ...prev, ...nextErrors }));
-      setSubmitError('필수 입력값을 확인해 주세요.');
+      setSubmitError(buildSubmitErrorMessage('필수 입력값을 확인해 주세요.', nextErrors));
       return;
     }
 
@@ -320,11 +372,11 @@ export function NewContractModal({
       });
 
       if (feedback) {
-        if (feedback.formError) {
-          setSubmitError(feedback.formError);
-        }
         if (feedback.fieldErrors) {
           setFieldErrors((prev) => ({ ...prev, ...feedback.fieldErrors }));
+        }
+        if (feedback.formError) {
+          setSubmitError(buildSubmitErrorMessage(feedback.formError, feedback.fieldErrors ?? {}));
         }
         return;
       }
@@ -480,7 +532,7 @@ export function NewContractModal({
                           data-testid="new-contract-start-date-input"
                           type="date"
                           value={startDate}
-                          min={new Date().toISOString().split('T')[0]}
+                          min={formatDateAsYmd(new Date())}
                           onChange={(event) => {
                             setStartDate(event.target.value);
                             clearFieldError('startDate');
