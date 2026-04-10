@@ -15,6 +15,7 @@ import { useAuth } from '../context/AuthContext';
 import { useAuthorization } from '../context/AuthorizationContext';
 import { ACTION_PERMISSIONS, ROUTE_PERMISSIONS } from '../authorization';
 import { ApiError } from '../../services/api';
+import { getAssetsList, patchAsset } from '../../services/assets';
 import {
   getActionRequiredDetail,
   getActionRequiredList,
@@ -135,6 +136,16 @@ interface AssigneeOption {
 
 type LateReturnResolveDialogState = 'confirm-returned' | 'return-required' | null;
 
+type IssueAssetKind = 'insurance' | 'inspection';
+
+interface IssueAssetRecord {
+  id: string;
+  version: number;
+  vehicleNumber: string;
+  insuranceExpiry: string;
+  nextInspection: string;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
@@ -201,6 +212,175 @@ function formatActionDate(rawValue: string): string {
   return ACTION_REQUIRED_DATETIME_FORMATTER.format(parsed);
 }
 
+function parseDateOnly(value: string | null | undefined): Date | null {
+  const raw = String(value ?? '').trim();
+  if (!raw || raw === '-') {
+    return null;
+  }
+  const isoPrefix = raw.match(/^(\d{4}-\d{2}-\d{2})/);
+  const candidate = isoPrefix ? `${isoPrefix[1]}T00:00:00` : `${raw}T00:00:00`;
+  const parsed = new Date(candidate);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+  return parsed;
+}
+
+function differenceInCalendarDays(targetDate: Date, baseDate: Date): number {
+  const targetMidnight = new Date(targetDate.getFullYear(), targetDate.getMonth(), targetDate.getDate());
+  const baseMidnight = new Date(baseDate.getFullYear(), baseDate.getMonth(), baseDate.getDate());
+  return Math.round((targetMidnight.getTime() - baseMidnight.getTime()) / 86_400_000);
+}
+
+function addCalendarDays(baseDate: Date, days: number): Date {
+  return new Date(baseDate.getFullYear(), baseDate.getMonth(), baseDate.getDate() + days);
+}
+
+function buildInspectionExpiryDescription(daysLeft: number): string {
+  if (daysLeft < 0) {
+    return '정기점검 기한이 경과하였습니다.';
+  }
+  if (daysLeft === 0) {
+    return '정기점검 기한이 오늘입니다.';
+  }
+  return `정기점검 기한 만료일이 임박했습니다.(D-${daysLeft})`;
+}
+
+function buildInspectionWindowExpiryDescription(daysLeft: number): string {
+  if (daysLeft < 0) {
+    return '수검 가능 기간 만료일이 경과하였습니다.';
+  }
+  if (daysLeft === 0) {
+    return '수검 가능 기간 만료일이 오늘입니다.';
+  }
+  if (daysLeft >= 31) {
+    return `수검 가능 기간이 ${daysLeft}일 남았습니다`;
+  }
+  return `수검 가능 기간 만료일이 임박했습니다.(D-${daysLeft})`;
+}
+
+function getIssueAssetDescription(item: ActionItem, issueAsset: IssueAssetRecord | null): string | null {
+  if (!isIssueAssetType(item.type) || !issueAsset) {
+    return item.description ?? null;
+  }
+  if (item.statusCode === 'resolved' || item.status === '완료') {
+    return '이슈가 해소되었습니다';
+  }
+
+  const targetDate = parseDateOnly(item.type === '보험 만료 임박' ? issueAsset.insuranceExpiry : issueAsset.nextInspection);
+  if (!targetDate) {
+    return item.description ?? null;
+  }
+
+  const daysLeft = differenceInCalendarDays(targetDate, new Date());
+  if (item.type === '보험 만료 임박') {
+    if (daysLeft < 0) {
+      return '차량 보험이 만료되었습니다.';
+    }
+    if (daysLeft === 0) {
+      return '차량 보험이 오늘 만료됩니다.';
+    }
+    return `차량 보험 만료일이 임박했습니다(D-${daysLeft})`;
+  }
+
+  const inspectionExpiryLine = buildInspectionExpiryDescription(daysLeft);
+  const availablePeriodExpiryDate = addCalendarDays(targetDate, 31);
+  const availablePeriodDaysLeft = differenceInCalendarDays(availablePeriodExpiryDate, new Date());
+  const availablePeriodExpiryLine = buildInspectionWindowExpiryDescription(availablePeriodDaysLeft);
+  return `${inspectionExpiryLine}\n${availablePeriodExpiryLine}`;
+}
+
+function isStrictlyLaterDate(nextValue: string, previousValue: string | null | undefined): boolean {
+  const nextDate = parseDateOnly(nextValue);
+  if (!nextDate) {
+    return false;
+  }
+  const previousDate = parseDateOnly(previousValue);
+  if (!previousDate) {
+    return true;
+  }
+  return nextDate.getTime() > previousDate.getTime();
+}
+
+function isIssueAssetType(type: string | null | undefined): type is '보험 만료 임박' | '정기점검' {
+  return type === '보험 만료 임박' || type === '정기점검';
+}
+
+function getInsuranceIssueResolveBlockMessage(issueAsset: IssueAssetRecord | null): string | null {
+  const insuranceDue = parseDateOnly(issueAsset?.insuranceExpiry);
+  if (!insuranceDue) {
+    return '보험 만료 임박 이슈가 해소되지 않았습니다.(D-0)일';
+  }
+
+  const daysLeft = differenceInCalendarDays(insuranceDue, new Date());
+  if (daysLeft >= 31) {
+    return null;
+  }
+
+  return `보험 만료 임박 이슈가 해소되지 않았습니다.(D-${Math.max(daysLeft, 0)})일`;
+}
+
+function isInsuranceIssueResolved(insuranceExpiry: string | null | undefined): boolean {
+  const insuranceDue = parseDateOnly(insuranceExpiry);
+  if (!insuranceDue) {
+    return false;
+  }
+
+  return differenceInCalendarDays(insuranceDue, new Date()) >= 31;
+}
+
+function getInspectionIssueResolveBlockMessage(issueAsset: IssueAssetRecord | null): string | null {
+  const inspectionDue = parseDateOnly(issueAsset?.nextInspection);
+  if (!inspectionDue) {
+    return '정기점검 만료 임박 이슈가 해소되지 않았습니다.(D-0)일';
+  }
+
+  const daysLeft = differenceInCalendarDays(inspectionDue, new Date());
+  if (daysLeft >= 31) {
+    return null;
+  }
+
+  return `정기점검 만료 임박 이슈가 해소되지 않았습니다.(D-${Math.max(daysLeft, 0)})일`;
+}
+
+function isInspectionIssueResolved(nextInspection: string | null | undefined): boolean {
+  const inspectionDue = parseDateOnly(nextInspection);
+  if (!inspectionDue) {
+    return false;
+  }
+
+  return differenceInCalendarDays(inspectionDue, new Date()) >= 31;
+}
+
+function getIssueResolveBlockMessage(item: ActionItem, issueAsset: IssueAssetRecord | null): string | null {
+  if (item.type === '보험 만료 임박') {
+    return getInsuranceIssueResolveBlockMessage(issueAsset);
+  }
+  if (item.type === '정기점검') {
+    return getInspectionIssueResolveBlockMessage(issueAsset);
+  }
+  return null;
+}
+
+function toIssueAssetRecord(row: unknown): IssueAssetRecord | null {
+  if (!isRecord(row)) {
+    return null;
+  }
+  const id = pickString(row, ['id', 'vin']);
+  const vehicleNumber = pickVehicleNumber(row);
+  const version = toNumberValue(row.version);
+  if (!id || !vehicleNumber || version === null) {
+    return null;
+  }
+  return {
+    id,
+    version,
+    vehicleNumber,
+    insuranceExpiry: pickString(row, ['insuranceExpiry', 'insuranceExpiryDate']) ?? '',
+    nextInspection: pickString(row, ['nextInspection', 'nextInspectionDate', 'inspectionDate', 'regularInspectionDate']) ?? '',
+  };
+}
+
 function normalizeSeverity(rawValue: string | null): ActionItem['severity'] {
   if (!rawValue) {
     return 'Low';
@@ -214,6 +394,13 @@ function normalizeSeverity(rawValue: string | null): ActionItem['severity'] {
     return 'Medium';
   }
   return 'Low';
+}
+
+function getDisplayedSeverity(item: ActionItem): ActionItem['severity'] | '-' {
+  if (item.statusCode === 'resolved' || item.status === '완료') {
+    return '-';
+  }
+  return item.severity;
 }
 
 function normalizeActionItemType(rawValue: string | null, hasPaymentInfo: boolean): string | null {
@@ -801,12 +988,26 @@ export default function ActionRequired() {
   const [isDetailLoading, setIsDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [isDetailNotFound, setIsDetailNotFound] = useState(false);
+  const [issueAsset, setIssueAsset] = useState<IssueAssetRecord | null>(null);
+  const [issueAssetDate, setIssueAssetDate] = useState('');
+  const [issueAssetFile, setIssueAssetFile] = useState<File | null>(null);
+  const [issueAssetError, setIssueAssetError] = useState<string | null>(null);
+  const [issueAssetNotice, setIssueAssetNotice] = useState<string | null>(null);
+  const [isIssueAssetLoading, setIsIssueAssetLoading] = useState(false);
+  const [isIssueAssetSaving, setIsIssueAssetSaving] = useState(false);
+  const [issueAssetPrompt, setIssueAssetPrompt] = useState<null | {
+    mode: 'invalid' | 'completed' | 'blocked';
+    kind: IssueAssetKind;
+    message: string;
+    payload?: { version: number; insuranceExpiry?: string | null; nextInspection?: string | null };
+  }>(null);
 
   const detailRequestSequenceRef = useRef(0);
   const detailControllerRef = useRef<AbortController | null>(null);
   const retryActionRef = useRef<(() => Promise<void>) | null>(null);
 
   const isWriteSaving = isStatusSaving || isMemoSaving || isResolveSaving || isAssigneeSaving;
+  const selectedItemDescription = selectedItem ? getIssueAssetDescription(selectedItem, issueAsset) : null;
 
   const paymentSyncTargets = useMemo(() => (
     sourceActionItems
@@ -908,6 +1109,61 @@ export default function ActionRequired() {
     }
     setCurrentAssigneeId(selectedItem.assigneeId ?? '');
   }, [selectedItem?.id, selectedItem?.assigneeId]);
+
+  useEffect(() => {
+    if (!selectedItem || !isIssueAssetType(selectedItem.type)) {
+      setIssueAsset(null);
+      setIssueAssetDate('');
+      setIssueAssetFile(null);
+      setIssueAssetError(null);
+      setIssueAssetNotice(null);
+      setIssueAssetPrompt(null);
+      setIsIssueAssetLoading(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    setIsIssueAssetLoading(true);
+    setIssueAsset(null);
+    setIssueAssetFile(null);
+    setIssueAssetError(null);
+    setIssueAssetNotice(null);
+    void getAssetsList({
+      page: 1,
+      size: 20,
+      q: selectedItem.vehicleNumber,
+      signal: controller.signal,
+    })
+      .then((payload) => {
+        const rows = getCollectionFromPayload(payload, ['items', 'rows', 'list']) ?? [];
+        const matchedAsset = rows
+          .map((row) => toIssueAssetRecord(row))
+          .find((row) => row && row.vehicleNumber === selectedItem.vehicleNumber) ?? null;
+        setIssueAsset(matchedAsset);
+        if (!matchedAsset) {
+          setIssueAssetError('연결된 차량 자산을 찾을 수 없습니다.');
+          return;
+        }
+        setIssueAssetDate(selectedItem.type === '보험 만료 임박' ? matchedAsset.insuranceExpiry : matchedAsset.nextInspection);
+      })
+      .catch((error) => {
+        if (controller.signal.aborted) {
+          return;
+        }
+        if (error instanceof ApiError) {
+          setIssueAssetError(error.message || '차량 자산 정보를 불러오지 못했습니다.');
+          return;
+        }
+        setIssueAssetError('차량 자산 정보를 불러오지 못했습니다.');
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          setIsIssueAssetLoading(false);
+        }
+      });
+
+    return () => controller.abort();
+  }, [selectedItem]);
 
   useEffect(() => {
     const filterParam = searchParams.get('filter');
@@ -1072,24 +1328,36 @@ export default function ActionRequired() {
       }
 
       const nextItem = allItems.find((item) => item.id === previousItem.id);
-      if (!nextItem || !nextItem.paymentInfo) {
+      if (!nextItem) {
         return previousItem;
       }
 
       const previousStatus = previousItem.paymentInfo?.status ?? null;
-      const nextStatus = nextItem.paymentInfo.status ?? null;
-      if (previousStatus === nextStatus) {
+      const nextStatus = nextItem.paymentInfo?.status ?? null;
+      const hasPaymentChanged = previousStatus !== nextStatus;
+      const hasCoreChanged = previousItem.severity !== nextItem.severity
+        || previousItem.status !== nextItem.status
+        || previousItem.statusCode !== nextItem.statusCode
+        || previousItem.assignee !== nextItem.assignee
+        || previousItem.assigneeId !== nextItem.assigneeId
+        || previousItem.date !== nextItem.date
+        || previousItem.description !== nextItem.description;
+
+      if (!hasPaymentChanged && !hasCoreChanged) {
         return previousItem;
       }
 
       return {
         ...previousItem,
+        ...nextItem,
         reservationId: previousItem.reservationId ?? nextItem.reservationId,
         paymentId: previousItem.paymentId ?? nextItem.paymentId,
-        paymentInfo: {
-          ...(previousItem.paymentInfo ?? {}),
-          ...nextItem.paymentInfo,
-        },
+        paymentInfo: nextItem.paymentInfo
+          ? {
+            ...(previousItem.paymentInfo ?? {}),
+            ...nextItem.paymentInfo,
+          }
+          : previousItem.paymentInfo,
       };
     });
   }, [allItems]);
@@ -1508,6 +1776,18 @@ export default function ActionRequired() {
       retryActionRef.current = null;
       return;
     }
+    if ((selectedItem.type === '보험 만료 임박' || selectedItem.type === '정기점검') && nextStatusCode === 'resolved') {
+      const blockedMessage = getIssueResolveBlockMessage(selectedItem, issueAsset);
+      if (blockedMessage) {
+        setCurrentStatus('');
+        setIssueAssetPrompt({
+          mode: 'blocked',
+          kind: selectedItem.type === '보험 만료 임박' ? 'insurance' : 'inspection',
+          message: blockedMessage,
+        });
+        return;
+      }
+    }
     if (handleLateReturnStatusIntent(selectedItem, nextStatusCode)) {
       return;
     }
@@ -1529,6 +1809,18 @@ export default function ActionRequired() {
   const handleResolveIssue = () => {
     if (!selectedItem || isWriteSaving) {
       return;
+    }
+
+    if (selectedItem.type === '보험 만료 임박' || selectedItem.type === '정기점검') {
+      const blockedMessage = getIssueResolveBlockMessage(selectedItem, issueAsset);
+      if (blockedMessage) {
+        setIssueAssetPrompt({
+          mode: 'blocked',
+          kind: selectedItem.type === '보험 만료 임박' ? 'insurance' : 'inspection',
+          message: blockedMessage,
+        });
+        return;
+      }
     }
 
     if (selectedItem.type === '반납 지연') {
@@ -1617,6 +1909,175 @@ export default function ActionRequired() {
       setIsResolveSaving(false);
     }
   }, [canWriteActionRequired, hydrateActionDetail, hydrateActionItems, isWriteSaving, selectedItem]);
+
+  const executeIssueAssetSave = useCallback(async (
+    payload: { version: number; insuranceExpiry?: string | null; nextInspection?: string | null },
+    kind: IssueAssetKind,
+  ) => {
+    if (!issueAsset) {
+      return;
+    }
+
+    setIsIssueAssetSaving(true);
+    setIssueAssetError(null);
+    setIssueAssetNotice(null);
+
+    try {
+      const previousInsuranceExpiry = issueAsset.insuranceExpiry || '-';
+      const previousInspectionDate = issueAsset.nextInspection || '-';
+      await patchAsset(issueAsset.id, payload);
+      if (
+        kind === 'insurance'
+        && selectedItem?.type === '보험 만료 임박'
+        && selectedItem.id
+        && payload.insuranceExpiry
+      ) {
+        const nextInsuranceExpiry = payload.insuranceExpiry || '-';
+        if (previousInsuranceExpiry !== nextInsuranceExpiry) {
+          try {
+            await patchActionRequiredMemo(selectedItem.id, {
+              memo: `보험만료일 업데이트: ${previousInsuranceExpiry} -> ${nextInsuranceExpiry}`,
+            });
+          } catch {
+            // Keep asset update successful even when memo logging fails.
+          }
+        }
+      }
+      if (
+        kind === 'inspection'
+        && selectedItem?.type === '정기점검'
+        && selectedItem.id
+        && payload.nextInspection
+      ) {
+        const nextInspectionDate = payload.nextInspection || '-';
+        if (previousInspectionDate !== nextInspectionDate) {
+          try {
+            await patchActionRequiredMemo(selectedItem.id, {
+              memo: `정기점검일 업데이트: ${previousInspectionDate} -> ${nextInspectionDate}`,
+            });
+          } catch {
+            // Keep asset update successful even when memo logging fails.
+          }
+        }
+      }
+      setIssueAsset((previousIssueAsset) => {
+        if (!previousIssueAsset) {
+          return previousIssueAsset;
+        }
+        return {
+          ...previousIssueAsset,
+          insuranceExpiry: payload.insuranceExpiry ?? previousIssueAsset.insuranceExpiry,
+          nextInspection: payload.nextInspection ?? previousIssueAsset.nextInspection,
+          version: previousIssueAsset.version + 1,
+        };
+      });
+      const nextInsuranceExpiry = payload.insuranceExpiry ?? issueAsset.insuranceExpiry;
+      const nextInspectionDate = payload.nextInspection ?? issueAsset.nextInspection;
+      const shouldReopenInsuranceIssue = Boolean(
+        selectedItem
+        && kind === 'insurance'
+        && selectedItem.type === '보험 만료 임박'
+        && selectedItem.statusCode === 'resolved'
+        && !isInsuranceIssueResolved(nextInsuranceExpiry),
+      );
+      const shouldReopenInspectionIssue = Boolean(
+        selectedItem
+        && kind === 'inspection'
+        && selectedItem.type === '정기점검'
+        && selectedItem.statusCode === 'resolved'
+        && !isInspectionIssueResolved(nextInspectionDate),
+      );
+      if (shouldReopenInsuranceIssue && selectedItem) {
+        await patchActionRequiredStatus(selectedItem.id, {
+          status: toStatusPatchValue('pending'),
+        });
+      }
+      if (shouldReopenInspectionIssue && selectedItem) {
+        await patchActionRequiredStatus(selectedItem.id, {
+          status: toStatusPatchValue('pending'),
+        });
+      }
+
+      let autoResolveMessage: string | null = null;
+      if (
+        selectedItem?.type === '보험 만료 임박'
+        && selectedItem.statusCode !== 'resolved'
+        && kind === 'insurance'
+        && isInsuranceIssueResolved(nextInsuranceExpiry)
+      ) {
+        autoResolveMessage = '보험 만료 임박 이슈가 해소되었습니다.';
+      }
+      if (
+        selectedItem?.type === '정기점검'
+        && selectedItem.statusCode !== 'resolved'
+        && kind === 'inspection'
+        && isInspectionIssueResolved(nextInspectionDate)
+      ) {
+        autoResolveMessage = '정기점검 만료 임박 이슈가 해소되었습니다.';
+      }
+      if (autoResolveMessage && selectedItem) {
+        await patchActionRequiredStatus(selectedItem.id, {
+          status: toStatusPatchValue('resolved'),
+        });
+        setIssueAssetPrompt({
+          mode: 'completed',
+          kind,
+          message: autoResolveMessage,
+        });
+      }
+      await hydrateActionItems();
+      if (selectedItem) {
+        void hydrateActionDetail(selectedItem.id, selectedItem);
+      }
+      setIssueAssetNotice(
+        shouldReopenInsuranceIssue || shouldReopenInspectionIssue
+          ? '차량 정보가 저장되었습니다. 이슈 상태와 심각도를 다시 반영했습니다.'
+          : '차량 정보가 저장되었습니다.'
+      );
+    } catch (error) {
+      if (error instanceof ApiError) {
+        setIssueAssetError(error.message || '차량 정보 저장에 실패했습니다.');
+        return;
+      }
+      setIssueAssetError('차량 정보 저장에 실패했습니다.');
+    } finally {
+      setIsIssueAssetSaving(false);
+    }
+  }, [hydrateActionDetail, hydrateActionItems, issueAsset, selectedItem]);
+
+  const handleIssueAssetSave = useCallback(() => {
+    if (!selectedItem || !isIssueAssetType(selectedItem.type)) {
+      return;
+    }
+    if (!issueAsset) {
+      setIssueAssetError('연결된 차량 자산을 찾을 수 없습니다.');
+      return;
+    }
+
+    const nextDate = issueAssetDate.trim();
+    if (!nextDate) {
+      setIssueAssetError(selectedItem.type === '보험 만료 임박' ? '보험 만료일을 입력해 주세요.' : '다음 정기점검일을 입력해 주세요.');
+      return;
+    }
+
+    const kind: IssueAssetKind = selectedItem.type === '보험 만료 임박' ? 'insurance' : 'inspection';
+    const previousDate = kind === 'insurance' ? issueAsset.insuranceExpiry : issueAsset.nextInspection;
+    const payload = kind === 'insurance'
+      ? { version: issueAsset.version, insuranceExpiry: nextDate }
+      : { version: issueAsset.version, nextInspection: nextDate };
+
+    if (!isStrictlyLaterDate(nextDate, previousDate)) {
+      setIssueAssetPrompt({
+        mode: 'invalid',
+        kind,
+        message: kind === 'insurance' ? '보험 만료일자가 유효하지 않습니다.' : '정기점검 일자가 유효하지 않습니다.',
+        payload,
+      });
+      return;
+    }
+
+    void executeIssueAssetSave(payload, kind);
+  }, [executeIssueAssetSave, issueAsset, issueAssetDate, selectedItem]);
 
   return (
     <Layout title="조치 필요 항목">
@@ -1808,9 +2269,13 @@ export default function ActionRequired() {
                         </td>
                       )}
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <span className={`px-2 py-1 text-xs font-medium rounded-full ${getSeverityColor(item.severity)}`}>
-                          {item.severity}
-                        </span>
+                        {getDisplayedSeverity(item) === '-' ? (
+                          <span className="text-sm text-gray-400">-</span>
+                        ) : (
+                          <span className={`px-2 py-1 text-xs font-medium rounded-full ${getSeverityColor(item.severity)}`}>
+                            {item.severity}
+                          </span>
+                        )}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{item.status}</td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">{item.assignee}</td>
@@ -1913,16 +2378,84 @@ export default function ActionRequired() {
                 <div>
                   <label className="text-sm font-semibold text-gray-600">심각도</label>
                   <p className="text-base text-gray-900 mt-1">
-                    <span className={`px-2 py-1 text-xs font-medium rounded-full ${getSeverityColor(selectedItem.severity)}`}>
-                      {selectedItem.severity}
-                    </span>
+                    {getDisplayedSeverity(selectedItem) === '-' ? (
+                      <span className="text-sm text-gray-400">-</span>
+                    ) : (
+                      <span className={`px-2 py-1 text-xs font-medium rounded-full ${getSeverityColor(selectedItem.severity)}`}>
+                        {selectedItem.severity}
+                      </span>
+                    )}
                   </p>
                 </div>
 
-                {selectedItem.description && (
+                {selectedItemDescription && (
                   <div>
                     <label className="text-sm font-semibold text-gray-600">상세 설명</label>
-                    <p className="text-sm text-gray-700 mt-1 whitespace-pre-wrap">{selectedItem.description}</p>
+                    <p className="text-sm text-gray-700 mt-1 whitespace-pre-wrap">{selectedItemDescription}</p>
+                  </div>
+                )}
+
+                {isIssueAssetType(selectedItem.type) && (
+                  <div className="border-t border-gray-200 pt-4">
+                    <label className="mb-3 block text-sm font-semibold text-gray-600">
+                      {selectedItem.type === '보험 만료 임박' ? '보험 정보 업데이트' : '정기점검 정보 업데이트'}
+                    </label>
+                    <div className="space-y-3 rounded-lg border border-gray-200 bg-gray-50 p-4">
+                      {isIssueAssetLoading && (
+                        <div className="flex items-center gap-2 text-sm text-blue-700">
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          차량 자산 정보를 불러오는 중입니다.
+                        </div>
+                      )}
+                      <div>
+                        <label className="mb-1 block text-xs font-semibold text-gray-600">
+                          {selectedItem.type === '보험 만료 임박' ? '보험 가입 증서 업로드' : '자동차종합검사표 업로드'}
+                        </label>
+                        <input
+                          type="file"
+                          onChange={(event) => setIssueAssetFile(event.target.files?.[0] ?? null)}
+                          disabled={isIssueAssetSaving || isIssueAssetLoading}
+                          className="block w-full text-sm text-gray-700"
+                        />
+                        {issueAssetFile && (
+                          <p className="mt-1 text-xs text-green-700">{issueAssetFile.name}</p>
+                        )}
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-xs font-semibold text-gray-600">
+                          {selectedItem.type === '보험 만료 임박' ? '보험 만료일' : '다음 정기점검일'}
+                        </label>
+                        <input
+                          type="date"
+                          value={issueAssetDate}
+                          onChange={(event) => {
+                            setIssueAssetDate(event.target.value);
+                            setIssueAssetError(null);
+                            setIssueAssetNotice(null);
+                          }}
+                          disabled={isIssueAssetSaving || isIssueAssetLoading || !issueAsset}
+                          className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        />
+                      </div>
+                      {issueAssetError && (
+                        <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                          {issueAssetError}
+                        </div>
+                      )}
+                      {issueAssetNotice && (
+                        <div className="rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700">
+                          {issueAssetNotice}
+                        </div>
+                      )}
+                      <button
+                        type="button"
+                        onClick={handleIssueAssetSave}
+                        disabled={isIssueAssetSaving || isIssueAssetLoading || !issueAsset}
+                        className="w-full rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {isIssueAssetSaving ? '저장 중...' : '저장'}
+                      </button>
+                    </div>
                   </div>
                 )}
 
@@ -1999,6 +2532,18 @@ export default function ActionRequired() {
                         if (nextStatusCode === selectedItem.statusCode) {
                           setCurrentStatus(nextStatus);
                           return;
+                        }
+                        if ((selectedItem.type === '보험 만료 임박' || selectedItem.type === '정기점검') && nextStatusCode === 'resolved') {
+                          const blockedMessage = getIssueResolveBlockMessage(selectedItem, issueAsset);
+                          if (blockedMessage) {
+                            setCurrentStatus('');
+                            setIssueAssetPrompt({
+                              mode: 'blocked',
+                              kind: selectedItem.type === '보험 만료 임박' ? 'insurance' : 'inspection',
+                              message: blockedMessage,
+                            });
+                            return;
+                          }
                         }
                         if (handleLateReturnStatusIntent(selectedItem, nextStatusCode)) {
                           setCurrentStatus('');
@@ -2127,6 +2672,57 @@ export default function ActionRequired() {
                     </button>
                   )}
                 </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {issueAssetPrompt && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50">
+            <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+              <p className="text-base font-semibold text-[#1e2939]">{issueAssetPrompt.message}</p>
+              <div className="mt-6 flex justify-end gap-3">
+                {issueAssetPrompt.mode === 'invalid' ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => setIssueAssetPrompt(null)}
+                      className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                    >
+                      닫기
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const pendingPayload = issueAssetPrompt.payload;
+                        const kind = issueAssetPrompt.kind;
+                        setIssueAssetPrompt(null);
+                        if (pendingPayload) {
+                          void executeIssueAssetSave(pendingPayload, kind);
+                        }
+                      }}
+                      className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+                    >
+                      강제 저장
+                    </button>
+                  </>
+                ) : issueAssetPrompt.mode === 'blocked' ? (
+                  <button
+                    type="button"
+                    onClick={() => setIssueAssetPrompt(null)}
+                    className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+                  >
+                    닫기
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setIssueAssetPrompt(null)}
+                    className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+                  >
+                    닫기
+                  </button>
+                )}
               </div>
             </div>
           </div>

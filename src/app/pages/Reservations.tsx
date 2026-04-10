@@ -66,6 +66,12 @@ type DragSelection = {
   startDate: number;
   endDate: number;
 } | null;
+type ReservationWarningPrompt = {
+  message: string;
+  confirmLabel?: string;
+  cancelLabel: string;
+  dismissResult: boolean;
+};
 type ViewFilter = 'all' | 'reservation' | 'rental' | 'return' | 'unpaid' | 'overdue';
 type PaymentScope = 'all' | 'delinquent';
 type DueFilter = 'pickup' | 'return' | null;
@@ -82,6 +88,9 @@ const ASSET_FALLBACK_PAGE_SIZE = 500;
 const TOTAL_COUNT_KEYS = ['total', 'totalCount', 'count', 'size', 'itemsCount', 'totalElements'];
 const RETRY_TOAST_MESSAGE = '일시적인 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.';
 const ACTIVE_ACTION_STATUS_QUERY = 'open,in_progress';
+const EXPIRED_INSURANCE_PICKUP_MESSAGE = '현재 보험 만료 상태로 차량 인수가 불가능합니다.\n보험 만료 이후에 운행을 할 경우 행정처분(과태료, 영업정지)과 형사처벌을 받을 수 있으며 사고 발생시 보험처리가 불가합니다.';
+const INSPECTION_PICKUP_FORCE_MESSAGE = '예약 기간내에 정기점검 만료일자가 있습니다.\n수검 가능 기간을 넘기면 과태료(4만원 + 3일당 2만원)가 발생하며, 사고 발생시 보험 처리에 불리합니다.';
+const INSPECTION_PICKUP_NOTICE_MESSAGE = '예약 종료 후 수검 만료기간까지 {days}일입니다. \n반납 지연 및 대여 연장 발생시 주의해주세요.';
 
 type FieldErrorMap<TField extends string> = Partial<Record<TField, string>>;
 type ReservationsHydrationPayload = {
@@ -99,6 +108,193 @@ function toIsoDateTimeFromDateAndTime(dateValue: string, timeValue: string): str
     return null;
   }
   return parsed.toISOString();
+}
+
+function parseDateOnly(value: string | null | undefined): Date | null {
+  const raw = String(value ?? '').trim();
+  if (!raw || raw === '-') {
+    return null;
+  }
+  const isoPrefix = raw.match(/^(\d{4}-\d{2}-\d{2})/);
+  const candidate = isoPrefix ? `${isoPrefix[1]}T00:00:00` : `${raw}T00:00:00`;
+  const parsed = new Date(candidate);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+  return parsed;
+}
+
+function differenceInDays(fromDate: Date, toDate: Date): number {
+  const msPerDay = 1000 * 60 * 60 * 24;
+  return Math.round((toDate.getTime() - fromDate.getTime()) / msPerDay);
+}
+
+function addDays(value: Date, days: number): Date {
+  return new Date(value.getFullYear(), value.getMonth(), value.getDate() + days);
+}
+
+function getReservationDateRange(formValues: NewContractFormValues): { startDate: Date; endDate: Date } | null {
+  const startDate = parseDateOnly(formValues.startDate);
+  const endDate = parseDateOnly(formValues.endDate);
+  if (!startDate || !endDate) {
+    return null;
+  }
+  return { startDate, endDate };
+}
+
+function isInsuranceDueWithinReservationRange(asset: VehicleAsset | null, reservation: { startDateFull?: string; endDateFull?: string }): boolean {
+  if (!asset) {
+    return false;
+  }
+  const insuranceDue = parseDateOnly(asset.insuranceExpiry);
+  const reservationStart = parseDateOnly(reservation.startDateFull);
+  const reservationEnd = parseDateOnly(reservation.endDateFull);
+  if (!insuranceDue || !reservationStart || !reservationEnd) {
+    return false;
+  }
+  return reservationStart <= insuranceDue && insuranceDue <= reservationEnd;
+}
+
+function evaluateReservationAssetWarning(
+  asset: VehicleAsset,
+  formValues: NewContractFormValues,
+  hasInspectionIssueCard: boolean,
+): { blockedMessage?: string; prompt?: ReservationWarningPrompt } {
+  const range = getReservationDateRange(formValues);
+  if (!range) {
+    return {};
+  }
+
+  const insuranceDue = parseDateOnly(asset.insuranceExpiry);
+  const inspectionDue = parseDateOnly(asset.nextInspection);
+  const inspectionWindowExpiry = inspectionDue ? addDays(inspectionDue, 31) : null;
+  const today = parseDateOnly(new Date().toISOString().slice(0, 10));
+
+  if (inspectionWindowExpiry && today && inspectionWindowExpiry < today) {
+    return { blockedMessage: '정기점검 수검 가능 기간이 만료된 차량은 예약할 수 없습니다.' };
+  }
+
+  const informationalMessages: string[] = [];
+  const confirmationMessages: string[] = [];
+
+  if (insuranceDue && insuranceDue >= range.startDate && insuranceDue <= range.endDate) {
+    informationalMessages.push('예약 기간 내에 보험이 만료 됩니다. 만료일 전에 반드시 갱신하세요.');
+  }
+  if (hasInspectionIssueCard && inspectionWindowExpiry && range.endDate < inspectionWindowExpiry) {
+    confirmationMessages.push(`예약 종료 후 수검 가능 만료일까지 ${differenceInDays(range.endDate, inspectionWindowExpiry)}일입니다.`);
+  }
+  if (hasInspectionIssueCard && inspectionWindowExpiry && inspectionWindowExpiry >= range.startDate && inspectionWindowExpiry <= range.endDate) {
+    confirmationMessages.push('예약 시작일 전에 정기점검을 반드시 받아야합니다.');
+  }
+  if (insuranceDue) {
+    const daysLeft = differenceInDays(range.endDate, insuranceDue);
+    if (daysLeft >= 0 && daysLeft <= 30) {
+      confirmationMessages.push(`예약 종료 후 보험만료 유효기간까지 ${daysLeft}일입니다.`);
+    }
+  }
+
+  const combinedMessages = [...confirmationMessages, ...informationalMessages];
+  if (combinedMessages.length === 0) {
+    return {};
+  }
+
+  if (confirmationMessages.length > 0) {
+    return {
+      prompt: {
+        message: combinedMessages.join('\n\n'),
+        cancelLabel: '취소',
+        confirmLabel: '예약 진행',
+        dismissResult: false,
+      },
+    };
+  }
+
+  return {
+    prompt: {
+      message: combinedMessages.join('\n\n'),
+      cancelLabel: '닫기',
+      dismissResult: true,
+    },
+  };
+}
+
+function isInsuranceExpired(asset: VehicleAsset | null): boolean {
+  if (!asset) {
+    return false;
+  }
+  const insuranceDue = parseDateOnly(asset.insuranceExpiry);
+  const today = parseDateOnly(new Date().toISOString().slice(0, 10));
+  return Boolean(insuranceDue && today && insuranceDue < today);
+}
+
+function requiresForcedPickupPrompt(reservation: Reservation, asset: VehicleAsset | null): boolean {
+  if (!asset) {
+    return false;
+  }
+  const inspectionDue = parseDateOnly(asset.nextInspection);
+  const inspectionWindowExpiry = inspectionDue ? addDays(inspectionDue, 31) : null;
+  const reservationStart = parseDateOnly(reservation.startDateFull);
+  const reservationEnd = parseDateOnly(reservation.endDateFull);
+  if (!inspectionWindowExpiry || !reservationStart || !reservationEnd) {
+    return false;
+  }
+  return inspectionWindowExpiry >= reservationStart && inspectionWindowExpiry <= reservationEnd;
+}
+
+function getPickupInspectionNoticeDaysByIssueCard(
+  reservation: Reservation,
+  asset: VehicleAsset | null,
+  hasInspectionIssueCard: boolean,
+): number | null {
+  if (!asset || !hasInspectionIssueCard) {
+    return null;
+  }
+  const inspectionDue = parseDateOnly(asset.nextInspection);
+  const inspectionWindowExpiry = inspectionDue ? addDays(inspectionDue, 31) : null;
+  const reservationEnd = parseDateOnly(reservation.endDateFull);
+  if (!inspectionWindowExpiry || !reservationEnd) {
+    return null;
+  }
+  if (reservationEnd >= inspectionWindowExpiry) {
+    return null;
+  }
+  return differenceInDays(reservationEnd, inspectionWindowExpiry);
+}
+
+function buildPickupWarningPrompt(options: {
+  shouldForcePickup: boolean;
+  inspectionNoticeDays: number | null;
+  insuranceDueInRange: boolean;
+}): ReservationWarningPrompt | null {
+  const { shouldForcePickup, inspectionNoticeDays, insuranceDueInRange } = options;
+  const messages: string[] = [];
+  if (shouldForcePickup) {
+    messages.push(INSPECTION_PICKUP_FORCE_MESSAGE);
+  }
+  if (inspectionNoticeDays !== null) {
+    messages.push(INSPECTION_PICKUP_NOTICE_MESSAGE.replace('{days}', String(inspectionNoticeDays)));
+  }
+  if (insuranceDueInRange) {
+    messages.push('예약 기간 내에 보험이 만료 됩니다. 만료일 전에 반드시 갱신하세요.');
+  }
+
+  if (messages.length === 0) {
+    return null;
+  }
+  if (shouldForcePickup) {
+    return {
+      message: messages.join('\n\n'),
+      cancelLabel: '닫기',
+      confirmLabel: '인수 처리 강행',
+      dismissResult: false,
+    };
+  }
+  return {
+    message: messages.join('\n\n'),
+    cancelLabel: '닫기',
+    confirmLabel: '확인',
+    dismissResult: false,
+  };
 }
 
 function toAccidentDisplayTime(value: Date): string {
@@ -1054,12 +1250,14 @@ export default function Reservations() {
   const [isPaymentCompleting, setIsPaymentCompleting] = useState(false);
   const [activeReservationAction, setActiveReservationAction] = useState<'start' | 'cancel' | null>(null);
   const [reservationActionError, setReservationActionError] = useState<string | null>(null);
+  const [reservationWarningPrompt, setReservationWarningPrompt] = useState<ReservationWarningPrompt | null>(null);
 
   // 동적 날짜 로딩을 위한 상태
   const [totalDaysToShow, setTotalDaysToShow] = useState(42); // 초기 6주
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const detailRequestSequenceRef = useRef(0);
   const detailControllerRef = useRef<AbortController | null>(null);
+  const reservationWarningResolverRef = useRef<((confirmed: boolean) => void) | null>(null);
 
   // 드래그 선택 상태
   const [isDragging, setIsDragging] = useState(false);
@@ -1153,6 +1351,49 @@ export default function Reservations() {
     }
 
     return null;
+  }, []);
+
+  const hasInspectionIssueCardForVehicle = useCallback(async (vehicleNumber: string): Promise<boolean> => {
+    const normalizedVehicleNumber = vehicleNumber.trim();
+    if (!normalizedVehicleNumber) {
+      return false;
+    }
+
+    const pageSize = 100;
+    for (let page = 1; page <= 5; page += 1) {
+      const payload = await getActionRequiredList({
+        page,
+        pageSize,
+        status: ACTIVE_ACTION_STATUS_QUERY,
+      });
+      const rows = getCollectionFromPayload(payload, ['items', 'rows', 'list', 'actionRequired', 'actionItems']);
+      if (!rows || rows.length === 0) {
+        return false;
+      }
+
+      for (const row of rows) {
+        if (!isRecord(row)) {
+          continue;
+        }
+        const type = extractActionItemType(row);
+        if (!type || !type.includes('정기점검')) {
+          continue;
+        }
+        const rowVehicleNumber = toStringValue(row.vehicleNumber)
+          ?? toStringValue(row.plate)
+          ?? toStringValue(row.assetName)
+          ?? '';
+        if (rowVehicleNumber === normalizedVehicleNumber) {
+          return true;
+        }
+      }
+
+      if (rows.length < pageSize) {
+        break;
+      }
+    }
+
+    return false;
   }, []);
 
 
@@ -1689,6 +1930,11 @@ export default function Reservations() {
     });
   }, [hydrateReservationsData]);
 
+  const confirmReservationWarning = useCallback((prompt: ReservationWarningPrompt) => new Promise<boolean>((resolve) => {
+    reservationWarningResolverRef.current = resolve;
+    setReservationWarningPrompt(prompt);
+  }), []);
+
   const handleReservationClick = useCallback((reservation: Reservation) => {
     openReservationDetail(reservation);
   }, [openReservationDetail]);
@@ -1732,6 +1978,31 @@ export default function Reservations() {
           endDate: '반납 일시를 다시 확인해 주세요.',
         },
       };
+    }
+
+    let hasInspectionIssueCard = (selectedAsset.issues ?? []).some((issue) => issue.includes('정기점검'));
+    try {
+      hasInspectionIssueCard = await hasInspectionIssueCardForVehicle(selectedAsset.vehicleNumber);
+    } catch {
+      // Fall back to asset.issues when action-items lookup is unavailable.
+    }
+
+    const assetWarning = evaluateReservationAssetWarning(selectedAsset, formValues, hasInspectionIssueCard);
+    if (assetWarning.blockedMessage) {
+      return {
+        formError: assetWarning.blockedMessage,
+        fieldErrors: {
+          selectedVehicle: assetWarning.blockedMessage,
+        },
+      };
+    }
+    if (assetWarning.prompt) {
+      const shouldProceed = await confirmReservationWarning(assetWarning.prompt);
+      if (!shouldProceed) {
+        return {
+          formError: '예약 생성을 취소했습니다.',
+        };
+      }
     }
 
     const reservationId = `R-${Date.now()}-${Math.floor(Math.random() * 1000).toString().padStart(3, '0')}`;
@@ -1832,7 +2103,7 @@ export default function Reservations() {
         formError: '예약 생성에 실패했습니다. 잠시 후 다시 시도해 주세요.',
       };
     }
-  }, [canWriteReservations, hydrateReservationsData, openReservationDetail, vehicleAssets]);
+  }, [canWriteReservations, confirmReservationWarning, hasInspectionIssueCardForVehicle, hydrateReservationsData, openReservationDetail, vehicleAssets]);
 
   const handleCompleteReservationPayment = useCallback(async () => {
     if (!canWritePayments) {
@@ -1929,6 +2200,42 @@ export default function Reservations() {
       return;
     }
 
+    const shouldForcePickup = requiresForcedPickupPrompt(selectedReservation, selectedVehicleAsset);
+    let hasInspectionIssueCard = (selectedVehicleAsset?.issues ?? []).some((issue) => issue.includes('정기점검'));
+    if (selectedVehicleAsset?.vehicleNumber) {
+      try {
+        hasInspectionIssueCard = await hasInspectionIssueCardForVehicle(selectedVehicleAsset.vehicleNumber);
+      } catch {
+        // Fall back to asset.issues when action-items lookup is unavailable.
+      }
+    }
+    const pickupInspectionNoticeDays = getPickupInspectionNoticeDaysByIssueCard(
+      selectedReservation,
+      selectedVehicleAsset,
+      hasInspectionIssueCard,
+    );
+    const insuranceDueInRange = isInsuranceDueWithinReservationRange(selectedVehicleAsset, selectedReservation);
+    const shouldBlockPickupForExpiredInsurance = isInsuranceExpired(selectedVehicleAsset);
+    if (shouldBlockPickupForExpiredInsurance) {
+      await confirmReservationWarning({
+        message: EXPIRED_INSURANCE_PICKUP_MESSAGE,
+        cancelLabel: '닫기',
+        dismissResult: false,
+      });
+      return;
+    }
+    const pickupWarningPrompt = buildPickupWarningPrompt({
+      shouldForcePickup,
+      inspectionNoticeDays: pickupInspectionNoticeDays,
+      insuranceDueInRange,
+    });
+    if (pickupWarningPrompt) {
+      const confirmed = await confirmReservationWarning(pickupWarningPrompt);
+      if (!confirmed) {
+        return;
+      }
+    }
+
     setActiveReservationAction('start');
     setReservationActionError(null);
 
@@ -1936,6 +2243,7 @@ export default function Reservations() {
       const payload = await transitionReservation(selectedReservation.id, {
         to: '대여중',
         reason: '차량 인수 처리',
+        force: shouldForcePickup,
       });
       const fallbackReservation: Reservation = {
         ...selectedReservation,
@@ -1977,6 +2285,14 @@ export default function Reservations() {
           return;
         }
         if (error.status === 409) {
+          if (error.message === EXPIRED_INSURANCE_PICKUP_MESSAGE) {
+            await confirmReservationWarning({
+              message: error.message,
+              cancelLabel: '닫기',
+              dismissResult: false,
+            });
+            return;
+          }
           setReservationActionError(error.message || '상태 전이 충돌이 발생했습니다. 최신 상태를 확인해 주세요.');
           void hydrateReservationsData();
           void hydrateReservationDetail(selectedReservation.id, selectedReservation);
@@ -2004,7 +2320,9 @@ export default function Reservations() {
     hydrateReservationDetail,
     hydrateReservationsData,
     refreshReservationsAfterMutation,
+    hasInspectionIssueCardForVehicle,
     selectedReservation,
+    selectedVehicleAsset,
     vehicleAssets,
   ]);
 
@@ -3149,6 +3467,42 @@ export default function Reservations() {
           dragSelection={dragSelection}
           onSubmit={handleCreateReservation}
         />
+
+        {reservationWarningPrompt && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50">
+            <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+              <p className="whitespace-pre-line text-base font-semibold text-[#1e2939]">{reservationWarningPrompt.message}</p>
+              <div className="mt-6 flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const resolver = reservationWarningResolverRef.current;
+                    reservationWarningResolverRef.current = null;
+                    setReservationWarningPrompt(null);
+                    resolver?.(reservationWarningPrompt.dismissResult);
+                  }}
+                  className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                >
+                  {reservationWarningPrompt.cancelLabel}
+                </button>
+                {reservationWarningPrompt.confirmLabel && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const resolver = reservationWarningResolverRef.current;
+                      reservationWarningResolverRef.current = null;
+                      setReservationWarningPrompt(null);
+                      resolver?.(true);
+                    }}
+                    className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+                  >
+                    {reservationWarningPrompt.confirmLabel}
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* 반납 확인 모달 */}
         {showReturnConfirm && (

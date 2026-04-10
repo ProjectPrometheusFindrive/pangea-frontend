@@ -80,6 +80,15 @@ interface Asset extends VehicleAsset {
   contractStatus?: string;
 }
 
+type ExpiryIssueKind = 'insurance' | 'inspection';
+
+interface DetailSavePromptState {
+  mode: 'invalid' | 'completed';
+  issueKind: ExpiryIssueKind;
+  message: string;
+  payload?: ReturnType<typeof buildAssetPatchPayload>['payload'];
+}
+
 interface AssetActivityEntry {
   id: string;
   timestamp: string;
@@ -931,6 +940,72 @@ function paginateAssets(rows: Asset[], page: number, pageSize: number): Asset[] 
   return rows.slice(start, start + pageSize);
 }
 
+function parseDateOnly(value: string | null | undefined): Date | null {
+  const raw = String(value ?? '').trim();
+  if (!raw || raw === '-') {
+    return null;
+  }
+  const isoPrefix = raw.match(/^(\d{4}-\d{2}-\d{2})/);
+  const candidate = isoPrefix ? `${isoPrefix[1]}T00:00:00` : `${raw}T00:00:00`;
+  const parsed = new Date(candidate);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+  return parsed;
+}
+
+function isStrictlyLaterDate(nextValue: string, previousValue: string | null | undefined): boolean {
+  const nextDate = parseDateOnly(nextValue);
+  if (!nextDate) {
+    return false;
+  }
+  const previousDate = parseDateOnly(previousValue);
+  if (!previousDate) {
+    return true;
+  }
+  return nextDate.getTime() > previousDate.getTime();
+}
+
+function getDetailSaveIssueChange(asset: Asset, form: AssetEditForm): {
+  issueKind: ExpiryIssueKind;
+  nextValue: string;
+  isValid: boolean;
+} | null {
+  const candidates: Array<{ issueKind: ExpiryIssueKind; previousValue: string; nextValue: string }> = [
+    {
+      issueKind: 'insurance',
+      previousValue: String(asset.insuranceExpiry ?? '').trim(),
+      nextValue: form.insuranceExpiry.trim(),
+    },
+    {
+      issueKind: 'inspection',
+      previousValue: String(asset.nextInspection ?? '').trim(),
+      nextValue: form.nextInspection.trim(),
+    },
+  ];
+
+  for (const candidate of candidates) {
+    if (!candidate.nextValue || candidate.previousValue === candidate.nextValue) {
+      continue;
+    }
+    return {
+      issueKind: candidate.issueKind,
+      nextValue: candidate.nextValue,
+      isValid: isStrictlyLaterDate(candidate.nextValue, candidate.previousValue),
+    };
+  }
+
+  return null;
+}
+
+function hasActiveExpiryIssue(asset: Asset, issueKind: ExpiryIssueKind): boolean {
+  const normalizedIssues = asset.issues.map((issue) => issue.replaceAll(' ', '').trim());
+  if (issueKind === 'insurance') {
+    return normalizedIssues.some((issue) => issue.includes('보험만료'));
+  }
+  return normalizedIssues.some((issue) => issue.includes('정기점검'));
+}
+
 function cleanupAssetsQueryParams(params: URLSearchParams): void {
   if (params.get('page') === String(DEFAULT_PAGE)) {
     params.delete('page');
@@ -1004,6 +1079,7 @@ export default function Assets() {
   const [detailFieldErrors, setDetailFieldErrors] = useState<FieldErrorMap<AssetEditField>>({});
   const [detailSaveError, setDetailSaveError] = useState<string | null>(null);
   const [detailConflictNotice, setDetailConflictNotice] = useState<string | null>(null);
+  const [detailSavePrompt, setDetailSavePrompt] = useState<DetailSavePromptState | null>(null);
   const [isDetailSaving, setIsDetailSaving] = useState(false);
   const [isDetailDeleting, setIsDetailDeleting] = useState(false);
   const [assetActivities, setAssetActivities] = useState<AssetActivityEntry[]>([]);
@@ -2125,6 +2201,74 @@ export default function Assets() {
     }
   }, [canWriteAssets, closeDetailModalState, hydrateAssets, isDetailDeleting, isDetailSaving, selectedAsset]);
 
+  const executeDetailSave = useCallback(async (
+    payload: ReturnType<typeof buildAssetPatchPayload>['payload'],
+    issueChange: ReturnType<typeof getDetailSaveIssueChange>,
+  ) => {
+    if (!selectedAsset) {
+      return;
+    }
+
+    setIsDetailSaving(true);
+    setDetailSaveError(null);
+    setDetailFieldErrors({});
+    setDetailConflictNotice(null);
+
+    try {
+      const responsePayload = await patchAsset(selectedAsset.id, payload);
+      const updatedAsset = toAssetDetail(responsePayload);
+      if (!updatedAsset) {
+        throw new Error('수정 응답에서 자산 정보를 확인할 수 없습니다.');
+      }
+
+      setSelectedAsset(updatedAsset);
+      setDetailForm(toAssetEditForm(updatedAsset));
+      setDetailFieldErrors({});
+      setDetailSaveError(null);
+      setDetailConflictNotice(null);
+      setAssets((prevAssets) => prevAssets.map((asset) => (asset.id === updatedAsset.id ? { ...asset, ...updatedAsset } : asset)));
+      void hydrateAssetActivities(updatedAsset.id);
+      void hydrateAssets();
+      if (issueChange?.isValid && hasActiveExpiryIssue(selectedAsset, issueChange.issueKind)) {
+        setDetailSavePrompt({
+          mode: 'completed',
+          issueKind: issueChange.issueKind,
+          message: issueChange.issueKind === 'insurance'
+            ? '보험 만기 임박 이슈를 완료 처리 합니다.'
+            : '정기점검 이슈를 완료 처리 합니다.',
+        });
+      } else {
+        toast.success('차량 정보가 업데이트되었습니다.');
+      }
+    } catch (error) {
+      if (error instanceof ApiError) {
+        if (error.status === 400) {
+          const nextFieldErrors = toAssetEditFieldErrors(error);
+          if (Object.keys(nextFieldErrors).length > 0) {
+            setDetailFieldErrors(nextFieldErrors);
+          }
+          setDetailSaveError(error.message || '입력값을 확인해 주세요.');
+          return;
+        }
+        if (error.status === 403) {
+          setDetailSaveError('차량 자산 수정 권한이 없습니다. 관리자에게 권한을 요청해 주세요.');
+          return;
+        }
+        if (error.status === 409) {
+          setDetailConflictNotice('다른 변경 사항이 먼저 저장되었습니다. 최신 데이터로 새로고침 후 다시 저장해 주세요.');
+          setDetailSaveError(error.message || '버전 충돌이 발생했습니다.');
+          void hydrateAssetDetail(selectedAsset.id, { preserveForm: true, preserveConflictNotice: true });
+          return;
+        }
+      }
+
+      setDetailSaveError('저장에 실패했습니다. 잠시 후 다시 시도해 주세요.');
+      toast.error('저장에 실패했습니다. 다시 시도해 주세요.');
+    } finally {
+      setIsDetailSaving(false);
+    }
+  }, [hydrateAssetActivities, hydrateAssetDetail, hydrateAssets, selectedAsset]);
+
   const handleDetailSave = useCallback(async () => {
     if (!canWriteAssets) {
       setDetailSaveError('차량 자산 수정 권한이 없습니다. 관리자에게 권한을 요청해 주세요.');
@@ -2159,60 +2303,24 @@ export default function Assets() {
       return;
     }
 
-    setIsDetailSaving(true);
-    setDetailSaveError(null);
-    setDetailFieldErrors({});
-    setDetailConflictNotice(null);
-
-    try {
-      const responsePayload = await patchAsset(selectedAsset.id, payload);
-      const updatedAsset = toAssetDetail(responsePayload);
-      if (!updatedAsset) {
-        throw new Error('수정 응답에서 자산 정보를 확인할 수 없습니다.');
-      }
-
-      setSelectedAsset(updatedAsset);
-      setDetailForm(toAssetEditForm(updatedAsset));
-      setDetailFieldErrors({});
-      setDetailSaveError(null);
-      setDetailConflictNotice(null);
-      setAssets((prevAssets) => prevAssets.map((asset) => (asset.id === updatedAsset.id ? { ...asset, ...updatedAsset } : asset)));
-      void hydrateAssetActivities(updatedAsset.id);
-      void hydrateAssets();
-      toast.success('차량 정보가 업데이트되었습니다.');
-    } catch (error) {
-      if (error instanceof ApiError) {
-        if (error.status === 400) {
-          const nextFieldErrors = toAssetEditFieldErrors(error);
-          if (Object.keys(nextFieldErrors).length > 0) {
-            setDetailFieldErrors(nextFieldErrors);
-          }
-          setDetailSaveError(error.message || '입력값을 확인해 주세요.');
-          return;
-        }
-        if (error.status === 403) {
-          setDetailSaveError('차량 자산 수정 권한이 없습니다. 관리자에게 권한을 요청해 주세요.');
-          return;
-        }
-        if (error.status === 409) {
-          setDetailConflictNotice('다른 변경 사항이 먼저 저장되었습니다. 최신 데이터로 새로고침 후 다시 저장해 주세요.');
-          setDetailSaveError(error.message || '버전 충돌이 발생했습니다.');
-          void hydrateAssetDetail(selectedAsset.id, { preserveForm: true, preserveConflictNotice: true });
-          return;
-        }
-      }
-
-      setDetailSaveError('저장에 실패했습니다. 잠시 후 다시 시도해 주세요.');
-      toast.error('저장에 실패했습니다. 다시 시도해 주세요.');
-    } finally {
-      setIsDetailSaving(false);
+    const issueChange = getDetailSaveIssueChange(selectedAsset, detailForm);
+    if (issueChange && !issueChange.isValid) {
+      setDetailSavePrompt({
+        mode: 'invalid',
+        issueKind: issueChange.issueKind,
+        message: issueChange.issueKind === 'insurance'
+          ? '보험 만료일자가 유효하지 않습니다.'
+          : '정기점검 일자가 유효하지 않습니다.',
+        payload,
+      });
+      return;
     }
+
+    await executeDetailSave(payload, issueChange);
   }, [
     canWriteAssets,
     detailForm,
-    hydrateAssetActivities,
-    hydrateAssetDetail,
-    hydrateAssets,
+    executeDetailSave,
     isDetailDirty,
     isDetailSaving,
     selectedAsset,
@@ -2909,6 +3017,52 @@ export default function Assets() {
             onDetailInsuranceFileSelect={handleDetailInsuranceFileSelect}
             onDetailLoanScheduleFileSelect={handleDetailLoanScheduleFileSelect}
           />
+        )}
+
+        {detailSavePrompt && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50">
+            <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+              <p className="text-base font-semibold text-[#1e2939]">{detailSavePrompt.message}</p>
+              <div className="mt-6 flex justify-end gap-3">
+                {detailSavePrompt.mode === 'invalid' ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => setDetailSavePrompt(null)}
+                      className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                    >
+                      닫기
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const pendingPayload = detailSavePrompt.payload;
+                        const issueChange = selectedAsset ? getDetailSaveIssueChange(selectedAsset, detailForm) : null;
+                        setDetailSavePrompt(null);
+                        if (pendingPayload) {
+                          void executeDetailSave(pendingPayload, issueChange && !issueChange.isValid ? null : issueChange);
+                        }
+                      }}
+                      className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+                    >
+                      강제 저장
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDetailSavePrompt(null);
+                      toast.success('차량 정보가 업데이트되었습니다.');
+                    }}
+                    className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+                  >
+                    닫기
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
         )}
       </div>
     </Layout>
