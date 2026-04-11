@@ -46,6 +46,9 @@ interface VehicleDetailModalProps {
     memo?: string;
     plate?: string;
   };
+  visibleInsuranceDocument: AssetStoredDocument | null;
+  visibleInspectionDocument: AssetStoredDocument | null;
+  visibleLoanScheduleDocuments: AssetStoredDocument[];
   activityEntries: AssetActivityEntry[];
   isActivityLoading: boolean;
   activityError: string | null;
@@ -70,6 +73,9 @@ interface VehicleDetailModalProps {
   onDetailInspectionFileSelect: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onDetailLoanScheduleFileSelect: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onDetailLoanScheduleFileRemove: (index: number) => void;
+  onRemoveStoredInsuranceDocument: () => void;
+  onRemoveStoredInspectionDocument: () => void;
+  onRemoveStoredLoanScheduleDocument: (objectName: string) => void;
 }
 
 function toStoredDocumentLabel(objectName: string): string {
@@ -87,9 +93,21 @@ function toStoredDocumentLabel(objectName: string): string {
   }
 }
 
+function stripGeneratedPrefix(fileName: string): string {
+  const normalized = fileName.trim();
+  if (!normalized) {
+    return normalized;
+  }
+
+  return normalized.replace(/^[a-f0-9]{24,}-/i, '');
+}
+
 function getDocumentLabel(document: AssetStoredDocument): string {
+  if (document.originalFileName && document.originalFileName.trim()) {
+    return document.originalFileName.trim();
+  }
   if (document.fileName && document.fileName.trim()) {
-    return document.fileName.trim();
+    return stripGeneratedPrefix(document.fileName);
   }
   return toStoredDocumentLabel(document.objectName);
 }
@@ -113,12 +131,14 @@ function StoredDocumentSection({
   documents,
   emptyText,
   onPreview,
+  onRemove,
 }: {
   title: string;
   document?: AssetStoredDocument | null;
   documents?: AssetStoredDocument[];
   emptyText: string;
   onPreview: (document: AssetStoredDocument) => void;
+  onRemove?: (document: AssetStoredDocument) => void;
 }) {
   const items = documents ?? (document ? [document] : []);
 
@@ -134,15 +154,37 @@ function StoredDocumentSection({
             >
               <span className="min-w-0 truncate">{getDocumentLabel(item)}</span>
               {canPreviewDocument(item) ? (
-                <button
-                  type="button"
-                  onClick={() => onPreview(item)}
-                  className="shrink-0 rounded-md border border-gray-300 bg-white px-2 py-1 font-medium text-gray-700 hover:bg-gray-100"
-                >
-                  {'미리보기'}
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => onPreview(item)}
+                    className="shrink-0 rounded-md border border-gray-300 bg-white px-2 py-1 font-medium text-gray-700 hover:bg-gray-100"
+                  >
+                    {'미리보기'}
+                  </button>
+                  {onRemove && (
+                    <button
+                      type="button"
+                      onClick={() => onRemove(item)}
+                      className="shrink-0 rounded-md border border-red-200 bg-white px-2 py-1 font-medium text-red-600 hover:bg-red-50"
+                    >
+                      {'삭제'}
+                    </button>
+                  )}
+                </div>
               ) : (
-                <span className="shrink-0 text-[11px] text-gray-400">{'미리보기 없음'}</span>
+                <div className="flex items-center gap-2">
+                  <span className="shrink-0 text-[11px] text-gray-400">{'미리보기 없음'}</span>
+                  {onRemove && (
+                    <button
+                      type="button"
+                      onClick={() => onRemove(item)}
+                      className="shrink-0 rounded-md border border-red-200 bg-white px-2 py-1 font-medium text-red-600 hover:bg-red-50"
+                    >
+                      {'삭제'}
+                    </button>
+                  )}
+                </div>
               )}
             </div>
           ))}
@@ -155,6 +197,9 @@ function StoredDocumentSection({
 }
 export function VehicleDetailModal({
   asset,
+  visibleInsuranceDocument,
+  visibleInspectionDocument,
+  visibleLoanScheduleDocuments,
   activityEntries,
   isActivityLoading,
   activityError,
@@ -178,6 +223,9 @@ export function VehicleDetailModal({
   onDetailInspectionFileSelect,
   onDetailLoanScheduleFileSelect,
   onDetailLoanScheduleFileRemove,
+  onRemoveStoredInsuranceDocument,
+  onRemoveStoredInspectionDocument,
+  onRemoveStoredLoanScheduleDocument,
 }: VehicleDetailModalProps) {
   const [detailTab, setDetailTab] = useState<'info' | 'history' | 'sensor'>('info');
   const [previewDocument, setPreviewDocument] = useState<AssetStoredDocument | null>(null);
@@ -344,9 +392,10 @@ export function VehicleDetailModal({
                     <label className="mb-2 block text-sm font-semibold text-gray-600">{'보험가입증서 업로드'}</label>
                     <StoredDocumentSection
                       title="저장된 보험가입증서"
-                      document={asset.insuranceDocument}
+                      document={visibleInsuranceDocument}
                       emptyText="저장된 파일이 없습니다."
                       onPreview={setPreviewDocument}
+                      onRemove={() => onRemoveStoredInsuranceDocument()}
                     />
                     <label className="cursor-pointer">
                       <div className="flex items-center gap-2">
@@ -381,9 +430,10 @@ export function VehicleDetailModal({
                     <label className="mb-2 block text-sm font-semibold text-gray-600">{'자동차종합검사 결과표 업로드'}</label>
                     <StoredDocumentSection
                       title="저장된 자동차종합검사 결과표"
-                      document={asset.inspectionDocument}
+                      document={visibleInspectionDocument}
                       emptyText="저장된 파일이 없습니다."
                       onPreview={setPreviewDocument}
+                      onRemove={() => onRemoveStoredInspectionDocument()}
                     />
                     <label className="cursor-pointer">
                       <div className="flex items-center gap-2">
@@ -418,9 +468,10 @@ export function VehicleDetailModal({
                     <label className="mb-2 block text-sm font-semibold text-gray-600">{'차량구매 대출 상환계획서 업로드'}</label>
                     <StoredDocumentSection
                       title="저장된 상환계획서"
-                      documents={asset.loanScheduleDocuments}
+                      documents={visibleLoanScheduleDocuments}
                       emptyText="저장된 파일이 없습니다."
                       onPreview={setPreviewDocument}
+                      onRemove={(document) => onRemoveStoredLoanScheduleDocument(document.objectName)}
                     />
                     <label className="cursor-pointer">
                       <div className="flex items-center gap-2">

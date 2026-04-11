@@ -28,6 +28,7 @@ export interface DTCRecord {
 }
 
 export interface AssetStoredDocument {
+  originalFileName?: string;
   fileName?: string;
   objectName: string;
   url?: string;
