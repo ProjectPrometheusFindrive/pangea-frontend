@@ -61,8 +61,8 @@ export interface PatchAssetPayload {
   purchaseDate?: string | null;
   insuranceExpiry?: string | null;
   nextInspection?: string | null;
-  insuranceDocObjectName?: string;
-  inspectionDocObjectName?: string;
+  insuranceDocObjectName?: string | null;
+  inspectionDocObjectName?: string | null;
   loanScheduleDocObjectNames?: string[];
 }
 

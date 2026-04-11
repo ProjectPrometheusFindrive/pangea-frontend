@@ -86,6 +86,12 @@ interface DetailUploadedFilesState {
   loanSchedule: File[];
 }
 
+interface DetailRemovedDocumentsState {
+  insurance: boolean;
+  inspection: boolean;
+  loanScheduleObjectNames: string[];
+}
+
 type ExpiryIssueKind = 'insurance' | 'inspection';
 
 interface DetailSavePromptState {
@@ -639,9 +645,15 @@ function normalizeStoredDocument(value: unknown): AssetStoredDocument | null {
     }
 
     return {
+      originalFileName: toStringValue(value.originalFileName) ?? toStringValue(value.originalFilename) ?? undefined,
       fileName: toStringValue(value.fileName) ?? toStringValue(value.name) ?? undefined,
       objectName,
-      url: toStringValue(value.url) ?? toStringValue(value.previewUrl) ?? toStringValue(value.signedUrl) ?? undefined,
+      url: toStringValue(value.url)
+        ?? toStringValue(value.previewUrl)
+        ?? toStringValue(value.signedUrl)
+        ?? toStringValue(value.signedReadUrl)
+        ?? toStringValue(value.readUrl)
+        ?? undefined,
       contentType: toStringValue(value.contentType) ?? toStringValue(value.mimeType) ?? undefined,
     };
   }
@@ -1177,6 +1189,11 @@ export default function Assets() {
   const [isAssetActivitiesLoading, setIsAssetActivitiesLoading] = useState(false);
   const [assetActivitiesError, setAssetActivitiesError] = useState<string | null>(null);
   const [detailUploadedFiles, setDetailUploadedFiles] = useState<DetailUploadedFilesState>({ insurance: null, inspection: null, loanSchedule: [] });
+  const [detailRemovedDocuments, setDetailRemovedDocuments] = useState<DetailRemovedDocumentsState>({
+    insurance: false,
+    inspection: false,
+    loanScheduleObjectNames: [],
+  });
   const detailRequestSequenceRef = useRef(0);
   const detailAbortControllerRef = useRef<AbortController | null>(null);
   const activitiesRequestSequenceRef = useRef(0);
@@ -1373,8 +1390,20 @@ export default function Assets() {
       || detailUploadedFiles.insurance !== null
       || detailUploadedFiles.inspection !== null
       || detailUploadedFiles.loanSchedule.length > 0
+      || detailRemovedDocuments.insurance
+      || detailRemovedDocuments.inspection
+      || detailRemovedDocuments.loanScheduleObjectNames.length > 0
     );
-  }, [detailForm, detailUploadedFiles.inspection, detailUploadedFiles.insurance, detailUploadedFiles.loanSchedule.length, selectedAsset]);
+  }, [
+    detailForm,
+    detailRemovedDocuments.inspection,
+    detailRemovedDocuments.insurance,
+    detailRemovedDocuments.loanScheduleObjectNames.length,
+    detailUploadedFiles.inspection,
+    detailUploadedFiles.insurance,
+    detailUploadedFiles.loanSchedule.length,
+    selectedAsset,
+  ]);
 
   useEffect(() => {
     const hasUnsavedChanges = (
@@ -1436,6 +1465,7 @@ export default function Assets() {
     setAssetActivitiesError(null);
     setIsAssetActivitiesLoading(false);
     setDetailUploadedFiles({ insurance: null, inspection: null, loanSchedule: [] });
+    setDetailRemovedDocuments({ insurance: false, inspection: false, loanScheduleObjectNames: [] });
     updateAssetsSearchParams((params) => {
       params.delete('assetId');
       params.delete('vehicle');
@@ -1802,6 +1832,7 @@ export default function Assets() {
     const file = e.target.files?.[0];
     if (file) {
       setDetailUploadedFiles((prev) => ({ ...prev, insurance: file }));
+      setDetailRemovedDocuments((prev) => ({ ...prev, insurance: false }));
     }
     e.target.value = '';
   }, []);
@@ -1810,6 +1841,7 @@ export default function Assets() {
     const file = e.target.files?.[0];
     if (file) {
       setDetailUploadedFiles((prev) => ({ ...prev, inspection: file }));
+      setDetailRemovedDocuments((prev) => ({ ...prev, inspection: false }));
     }
     e.target.value = '';
   }, []);
@@ -1817,7 +1849,7 @@ export default function Assets() {
   const handleDetailLoanScheduleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
     if (files.length > 0) {
-      setDetailUploadedFiles((prev) => ({ ...prev, loanSchedule: files }));
+      setDetailUploadedFiles((prev) => ({ ...prev, loanSchedule: [...prev.loanSchedule, ...files] }));
     }
     e.target.value = '';
   }, []);
@@ -1826,6 +1858,23 @@ export default function Assets() {
     setDetailUploadedFiles((prev) => ({
       ...prev,
       loanSchedule: prev.loanSchedule.filter((_file, index) => index !== targetIndex),
+    }));
+  }, []);
+
+  const handleRemoveStoredInsuranceDocument = useCallback(() => {
+    setDetailRemovedDocuments((prev) => ({ ...prev, insurance: true }));
+  }, []);
+
+  const handleRemoveStoredInspectionDocument = useCallback(() => {
+    setDetailRemovedDocuments((prev) => ({ ...prev, inspection: true }));
+  }, []);
+
+  const handleRemoveStoredLoanScheduleDocument = useCallback((objectName: string) => {
+    setDetailRemovedDocuments((prev) => ({
+      ...prev,
+      loanScheduleObjectNames: prev.loanScheduleObjectNames.includes(objectName)
+        ? prev.loanScheduleObjectNames
+        : [...prev.loanScheduleObjectNames, objectName],
     }));
   }, []);
 
@@ -2346,6 +2395,8 @@ export default function Assets() {
         const uploadContentType = signedUpload.contentType?.trim() || resolvedContentType;
         await uploadFileToSignedUrl(signedUpload.uploadUrl, detailUploadedFiles.insurance, uploadContentType);
         payload.insuranceDocObjectName = signedUpload.objectName;
+      } else if (detailRemovedDocuments.insurance) {
+        payload.insuranceDocObjectName = null;
       }
 
       if (detailUploadedFiles.inspection) {
@@ -2366,32 +2417,40 @@ export default function Assets() {
         const uploadContentType = signedUpload.contentType?.trim() || resolvedContentType;
         await uploadFileToSignedUrl(signedUpload.uploadUrl, detailUploadedFiles.inspection, uploadContentType);
         payload.inspectionDocObjectName = signedUpload.objectName;
+      } else if (detailRemovedDocuments.inspection) {
+        payload.inspectionDocObjectName = null;
       }
 
-      if (detailUploadedFiles.loanSchedule.length > 0) {
-        const uploadedObjectNames = await Promise.all(
-          detailUploadedFiles.loanSchedule.map(async (file) => {
-            const resolvedContentType = resolveOcrContentType(file);
-            if (!resolvedContentType) {
-              throw new ApiError('UNSUPPORTED_MEDIA_TYPE', '상환계획서는 PDF 또는 이미지 파일만 업로드할 수 있습니다.', {
-                status: 415,
+      const remainingLoanScheduleObjectNames = (selectedAsset.loanScheduleDocuments ?? [])
+        .map((document) => document.objectName)
+        .filter((objectName) => !detailRemovedDocuments.loanScheduleObjectNames.includes(objectName));
+
+      if (detailUploadedFiles.loanSchedule.length > 0 || detailRemovedDocuments.loanScheduleObjectNames.length > 0) {
+        const uploadedObjectNames = detailUploadedFiles.loanSchedule.length > 0
+          ? await Promise.all(
+            detailUploadedFiles.loanSchedule.map(async (file) => {
+              const resolvedContentType = resolveOcrContentType(file);
+              if (!resolvedContentType) {
+                throw new ApiError('UNSUPPORTED_MEDIA_TYPE', '상환계획서는 PDF 또는 이미지 파일만 업로드할 수 있습니다.', {
+                  status: 415,
+                });
+              }
+
+              const signedUpload = await signAssetUpload({
+                fileName: file.name,
+                contentType: resolvedContentType,
+                fileSize: file.size,
+                folder: `assets/${selectedAsset.id}/loan`,
               });
-            }
 
-            const signedUpload = await signAssetUpload({
-              fileName: file.name,
-              contentType: resolvedContentType,
-              fileSize: file.size,
-              folder: `assets/${selectedAsset.id}/loan`,
-            });
+              const uploadContentType = signedUpload.contentType?.trim() || resolvedContentType;
+              await uploadFileToSignedUrl(signedUpload.uploadUrl, file, uploadContentType);
+              return signedUpload.objectName;
+            }),
+          )
+          : [];
 
-            const uploadContentType = signedUpload.contentType?.trim() || resolvedContentType;
-            await uploadFileToSignedUrl(signedUpload.uploadUrl, file, uploadContentType);
-            return signedUpload.objectName;
-          }),
-        );
-
-        payload.loanScheduleDocObjectNames = uploadedObjectNames;
+        payload.loanScheduleDocObjectNames = [...remainingLoanScheduleObjectNames, ...uploadedObjectNames];
       }
 
       const responsePayload = await patchAsset(selectedAsset.id, payload);
@@ -2406,6 +2465,7 @@ export default function Assets() {
       setDetailSaveError(null);
       setDetailConflictNotice(null);
       setDetailUploadedFiles({ insurance: null, inspection: null, loanSchedule: [] });
+      setDetailRemovedDocuments({ insurance: false, inspection: false, loanScheduleObjectNames: [] });
       setAssets((prevAssets) => prevAssets.map((asset) => (asset.id === updatedAsset.id ? { ...asset, ...updatedAsset } : asset)));
       void hydrateAssetActivities(updatedAsset.id);
       void hydrateAssets();
@@ -2447,7 +2507,18 @@ export default function Assets() {
     } finally {
       setIsDetailSaving(false);
     }
-  }, [detailUploadedFiles.inspection, detailUploadedFiles.insurance, detailUploadedFiles.loanSchedule, hydrateAssetActivities, hydrateAssetDetail, hydrateAssets, selectedAsset]);
+  }, [
+    detailRemovedDocuments.inspection,
+    detailRemovedDocuments.insurance,
+    detailRemovedDocuments.loanScheduleObjectNames,
+    detailUploadedFiles.inspection,
+    detailUploadedFiles.insurance,
+    detailUploadedFiles.loanSchedule,
+    hydrateAssetActivities,
+    hydrateAssetDetail,
+    hydrateAssets,
+    selectedAsset,
+  ]);
 
   const handleDetailSave = useCallback(async () => {
     if (!canWriteAssets) {
@@ -2483,6 +2554,9 @@ export default function Assets() {
       && detailUploadedFiles.insurance === null
       && detailUploadedFiles.inspection === null
       && detailUploadedFiles.loanSchedule.length === 0
+      && !detailRemovedDocuments.insurance
+      && !detailRemovedDocuments.inspection
+      && detailRemovedDocuments.loanScheduleObjectNames.length === 0
     ) {
       toast.info('변경된 내용이 없습니다.');
       return;
@@ -2505,6 +2579,9 @@ export default function Assets() {
   }, [
     canWriteAssets,
     detailForm,
+    detailRemovedDocuments.inspection,
+    detailRemovedDocuments.insurance,
+    detailRemovedDocuments.loanScheduleObjectNames.length,
     executeDetailSave,
     detailUploadedFiles.inspection,
     detailUploadedFiles.insurance,
@@ -3182,6 +3259,11 @@ export default function Assets() {
         {selectedAsset && (
           <VehicleDetailModal
             asset={selectedAsset}
+            visibleInsuranceDocument={detailRemovedDocuments.insurance ? null : selectedAsset.insuranceDocument ?? null}
+            visibleInspectionDocument={detailRemovedDocuments.inspection ? null : selectedAsset.inspectionDocument ?? null}
+            visibleLoanScheduleDocuments={(selectedAsset.loanScheduleDocuments ?? []).filter(
+              (document) => !detailRemovedDocuments.loanScheduleObjectNames.includes(document.objectName),
+            )}
             activityEntries={assetActivities}
             isActivityLoading={isAssetActivitiesLoading}
             activityError={assetActivitiesError}
@@ -3206,6 +3288,9 @@ export default function Assets() {
             onDetailInspectionFileSelect={handleDetailInspectionFileSelect}
             onDetailLoanScheduleFileSelect={handleDetailLoanScheduleFileSelect}
             onDetailLoanScheduleFileRemove={handleDetailLoanScheduleFileRemove}
+            onRemoveStoredInsuranceDocument={handleRemoveStoredInsuranceDocument}
+            onRemoveStoredInspectionDocument={handleRemoveStoredInspectionDocument}
+            onRemoveStoredLoanScheduleDocument={handleRemoveStoredLoanScheduleDocument}
           />
         )}
 
