@@ -27,6 +27,13 @@ export interface DTCRecord {
   notes?: string;
 }
 
+export interface AssetStoredDocument {
+  fileName?: string;
+  objectName: string;
+  url?: string;
+  contentType?: string;
+}
+
 export interface VehicleAsset {
   vehicleNumber: string;
   model: string;
@@ -47,4 +54,8 @@ export interface VehicleAsset {
   registrationStatus?: string;
   registrationDate?: string | null;
   purchaseDate?: string | null;
+  insuranceDocument?: AssetStoredDocument | null;
+  inspectionDocument?: AssetStoredDocument | null;
+  loanScheduleDocuments?: AssetStoredDocument[];
+  loanScheduleDocObjectNames?: string[];
 }

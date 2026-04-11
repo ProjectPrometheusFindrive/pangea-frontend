@@ -61,6 +61,9 @@ export interface PatchAssetPayload {
   purchaseDate?: string | null;
   insuranceExpiry?: string | null;
   nextInspection?: string | null;
+  insuranceDocObjectName?: string;
+  inspectionDocObjectName?: string;
+  loanScheduleDocObjectNames?: string[];
 }
 
 export interface GetAssetHistoryParams extends AssetsRequestOptions {
