@@ -16,6 +16,7 @@ import { useAuth } from '../context/AuthContext';
 import { useAuthorization } from '../context/AuthorizationContext';
 import { useCompany } from '../context/CompanyContext';
 import { resolveRoutePermissionForPath, ROUTE_PERMISSIONS } from '../authorization';
+import { formatDateKst } from '../utils/dateTimeFormat';
 import { navigateToPremiumInquiry } from '../utils/premiumInquiry';
 
 interface LayoutProps {
@@ -39,7 +40,7 @@ function toRelativeTimeLabel(value: string): string {
   if (diffMs < 86_400_000) {
     return `${Math.floor(diffMs / 3_600_000)}시간 전`;
   }
-  return parsedDate.toLocaleDateString('ko-KR');
+  return formatDateKst(parsedDate);
 }
 
 function toNotificationErrorMessage(error: unknown): string {

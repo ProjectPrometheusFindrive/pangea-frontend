@@ -23,6 +23,7 @@ import {
   uploadSupportTicketAttachment,
   updateSupportTicketStatus,
 } from '../../services/support';
+import { formatDateTimeKst } from '../utils/dateTimeFormat';
 import type { SupportCenterLocationState, SupportPrefillState } from '../utils/premiumInquiry';
 
 type SupportField = 'companyId' | 'category' | 'title' | 'content' | 'contactPhone' | 'attachments';
@@ -128,22 +129,7 @@ function formatBytes(bytes: number): string {
 }
 
 function formatDateTime(value?: string): string {
-  if (!value) {
-    return '-';
-  }
-
-  const parsedValue = new Date(value);
-  if (Number.isNaN(parsedValue.getTime())) {
-    return value;
-  }
-
-  return parsedValue.toLocaleString('ko-KR', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+  return formatDateTimeKst(value, '-');
 }
 
 function normalizeSupportStatus(status: SupportTicketStatus): string {

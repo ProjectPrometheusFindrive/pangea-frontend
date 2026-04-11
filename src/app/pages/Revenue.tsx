@@ -30,6 +30,7 @@ import {
   shouldShowDashboardCompanySelector,
   updateDashboardSearchParams,
 } from './dashboardCompanyScope';
+import { formatDateKst } from '../utils/dateTimeFormat';
 
 type PeriodPreset = 'last7Days' | 'last30Days' | 'last365Days';
 
@@ -197,10 +198,7 @@ function formatAxisCurrency(value: number): string {
 }
 
 function formatTrendDateLabel(value: string): string {
-  if (value.length >= 10) {
-    return `${value.slice(5, 7)}/${value.slice(8, 10)}`;
-  }
-  return value;
+  return formatDateKst(value, value);
 }
 
 function formatWanCurrency(value: number): string {
@@ -884,4 +882,3 @@ export default function Revenue() {
     </Layout>
   );
 }
-

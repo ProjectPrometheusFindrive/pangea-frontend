@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { X, AlertTriangle, Loader2, Upload } from 'lucide-react';
 import { getAccidentSeverity } from '../utils/issueUtils';
 
@@ -18,12 +18,20 @@ export interface AccidentReportSubmitFeedback {
   fieldErrors?: Partial<Record<AccidentReportField, string>>;
 }
 
+export interface AccidentReportAssigneeOption {
+  userId: string;
+  label: string;
+}
+
 interface AccidentReportModalProps {
   isOpen: boolean;
   onClose: () => void;
   reservationId: string;
   vehicleNumber: string;
   customerName: string;
+  assigneeOptions: AccidentReportAssigneeOption[];
+  isAssigneeLoading?: boolean;
+  assigneeLoadError?: string | null;
   onSubmit: (report: AccidentReportFormValues) => Promise<AccidentReportSubmitFeedback | null>;
 }
 
@@ -33,15 +41,27 @@ export function AccidentReportModal({
   reservationId,
   vehicleNumber,
   customerName,
+  assigneeOptions,
+  isAssigneeLoading = false,
+  assigneeLoadError = null,
   onSubmit,
 }: AccidentReportModalProps) {
   const [accidentType, setAccidentType] = useState<'major' | 'medium' | 'minor'>('minor');
   const [description, setDescription] = useState('');
-  const [assignee, setAssignee] = useState('이영희');
+  const [assigneeId, setAssigneeId] = useState('');
   const [blackboxFile, setBlackboxFile] = useState<File | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Partial<Record<AccidentReportField, string>>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+    if (assigneeOptions.length > 0 && !assigneeId.trim()) {
+      setAssigneeId(assigneeOptions[0].userId);
+    }
+  }, [assigneeId, assigneeOptions, isOpen]);
 
   if (!isOpen) {
     return null;
@@ -62,7 +82,7 @@ export function AccidentReportModal({
   const handleResetAndClose = () => {
     setAccidentType('minor');
     setDescription('');
-    setAssignee('이영희');
+    setAssigneeId(assigneeOptions[0]?.userId ?? '');
     setBlackboxFile(null);
     setSubmitError(null);
     setFieldErrors({});
@@ -79,6 +99,9 @@ export function AccidentReportModal({
     if (!description.trim()) {
       nextErrors.description = '사고 설명을 입력해 주세요.';
     }
+    if (assigneeOptions.length > 0 && !assigneeId.trim()) {
+      nextErrors.assignee = '담당자를 선택해 주세요.';
+    }
     if (!blackboxFile) {
       nextErrors.blackboxFile = '블랙박스 첨부는 필수입니다.';
     } else if (blackboxFile.size > MAX_BLACKBOX_FILE_BYTES) {
@@ -91,6 +114,9 @@ export function AccidentReportModal({
       return;
     }
 
+    const selectedAssignee = assigneeOptions.find((option) => option.userId === assigneeId);
+    const assigneeLabel = selectedAssignee?.label ?? '';
+
     setIsSubmitting(true);
     setSubmitError(null);
 
@@ -98,7 +124,7 @@ export function AccidentReportModal({
       const feedback = await onSubmit({
         accidentType,
         description: description.trim(),
-        assignee: assignee.trim(),
+        assignee: assigneeLabel,
         blackboxFile,
       });
 
@@ -282,23 +308,38 @@ export function AccidentReportModal({
             <label className="block text-sm font-semibold text-gray-700 mb-2">
               담당자 배정
             </label>
+            {isAssigneeLoading ? (
+              <div className="flex items-center gap-2 rounded-lg border border-gray-300 bg-gray-50 px-4 py-3 text-sm text-gray-600">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                담당자 목록을 불러오는 중입니다.
+              </div>
+            ) : (
             <select
-              value={assignee}
+              value={assigneeId}
               onChange={(event) => {
-                setAssignee(event.target.value);
+                setAssigneeId(event.target.value);
                 clearFieldError('assignee');
               }}
               className={`w-full px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 ${
                 fieldErrors.assignee ? 'border-red-400 bg-red-50' : 'border-gray-300'
               }`}
-              disabled={isSubmitting}
+              disabled={isSubmitting || assigneeOptions.length === 0}
             >
-              <option value="이영희">이영희</option>
-              <option value="박철수">박철수</option>
-              <option value="최지우">최지우</option>
-              <option value="김서연">김서연</option>
-              <option value="정다은">정다은</option>
+              {assigneeOptions.length === 0 ? (
+                <option value="">선택 가능한 담당자가 없습니다</option>
+              ) : (
+                <>
+                  <option value="">담당자를 선택하세요</option>
+                  {assigneeOptions.map((option) => (
+                    <option key={option.userId} value={option.userId}>
+                      {option.label}
+                    </option>
+                  ))}
+                </>
+              )}
             </select>
+            )}
+            {assigneeLoadError && <p className="mt-1 text-xs text-red-600">{assigneeLoadError}</p>}
             {fieldErrors.assignee && <p className="mt-1 text-xs text-red-600">{fieldErrors.assignee}</p>}
           </div>
         </div>
@@ -314,7 +355,7 @@ export function AccidentReportModal({
           <button
             onClick={handleSubmit}
             className="px-6 py-2.5 rounded-lg bg-red-600 text-white font-medium hover:bg-red-700 transition-colors flex items-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
-            disabled={isSubmitting}
+            disabled={isSubmitting || isAssigneeLoading || assigneeOptions.length === 0}
           >
             {isSubmitting && <Loader2 className="h-4 w-4 animate-spin" />}
             {isSubmitting ? '등록 중...' : '사고 등록'}

@@ -12,6 +12,7 @@ import {
   type DeviceInstallationStatus,
 } from '../../services/deviceInstallations';
 import { getPageErrorActionLabel, handlePageErrorAction } from '../hooks/usePageEndpointState';
+import { formatDateTimeKst } from '../utils/dateTimeFormat';
 import { PremiumBanner } from './PremiumBanner';
 
 interface PremiumInstallableAsset {
@@ -204,22 +205,7 @@ function readPremiumInstallationReceipt(): PremiumInstallationReceipt | null {
 }
 
 function formatDateTime(value?: string): string {
-  if (!value) {
-    return '-';
-  }
-
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
-    return value;
-  }
-
-  return parsed.toLocaleString('ko-KR', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+  return formatDateTimeKst(value, '-');
 }
 
 function toDateTimeLocalValue(date: Date): string {

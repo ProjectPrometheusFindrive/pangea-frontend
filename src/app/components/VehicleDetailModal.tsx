@@ -3,7 +3,9 @@ import { X, Activity, History, Info, Zap, AlertTriangle, Loader2 } from 'lucide-
 import type { AssetStoredDocument, VehicleAsset } from '../types/assets';
 import { useNavigate } from 'react-router';
 import type { AssetEditForm } from '../pages/assetsDetailForm';
+import { formatDateTimeKst } from '../utils/dateTimeFormat';
 import { navigateToPremiumInquiry } from '../utils/premiumInquiry';
+import { DateTextPicker } from './DateTextPicker';
 
 interface AssetActivityEntry {
   id: string;
@@ -18,18 +20,7 @@ interface AssetActivityEntry {
 }
 
 function formatActivityDate(isoString: string): string {
-  if (!isoString) return '-';
-  const d = new Date(isoString);
-  if (Number.isNaN(d.getTime())) return isoString;
-  return d.toLocaleString('ko-KR', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-    timeZone: 'Asia/Seoul',
-  });
+  return formatDateTimeKst(isoString, '-');
 }
 
 function getActivityStatusBadge(status: string | null): { label: string; className: string } {
@@ -79,22 +70,6 @@ interface VehicleDetailModalProps {
   onDetailInspectionFileSelect: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onDetailLoanScheduleFileSelect: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onDetailLoanScheduleFileRemove: (index: number) => void;
-}
-
-function formatDateInputValue(value: string | undefined): string {
-  if (!value || value === '-') {
-    return '';
-  }
-  const trimmed = value.trim();
-  const isoPrefix = trimmed.match(/^(\d{4}-\d{2}-\d{2})/);
-  if (isoPrefix) {
-    return isoPrefix[1];
-  }
-  const parsed = new Date(trimmed);
-  if (Number.isNaN(parsed.getTime())) {
-    return '';
-  }
-  return parsed.toISOString().slice(0, 10);
 }
 
 function toStoredDocumentLabel(objectName: string): string {
@@ -178,8 +153,6 @@ function StoredDocumentSection({
     </div>
   );
 }
-
-
 export function VehicleDetailModal({
   asset,
   activityEntries,
@@ -395,13 +368,12 @@ export function VehicleDetailModal({
 
                   <div>
                     <label className="mb-2 block text-sm font-semibold text-gray-600">{'보험만료일'}</label>
-                    <input
-                      data-testid="asset-detail-insurance-expiry-input"
-                      type="date"
-                      value={formatDateInputValue(editForm.insuranceExpiry)}
-                      onChange={(e) => onEditFieldChange('insuranceExpiry', e.target.value)}
+                    <DateTextPicker
+                      inputTestId="asset-detail-insurance-expiry-input"
+                      ariaLabel="보험만료일"
+                      value={editForm.insuranceExpiry}
+                      onChange={(value) => onEditFieldChange('insuranceExpiry', value)}
                       disabled={!canEdit || isSaving}
-                      className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-500"
                     />
                   </div>
 
@@ -433,13 +405,12 @@ export function VehicleDetailModal({
 
                   <div>
                     <label className="mb-2 block text-sm font-semibold text-gray-600">{'다음 정기점검일'}</label>
-                    <input
-                      data-testid="asset-detail-next-inspection-input"
-                      type="date"
-                      value={formatDateInputValue(editForm.nextInspection)}
-                      onChange={(e) => onEditFieldChange('nextInspection', e.target.value)}
+                    <DateTextPicker
+                      inputTestId="asset-detail-next-inspection-input"
+                      ariaLabel="다음 정기점검일"
+                      value={editForm.nextInspection}
+                      onChange={(value) => onEditFieldChange('nextInspection', value)}
                       disabled={!canEdit || isSaving}
-                      className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-500"
                     />
                   </div>
 
@@ -651,7 +622,7 @@ export function VehicleDetailModal({
                     </div>
                     <p className="text-sm text-green-700">{'실시간 차량 상태 모니터링 중입니다.'}</p>
                     <p className="mt-1 text-xs text-green-600">
-                      {`마지막 업데이트: ${asset.deviceStatus ? new Date(asset.deviceStatus.lastUpdate).toLocaleString('ko-KR') : '-'}`}
+                      {`마지막 업데이트: ${asset.deviceStatus ? formatDateTimeKst(asset.deviceStatus.lastUpdate, '-') : '-'}`}
                     </p>
                   </div>
                 </div>
