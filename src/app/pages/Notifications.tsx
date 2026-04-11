@@ -13,6 +13,7 @@ import {
 import { Layout } from '../components/Layout';
 import { resolveRoutePermissionForPath } from '../authorization';
 import { useAuthorization } from '../context/AuthorizationContext';
+import { formatDateKst } from '../utils/dateTimeFormat';
 
 function toNotificationErrorMessage(error: unknown): string {
   if (error instanceof ApiError && error.message) {
@@ -42,7 +43,7 @@ function toRelativeTimeLabel(value: string): string {
   if (diffMs < 86_400_000) {
     return `${Math.floor(diffMs / 3_600_000)}시간 전`;
   }
-  return parsedDate.toLocaleDateString('ko-KR');
+  return formatDateKst(parsedDate);
 }
 
 const PAGE_SIZE = 20;

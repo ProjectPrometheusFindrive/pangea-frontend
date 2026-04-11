@@ -39,6 +39,7 @@ import {
 } from '../utils/paymentStatusSync';
 import { useAuthorization } from '../context/AuthorizationContext';
 import { ACTION_PERMISSIONS, ROUTE_PERMISSIONS } from '../authorization';
+import { formatDateKst, formatDateTimeKst } from '../utils/dateTimeFormat';
 import type { VehicleAsset } from '../types/assets';
 import type { Reservation } from '../types/reservations';
 import { ApiError } from '../../services/api';
@@ -298,7 +299,7 @@ function buildPickupWarningPrompt(options: {
 }
 
 function toAccidentDisplayTime(value: Date): string {
-  return `${value.getFullYear()}.${pad2(value.getMonth() + 1)}.${pad2(value.getDate())} ${pad2(value.getHours())}:${pad2(value.getMinutes())}:${pad2(value.getSeconds())}`;
+  return formatDateTimeKst(value, '-');
 }
 
 function sanitizeFileName(value: string): string {
@@ -2842,11 +2843,7 @@ export default function Reservations() {
             <div className="flex-1" />
             
             <span className="text-xs text-blue-700 font-semibold">
-              {toDateFromOffset(currentWeekStart).toLocaleDateString('ko-KR', { 
-                year: 'numeric', 
-                month: 'long', 
-                day: 'numeric' 
-              })} ~
+              {formatDateKst(toDateFromOffset(currentWeekStart))} ~
             </span>
           </div>
 
@@ -3280,7 +3277,7 @@ export default function Reservations() {
                       </div>
                       {selectedReservationPaymentSync?.updatedAt && (
                         <p className="text-xs text-gray-500 mt-2">
-                          최근 반영: {new Date(selectedReservationPaymentSync.updatedAt).toLocaleString('ko-KR')}
+                          최근 반영: {formatDateTimeKst(selectedReservationPaymentSync.updatedAt, '-')}
                         </p>
                       )}
                       {canWritePayments && canMarkReservationPaymentAsPaid(selectedReservation, selectedReservationPaymentSync) && (
