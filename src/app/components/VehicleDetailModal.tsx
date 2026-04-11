@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { X, Activity, History, Info, Zap, AlertTriangle, Loader2 } from 'lucide-react';
-import type { VehicleAsset } from '../types/assets';
+import type { AssetStoredDocument, VehicleAsset } from '../types/assets';
 import { useNavigate } from 'react-router';
 import type { AssetEditForm } from '../pages/assetsDetailForm';
 import { formatDateTimeKst } from '../utils/dateTimeFormat';
@@ -65,11 +65,94 @@ interface VehicleDetailModalProps {
   handleSave: () => void;
   handleDelete: () => void;
   getStatusColor: (status: string) => string;
-  detailUploadedFiles: { insurance: File | null; loanSchedule: File | null };
+  detailUploadedFiles: { insurance: File | null; inspection: File | null; loanSchedule: File[] };
   onDetailInsuranceFileSelect: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onDetailInspectionFileSelect: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onDetailLoanScheduleFileSelect: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onDetailLoanScheduleFileRemove: (index: number) => void;
 }
 
+function toStoredDocumentLabel(objectName: string): string {
+  const normalized = objectName.trim();
+  if (!normalized) {
+    return '-';
+  }
+
+  const segments = normalized.split('/');
+  const fileName = segments[segments.length - 1] ?? normalized;
+  try {
+    return decodeURIComponent(fileName);
+  } catch {
+    return fileName;
+  }
+}
+
+function getDocumentLabel(document: AssetStoredDocument): string {
+  if (document.fileName && document.fileName.trim()) {
+    return document.fileName.trim();
+  }
+  return toStoredDocumentLabel(document.objectName);
+}
+
+function canPreviewDocument(document: AssetStoredDocument): boolean {
+  return Boolean(document.url && document.url.trim());
+}
+
+function isImageDocument(document: AssetStoredDocument): boolean {
+  return document.contentType?.startsWith('image/') ?? false;
+}
+
+function isPdfDocument(document: AssetStoredDocument): boolean {
+  return document.contentType === 'application/pdf'
+    || getDocumentLabel(document).toLowerCase().endsWith('.pdf');
+}
+
+function StoredDocumentSection({
+  title,
+  document,
+  documents,
+  emptyText,
+  onPreview,
+}: {
+  title: string;
+  document?: AssetStoredDocument | null;
+  documents?: AssetStoredDocument[];
+  emptyText: string;
+  onPreview: (document: AssetStoredDocument) => void;
+}) {
+  const items = documents ?? (document ? [document] : []);
+
+  return (
+    <div className="mb-3 rounded-lg border border-gray-200 bg-gray-50 px-3 py-3">
+      <p className="text-xs font-semibold text-gray-600">{title}</p>
+      {items.length > 0 ? (
+        <div className="mt-2 space-y-2">
+          {items.map((item, index) => (
+            <div
+              key={`${item.objectName}-${index}`}
+              className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs text-gray-700"
+            >
+              <span className="min-w-0 truncate">{getDocumentLabel(item)}</span>
+              {canPreviewDocument(item) ? (
+                <button
+                  type="button"
+                  onClick={() => onPreview(item)}
+                  className="shrink-0 rounded-md border border-gray-300 bg-white px-2 py-1 font-medium text-gray-700 hover:bg-gray-100"
+                >
+                  {'미리보기'}
+                </button>
+              ) : (
+                <span className="shrink-0 text-[11px] text-gray-400">{'미리보기 없음'}</span>
+              )}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="mt-2 text-xs text-gray-500">{emptyText}</p>
+      )}
+    </div>
+  );
+}
 export function VehicleDetailModal({
   asset,
   activityEntries,
@@ -92,9 +175,12 @@ export function VehicleDetailModal({
   getStatusColor,
   detailUploadedFiles,
   onDetailInsuranceFileSelect,
+  onDetailInspectionFileSelect,
   onDetailLoanScheduleFileSelect,
+  onDetailLoanScheduleFileRemove,
 }: VehicleDetailModalProps) {
   const [detailTab, setDetailTab] = useState<'info' | 'history' | 'sensor'>('info');
+  const [previewDocument, setPreviewDocument] = useState<AssetStoredDocument | null>(null);
   const navigate = useNavigate();
 
   if (!isOpen) {
@@ -105,6 +191,7 @@ export function VehicleDetailModal({
     const closed = onClose();
     if (closed) {
       setDetailTab('info');
+      setPreviewDocument(null);
     }
   };
 
@@ -255,6 +342,12 @@ export function VehicleDetailModal({
                 <div className="space-y-4">
                   <div>
                     <label className="mb-2 block text-sm font-semibold text-gray-600">{'보험가입증서 업로드'}</label>
+                    <StoredDocumentSection
+                      title="저장된 보험가입증서"
+                      document={asset.insuranceDocument}
+                      emptyText="저장된 파일이 없습니다."
+                      onPreview={setPreviewDocument}
+                    />
                     <label className="cursor-pointer">
                       <div className="flex items-center gap-2">
                         <div className="rounded-lg bg-gray-100 px-4 py-2 font-medium text-gray-700 hover:bg-gray-200">{'파일 선택'}</div>
@@ -286,14 +379,25 @@ export function VehicleDetailModal({
 
                   <div>
                     <label className="mb-2 block text-sm font-semibold text-gray-600">{'자동차종합검사 결과표 업로드'}</label>
+                    <StoredDocumentSection
+                      title="저장된 자동차종합검사 결과표"
+                      document={asset.inspectionDocument}
+                      emptyText="저장된 파일이 없습니다."
+                      onPreview={setPreviewDocument}
+                    />
                     <label className="cursor-pointer">
                       <div className="flex items-center gap-2">
                         <div className="rounded-lg bg-gray-100 px-4 py-2 font-medium text-gray-700 hover:bg-gray-200">{'파일 선택'}</div>
-                        <span className="text-sm text-gray-500">{'선택된 파일 없음'}</span>
+                        {detailUploadedFiles.inspection ? (
+                          <span className="text-sm text-green-600">{'✓ '}{detailUploadedFiles.inspection.name}</span>
+                        ) : (
+                          <span className="text-sm text-gray-500">{'선택된 파일 없음'}</span>
+                        )}
                       </div>
                       <input
                         type="file"
-                        accept=".pdf,.jpg,.jpeg,.png"
+                        accept="application/pdf,image/*"
+                        onChange={onDetailInspectionFileSelect}
                         className="hidden"
                       />
                     </label>
@@ -312,11 +416,17 @@ export function VehicleDetailModal({
 
                   <div>
                     <label className="mb-2 block text-sm font-semibold text-gray-600">{'차량구매 대출 상환계획서 업로드'}</label>
+                    <StoredDocumentSection
+                      title="저장된 상환계획서"
+                      documents={asset.loanScheduleDocuments}
+                      emptyText="저장된 파일이 없습니다."
+                      onPreview={setPreviewDocument}
+                    />
                     <label className="cursor-pointer">
                       <div className="flex items-center gap-2">
                         <div className="rounded-lg bg-gray-100 px-4 py-2 font-medium text-gray-700 hover:bg-gray-200">{'파일 선택'}</div>
-                        {detailUploadedFiles.loanSchedule ? (
-                          <span className="text-sm text-green-600">{'✓ '}{detailUploadedFiles.loanSchedule.name}</span>
+                        {detailUploadedFiles.loanSchedule.length > 0 ? (
+                          <span className="text-sm text-green-600">{`선택된 파일 ${detailUploadedFiles.loanSchedule.length}개`}</span>
                         ) : (
                           <span className="text-sm text-gray-500">{'선택된 파일 없음'}</span>
                         )}
@@ -324,12 +434,89 @@ export function VehicleDetailModal({
                       <input
                         type="file"
                         accept="application/pdf,image/*"
+                        multiple
                         onChange={onDetailLoanScheduleFileSelect}
                         className="hidden"
                       />
                     </label>
+                    {detailUploadedFiles.loanSchedule.length > 0 && (
+                      <div className="mt-3 space-y-2">
+                        {detailUploadedFiles.loanSchedule.map((file, index) => (
+                          <div
+                            key={`${file.name}-${file.lastModified}-${index}`}
+                            className="flex items-center justify-between gap-3 rounded-lg border border-green-100 bg-green-50 px-3 py-2 text-xs text-green-700"
+                          >
+                            <span className="min-w-0 truncate">{file.name}</span>
+                            <button
+                              type="button"
+                              onClick={() => onDetailLoanScheduleFileRemove(index)}
+                              className="shrink-0 rounded-md border border-green-200 bg-white px-2 py-1 font-medium text-green-700 hover:bg-green-100"
+                            >
+                              {'삭제'}
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
+              </div>
+            </div>
+          )}
+
+          {previewDocument && (
+            <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-6">
+              <div className="flex max-h-[85vh] w-[960px] max-w-[92vw] flex-col overflow-hidden rounded-xl bg-white shadow-2xl">
+                <div className="flex items-center justify-between border-b border-gray-200 px-5 py-4">
+                  <div>
+                    <p className="text-sm font-semibold text-[#1e2939]">{getDocumentLabel(previewDocument)}</p>
+                    <p className="text-xs text-gray-500">{previewDocument.contentType ?? 'content type unknown'}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setPreviewDocument(null)}
+                    className="rounded-lg p-2 hover:bg-gray-100"
+                  >
+                    <X className="h-5 w-5" />
+                  </button>
+                </div>
+                <div className="flex-1 overflow-auto bg-gray-100 p-4">
+                  {previewDocument.url ? (
+                    isImageDocument(previewDocument) ? (
+                      <img
+                        src={previewDocument.url}
+                        alt={getDocumentLabel(previewDocument)}
+                        className="mx-auto max-h-[70vh] rounded-lg bg-white object-contain"
+                      />
+                    ) : isPdfDocument(previewDocument) ? (
+                      <iframe
+                        src={previewDocument.url}
+                        title={getDocumentLabel(previewDocument)}
+                        className="h-[70vh] w-full rounded-lg border border-gray-200 bg-white"
+                      />
+                    ) : (
+                      <div className="flex h-[70vh] items-center justify-center rounded-lg border border-dashed border-gray-300 bg-white text-sm text-gray-500">
+                        {'이 형식은 인라인 미리보기를 지원하지 않습니다.'}
+                      </div>
+                    )
+                  ) : (
+                    <div className="flex h-[70vh] items-center justify-center rounded-lg border border-dashed border-gray-300 bg-white text-sm text-gray-500">
+                      {'미리보기 URL이 없습니다.'}
+                    </div>
+                  )}
+                </div>
+                {previewDocument.url && (
+                  <div className="border-t border-gray-200 px-5 py-3">
+                    <a
+                      href={previewDocument.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-sm font-medium text-blue-600 hover:text-blue-800"
+                    >
+                      {'새 탭에서 열기'}
+                    </a>
+                  </div>
+                )}
               </div>
             </div>
           )}
