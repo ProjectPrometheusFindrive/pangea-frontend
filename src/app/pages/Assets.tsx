@@ -129,6 +129,11 @@ interface UploadedFiles {
   loanSchedule: File[];
 }
 
+interface CreateUploadedDocumentsState {
+  insuranceDocObjectName: string | null;
+  loanScheduleDocObjectNames: string[];
+}
+
 interface OcrSuggestion {
   docType: OcrDocType;
   fieldName: string;
@@ -921,7 +926,11 @@ function toAssetEditFieldErrors(error: ApiError): FieldErrorMap<AssetEditField> 
   return mapAssetEditFieldErrors(toErrorFieldEntries(error));
 }
 
-function toCreatePayload(form: CreateFormState, companyId: string | null): {
+function toCreatePayload(
+  form: CreateFormState,
+  companyId: string | null,
+  uploadedDocuments?: CreateUploadedDocumentsState,
+): {
   payload: {
     vin: string;
     plate: string;
@@ -932,6 +941,8 @@ function toCreatePayload(form: CreateFormState, companyId: string | null): {
     year?: number;
     insuranceExpiry?: string | null;
     nextInspection?: string | null;
+    insuranceDocObjectName?: string | null;
+    loanScheduleDocObjectNames?: string[];
   } | null;
   fieldErrors: FieldErrorMap<CreateField>;
 } {
@@ -977,6 +988,10 @@ function toCreatePayload(form: CreateFormState, companyId: string | null): {
       year,
       insuranceExpiry: insuranceExpiry || undefined,
       nextInspection: nextInspection || undefined,
+      insuranceDocObjectName: uploadedDocuments?.insuranceDocObjectName ?? undefined,
+      loanScheduleDocObjectNames: uploadedDocuments?.loanScheduleDocObjectNames.length
+        ? uploadedDocuments.loanScheduleDocObjectNames
+        : undefined,
     },
     fieldErrors,
   };
@@ -1170,6 +1185,10 @@ export default function Assets() {
     vehicleRegistration: null,
     insurance: null,
     loanSchedule: [],
+  });
+  const [createUploadedDocuments, setCreateUploadedDocuments] = useState<CreateUploadedDocumentsState>({
+    insuranceDocObjectName: null,
+    loanScheduleDocObjectNames: [],
   });
   const [assets, setAssets] = useState<Asset[]>([]);
   const [catalogAssets, setCatalogAssets] = useState<Asset[]>([]);
@@ -1365,6 +1384,10 @@ export default function Assets() {
       vehicleRegistration: null,
       insurance: null,
       loanSchedule: [],
+    });
+    setCreateUploadedDocuments({
+      insuranceDocObjectName: null,
+      loanScheduleDocObjectNames: [],
     });
   }, [abortOcrProcessing, resetOcrFeedback]);
 
@@ -1963,6 +1986,23 @@ export default function Assets() {
     setOcrWarnings([]);
     setOcrSuggestions([]);
     setOcrCanRetry(false);
+    setCreateUploadedDocuments((previous) => {
+      if (fileKey === 'loanSchedule') {
+        return {
+          ...previous,
+          loanScheduleDocObjectNames: [],
+        };
+      }
+
+      if (fileKey === 'insurance') {
+        return {
+          ...previous,
+          insuranceDocObjectName: null,
+        };
+      }
+
+      return previous;
+    });
     setCreateForm((previous) => {
       const nextForm = { ...previous };
       for (const [fieldName, appliedValue] of Object.entries(ocrAppliedValues)) {
@@ -2052,6 +2092,10 @@ export default function Assets() {
 
     const warnings: string[] = [];
     const extractedItems: Array<{ docType: OcrDocType; fields: OcrExtractedField[] }> = [];
+    const nextUploadedDocuments: CreateUploadedDocumentsState = {
+      insuranceDocObjectName: null,
+      loanScheduleDocObjectNames: [],
+    };
     let shouldEnableRetry = false;
     let requiredDocumentFailureMessage: string | null = null;
 
@@ -2100,6 +2144,12 @@ export default function Assets() {
             );
             if (controller.signal.aborted || requestSequence !== ocrRequestSequenceRef.current) {
               return;
+            }
+
+            if (docConfig.key === 'insurance') {
+              nextUploadedDocuments.insuranceDocObjectName = signedUpload.objectName;
+            } else if (docConfig.key === 'loanSchedule') {
+              nextUploadedDocuments.loanScheduleDocObjectNames.push(signedUpload.objectName);
             }
 
             setOcrProgressMessage(`${docLabel} OCR job requested...`);
@@ -2180,6 +2230,7 @@ export default function Assets() {
     setOcrSuggestions(suggestions);
     setOcrWarnings(warnings);
     setOcrCanRetry(shouldEnableRetry);
+    setCreateUploadedDocuments(nextUploadedDocuments);
     setOcrProgressMessage(null);
     setUploadStep('preview');
 
@@ -2274,9 +2325,66 @@ export default function Assets() {
 
     try {
       const responsePayload = await createAsset(payload);
-      const createdAsset = toAssetDetail(responsePayload);
+      let createdAsset = toAssetDetail(responsePayload);
       if (!createdAsset) {
         throw new Error('생성 응답에서 자산 정보를 확인할 수 없습니다.');
+      }
+
+      if ((uploadedFiles.insurance || uploadedFiles.loanSchedule.length > 0) && typeof createdAsset.version === 'number') {
+        const documentPayload: Pick<CreateAssetPayload, 'insuranceDocObjectName' | 'loanScheduleDocObjectNames'> = {};
+
+        if (uploadedFiles.insurance) {
+          const insuranceContentType = resolveOcrContentType(uploadedFiles.insurance);
+          if (!insuranceContentType) {
+            throw new ApiError('UNSUPPORTED_MEDIA_TYPE', '보험가입증서는 PDF 또는 이미지 파일만 업로드할 수 있습니다.', {
+              status: 415,
+            });
+          }
+
+          const signedInsuranceUpload = await signAssetUpload({
+            fileName: uploadedFiles.insurance.name,
+            contentType: insuranceContentType,
+            fileSize: uploadedFiles.insurance.size,
+            folder: `assets/${createdAsset.id}/insurance`,
+          });
+          const uploadContentType = signedInsuranceUpload.contentType?.trim() || insuranceContentType;
+          await uploadFileToSignedUrl(signedInsuranceUpload.uploadUrl, uploadedFiles.insurance, uploadContentType);
+          documentPayload.insuranceDocObjectName = signedInsuranceUpload.objectName;
+        }
+
+        if (uploadedFiles.loanSchedule.length > 0) {
+          documentPayload.loanScheduleDocObjectNames = await Promise.all(
+            uploadedFiles.loanSchedule.map(async (file) => {
+              const loanContentType = resolveOcrContentType(file);
+              if (!loanContentType) {
+                throw new ApiError('UNSUPPORTED_MEDIA_TYPE', '상환계획서는 PDF 또는 이미지 파일만 업로드할 수 있습니다.', {
+                  status: 415,
+                });
+              }
+
+              const signedLoanUpload = await signAssetUpload({
+                fileName: file.name,
+                contentType: loanContentType,
+                fileSize: file.size,
+                folder: `assets/${createdAsset.id}/loan`,
+              });
+              const uploadContentType = signedLoanUpload.contentType?.trim() || loanContentType;
+              await uploadFileToSignedUrl(signedLoanUpload.uploadUrl, file, uploadContentType);
+              return signedLoanUpload.objectName;
+            }),
+          );
+        }
+
+        if (documentPayload.insuranceDocObjectName || documentPayload.loanScheduleDocObjectNames?.length) {
+          const patchedAssetResponse = await patchAsset(createdAsset.id, {
+            version: createdAsset.version,
+            ...documentPayload,
+          });
+          const patchedAsset = toAssetDetail(patchedAssetResponse);
+          if (patchedAsset) {
+            createdAsset = patchedAsset;
+          }
+        }
       }
 
       setShowModal(false);
@@ -2318,7 +2426,7 @@ export default function Assets() {
     } finally {
       setIsCreateSaving(false);
     }
-  }, [canWriteAssets, company, createForm, hydrateAssets, isCreateSaving, resetCreateModalState, updateAssetsSearchParams, user?.companyId]);
+  }, [canWriteAssets, company, createForm, hydrateAssets, isCreateSaving, resetCreateModalState, updateAssetsSearchParams, uploadedFiles.insurance, uploadedFiles.loanSchedule, user?.companyId]);
 
   const handleDeleteAsset = useCallback(async () => {
     if (!canWriteAssets) {

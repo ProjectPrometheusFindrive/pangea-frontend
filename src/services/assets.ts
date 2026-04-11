@@ -24,6 +24,8 @@ export interface CreateAssetPayload {
   year?: number;
   insuranceExpiry?: string | null;
   nextInspection?: string | null;
+  insuranceDocObjectName?: string | null;
+  loanScheduleDocObjectNames?: string[];
 }
 
 export interface BatchCreateAssetItem extends CreateAssetPayload {
