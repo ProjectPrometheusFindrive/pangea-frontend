@@ -1,5 +1,6 @@
 export interface Reservation {
   id: string;
+  companyId?: string;
   vehicleNumber: string;
   vin?: string;
   customer: string;
