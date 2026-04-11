@@ -11,6 +11,7 @@ import {
 import { useAuth } from '../context/AuthContext';
 import { useAuthorization } from '../context/AuthorizationContext';
 import { ACTION_PERMISSIONS } from '../authorization';
+import { formatDateTimeKst } from '../utils/dateTimeFormat';
 import { ApiError } from '../../services/api';
 import { getAssetsList } from '../../services/assets';
 import {
@@ -127,22 +128,7 @@ function toVehicleOptions(payload: unknown): DeviceInstallationVehicleOption[] {
 }
 
 function formatDateTime(value?: string): string {
-  if (!value) {
-    return '-';
-  }
-
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
-    return value;
-  }
-
-  return parsed.toLocaleString('ko-KR', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+  return formatDateTimeKst(value, '-');
 }
 
 function toDisplayStatus(status: DeviceInstallationStatus): DeviceInstallationDisplayStatus {

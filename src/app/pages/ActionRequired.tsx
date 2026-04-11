@@ -27,6 +27,9 @@ import {
   returnReservation,
 } from '../../services/reservations';
 import { listSettingsMembers, type SettingsMember } from '../../services/settings';
+import { formatDateKst, formatDateTimeKst } from '../utils/dateTimeFormat';
+import { toDateInputValue } from '../utils/dateInputValue';
+import { DateTextPicker } from '../components/DateTextPicker';
 import { paymentStatusToLabel, toCanonicalPaymentStatus } from '../utils/paymentStatusSync';
 
 type ActionStatusCode = 'pending' | 'in-progress' | 'resolved';
@@ -87,16 +90,6 @@ type ActionIssueFilter =
   | '정기점검'
   | '차량이상'
   | '보험 만료 임박';
-
-const ACTION_REQUIRED_DATETIME_FORMATTER = new Intl.DateTimeFormat('sv-SE', {
-  timeZone: 'Asia/Seoul',
-  year: 'numeric',
-  month: '2-digit',
-  day: '2-digit',
-  hour: '2-digit',
-  minute: '2-digit',
-  hour12: false,
-});
 
 const STATUS_OPTIONS = ['대기중', '진행중', '완료'] as const;
 const LIST_COLLECTION_KEYS = ['items', 'rows', 'list', 'actionRequired', 'actionItems'];
@@ -199,17 +192,11 @@ function pickVehicleNumber(source: Record<string, unknown>): string | null {
 }
 
 function formatActionDate(rawValue: string): string {
-  const normalized = rawValue.trim();
-  if (!normalized || normalized === '-') {
-    return '-';
-  }
+  return formatDateTimeKst(rawValue, '-');
+}
 
-  const parsed = new Date(normalized);
-  if (Number.isNaN(parsed.getTime())) {
-    return normalized;
-  }
-
-  return ACTION_REQUIRED_DATETIME_FORMATTER.format(parsed);
+function formatActionDateOnly(rawValue: string): string {
+  return formatDateKst(rawValue, '-');
 }
 
 function parseDateOnly(value: string | null | undefined): Date | null {
@@ -376,8 +363,8 @@ function toIssueAssetRecord(row: unknown): IssueAssetRecord | null {
     id,
     version,
     vehicleNumber,
-    insuranceExpiry: pickString(row, ['insuranceExpiry', 'insuranceExpiryDate']) ?? '',
-    nextInspection: pickString(row, ['nextInspection', 'nextInspectionDate', 'inspectionDate', 'regularInspectionDate']) ?? '',
+    insuranceExpiry: toDateInputValue(pickString(row, ['insuranceExpiry', 'insuranceExpiryDate'])),
+    nextInspection: toDateInputValue(pickString(row, ['nextInspection', 'nextInspectionDate', 'inspectionDate', 'regularInspectionDate'])),
   };
 }
 
@@ -1144,7 +1131,7 @@ export default function ActionRequired() {
           setIssueAssetError('연결된 차량 자산을 찾을 수 없습니다.');
           return;
         }
-        setIssueAssetDate(selectedItem.type === '보험 만료 임박' ? matchedAsset.insuranceExpiry : matchedAsset.nextInspection);
+        setIssueAssetDate(toDateInputValue(selectedItem.type === '보험 만료 임박' ? matchedAsset.insuranceExpiry : matchedAsset.nextInspection));
       })
       .catch((error) => {
         if (controller.signal.aborted) {
@@ -2256,7 +2243,7 @@ export default function ActionRequired() {
                         {item.vehicleNumber}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{item.customerName}</td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">{formatActionDate(item.date)}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">{formatActionDateOnly(item.date)}</td>
                       {isUnpaidFilterActive && (
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-right">
                           {item.paymentInfo ? (
@@ -2372,7 +2359,7 @@ export default function ActionRequired() {
 
                 <div>
                   <label className="text-sm font-semibold text-gray-600">발생일</label>
-                  <p className="text-base text-gray-900 mt-1">{formatActionDate(selectedItem.date)}</p>
+                  <p className="text-base text-gray-900 mt-1">{formatActionDateOnly(selectedItem.date)}</p>
                 </div>
 
                 <div>
@@ -2425,16 +2412,15 @@ export default function ActionRequired() {
                         <label className="mb-1 block text-xs font-semibold text-gray-600">
                           {selectedItem.type === '보험 만료 임박' ? '보험 만료일' : '다음 정기점검일'}
                         </label>
-                        <input
-                          type="date"
+                        <DateTextPicker
                           value={issueAssetDate}
-                          onChange={(event) => {
-                            setIssueAssetDate(event.target.value);
+                          ariaLabel={selectedItem.type === '보험 만료 임박' ? '보험 만료일' : '다음 정기점검일'}
+                          onChange={(value) => {
+                            setIssueAssetDate(value);
                             setIssueAssetError(null);
                             setIssueAssetNotice(null);
                           }}
                           disabled={isIssueAssetSaving || isIssueAssetLoading || !issueAsset}
-                          className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                         />
                       </div>
                       {issueAssetError && (

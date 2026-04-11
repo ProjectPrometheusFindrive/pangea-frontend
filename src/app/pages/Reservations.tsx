@@ -5,6 +5,7 @@ import { ChevronLeft, ChevronRight, Plus, Car, Calendar, AlertCircle, DollarSign
 import { toast } from 'sonner';
 import {
   AccidentReportModal,
+  type AccidentReportAssigneeOption,
   type AccidentReportField,
   type AccidentReportFormValues,
   type AccidentReportSubmitFeedback,
@@ -39,6 +40,7 @@ import {
 } from '../utils/paymentStatusSync';
 import { useAuthorization } from '../context/AuthorizationContext';
 import { ACTION_PERMISSIONS, ROUTE_PERMISSIONS } from '../authorization';
+import { formatDateKst, formatDateTimeKst } from '../utils/dateTimeFormat';
 import type { VehicleAsset } from '../types/assets';
 import type { Reservation } from '../types/reservations';
 import { ApiError } from '../../services/api';
@@ -58,7 +60,7 @@ import {
   returnReservation,
   transitionReservation,
 } from '../../services/reservations';
-import { listSettingsGarages } from '../../services/settings';
+import { listSettingsGarages, listSettingsMembers, type SettingsMember } from '../../services/settings';
 
 // 드래그 선택 타입 정의
 type DragSelection = {
@@ -298,7 +300,7 @@ function buildPickupWarningPrompt(options: {
 }
 
 function toAccidentDisplayTime(value: Date): string {
-  return `${value.getFullYear()}.${pad2(value.getMonth() + 1)}.${pad2(value.getDate())} ${pad2(value.getHours())}:${pad2(value.getMinutes())}:${pad2(value.getSeconds())}`;
+  return formatDateTimeKst(value, '-');
 }
 
 function sanitizeFileName(value: string): string {
@@ -959,6 +961,14 @@ function toTotalCount(payload: unknown, fallbackValue: number): number {
   return fallbackValue;
 }
 
+function toMemberDisplayName(member: SettingsMember): string | null {
+  const name = toStringValue(member.name);
+  if (name) {
+    return name;
+  }
+  return toStringValue(member.email) ?? toStringValue(member.userId);
+}
+
 function toReservationRow(row: unknown, index: number): Reservation | null {
   if (!isRecord(row)) {
     return null;
@@ -999,6 +1009,7 @@ function toReservationRow(row: unknown, index: number): Reservation | null {
 
   return {
     id: reservationId,
+    companyId: toStringValue(row.companyId) ?? undefined,
     vehicleNumber: fallbackVehicleNumber,
     vin: toStringValue(row.vin) ?? toStringValue(row.chassisNumber) ?? undefined,
     customer,
@@ -1230,6 +1241,9 @@ export default function Reservations() {
   const [activeTab, setActiveTab] = useState<'reservation' | 'payment' | 'vehicle'>('reservation');
   const [showReturnConfirm, setShowReturnConfirm] = useState(false);
   const [showAccidentModal, setShowAccidentModal] = useState(false);
+  const [accidentAssigneeOptions, setAccidentAssigneeOptions] = useState<AccidentReportAssigneeOption[]>([]);
+  const [isAccidentAssigneeLoading, setIsAccidentAssigneeLoading] = useState(false);
+  const [accidentAssigneeLoadError, setAccidentAssigneeLoadError] = useState<string | null>(null);
   const [reservationsData, setReservationsData] = useState<Reservation[]>([]);
   const [vehicleAssets, setVehicleAssets] = useState<VehicleAsset[]>([]);
   const [garageLocationOptions, setGarageLocationOptions] = useState<string[]>([]);
@@ -1590,6 +1604,62 @@ export default function Reservations() {
       // garage loading is best-effort; fall back to free-text input
     });
   }, []);
+
+  useEffect(() => {
+    if (!showAccidentModal || !selectedReservation) {
+      return;
+    }
+
+    const targetCompanyId = selectedReservation.companyId ?? user?.companyId ?? undefined;
+    const controller = new AbortController();
+    setIsAccidentAssigneeLoading(true);
+    setAccidentAssigneeLoadError(null);
+    setAccidentAssigneeOptions([]);
+
+    void listSettingsMembers('approved', {
+      companyId: targetCompanyId,
+      signal: controller.signal,
+    }).then((payload) => {
+      if (controller.signal.aborted) {
+        return;
+      }
+
+      const rows = Array.isArray(payload.items) ? payload.items : [];
+      const options = rows
+        .map((member) => {
+          const userId = toStringValue(member.userId);
+          const label = toMemberDisplayName(member);
+          if (!userId || !label) {
+            return null;
+          }
+          return { userId, label } satisfies AccidentReportAssigneeOption;
+        })
+        .filter((row): row is AccidentReportAssigneeOption => row !== null);
+
+      setAccidentAssigneeOptions(options);
+      if (options.length === 0) {
+        setAccidentAssigneeLoadError('해당 업체에 선택 가능한 승인된 직원이 없습니다.');
+      }
+    }).catch((error) => {
+      if (controller.signal.aborted) {
+        return;
+      }
+      if (error instanceof ApiError) {
+        setAccidentAssigneeLoadError(error.message || '담당자 목록을 불러오지 못했습니다.');
+      } else {
+        setAccidentAssigneeLoadError('담당자 목록을 불러오지 못했습니다.');
+      }
+      setAccidentAssigneeOptions([]);
+    }).finally(() => {
+      if (!controller.signal.aborted) {
+        setIsAccidentAssigneeLoading(false);
+      }
+    });
+
+    return () => {
+      controller.abort();
+    };
+  }, [selectedReservation, showAccidentModal, user?.companyId]);
 
   useEffect(() => () => {
     detailControllerRef.current?.abort();
@@ -2842,11 +2912,7 @@ export default function Reservations() {
             <div className="flex-1" />
             
             <span className="text-xs text-blue-700 font-semibold">
-              {toDateFromOffset(currentWeekStart).toLocaleDateString('ko-KR', { 
-                year: 'numeric', 
-                month: 'long', 
-                day: 'numeric' 
-              })} ~
+              {formatDateKst(toDateFromOffset(currentWeekStart))} ~
             </span>
           </div>
 
@@ -3280,7 +3346,7 @@ export default function Reservations() {
                       </div>
                       {selectedReservationPaymentSync?.updatedAt && (
                         <p className="text-xs text-gray-500 mt-2">
-                          최근 반영: {new Date(selectedReservationPaymentSync.updatedAt).toLocaleString('ko-KR')}
+                          최근 반영: {formatDateTimeKst(selectedReservationPaymentSync.updatedAt, '-')}
                         </p>
                       )}
                       {canWritePayments && canMarkReservationPaymentAsPaid(selectedReservation, selectedReservationPaymentSync) && (
@@ -3636,6 +3702,9 @@ export default function Reservations() {
             reservationId={selectedReservation.id}
             vehicleNumber={selectedReservation.vehicleNumber}
             customerName={selectedReservation.customer}
+            assigneeOptions={accidentAssigneeOptions}
+            isAssigneeLoading={isAccidentAssigneeLoading}
+            assigneeLoadError={accidentAssigneeLoadError}
             onClose={() => setShowAccidentModal(false)}
             onSubmit={handleAccidentReport}
           />

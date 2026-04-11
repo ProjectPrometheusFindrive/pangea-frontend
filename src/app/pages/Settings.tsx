@@ -78,6 +78,7 @@ import {
   validateInvitationDraft,
 } from './settingsInvitations';
 import { canAccessBulkOcr } from './settingsBulkOcr';
+import { formatDateTimeKst } from '../utils/dateTimeFormat';
 import SupportCenter from './SupportCenter';
 
 type TabType = 'bulk' | 'company' | 'geofence' | 'garage' | 'accounts' | 'support';
@@ -605,16 +606,7 @@ function areGeofencePointsEqual(
 }
 
 function formatUpdatedAt(value: string | null): string {
-  if (!value) {
-    return '-';
-  }
-
-  const parsedDate = new Date(value);
-  if (Number.isNaN(parsedDate.getTime())) {
-    return value;
-  }
-
-  return parsedDate.toLocaleString('ko-KR');
+  return formatDateTimeKst(value, '-');
 }
 
 function getRoleBadgeColor(role: string): string {

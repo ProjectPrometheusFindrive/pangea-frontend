@@ -29,6 +29,7 @@ import { Layout } from '../components/Layout';
 import { PageStateBoundary } from '../components/PageStateBoundary';
 import { useAuthorization } from '../context/AuthorizationContext';
 import { useAuth } from '../context/AuthContext';
+import { formatDateKst } from '../utils/dateTimeFormat';
 import { navigateToPremiumInquiry } from '../utils/premiumInquiry';
 import {
   getPageErrorActionLabel,
@@ -322,7 +323,7 @@ function toRelativeTimeLabel(value: string): string {
   if (diffMs < 86_400_000) {
     return `${Math.floor(diffMs / 3_600_000)}시간 전`;
   }
-  return parsedDate.toLocaleDateString('ko-KR');
+  return formatDateKst(parsedDate);
 }
 
 function formatStatCardCount(count: number | string, unit?: string): string {
