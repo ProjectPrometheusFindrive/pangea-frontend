@@ -4,6 +4,19 @@ import type { AccessTokenProvider, ApiUnauthorizedHandler } from './types';
 const DEFAULT_API_BASE_URL = 'https://api.pangea.local';
 const DEFAULT_API_TIMEOUT_MS = 10_000;
 
+export function resolveApiBaseUrl(baseUrl?: string): string {
+  const normalizedBaseUrl = baseUrl?.trim();
+  if (normalizedBaseUrl) {
+    return normalizedBaseUrl;
+  }
+
+  if (typeof window !== 'undefined' && window.location?.origin) {
+    return window.location.origin;
+  }
+
+  return DEFAULT_API_BASE_URL;
+}
+
 function resolveTimeoutMs(timeoutValue?: string): number {
   const parsedValue = Number(timeoutValue);
   if (!Number.isFinite(parsedValue) || parsedValue <= 0) {
@@ -17,7 +30,7 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
 }
 
 export const apiClient = createApiClient({
-  baseUrl: import.meta.env.VITE_API_BASE_URL || DEFAULT_API_BASE_URL,
+  baseUrl: resolveApiBaseUrl(import.meta.env.VITE_API_BASE_URL),
   timeoutMs: resolveTimeoutMs(import.meta.env.VITE_API_TIMEOUT_MS),
 });
 
