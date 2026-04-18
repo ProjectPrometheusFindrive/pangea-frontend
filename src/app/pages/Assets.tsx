@@ -147,7 +147,8 @@ interface AssetsHydrationPayload {
   page: number;
   pageSize: number;
   modelOptions: string[];
-  catalogItems: Asset[];
+  statusCountItems: Asset[];
+  premiumInstallableAssets: PremiumInstallableAsset[];
 }
 
 type StatusFilterCode = 'all' | 'rental' | 'reserved' | 'available' | 'maintenance';
@@ -1192,6 +1193,7 @@ export default function Assets() {
   });
   const [assets, setAssets] = useState<Asset[]>([]);
   const [catalogAssets, setCatalogAssets] = useState<Asset[]>([]);
+  const [premiumInstallableAssets, setPremiumInstallableAssets] = useState<PremiumInstallableAsset[]>([]);
   const [availableModelOptions, setAvailableModelOptions] = useState<string[]>([]);
   const [totalCount, setTotalCount] = useState<number | null>(null);
   const [assetsErrorStatus, setAssetsErrorStatus] = useState<number | null>(null);
@@ -1255,7 +1257,10 @@ export default function Assets() {
     }, true);
   }, [statusParam, updateAssetsSearchParams]);
 
-  const loadModelCatalog = useCallback(async (signal: AbortSignal) => {
+  const loadAssetsCatalog = useCallback(async (
+    signal: AbortSignal,
+    options: { status?: string; query?: string } = {},
+  ) => {
     const catalogAssets: Asset[] = [];
     const catalogPageSize = Math.max(pageSize, MODEL_CATALOG_PAGE_SIZE);
     let catalogPage = 1;
@@ -1265,8 +1270,8 @@ export default function Assets() {
       const payload = await getAssetsList({
         page: catalogPage,
         size: catalogPageSize,
-        status: statusQueryValue,
-        q: keyword || undefined,
+        status: options.status,
+        q: options.query,
         signal,
       });
 
@@ -1283,11 +1288,27 @@ export default function Assets() {
     }
 
     return catalogAssets;
-  }, [keyword, pageSize, statusQueryValue]);
+  }, [pageSize]);
 
   const requestAssets = useCallback(async (signal: AbortSignal): Promise<AssetsHydrationPayload> => {
     try {
-      const fullCatalog = await loadModelCatalog(signal);
+      const [fullCatalog, fullStatusCountCatalog, fullTenantCatalog] = await Promise.all([
+        loadAssetsCatalog(signal, { status: statusQueryValue, query: keyword || undefined }),
+        loadAssetsCatalog(signal, { query: keyword || undefined }),
+        loadAssetsCatalog(signal),
+      ]);
+
+      const statusCountCatalog = filterAssetsByModel(fullStatusCountCatalog, modelFilter);
+      const tenantWidePremiumInstallableAssets = fullTenantCatalog
+        .filter((asset) => !asset.hasDevice)
+        .map((asset) => ({
+          id: asset.id,
+          companyId: asset.companyId,
+          vehicleNumber: asset.vehicleNumber,
+          model: asset.model,
+          vin: asset.vin,
+          owner: asset.owner,
+        }));
       const filteredCatalog = filterAssetsByModel(fullCatalog, modelFilter);
       if (modelFilter) {
         return {
@@ -1296,7 +1317,8 @@ export default function Assets() {
           page,
           pageSize,
           modelOptions: toModelOptions(fullCatalog),
-          catalogItems: fullCatalog,
+          statusCountItems: statusCountCatalog,
+          premiumInstallableAssets: tenantWidePremiumInstallableAssets,
         };
       }
 
@@ -1317,17 +1339,19 @@ export default function Assets() {
         page,
         pageSize,
         modelOptions: toModelOptions(fullCatalog),
-        catalogItems: fullCatalog,
+        statusCountItems: statusCountCatalog,
+        premiumInstallableAssets: tenantWidePremiumInstallableAssets,
       };
     } catch (error) {
       setAssetsErrorStatus(error instanceof ApiError ? error.status ?? null : null);
       throw error;
     }
-  }, [keyword, loadModelCatalog, modelFilter, page, pageSize, statusQueryValue]);
+  }, [loadAssetsCatalog, modelFilter, page, pageSize, statusQueryValue]);
 
   const handleAssetsSuccess = useCallback((payload: AssetsHydrationPayload) => {
     setAssets(payload.items);
-    setCatalogAssets(payload.catalogItems);
+    setCatalogAssets(payload.statusCountItems);
+    setPremiumInstallableAssets(payload.premiumInstallableAssets);
     setAvailableModelOptions(payload.modelOptions);
     setTotalCount(payload.total);
     setAssetsErrorStatus(null);
@@ -1784,11 +1808,11 @@ export default function Assets() {
   ), [assets, modelFilter, page, pageSize]);
 
   const statusCountMap = useMemo(() => ({
-    rental: assets.filter((asset) => asset.status === '대여중').length,
-    reserved: assets.filter((asset) => asset.status === '예약').length,
-    available: assets.filter((asset) => asset.status === '가용').length,
-    maintenance: assets.filter((asset) => asset.status === '정비중').length,
-  }), [assets]);
+    rental: catalogAssets.filter((asset) => asset.status === '대여중').length,
+    reserved: catalogAssets.filter((asset) => asset.status === '예약').length,
+    available: catalogAssets.filter((asset) => asset.status === '가용').length,
+    maintenance: catalogAssets.filter((asset) => asset.status === '정비중').length,
+  }), [catalogAssets]);
 
   const totalPages = useMemo(() => {
     if (totalCount === null) {
@@ -1809,19 +1833,6 @@ export default function Assets() {
     && !assetsError
     && (isAssetsApiEmpty || visibleAssets.length === 0)
   ) || shouldShowOutOfRangeEmpty;
-  const premiumInstallableAssets = useMemo(() => (
-    assets
-      .filter((asset) => !asset.hasDevice)
-      .map((asset) => ({
-        id: asset.id,
-        companyId: asset.companyId,
-        vehicleNumber: asset.vehicleNumber,
-        model: asset.model,
-        vin: asset.vin,
-        owner: asset.owner,
-      }))
-  ), [assets]);
-
   const handleCreateFieldChange = useCallback((field: keyof CreateFormState, value: string) => {
     setCreateForm((prev) => ({ ...prev, [field]: value }));
     setCreateSaveError(null);
@@ -2755,7 +2766,7 @@ export default function Assets() {
                   : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
               }`}
             >
-              전체 ({totalCount ?? assets.length})
+              전체 ({catalogAssets.length})
             </button>
             <button
               onClick={() => handleStatusChange('rental')}

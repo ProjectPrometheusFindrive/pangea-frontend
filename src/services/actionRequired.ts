@@ -33,6 +33,15 @@ export interface ActionRequiredTypeCountOptions {
   signal?: AbortSignal;
 }
 
+export interface ActionRequiredListAllRequestOptions {
+  pageSize?: number;
+  status?: string;
+  priority?: string;
+  assignee?: string;
+  reservationId?: string;
+  signal?: AbortSignal;
+}
+
 const LIST_COLLECTION_KEYS = ['items', 'rows', 'list', 'actionRequired', 'actionItems'];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -203,22 +212,39 @@ export function getActionRequiredList(options: ActionRequiredListRequestOptions 
   });
 }
 
-export async function getActionItemTypeCounts(
-  options: ActionRequiredTypeCountOptions = {},
-): Promise<Record<string, number>> {
-  const { pageSize = 100, status, signal } = options;
-  const counts: Record<string, number> = {};
+export async function getActionRequiredListAll(
+  options: ActionRequiredListAllRequestOptions = {},
+): Promise<{ items: unknown[]; total: number }> {
+  const {
+    pageSize = 100,
+    status,
+    priority,
+    assignee,
+    reservationId,
+    signal,
+  } = options;
+
+  const items: unknown[] = [];
   const seenActionIds = new Set<string>();
   let page = 1;
   let expectedTotal = 0;
 
   while (true) {
-    const payload = await getActionRequiredList({ page, pageSize, status, signal });
+    const payload = await getActionRequiredList({
+      page,
+      pageSize,
+      status,
+      priority,
+      assignee,
+      reservationId,
+      signal,
+    });
     const rows = getCollectionFromPayload(payload) ?? [];
     expectedTotal = Math.max(expectedTotal, toTotalCount(payload, rows.length));
 
     rows.forEach((row, index) => {
       if (!isRecord(row)) {
+        items.push(row);
         return;
       }
 
@@ -227,21 +253,8 @@ export async function getActionItemTypeCounts(
         return;
       }
 
-      const vehicleNumber = pickString(row, ['vehicleNumber', 'plateNumber', 'vehicleNo', 'plate']);
-      if (!vehicleNumber) {
-        return;
-      }
-
-      const type = normalizeActionItemType(
-        pickString(row, ['type', 'category', 'issueType', 'issue', 'title']),
-        hasPaymentInfo(row),
-      );
-      if (!type) {
-        return;
-      }
-
       seenActionIds.add(actionId);
-      counts[type] = (counts[type] ?? 0) + 1;
+      items.push(row);
     });
 
     if (rows.length === 0 || rows.length < pageSize || seenActionIds.size >= expectedTotal) {
@@ -250,6 +263,40 @@ export async function getActionItemTypeCounts(
 
     page += 1;
   }
+
+  return {
+    items,
+    total: Math.max(expectedTotal, items.length),
+  };
+}
+
+export async function getActionItemTypeCounts(
+  options: ActionRequiredTypeCountOptions = {},
+): Promise<Record<string, number>> {
+  const { pageSize = 100, status, signal } = options;
+  const counts: Record<string, number> = {};
+  const payload = await getActionRequiredListAll({ pageSize, status, signal });
+
+  payload.items.forEach((row) => {
+    if (!isRecord(row)) {
+      return;
+    }
+
+    const vehicleNumber = pickString(row, ['vehicleNumber', 'plateNumber', 'vehicleNo', 'plate']);
+    if (!vehicleNumber) {
+      return;
+    }
+
+    const type = normalizeActionItemType(
+      pickString(row, ['type', 'category', 'issueType', 'issue', 'title']),
+      hasPaymentInfo(row),
+    );
+    if (!type) {
+      return;
+    }
+
+    counts[type] = (counts[type] ?? 0) + 1;
+  });
 
   return counts;
 }
