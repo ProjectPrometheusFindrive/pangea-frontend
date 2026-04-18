@@ -1,7 +1,7 @@
 import { Layout } from '../components/Layout';
 import { useSearchParams, useNavigate } from 'react-router';
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { Search, X, ArrowUp, ArrowDown, Clock, User, CheckCircle2, Loader2, AlertTriangle } from 'lucide-react';
+import { Search, X, ArrowUp, ArrowDown, Clock, User, CheckCircle2, Loader2, AlertTriangle, ChevronLeft, ChevronRight } from 'lucide-react';
 import { PageStateBoundary } from '../components/PageStateBoundary';
 import {
   getCollectionFromPayload,
@@ -18,7 +18,7 @@ import { ApiError } from '../../services/api';
 import { getAssetsList, patchAsset } from '../../services/assets';
 import {
   getActionRequiredDetail,
-  getActionRequiredList,
+  getActionRequiredListAll,
   patchActionRequiredMemo,
   patchActionRequiredStatus,
 } from '../../services/actionRequired';
@@ -1021,14 +1021,13 @@ export default function ActionRequired() {
     pollIntervalMs: 20_000,
   });
 
-  const requestActionItems = useCallback((signal: AbortSignal) => getActionRequiredList({
-    page,
-    pageSize,
+  const requestActionItems = useCallback((signal: AbortSignal) => getActionRequiredListAll({
+    pageSize: 100,
     status: getListStatusQuery(statusFilter, includeCompleted),
     priority: priorityFilter === 'all' ? undefined : priorityFilter,
     assignee: assigneeFilter === 'all' ? undefined : assigneeFilter,
     signal,
-  }), [assigneeFilter, includeCompleted, page, pageSize, priorityFilter, statusFilter]);
+  }), [assigneeFilter, includeCompleted, priorityFilter, statusFilter]);
 
   const handleActionItemsSuccess = useCallback((payload: unknown) => {
     const { items, total } = toActionItemCollection(payload);
@@ -1162,10 +1161,12 @@ export default function ActionRequired() {
 
     if (normalizedFilterParam && ISSUE_FILTER_CHIPS.includes(normalizedFilterParam as ActionIssueFilter)) {
       setSelectedFilters([normalizedFilterParam as ActionIssueFilter]);
+      setPage(1);
     }
 
     if (searchParam) {
       setSearchQuery(searchParam);
+      setPage(1);
     }
   }, [searchParams]);
 
@@ -1350,6 +1351,7 @@ export default function ActionRequired() {
   }, [allItems]);
 
   const toggleFilter = (filter: ActionIssueFilter) => {
+    setPage(1);
     setSelectedFilters((prev) =>
       prev.includes(filter)
         ? prev.filter((entry) => entry !== filter)
@@ -1366,7 +1368,10 @@ export default function ActionRequired() {
   });
 
   const isUnpaidFilterActive = selectedFilters.includes('미납/결제 문제');
-  const totalPages = Math.max(1, Math.ceil((totalItems || 0) / pageSize));
+  const totalFilteredItems = filteredItems.length;
+  const totalPages = Math.max(1, Math.ceil(totalFilteredItems / pageSize));
+  const hasPrevPage = page > 1;
+  const hasNextPage = page < totalPages;
   const getSeverityColor = (severity: string) => {
     switch (severity) {
       case 'High':
@@ -1422,6 +1427,13 @@ export default function ActionRequired() {
     }
     return 0;
   });
+  const pagedItems = sortedItems.slice((page - 1) * pageSize, page * pageSize);
+
+  useEffect(() => {
+    if (page > totalPages) {
+      setPage(totalPages);
+    }
+  }, [page, totalPages]);
 
   const applyOptimisticActionPatch = (
     actionId: string,
@@ -2079,7 +2091,10 @@ export default function ActionRequired() {
                 aria-label="차량번호 또는 고객명 검색"
                 placeholder="차량번호 또는 고객명 검색..."
                 value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+                onChange={(e) => {
+                  setSearchQuery(e.target.value);
+                  setPage(1);
+                }}
                 className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
           </div>
@@ -2104,7 +2119,10 @@ export default function ActionRequired() {
             })}
             <button
               type="button"
-              onClick={() => setIncludeCompleted((prev) => !prev)}
+              onClick={() => {
+                setIncludeCompleted((prev) => !prev);
+                setPage(1);
+              }}
               className={`px-4 py-2 rounded-full text-sm font-medium transition-colors ${
                 includeCompleted
                   ? 'bg-blue-600 text-white'
@@ -2118,31 +2136,7 @@ export default function ActionRequired() {
 
           <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-gray-600">
             <div>
-              총 <span className="font-bold text-blue-600">{sortedItems.length}</span>건의 조치 필요 항목
-              {null}
-              {null}
-            </div>
-
-            <div className="hidden items-center gap-2" aria-hidden="true">
-              <button
-                type="button"
-                onClick={() => setPage((prev) => Math.max(1, prev - 1))}
-                disabled={isItemsLoading || page <= 1}
-                className="px-3 py-1.5 text-sm border border-gray-300 rounded-md disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
-              >
-                이전
-              </button>
-              <span className="text-sm text-gray-600">
-                {page} / {totalPages}
-              </span>
-              <button
-                type="button"
-                onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
-                disabled={isItemsLoading || page >= totalPages}
-                className="px-3 py-1.5 text-sm border border-gray-300 rounded-md disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
-              >
-                다음
-              </button>
+              총 <span className="font-bold text-blue-600">{totalFilteredItems}</span>건의 조치 필요 항목
             </div>
           </div>
 
@@ -2177,7 +2171,7 @@ export default function ActionRequired() {
         <PageStateBoundary
           isLoading={isItemsLoading}
           error={itemsError}
-          isEmpty={!isItemsLoading && !itemsError && (isActionApiEmpty || sortedItems.length === 0)}
+          isEmpty={!isItemsLoading && !itemsError && (isActionApiEmpty || totalFilteredItems === 0)}
           errorDescription="조치 필요 항목 목록을 불러오는 중 문제가 발생했습니다."
           emptyTitle="조건에 맞는 조치 항목이 없습니다"
           emptyDescription="필터나 검색어를 조정해 다시 확인해 주세요."
@@ -2230,7 +2224,7 @@ export default function ActionRequired() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
-                  {sortedItems.map((item) => (
+                  {pagedItems.map((item) => (
                     <tr key={item.id} className="hover:bg-gray-50">
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{item.type}</td>
                       <td
@@ -2279,6 +2273,33 @@ export default function ActionRequired() {
                 </tbody>
               </table>
             </div>
+            {(hasPrevPage || hasNextPage) && (
+              <div className="flex items-center justify-between border-t border-gray-200 px-6 py-4">
+                <p className="text-sm text-gray-600">
+                  {`총 ${totalFilteredItems}건 · ${page} / ${totalPages} 페이지`}
+                </p>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+                    disabled={!hasPrevPage || isItemsLoading}
+                    className="inline-flex items-center gap-1 rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                    이전
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
+                    disabled={!hasNextPage || isItemsLoading}
+                    className="inline-flex items-center gap-1 rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    다음
+                    <ChevronRight className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </PageStateBoundary>
 
