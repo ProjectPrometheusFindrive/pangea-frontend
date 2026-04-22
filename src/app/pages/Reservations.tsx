@@ -1,7 +1,7 @@
 import { Layout } from '../components/Layout';
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useSearchParams, useNavigate } from 'react-router';
-import { ChevronLeft, ChevronRight, Plus, Car, Calendar, AlertCircle, DollarSign, AlertTriangle, Loader2, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, Car, Calendar, AlertCircle, DollarSign, AlertTriangle, Loader2, RefreshCw, X } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   AccidentReportModal,
@@ -1979,6 +1979,14 @@ export default function Reservations() {
   const selectedReservationPaymentSync = selectedReservation
     ? syncedPaymentByReservationId[selectedReservation.id] ?? null
     : null;
+  const isPaymentSyncStatusVisible = isPaymentSyncing || Boolean(paymentSyncError);
+  const paymentSyncStatusMessage = isPaymentSyncing
+    ? '결제 상태를 동기화하는 중입니다.'
+    : (
+      isPaymentSyncUsingLastKnown
+        ? '결제 상태 동기화에 실패해 마지막 정상 상태를 표시 중입니다.'
+        : paymentSyncError ?? ''
+    );
 
   const openReservationDetail = useCallback((reservation: Reservation) => {
     setSelectedReservation(reservation);
@@ -2836,32 +2844,6 @@ export default function Reservations() {
             </button>
           </div>
 
-          {(paymentSyncError || isPaymentSyncing) && (
-            <div className={`mt-2 flex items-center justify-between gap-3 rounded-lg border px-3 py-2 text-xs ${
-              paymentSyncError
-                ? 'border-amber-200 bg-amber-50 text-amber-700'
-                : 'border-blue-200 bg-blue-50 text-blue-700'
-            }`}>
-              <span>
-                {paymentSyncError
-                  ? (
-                    isPaymentSyncUsingLastKnown
-                      ? '결제 상태 동기화에 실패해 마지막 정상 상태를 표시 중입니다.'
-                      : paymentSyncError
-                  )
-                  : '결제 상태를 동기화하는 중입니다.'}
-              </span>
-              {paymentSyncError && (
-                <button
-                  type="button"
-                  onClick={retryPaymentSync}
-                  className="rounded-md border border-amber-300 bg-white px-2 py-1 font-semibold text-amber-700 hover:bg-amber-100"
-                >
-                  다시 시도
-                </button>
-              )}
-            </div>
-          )}
         </div>
 
         {/* 주간 캘린더 */}
@@ -2909,8 +2891,41 @@ export default function Reservations() {
               <ChevronRight className="w-4 h-4 text-blue-600" />
             </button>
 
-            <div className="flex-1" />
-            
+            <div className="relative min-w-0 flex-1 self-stretch">
+              {isPaymentSyncStatusVisible && (
+                <div
+                  role="status"
+                  aria-live="polite"
+                  title={paymentSyncStatusMessage}
+                  className={`absolute left-0 top-1/2 z-10 inline-flex max-w-[12rem] -translate-y-1/2 items-center gap-1.5 rounded-md border bg-white/95 px-2 py-1 text-xs shadow-sm sm:max-w-[18rem] ${
+                    paymentSyncError && !isPaymentSyncing
+                      ? 'border-amber-200 text-amber-700'
+                      : 'border-blue-200 text-blue-700'
+                  }`}
+                >
+                  {isPaymentSyncing ? (
+                    <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
+                  ) : (
+                    <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                  )}
+                  <span className="hidden truncate sm:inline">
+                    {isPaymentSyncing ? '결제 동기화 중' : '동기화 실패'}
+                  </span>
+                  {paymentSyncError && !isPaymentSyncing && (
+                    <button
+                      type="button"
+                      onClick={retryPaymentSync}
+                      aria-label="결제 상태 동기화 다시 시도"
+                      title="다시 시도"
+                      className="rounded p-0.5 hover:bg-amber-100"
+                    >
+                      <RefreshCw className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+
             <span className="text-xs text-blue-700 font-semibold">
               {formatDateKst(toDateFromOffset(currentWeekStart))} ~
             </span>
