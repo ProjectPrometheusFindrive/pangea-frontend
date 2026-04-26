@@ -122,3 +122,87 @@ test('getReservationOverdueSegment keeps an unreturned rental blocked through to
     endDate: 0,
   });
 });
+
+test('getReservationOverdueSegment marks same-day overdue once scheduled end time has passed', async () => {
+  const module = await viteServer.ssrLoadModule('/src/app/pages/Reservations.tsx');
+  const now = new Date();
+  const referenceNow = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 14, 0, 0);
+  const scheduledEndAt = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 9, 0, 0).toISOString();
+
+  const overdueSegment = module.getReservationOverdueSegment({
+    id: 'R-LATE-SAME-DAY',
+    vehicleNumber: '11가1111',
+    customer: '당일지연고객',
+    startDate: -2,
+    endDate: 0,
+    type: 'rental',
+    contractStatus: '대여중',
+    scheduledEndAt,
+    phone: '010-0000-0000',
+    paymentMethod: '카드',
+    amount: '100,000원',
+    deposit: '10,000원',
+    paymentStatus: '대기',
+  }, 0, referenceNow);
+
+  assert.deepEqual(overdueSegment, {
+    kind: 'overdue',
+    startDate: 0,
+    endDate: 0,
+  });
+});
+
+test('getReservationOverdueSegment does not mark same-day overdue before scheduled end time', async () => {
+  const module = await viteServer.ssrLoadModule('/src/app/pages/Reservations.tsx');
+  const now = new Date();
+  const referenceNow = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 9, 0, 0);
+  const scheduledEndAt = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 21, 0, 0).toISOString();
+
+  const overdueSegment = module.getReservationOverdueSegment({
+    id: 'R-NOT-LATE-SAME-DAY',
+    vehicleNumber: '22나2222',
+    customer: '당일정상고객',
+    startDate: -1,
+    endDate: 0,
+    type: 'rental',
+    contractStatus: '대여중',
+    scheduledEndAt,
+    phone: '010-0000-0001',
+    paymentMethod: '카드',
+    amount: '120,000원',
+    deposit: '20,000원',
+    paymentStatus: '대기',
+  }, 0, referenceNow);
+
+  assert.equal(overdueSegment, null);
+});
+
+test('getReservationOverdueSegment marks same-day late return on the returned day', async () => {
+  const module = await viteServer.ssrLoadModule('/src/app/pages/Reservations.tsx');
+  const now = new Date();
+  const endDay = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 9, 0, 0);
+  const returnedAt = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 12, 0, 0).toISOString();
+
+  const overdueSegment = module.getReservationOverdueSegment({
+    id: 'R-LATE-RETURN-SAME-DAY',
+    vehicleNumber: '33다3333',
+    customer: '당일지연해소고객',
+    startDate: -4,
+    endDate: -1,
+    type: 'return',
+    contractStatus: '완료',
+    scheduledEndAt: endDay.toISOString(),
+    returnedAt,
+    phone: '010-0000-0002',
+    paymentMethod: '카드',
+    amount: '150,000원',
+    deposit: '30,000원',
+    paymentStatus: '완료',
+  }, 0, new Date(now.getFullYear(), now.getMonth(), now.getDate(), 15, 0, 0));
+
+  assert.deepEqual(overdueSegment, {
+    kind: 'overdue',
+    startDate: -1,
+    endDate: -1,
+  });
+});

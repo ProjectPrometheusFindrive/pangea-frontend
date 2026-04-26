@@ -9,6 +9,7 @@ export interface Reservation {
   returnedAt?: string;
   contractStatus?: string;
   scheduledStartAt?: string;
+  scheduledEndAt?: string;
   type: 'reservation' | 'rental' | 'return';
   issues?: string[];
   phone: string;
