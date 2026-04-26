@@ -709,17 +709,50 @@ function getReservationReturnedDateOffset(reservation: Reservation): number | nu
   return toDateOffset(reservation.returnedAt);
 }
 
+function parseReservationDateTime(value: string | undefined): Date | null {
+  if (typeof value !== 'string' || !value.trim()) {
+    return null;
+  }
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+  return parsed;
+}
+
 export function getReservationOverdueSegment(
   reservation: Reservation,
   todayOffset = 0,
+  referenceNow: Date = new Date(),
 ): ReservationCalendarSegment | null {
   if (reservation.type === 'reservation') {
     return null;
   }
 
+  const scheduledEndAt = parseReservationDateTime(reservation.scheduledEndAt);
+  const returnedAtDate = parseReservationDateTime(reservation.returnedAt);
   const overdueStartDate = reservation.endDate + 1;
   const returnedDateOffset = getReservationReturnedDateOffset(reservation);
+
   if (returnedDateOffset !== null) {
+    const hasSameDayLateReturn = (
+      scheduledEndAt !== null
+      && returnedAtDate !== null
+      && returnedAtDate > scheduledEndAt
+      && returnedDateOffset === reservation.endDate
+    );
+    if (hasSameDayLateReturn) {
+      const overdueEndDate = Math.min(returnedDateOffset, todayOffset);
+      if (overdueEndDate < reservation.endDate) {
+        return null;
+      }
+      return {
+        kind: 'overdue',
+        startDate: reservation.endDate,
+        endDate: overdueEndDate,
+      };
+    }
+
     const overdueEndDate = Math.min(returnedDateOffset, todayOffset);
     if (overdueEndDate < overdueStartDate) {
       return null;
@@ -735,6 +768,20 @@ export function getReservationOverdueSegment(
   const currentContractStatus = normalizeReservationContractStatus(reservation.contractStatus ?? null);
   const isCompleted = reservation.type === 'return'
     || (currentContractStatus !== null && TERMINAL_CONTRACT_STATUSES.has(currentContractStatus));
+  const isSameDayCurrentlyOverdue = (
+    !isCompleted
+    && scheduledEndAt !== null
+    && referenceNow > scheduledEndAt
+    && todayOffset === reservation.endDate
+  );
+  if (isSameDayCurrentlyOverdue) {
+    return {
+      kind: 'overdue',
+      startDate: reservation.endDate,
+      endDate: todayOffset,
+    };
+  }
+
   if (isCompleted || todayOffset < overdueStartDate) {
     return null;
   }
@@ -1017,6 +1064,7 @@ function toReservationRow(row: unknown, index: number): Reservation | null {
     endDate: endDateOffset,
     returnedAt: toStringValue(row.returnedAt) ?? undefined,
     scheduledStartAt: toStringValue(startSource) ?? undefined,
+    scheduledEndAt: toStringValue(endSource) ?? undefined,
     contractStatus: contractStatus ?? undefined,
     type: normalizeReservationType(contractStatus ?? toStringValue(row.type) ?? toStringValue(row.status)),
     issues,
