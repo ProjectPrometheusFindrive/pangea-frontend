@@ -33,9 +33,11 @@ import {
   resolveReservationVehicleNumber,
 } from './reservationsViewModel';
 import {
+  invalidatePaymentStatusCache,
   isUnpaidPaymentStatus,
   toCanonicalPaymentStatus,
   toReservationPaymentStatus,
+  type PaymentStatusCanonical,
   type PaymentStatusSnapshot,
 } from '../utils/paymentStatusSync';
 import { useAuthorization } from '../context/AuthorizationContext';
@@ -530,6 +532,10 @@ function applySyncedPaymentStatusToReservation(
   reservation: Reservation,
   syncedPaymentStatus: PaymentStatusSnapshot,
 ): Reservation {
+  if (syncedPaymentStatus.status === 'not-found' || syncedPaymentStatus.status === 'unknown') {
+    return reservation;
+  }
+
   const nextPaymentStatus = toReservationPaymentStatus(syncedPaymentStatus.status);
   const nextIssues = isUnpaidPaymentStatus(syncedPaymentStatus.status)
     ? withIssueLabel(reservation.issues, '미납/결제 문제')
@@ -538,26 +544,95 @@ function applySyncedPaymentStatusToReservation(
   return {
     ...reservation,
     paymentStatus: nextPaymentStatus,
+    additionalPaymentAmount: (
+      normalizeAdditionalPaymentAmount(syncedPaymentStatus.additionalAmount)
+      ?? normalizeAdditionalPaymentAmount(syncedPaymentStatus.amount)
+      ?? reservation.additionalPaymentAmount
+    ),
+    paymentMethod: syncedPaymentStatus.method
+      ? normalizePaymentMethod(syncedPaymentStatus.method)
+      : reservation.paymentMethod,
+    paymentInfo: {
+      paymentId: syncedPaymentStatus.paymentId ?? reservation.paymentInfo?.paymentId,
+      reservationId: syncedPaymentStatus.reservationId ?? reservation.id,
+      status: syncedPaymentStatus.status,
+      amount: normalizeAdditionalPaymentAmount(syncedPaymentStatus.amount) ?? (reservation.paymentInfo?.amount ?? 0),
+      principalAmount: normalizeAdditionalPaymentAmount(syncedPaymentStatus.principalAmount) ?? (reservation.paymentInfo?.principalAmount ?? 0),
+      additionalAmount: normalizeAdditionalPaymentAmount(syncedPaymentStatus.additionalAmount) ?? (
+        reservation.paymentInfo?.additionalAmount ?? reservation.additionalPaymentAmount ?? 0
+      ),
+      overdueDays: Math.max(0, Math.trunc(normalizeAdditionalPaymentAmount(syncedPaymentStatus.overdueDays) ?? reservation.paymentInfo?.overdueDays ?? 0)),
+      dueDate: syncedPaymentStatus.dueDate ?? reservation.paymentInfo?.dueDate,
+      method: syncedPaymentStatus.method ?? reservation.paymentInfo?.method ?? reservation.paymentMethod,
+      updatedAt: syncedPaymentStatus.updatedAt ?? reservation.paymentInfo?.updatedAt,
+    },
     issues: nextIssues,
   };
 }
 
 function applyCompletedPaymentToReservation(reservation: Reservation): Reservation {
+  const principalAmount = reservation.paymentInfo?.principalAmount ?? (toCurrencyNumberValue(reservation.amount) ?? 0);
+  const additionalAmount = reservation.paymentInfo?.additionalAmount ?? (reservation.additionalPaymentAmount ?? 0);
+  const totalAmount = reservation.paymentInfo?.amount ?? (principalAmount + additionalAmount);
   return {
     ...reservation,
     paymentStatus: toReservationPaymentStatus('paid'),
+    hasPaymentInfo: true,
+    additionalPaymentAmount: additionalAmount,
+    paymentInfo: {
+      ...reservation.paymentInfo,
+      reservationId: reservation.id,
+      status: 'paid',
+      amount: totalAmount,
+      principalAmount,
+      additionalAmount,
+      overdueDays: reservation.paymentInfo?.overdueDays ?? 0,
+      method: reservation.paymentInfo?.method ?? reservation.paymentMethod,
+      updatedAt: reservation.paymentInfo?.updatedAt,
+    },
     issues: withoutIssueLabel(reservation.issues, '미납/결제 문제'),
   };
 }
 
-export function canMarkReservationPaymentAsPaid(
+function applyUnpaidPaymentToReservation(
+  reservation: Reservation,
+  { amount }: { amount: number },
+): Reservation {
+  return {
+    ...reservation,
+    paymentStatus: toReservationPaymentStatus('unpaid'),
+    hasPaymentInfo: true,
+    additionalPaymentAmount: Math.max(amount, 0),
+    paymentInfo: {
+      ...reservation.paymentInfo,
+      reservationId: reservation.id,
+      status: 'overdue',
+      amount: reservation.paymentInfo?.amount ?? Math.max(amount, 0),
+      principalAmount: reservation.paymentInfo?.principalAmount ?? (toCurrencyNumberValue(reservation.amount) ?? 0),
+      additionalAmount: Math.max(amount, 0),
+      overdueDays: reservation.paymentInfo?.overdueDays ?? 0,
+      method: reservation.paymentInfo?.method ?? reservation.paymentMethod,
+      updatedAt: reservation.paymentInfo?.updatedAt,
+    },
+    issues: withIssueLabel(reservation.issues, '미납/결제 문제'),
+  };
+}
+
+function canManageReservationPaymentIssue(
   reservation: Reservation,
   paymentSnapshot: PaymentStatusSnapshot | null,
 ): boolean {
   const effectiveStatus = paymentSnapshot?.status === 'not-found'
     ? toCanonicalPaymentStatus(reservation.paymentStatus)
     : paymentSnapshot?.status ?? toCanonicalPaymentStatus(reservation.paymentStatus);
-  return effectiveStatus === 'pending' || effectiveStatus === 'unpaid';
+  return effectiveStatus === 'pending' || effectiveStatus === 'unpaid' || effectiveStatus === 'partial';
+}
+
+export function canMarkReservationPaymentAsPaid(
+  reservation: Reservation,
+  paymentSnapshot: PaymentStatusSnapshot | null,
+): boolean {
+  return canManageReservationPaymentIssue(reservation, paymentSnapshot);
 }
 
 export function getReservationPaymentMutationId(
@@ -840,6 +915,148 @@ function toCurrencyValue(value: unknown): string {
   return textValue.endsWith('원') ? textValue : `${textValue}원`;
 }
 
+function toCurrencyNumberValue(value: unknown): number | null {
+  const numericValue = toNumberValue(value);
+  if (numericValue !== null) {
+    return numericValue;
+  }
+
+  const textValue = toStringValue(value);
+  if (!textValue) {
+    return null;
+  }
+  const numericText = textValue.replace(/[^\d.-]/g, '');
+  if (!numericText) {
+    return null;
+  }
+  const parsed = Number(numericText);
+  if (!Number.isFinite(parsed)) {
+    return null;
+  }
+  return parsed;
+}
+
+function normalizeAdditionalPaymentAmount(value: number | null | undefined): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return null;
+  }
+  if (value < 0) {
+    return 0;
+  }
+  return value;
+}
+
+function fallbackAdditionalPaymentAmountFromContract(amount: unknown, deposit: unknown): number {
+  const amountValue = toCurrencyNumberValue(amount) ?? 0;
+  const depositValue = toCurrencyNumberValue(deposit) ?? 0;
+  return Math.max(amountValue - depositValue, 0);
+}
+
+function resolveReservationAdditionalPaymentAmount(
+  reservation: Reservation,
+  paymentSnapshot: PaymentStatusSnapshot | null,
+): number {
+  const reservationInfo = reservation.paymentInfo;
+  if (paymentSnapshot && paymentSnapshot.status !== 'not-found' && paymentSnapshot.status !== 'unknown') {
+    const syncedAmount = normalizeAdditionalPaymentAmount(
+      paymentSnapshot.additionalAmount ?? paymentSnapshot.amount,
+    );
+    if (syncedAmount !== null) {
+      return syncedAmount;
+    }
+  }
+  const fromReservationInfo = normalizeAdditionalPaymentAmount(reservationInfo?.additionalAmount);
+  if (fromReservationInfo !== null) {
+    return fromReservationInfo;
+  }
+
+  const reservationAmount = normalizeAdditionalPaymentAmount(reservation.additionalPaymentAmount);
+  if (reservationAmount !== null) {
+    return reservationAmount;
+  }
+  return fallbackAdditionalPaymentAmountFromContract(reservation.amount, reservation.deposit);
+}
+
+function resolveReservationPrincipalPaymentAmount(
+  reservation: Reservation,
+  paymentSnapshot: PaymentStatusSnapshot | null,
+): number {
+  const fromReservationInfo = normalizeAdditionalPaymentAmount(reservation.paymentInfo?.principalAmount);
+  if (fromReservationInfo !== null) {
+    return fromReservationInfo;
+  }
+  const fromSnapshot = normalizeAdditionalPaymentAmount(paymentSnapshot?.principalAmount ?? null);
+  if (fromSnapshot !== null) {
+    return fromSnapshot;
+  }
+  return normalizeAdditionalPaymentAmount(toCurrencyNumberValue(reservation.amount)) ?? 0;
+}
+
+function resolveReservationTotalPaymentAmount(
+  reservation: Reservation,
+  paymentSnapshot: PaymentStatusSnapshot | null,
+): number {
+  const fromReservationInfo = normalizeAdditionalPaymentAmount(reservation.paymentInfo?.amount);
+  if (fromReservationInfo !== null) {
+    return fromReservationInfo;
+  }
+  const fromSnapshot = normalizeAdditionalPaymentAmount(paymentSnapshot?.amount ?? null);
+  if (fromSnapshot !== null) {
+    return fromSnapshot;
+  }
+  const principalAmount = resolveReservationPrincipalPaymentAmount(reservation, paymentSnapshot);
+  const additionalAmount = resolveReservationAdditionalPaymentAmount(reservation, paymentSnapshot);
+  return principalAmount + additionalAmount;
+}
+
+function resolveReservationPaymentOverdueDays(
+  reservation: Reservation,
+  paymentSnapshot: PaymentStatusSnapshot | null,
+): number {
+  const reservationDays = normalizeAdditionalPaymentAmount(reservation.paymentInfo?.overdueDays ?? null);
+  if (reservationDays !== null) {
+    return Math.max(0, Math.trunc(reservationDays));
+  }
+  const snapshotDays = normalizeAdditionalPaymentAmount(paymentSnapshot?.overdueDays ?? null);
+  if (snapshotDays !== null) {
+    return Math.max(0, Math.trunc(snapshotDays));
+  }
+  return 0;
+}
+
+function resolveReservationPaymentUpdatedAt(
+  reservation: Reservation,
+  paymentSnapshot: PaymentStatusSnapshot | null,
+): string | null {
+  return toStringValue(reservation.paymentInfo?.updatedAt) ?? paymentSnapshot?.updatedAt ?? null;
+}
+
+function resolveReservationPaymentMethod(
+  reservation: Reservation,
+  paymentSnapshot: PaymentStatusSnapshot | null,
+): Reservation['paymentMethod'] {
+  return normalizePaymentMethod(
+    toStringValue(reservation.paymentInfo?.method)
+      ?? paymentSnapshot?.method
+      ?? reservation.paymentMethod
+      ?? null,
+  );
+}
+
+function resolveReservationPaymentStatus(
+  reservation: Reservation,
+  paymentSnapshot: PaymentStatusSnapshot | null,
+): Reservation['paymentStatus'] {
+  const reservationInfoStatus = toCanonicalPaymentStatus(toStringValue(reservation.paymentInfo?.status));
+  if (reservationInfoStatus !== 'unknown' && reservationInfoStatus !== 'not-found') {
+    return toReservationPaymentStatus(reservationInfoStatus);
+  }
+  const effectiveSnapshotStatus = paymentSnapshot?.status === 'not-found'
+    ? toCanonicalPaymentStatus(reservation.paymentStatus)
+    : paymentSnapshot?.status ?? toCanonicalPaymentStatus(reservation.paymentStatus);
+  return toReservationPaymentStatus(effectiveSnapshotStatus);
+}
+
 function normalizeReservationType(value: string | null): Reservation['type'] {
   if (!value) {
     return 'reservation';
@@ -870,6 +1087,22 @@ function normalizePaymentMethod(value: string | null): Reservation['paymentMetho
     return '계좌이체';
   }
   return '카드';
+}
+
+function toApiPaymentStatus(status: PaymentStatusCanonical): 'pending' | 'overdue' | 'partial' | 'paid' | 'canceled' {
+  if (status === 'paid') {
+    return 'paid';
+  }
+  if (status === 'canceled') {
+    return 'canceled';
+  }
+  if (status === 'partial') {
+    return 'partial';
+  }
+  if (status === 'unpaid') {
+    return 'overdue';
+  }
+  return 'pending';
 }
 
 export function normalizeReservationPaymentStatus(value: string | null): Reservation['paymentStatus'] {
@@ -1017,6 +1250,70 @@ function toMemberDisplayName(member: SettingsMember): string | null {
   return toStringValue(member.email) ?? toStringValue(member.userId);
 }
 
+function toReservationPaymentInfo(
+  row: Record<string, unknown>,
+  options: {
+    reservationId: string;
+    paymentMethodSource: string | null;
+    paymentStatusSource: string | null;
+    additionalPaymentAmount: number | null;
+    hasPaymentInfo: boolean;
+  },
+): Reservation['paymentInfo'] | undefined {
+  const {
+    reservationId,
+    paymentMethodSource,
+    paymentStatusSource,
+    additionalPaymentAmount,
+    hasPaymentInfo,
+  } = options;
+  const paymentSource = isRecord(row.paymentInfo)
+    ? row.paymentInfo
+    : isRecord(row.payment)
+      ? row.payment
+      : null;
+  const paymentId = toStringValue(paymentSource?.paymentId ?? paymentSource?.id) ?? toStringValue(row.paymentId);
+  const method = toStringValue(paymentSource?.method ?? paymentSource?.paymentMethod ?? paymentSource?.paymentType) ?? paymentMethodSource;
+  const status = toStringValue(paymentSource?.status ?? paymentSource?.paymentStatus) ?? paymentStatusSource;
+  const principalAmount = normalizeAdditionalPaymentAmount(
+    toCurrencyNumberValue(paymentSource?.principalAmount) ?? toCurrencyNumberValue(row.amount),
+  ) ?? 0;
+  const additionalAmount = normalizeAdditionalPaymentAmount(
+    toCurrencyNumberValue(paymentSource?.additionalAmount) ?? additionalPaymentAmount,
+  ) ?? 0;
+  const amount = normalizeAdditionalPaymentAmount(toCurrencyNumberValue(paymentSource?.amount)) ?? (principalAmount + additionalAmount);
+  const overdueDays = Math.max(0, Math.trunc(normalizeAdditionalPaymentAmount(toNumberValue(paymentSource?.overdueDays)) ?? 0));
+  const dueDate = toStringValue(paymentSource?.dueDate ?? paymentSource?.paymentDueDate)
+    ?? toStringValue(row.paymentDueDate)
+    ?? toStringValue(row.dueDate);
+  const updatedAt = toStringValue(paymentSource?.updatedAt) ?? toStringValue(row.updatedAt);
+  if (
+    !hasPaymentInfo
+    && !paymentId
+    && !method
+    && !status
+    && !dueDate
+    && amount === 0
+    && principalAmount === 0
+    && additionalAmount === 0
+    && overdueDays === 0
+  ) {
+    return undefined;
+  }
+  return {
+    paymentId: paymentId ?? undefined,
+    reservationId,
+    status: status ?? undefined,
+    amount,
+    principalAmount,
+    additionalAmount,
+    overdueDays,
+    dueDate: dueDate ?? undefined,
+    method: method ?? undefined,
+    updatedAt: updatedAt ?? undefined,
+  };
+}
+
 function toReservationRow(row: unknown, index: number): Reservation | null {
   if (!isRecord(row)) {
     return null;
@@ -1055,6 +1352,34 @@ function toReservationRow(row: unknown, index: number): Reservation | null {
     issues.unshift('사고 접수');
   }
 
+  const paymentMethodSource = toStringValue(row.paymentMethod)
+    ?? toStringValue(row.paymentType)
+    ?? parseReservationMemoValue(row.memo, 'paymentMethod');
+  const paymentStatusSource = toStringValue(row.paymentStatus)
+    ?? parseReservationMemoValue(row.memo, 'paymentStatus');
+  const hasPaymentInfo = (
+    paymentMethodSource !== null
+    || paymentStatusSource !== null
+    || toCurrencyNumberValue(row.amount) !== null
+    || toCurrencyNumberValue(row.deposit) !== null
+  );
+  const additionalPaymentAmount = normalizeAdditionalPaymentAmount(
+    toCurrencyNumberValue(row.additionalPaymentAmount)
+    ?? toCurrencyNumberValue(row.unpaidAmount)
+    ?? toCurrencyNumberValue(row.remainingAmount)
+    ?? toCurrencyNumberValue(row.outstandingAmount),
+  );
+  const paymentInfo = toReservationPaymentInfo(
+    row,
+    {
+      reservationId,
+      paymentMethodSource,
+      paymentStatusSource,
+      additionalPaymentAmount,
+      hasPaymentInfo,
+    },
+  );
+
   return {
     id: reservationId,
     companyId: toStringValue(row.companyId) ?? undefined,
@@ -1075,10 +1400,13 @@ function toReservationRow(row: unknown, index: number): Reservation | null {
       ?? parseReservationMemoValue(row.memo, 'phone')
       ?? '-'
     ),
-    paymentMethod: normalizePaymentMethod(toStringValue(row.paymentMethod) ?? toStringValue(row.paymentType)),
+    paymentMethod: normalizePaymentMethod(paymentMethodSource),
     amount: toCurrencyValue(row.amount),
     deposit: toCurrencyValue(row.deposit),
-    paymentStatus: normalizeReservationPaymentStatus(toStringValue(row.paymentStatus)),
+    paymentStatus: normalizeReservationPaymentStatus(paymentStatusSource),
+    hasPaymentInfo: hasPaymentInfo || Boolean(paymentInfo),
+    additionalPaymentAmount: additionalPaymentAmount ?? undefined,
+    paymentInfo,
     startDateFull: startDateLabel,
     endDateFull: endDateLabel,
   };
@@ -1108,6 +1436,9 @@ function mergeReservationDetail(detailRow: Reservation, fallbackReservation: Res
   };
   if (detailRow.phone === '-' && fallbackReservation.phone !== '-') {
     mergedReservation.phone = fallbackReservation.phone;
+  }
+  if (!detailRow.paymentInfo && fallbackReservation.paymentInfo) {
+    mergedReservation.paymentInfo = fallbackReservation.paymentInfo;
   }
   return mergedReservation;
 }
@@ -1311,6 +1642,10 @@ export default function Reservations() {
   const [isLateReturnMemoSaving, setIsLateReturnMemoSaving] = useState(false);
   const [isLateReturnMemoSaved, setIsLateReturnMemoSaved] = useState(false);
   const [isPaymentCompleting, setIsPaymentCompleting] = useState(false);
+  const [paymentAmountDraft, setPaymentAmountDraft] = useState('');
+  const [paymentMethodDraft, setPaymentMethodDraft] = useState<Reservation['paymentMethod']>('카드');
+  const [isPaymentMethodSaving, setIsPaymentMethodSaving] = useState(false);
+  const [isPaymentAmountSaving, setIsPaymentAmountSaving] = useState(false);
   const [activeReservationAction, setActiveReservationAction] = useState<'start' | 'cancel' | null>(null);
   const [reservationActionError, setReservationActionError] = useState<string | null>(null);
   const [reservationWarningPrompt, setReservationWarningPrompt] = useState<ReservationWarningPrompt | null>(null);
@@ -2038,6 +2373,44 @@ export default function Reservations() {
   const selectedReservationPaymentSync = selectedReservation
     ? syncedPaymentByReservationId[selectedReservation.id] ?? null
     : null;
+  const selectedReservationPaymentStatus = selectedReservation
+    ? resolveReservationPaymentStatus(selectedReservation, selectedReservationPaymentSync)
+    : '대기';
+  const selectedReservationPrincipalAmount = selectedReservation
+    ? resolveReservationPrincipalPaymentAmount(selectedReservation, selectedReservationPaymentSync)
+    : 0;
+  const selectedReservationAdditionalAmount = selectedReservation
+    ? resolveReservationAdditionalPaymentAmount(selectedReservation, selectedReservationPaymentSync)
+    : 0;
+  const selectedReservationTotalAmount = selectedReservation
+    ? resolveReservationTotalPaymentAmount(selectedReservation, selectedReservationPaymentSync)
+    : 0;
+  const selectedReservationCalculatedTotalAmount = selectedReservationPrincipalAmount + selectedReservationAdditionalAmount;
+  const selectedReservationTotalAmountDelta = selectedReservationTotalAmount - selectedReservationCalculatedTotalAmount;
+  const selectedReservationOverdueDays = selectedReservation
+    ? resolveReservationPaymentOverdueDays(selectedReservation, selectedReservationPaymentSync)
+    : 0;
+  const selectedReservationPaymentUpdatedAt = selectedReservation
+    ? resolveReservationPaymentUpdatedAt(selectedReservation, selectedReservationPaymentSync)
+    : null;
+  const canEditReservationPaymentFields = selectedReservation
+    ? canWritePayments && canManageReservationPaymentIssue(selectedReservation, selectedReservationPaymentSync)
+    : false;
+  useEffect(() => {
+    if (!selectedReservation) {
+      setPaymentAmountDraft('');
+      setPaymentMethodDraft('카드');
+      return;
+    }
+    const additionalAmount = resolveReservationAdditionalPaymentAmount(
+      selectedReservation,
+      selectedReservationPaymentSync,
+    );
+    setPaymentAmountDraft(String(Math.max(0, Math.trunc(additionalAmount))));
+    setPaymentMethodDraft(
+      resolveReservationPaymentMethod(selectedReservation, selectedReservationPaymentSync),
+    );
+  }, [selectedReservation, selectedReservationPaymentSync]);
   const isPaymentSyncStatusVisible = isPaymentSyncing || Boolean(paymentSyncError);
   const paymentSyncStatusMessage = isPaymentSyncing
     ? '결제 상태를 동기화하는 중입니다.'
@@ -2145,6 +2518,8 @@ export default function Reservations() {
     const reservationId = `R-${Date.now()}-${Math.floor(Math.random() * 1000).toString().padStart(3, '0')}`;
     const startDateOffset = toDateOffset(startAt) ?? 0;
     const endDateOffset = toDateOffset(endAt) ?? startDateOffset;
+    const fallbackAmount = toCurrencyNumberFromInput(formValues.amount);
+    const fallbackDeposit = toCurrencyNumberFromInput(formValues.deposit);
     const fallbackReservation: Reservation = {
       id: reservationId,
       vehicleNumber: formValues.selectedVehicle,
@@ -2160,6 +2535,8 @@ export default function Reservations() {
       amount: toCurrencyDisplayFromInput(formValues.amount),
       deposit: toCurrencyDisplayFromInput(formValues.deposit),
       paymentStatus: formValues.paymentStatus,
+      hasPaymentInfo: true,
+      additionalPaymentAmount: Math.max(fallbackAmount - fallbackDeposit, 0),
       startDateFull: formValues.startDate,
       endDateFull: formValues.endDate,
     };
@@ -2179,8 +2556,8 @@ export default function Reservations() {
         address: formValues.customerAddress.trim() || undefined,
         paymentMethod: formValues.paymentMethod,
         paymentStatus: formValues.paymentStatus,
-        amount: toCurrencyNumberFromInput(formValues.amount),
-        deposit: toCurrencyNumberFromInput(formValues.deposit),
+        amount: fallbackAmount,
+        deposit: fallbackDeposit,
         pickupLocation: formValues.pickupLocation.trim() || undefined,
         returnLocation: formValues.returnLocation.trim() || undefined,
         memo: [
@@ -2242,9 +2619,11 @@ export default function Reservations() {
     }
   }, [canWriteReservations, confirmReservationWarning, hasInspectionIssueCardForVehicle, hydrateReservationsData, openReservationDetail, vehicleAssets]);
 
-  const handleCompleteReservationPayment = useCallback(async () => {
+  const handleUpdateReservationPaymentStatus = useCallback(async (
+    nextStatus: 'paid' | 'canceled',
+  ) => {
     if (!canWritePayments) {
-      setReservationActionError('결제 완료 처리 권한이 없습니다. 관리자에게 권한을 요청해 주세요.');
+      setReservationActionError('결제 상태 변경 권한이 없습니다. 관리자에게 권한을 요청해 주세요.');
       return;
     }
 
@@ -2252,7 +2631,7 @@ export default function Reservations() {
       return;
     }
 
-    if (!canMarkReservationPaymentAsPaid(selectedReservation, selectedReservationPaymentSync)) {
+    if (!canManageReservationPaymentIssue(selectedReservation, selectedReservationPaymentSync)) {
       return;
     }
 
@@ -2263,8 +2642,12 @@ export default function Reservations() {
 
     try {
       await patchPaymentStatus(paymentId, {
-        status: 'paid',
+        status: nextStatus,
         reservationId: selectedReservation.id,
+      });
+      invalidatePaymentStatusCache({
+        reservationId: selectedReservation.id,
+        paymentId,
       });
 
       const updatedReservation = applyCompletedPaymentToReservation(selectedReservation);
@@ -2275,15 +2658,15 @@ export default function Reservations() {
 
       refreshReservationsAfterMutation('결제 상태는 변경되었지만 목록을 다시 불러오지 못했습니다. 새로고침 후 확인해 주세요.');
       void hydrateReservationDetail(updatedReservation.id, updatedReservation);
-      toast.success('결제 상태를 완료로 처리했습니다.');
+      toast.success(nextStatus === 'paid' ? '결제 상태를 완료로 처리했습니다.' : '결제를 면제 처리했습니다.');
     } catch (error) {
       if (error instanceof ApiError) {
         if (error.status === 400) {
-          setReservationActionError(error.message || '결제 완료 처리 요청값을 확인해 주세요.');
+          setReservationActionError(error.message || '결제 상태 변경 요청값을 확인해 주세요.');
           return;
         }
         if (error.status === 403) {
-          setReservationActionError('결제 완료 처리 권한이 없습니다. 관리자에게 권한을 요청해 주세요.');
+          setReservationActionError('결제 상태 변경 권한이 없습니다. 관리자에게 권한을 요청해 주세요.');
           return;
         }
         if (error.status === 404) {
@@ -2304,11 +2687,11 @@ export default function Reservations() {
           return;
         }
 
-        setReservationActionError(error.message || '결제 완료 처리 중 오류가 발생했습니다.');
+        setReservationActionError(error.message || '결제 상태 변경 중 오류가 발생했습니다.');
         return;
       }
 
-      setReservationActionError('결제 완료 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.');
+      setReservationActionError('결제 상태 변경 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.');
       toast.error(RETRY_TOAST_MESSAGE);
     } finally {
       setIsPaymentCompleting(false);
@@ -2318,6 +2701,121 @@ export default function Reservations() {
     hydrateReservationDetail,
     hydrateReservationsData,
     isPaymentCompleting,
+    refreshReservationsAfterMutation,
+    selectedReservation,
+    selectedReservationPaymentSync,
+  ]);
+
+  const handleSaveAdditionalPaymentAmount = useCallback(async () => {
+    if (!canWritePayments) {
+      setReservationActionError('추가 결제 금액 수정 권한이 없습니다. 관리자에게 권한을 요청해 주세요.');
+      return;
+    }
+    if (!selectedReservation || isPaymentAmountSaving) {
+      return;
+    }
+    if (!canManageReservationPaymentIssue(selectedReservation, selectedReservationPaymentSync)) {
+      return;
+    }
+    const amount = Math.max(0, toCurrencyNumberFromInput(paymentAmountDraft));
+    const paymentId = getReservationPaymentMutationId(selectedReservation, selectedReservationPaymentSync);
+
+    setIsPaymentAmountSaving(true);
+    setReservationActionError(null);
+    try {
+      await patchPaymentStatus(paymentId, {
+        status: 'overdue',
+        reservationId: selectedReservation.id,
+        additionalAmount: amount,
+        force: true,
+        forceReason: 'manual-additional-payment',
+      });
+      invalidatePaymentStatusCache({
+        reservationId: selectedReservation.id,
+        paymentId,
+      });
+      const updatedReservation = applyUnpaidPaymentToReservation(selectedReservation, { amount });
+      setReservationsData((previousReservations) => previousReservations.map((reservation) => (
+        reservation.id === updatedReservation.id ? updatedReservation : reservation
+      )));
+      setSelectedReservation(updatedReservation);
+      refreshReservationsAfterMutation('추가 결제 금액은 저장되었지만 목록을 다시 불러오지 못했습니다. 새로고침 후 확인해 주세요.');
+      void hydrateReservationDetail(updatedReservation.id, updatedReservation);
+      toast.success('추가 결제 금액을 저장했습니다.');
+    } catch (error) {
+      if (error instanceof ApiError) {
+        setReservationActionError(error.message || '추가 결제 금액 저장 중 오류가 발생했습니다.');
+      } else {
+        setReservationActionError('추가 결제 금액 저장 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.');
+      }
+    } finally {
+      setIsPaymentAmountSaving(false);
+    }
+  }, [
+    canWritePayments,
+    hydrateReservationDetail,
+    isPaymentAmountSaving,
+    paymentAmountDraft,
+    refreshReservationsAfterMutation,
+    selectedReservation,
+    selectedReservationPaymentSync,
+  ]);
+
+  const handleSaveReservationPaymentMethod = useCallback(async () => {
+    if (!canWritePayments) {
+      setReservationActionError('결제 방법 수정 권한이 없습니다. 관리자에게 권한을 요청해 주세요.');
+      return;
+    }
+    if (!selectedReservation || isPaymentMethodSaving) {
+      return;
+    }
+    if (!canManageReservationPaymentIssue(selectedReservation, selectedReservationPaymentSync)) {
+      return;
+    }
+
+    const paymentId = getReservationPaymentMutationId(selectedReservation, selectedReservationPaymentSync);
+    const baseStatus = selectedReservationPaymentSync?.status === 'not-found'
+      ? toCanonicalPaymentStatus(selectedReservation.paymentStatus)
+      : selectedReservationPaymentSync?.status ?? toCanonicalPaymentStatus(selectedReservation.paymentStatus);
+    const status = toApiPaymentStatus(baseStatus);
+
+    setIsPaymentMethodSaving(true);
+    setReservationActionError(null);
+    try {
+      await patchPaymentStatus(paymentId, {
+        status,
+        reservationId: selectedReservation.id,
+        method: paymentMethodDraft,
+      });
+      invalidatePaymentStatusCache({
+        reservationId: selectedReservation.id,
+        paymentId,
+      });
+      const updatedReservation: Reservation = {
+        ...selectedReservation,
+        paymentMethod: paymentMethodDraft,
+      };
+      setReservationsData((previousReservations) => previousReservations.map((reservation) => (
+        reservation.id === updatedReservation.id ? updatedReservation : reservation
+      )));
+      setSelectedReservation(updatedReservation);
+      refreshReservationsAfterMutation('결제 방법은 저장되었지만 목록을 다시 불러오지 못했습니다. 새로고침 후 확인해 주세요.');
+      void hydrateReservationDetail(updatedReservation.id, updatedReservation);
+      toast.success('결제 방법을 저장했습니다.');
+    } catch (error) {
+      if (error instanceof ApiError) {
+        setReservationActionError(error.message || '결제 방법 저장 중 오류가 발생했습니다.');
+      } else {
+        setReservationActionError('결제 방법 저장 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.');
+      }
+    } finally {
+      setIsPaymentMethodSaving(false);
+    }
+  }, [
+    canWritePayments,
+    hydrateReservationDetail,
+    isPaymentMethodSaving,
+    paymentMethodDraft,
     refreshReservationsAfterMutation,
     selectedReservation,
     selectedReservationPaymentSync,
@@ -3593,50 +4091,143 @@ export default function Reservations() {
 
                 {/* 결제 정보 탭 */}
                 {activeTab === 'payment' && (
-                  <div className="space-y-4">
-                    <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
                       <div>
                         <label className="text-xs font-semibold text-gray-500 uppercase">대여 요금</label>
-                        <p className="text-2xl text-gray-900 mt-1 font-bold">{selectedReservation.amount}</p>
+                        <p className="text-xl text-gray-900 mt-1 font-bold">{selectedReservation.amount}</p>
                       </div>
                       <div>
                         <label className="text-xs font-semibold text-gray-500 uppercase">선금</label>
-                        <p className="text-2xl text-gray-900 mt-1 font-bold">{selectedReservation.deposit}</p>
+                        <p className="text-xl text-gray-900 mt-1 font-bold">{selectedReservation.deposit}</p>
+                      </div>
+                      <div>
+                        <label className="text-xs font-semibold text-gray-500 uppercase">기존 미납 금액</label>
+                        <p className="text-xl text-gray-900 mt-1 font-bold">
+                          {toCurrencyValue(selectedReservationPrincipalAmount)}
+                        </p>
                       </div>
                     </div>
-                    <div>
-                      <label className="text-xs font-semibold text-gray-500 uppercase">결제 방법</label>
-                      <p className="text-lg text-gray-900 mt-1">{selectedReservation.paymentMethod}</p>
-                    </div>
-                    <div>
-                      <label className="text-xs font-semibold text-gray-500 uppercase">결제 상태</label>
-                      <div className="mt-2 flex items-center gap-2">
-                        <span className={`inline-block px-3 py-1 rounded-full text-sm font-semibold ${getPaymentStatusColor(selectedReservation.paymentStatus)}`}>
-                          {selectedReservation.paymentStatus}
-                        </span>
-                        {selectedReservationPaymentSync?.status === 'not-found' && (
-                          <span className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-1">
-                            결제 정보 없음
+                    <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 space-y-2">
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-sm text-gray-700">결제 유형</span>
+                        {canEditReservationPaymentFields ? (
+                          <div className="flex items-center gap-2">
+                            <select
+                              value={paymentMethodDraft}
+                              onChange={(event) => setPaymentMethodDraft(normalizePaymentMethod(event.target.value))}
+                              className="rounded-md border border-gray-300 bg-white px-2 py-1 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                              aria-label="결제 방법 선택"
+                              disabled={isPaymentMethodSaving}
+                            >
+                              <option value="카드">카드</option>
+                              <option value="현금">현금</option>
+                              <option value="계좌이체">계좌이체</option>
+                            </select>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                void handleSaveReservationPaymentMethod();
+                              }}
+                              disabled={isPaymentMethodSaving}
+                              className="shrink-0 whitespace-nowrap rounded-md bg-blue-600 px-2 py-1 text-xs font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              {isPaymentMethodSaving ? '저장 중...' : '저장'}
+                            </button>
+                          </div>
+                        ) : (
+                          <span className="text-sm font-semibold text-gray-900">
+                            {resolveReservationPaymentMethod(selectedReservation, selectedReservationPaymentSync)}
                           </span>
                         )}
                       </div>
-                      {selectedReservationPaymentSync?.updatedAt && (
-                        <p className="text-xs text-gray-500 mt-2">
-                          최근 반영: {formatDateTimeKst(selectedReservationPaymentSync.updatedAt, '-')}
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-sm text-gray-700">기존 미납 금액</span>
+                        <span className="text-sm font-semibold text-gray-900">{toCurrencyValue(selectedReservationPrincipalAmount)}</span>
+                      </div>
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-sm text-gray-700">추가 결제 금액</span>
+                        {canEditReservationPaymentFields ? (
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="text"
+                              value={paymentAmountDraft}
+                              onChange={(event) => setPaymentAmountDraft(event.target.value.replace(/[^\d]/g, ''))}
+                              className="w-32 rounded-lg border border-amber-300 bg-white px-2 py-1 text-right text-sm font-semibold text-amber-800 focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-200"
+                              inputMode="numeric"
+                              aria-label="추가 결제 금액"
+                            />
+                            <span className="text-xs font-semibold text-amber-700">원</span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                void handleSaveAdditionalPaymentAmount();
+                              }}
+                              disabled={isPaymentAmountSaving}
+                              className="shrink-0 whitespace-nowrap rounded-md bg-amber-600 px-2 py-1 text-xs font-medium text-white hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              {isPaymentAmountSaving ? '저장 중...' : '저장'}
+                            </button>
+                          </div>
+                        ) : (
+                          <span className="text-sm font-semibold text-amber-700">{toCurrencyValue(selectedReservationAdditionalAmount)}</span>
+                        )}
+                      </div>
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-sm text-gray-700">연체 일수</span>
+                        <span className="text-sm font-bold text-red-600">{selectedReservationOverdueDays}일</span>
+                      </div>
+                      <div className="border-t border-gray-200 pt-2 mt-2 flex items-center justify-between gap-3">
+                        <span className="text-base font-bold text-gray-900">총 청구금액</span>
+                        <span className="text-lg font-bold text-red-600">{toCurrencyValue(selectedReservationTotalAmount)}</span>
+                      </div>
+                      <p className="text-xs text-gray-600">
+                        기존 미납 {toCurrencyValue(selectedReservationPrincipalAmount)} + 추가 결제 {toCurrencyValue(selectedReservationAdditionalAmount)} = 계산 합계 {toCurrencyValue(selectedReservationCalculatedTotalAmount)}
+                      </p>
+                      {selectedReservationTotalAmountDelta !== 0 && (
+                        <p className="text-xs text-amber-700">
+                          원장 총액과 계산 합계가 {toCurrencyValue(Math.abs(selectedReservationTotalAmountDelta))} 차이납니다.
                         </p>
                       )}
-                      {canWritePayments && canMarkReservationPaymentAsPaid(selectedReservation, selectedReservationPaymentSync) && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            void handleCompleteReservationPayment();
-                          }}
-                          data-testid="reservation-payment-complete-button"
-                          disabled={isPaymentCompleting}
-                          className="mt-3 inline-flex items-center rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
-                        >
-                          {isPaymentCompleting ? '처리 중...' : '결제 완료 처리'}
-                        </button>
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-sm text-gray-700">결제 상태</span>
+                        <span className={`inline-block px-3 py-1 rounded-full text-sm font-semibold ${getPaymentStatusColor(selectedReservationPaymentStatus)}`}>
+                          {selectedReservationPaymentStatus}
+                        </span>
+                      </div>
+                      {selectedReservationPaymentSync?.status === 'not-found' && selectedReservation.hasPaymentInfo === false && (
+                        <p className="text-xs text-amber-700">결제 정보 없음</p>
+                      )}
+                      {selectedReservationPaymentUpdatedAt && (
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="text-xs text-gray-500">최근 반영</span>
+                          <span className="text-xs text-gray-500">{formatDateTimeKst(selectedReservationPaymentUpdatedAt, '-')}</span>
+                        </div>
+                      )}
+                      {canEditReservationPaymentFields && (
+                        <div className="mt-2 flex flex-wrap items-center gap-2 pt-2 border-t border-gray-200">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              void handleUpdateReservationPaymentStatus('paid');
+                            }}
+                            data-testid="reservation-payment-complete-button"
+                            disabled={isPaymentCompleting}
+                            className="inline-flex items-center rounded-lg bg-emerald-600 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            {isPaymentCompleting ? '처리 중...' : '결제 완료 처리'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              void handleUpdateReservationPaymentStatus('canceled');
+                            }}
+                            disabled={isPaymentCompleting}
+                            className="inline-flex items-center rounded-lg bg-slate-600 px-3 py-2 text-xs font-medium text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            {isPaymentCompleting ? '처리 중...' : '결제 면제 처리'}
+                          </button>
+                        </div>
                       )}
                     </div>
                   </div>

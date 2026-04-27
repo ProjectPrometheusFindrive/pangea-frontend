@@ -61,6 +61,11 @@ test('resolvePaymentStatuses uses the status endpoint result without payment det
           {
             id: 'PAY-100',
             reservationId: 'R-100',
+            amount: 180000,
+            principalAmount: 120000,
+            additionalAmount: 60000,
+            overdueDays: 2,
+            method: '현금',
             status: 'pending',
             updatedAt: '2026-03-07T00:00:00Z',
           },
@@ -93,6 +98,11 @@ test('resolvePaymentStatuses uses the status endpoint result without payment det
     ]);
 
     assert.equal(result.byReservationId['R-100']?.status, 'pending');
+    assert.equal(result.byReservationId['R-100']?.amount, 180000);
+    assert.equal(result.byReservationId['R-100']?.principalAmount, 120000);
+    assert.equal(result.byReservationId['R-100']?.additionalAmount, 60000);
+    assert.equal(result.byReservationId['R-100']?.overdueDays, 2);
+    assert.equal(result.byReservationId['R-100']?.method, '현금');
     assert.deepEqual(requestedPaths, ['/api/v2/payments/status']);
   } finally {
     globalThis.fetch = originalFetch;
@@ -172,6 +182,45 @@ test('resolvePaymentStatuses prefers not-found over fallback status when the sta
     assert.equal(first.byReservationId['R-404-FALLBACK']?.status, 'not-found');
     assert.equal(second.byReservationId['R-404-FALLBACK']?.status, 'not-found');
     assert.equal(requestCount, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('invalidatePaymentStatusCache clears cached not-found snapshots so reservation status refetches', async () => {
+  const module = await viteServer.ssrLoadModule('/src/app/utils/paymentStatusSync.ts');
+  let requestCount = 0;
+  const originalFetch = globalThis.fetch;
+
+  globalThis.fetch = async (input) => {
+    const url = new URL(typeof input === 'string' ? input : String(input));
+    if (url.pathname === '/api/v2/payments/status') {
+      requestCount += 1;
+      return createJsonResponse(200, successEnvelope({
+        reservationId: 'R-CACHE-RESET',
+        items: [],
+        total: 0,
+      }));
+    }
+    return createJsonResponse(404, {
+      status: 'error',
+      error: {
+        type: 'NOT_FOUND',
+        message: 'not found',
+      },
+    });
+  };
+
+  try {
+    const first = await module.resolvePaymentStatuses([{ reservationId: 'R-CACHE-RESET' }]);
+    const second = await module.resolvePaymentStatuses([{ reservationId: 'R-CACHE-RESET' }]);
+    module.invalidatePaymentStatusCache({ reservationId: 'R-CACHE-RESET' });
+    const third = await module.resolvePaymentStatuses([{ reservationId: 'R-CACHE-RESET' }]);
+
+    assert.equal(first.byReservationId['R-CACHE-RESET']?.status, 'not-found');
+    assert.equal(second.byReservationId['R-CACHE-RESET']?.status, 'not-found');
+    assert.equal(third.byReservationId['R-CACHE-RESET']?.status, 'not-found');
+    assert.equal(requestCount, 2);
   } finally {
     globalThis.fetch = originalFetch;
   }

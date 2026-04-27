@@ -225,7 +225,7 @@ export function buildPaymentSyncTargets(
     .filter((reservation) => reservation.type !== 'return')
     .map((reservation) => ({
       reservationId: reservation.id,
-      fallbackStatus: reservation.paymentStatus,
+      fallbackStatus: reservation.hasPaymentInfo === false ? null : reservation.paymentStatus,
     }));
 
   if (!selectedReservation?.id) {
@@ -240,7 +240,7 @@ export function buildPaymentSyncTargets(
     ...targets,
     {
       reservationId: selectedReservation.id,
-      fallbackStatus: selectedReservation.paymentStatus,
+      fallbackStatus: selectedReservation.hasPaymentInfo === false ? null : selectedReservation.paymentStatus,
     },
   ];
 }

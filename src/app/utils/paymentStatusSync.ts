@@ -25,6 +25,12 @@ export interface PaymentStatusSnapshot {
   statusLabel: string;
   reservationId: string | null;
   paymentId: string | null;
+  amount: number | null;
+  principalAmount: number | null;
+  additionalAmount: number | null;
+  overdueDays: number | null;
+  method: string | null;
+  dueDate: string | null;
   updatedAt: string | null;
   source: PaymentStatusSource;
 }
@@ -68,6 +74,20 @@ const SOURCE_PRIORITY: Record<PaymentStatusSource, number> = {
 const CACHE_BY_RESERVATION_ID = new Map<string, PaymentStatusSnapshot>();
 const CACHE_BY_PAYMENT_ID = new Map<string, PaymentStatusSnapshot>();
 
+export function invalidatePaymentStatusCache(target: {
+  reservationId?: string | null;
+  paymentId?: string | null;
+}): void {
+  const reservationId = target.reservationId?.trim();
+  const paymentId = target.paymentId?.trim();
+  if (reservationId) {
+    CACHE_BY_RESERVATION_ID.delete(reservationId);
+  }
+  if (paymentId) {
+    CACHE_BY_PAYMENT_ID.delete(paymentId);
+  }
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
@@ -79,6 +99,19 @@ function toStringValue(value: unknown): string | null {
   }
   if (typeof value === 'number' && Number.isFinite(value)) {
     return String(value);
+  }
+  return null;
+}
+
+function toNumberValue(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === 'string') {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
   }
   return null;
 }
@@ -294,6 +327,12 @@ function toSnapshot(
   source: PaymentStatusSource,
   reservationId: string | null,
   paymentId: string | null,
+  amount: number | null,
+  principalAmount: number | null,
+  additionalAmount: number | null,
+  overdueDays: number | null,
+  method: string | null,
+  dueDate: string | null,
   updatedAt: string | null,
 ): PaymentStatusSnapshot {
   return {
@@ -301,6 +340,12 @@ function toSnapshot(
     statusLabel: paymentStatusToLabel(status),
     reservationId,
     paymentId,
+    amount,
+    principalAmount,
+    additionalAmount,
+    overdueDays,
+    method,
+    dueDate,
     updatedAt,
     source,
   };
@@ -315,13 +360,31 @@ function toSnapshotFromRecord(
   const status = toCanonicalPaymentStatus(rawStatus);
   const reservationId = pickString(row, ['reservationId', 'reservation_id', 'rentalId']) ?? hints.reservationId ?? null;
   const paymentId = pickString(row, ['paymentId', 'id']) ?? hints.paymentId ?? null;
+  const amount = toNumberValue(row.amount);
+  const principalAmount = toNumberValue(row.principalAmount);
+  const additionalAmount = toNumberValue(row.additionalAmount);
+  const overdueDays = toNumberValue(row.overdueDays);
+  const method = pickString(row, ['method', 'paymentMethod', 'paymentType']);
+  const dueDate = pickString(row, ['dueDate', 'paymentDueDate']);
   const updatedAt = toUpdatedAt(row);
 
   if (!reservationId && !paymentId && status === 'unknown') {
     return null;
   }
 
-  return toSnapshot(status, source, reservationId, paymentId, updatedAt);
+  return toSnapshot(
+    status,
+    source,
+    reservationId,
+    paymentId,
+    amount,
+    principalAmount,
+    additionalAmount,
+    overdueDays,
+    method,
+    dueDate,
+    updatedAt,
+  );
 }
 
 function chooseBetterSnapshot(
@@ -397,6 +460,12 @@ function toFallbackSnapshot(target: PaymentSyncTarget): PaymentStatusSnapshot | 
     'fallback',
     target.reservationId ?? null,
     target.paymentId ?? null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
     target.fallbackUpdatedAt ?? null,
   );
 }
@@ -587,11 +656,35 @@ export async function resolvePaymentStatuses(
 
     if (!selectedSnapshot) {
       if (shouldPreferNotFound && target.reservationId) {
-        selectedSnapshot = toSnapshot('not-found', 'not-found', target.reservationId, target.paymentId ?? null, null);
+        selectedSnapshot = toSnapshot(
+          'not-found',
+          'not-found',
+          target.reservationId,
+          target.paymentId ?? null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+        );
       } else if (cachedSnapshot) {
         selectedSnapshot = cachedSnapshot;
       } else if (isNotFoundFromStatusEndpoint && target.reservationId) {
-        selectedSnapshot = toSnapshot('not-found', 'not-found', target.reservationId, target.paymentId ?? null, null);
+        selectedSnapshot = toSnapshot(
+          'not-found',
+          'not-found',
+          target.reservationId,
+          target.paymentId ?? null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+        );
       }
     }
 

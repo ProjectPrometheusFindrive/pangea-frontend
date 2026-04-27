@@ -14,6 +14,11 @@ export interface GetPaymentsListOptions extends PaymentsRequestOptions {
 export interface PatchPaymentStatusPayload {
   status: string;
   reservationId?: string;
+  amount?: number;
+  additionalAmount?: number;
+  method?: string;
+  force?: boolean;
+  forceReason?: string;
 }
 
 export interface PatchPaymentStatusOptions extends PaymentsRequestOptions {}
