@@ -2551,19 +2551,15 @@ export default function Reservations() {
     setEditSubmitError(null);
 
     try {
-      const result = await patchReservation(selectedReservation.id, payload);
+      await patchReservation(selectedReservation.id, payload);
       const fallbackReservation: Reservation = {
         ...selectedReservation,
         ...(vehicleChanged && payload.vehicleNumber ? { vehicleNumber: payload.vehicleNumber } : {}),
         ...(vehicleChanged && payload.vin ? { vin: payload.vin } : {}),
       };
-      const updatedReservation = toReservationDetail(result, fallbackReservation);
-      setReservationsData((prev) => prev.map((r) => (r.id === updatedReservation.id ? updatedReservation : r)));
-      setSelectedReservation(updatedReservation);
-      const matchedAsset = vehicleAssets.find((a) => a.vehicleNumber === updatedReservation.vehicleNumber);
-      setSelectedVehicleAsset(matchedAsset ?? createReservationFallbackVehicleAsset(updatedReservation));
       setIsEditMode(false);
       refreshReservationsAfterMutation('예약이 수정되었지만 목록을 다시 불러오지 못했습니다.');
+      void hydrateReservationDetail(selectedReservation.id, fallbackReservation);
       toast.success(vehicleChanged ? '차량이 변경되었습니다.' : '예약이 수정되었습니다.');
     } catch (error) {
       if (error instanceof ApiError) {
