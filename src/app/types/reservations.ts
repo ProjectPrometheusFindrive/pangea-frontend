@@ -1,3 +1,16 @@
+export interface ReservationPaymentInfo {
+  paymentId?: string;
+  reservationId?: string;
+  status?: string;
+  amount: number;
+  principalAmount: number;
+  additionalAmount: number;
+  overdueDays: number;
+  dueDate?: string;
+  method?: string;
+  updatedAt?: string;
+}
+
 export interface Reservation {
   id: string;
   companyId?: string;
@@ -17,6 +30,9 @@ export interface Reservation {
   amount: string;
   deposit: string;
   paymentStatus: '대기' | '완료' | '미납' | '부분납부';
+  hasPaymentInfo?: boolean;
+  additionalPaymentAmount?: number;
+  paymentInfo?: ReservationPaymentInfo;
   startDateFull?: string;
   endDateFull?: string;
 }

@@ -102,3 +102,34 @@ test('payment sync targets keep the selected completed reservation for detail re
     ]),
   );
 });
+
+test('payment sync targets omit fallback status when reservation has no payment info', async () => {
+  const buildPaymentSyncTargets = await loadBuildPaymentSyncTargets();
+
+  const targets = buildPaymentSyncTargets([
+    {
+      id: 'R-NO-PAY',
+      vehicleNumber: 'VIN-000',
+      customer: 'No Payment',
+      startDate: 0,
+      endDate: 1,
+      type: 'reservation',
+      phone: '010-0000-0000',
+      paymentMethod: 'card',
+      amount: '0',
+      deposit: '0',
+      paymentStatus: '대기',
+      hasPaymentInfo: false,
+    },
+  ]);
+
+  assert.equal(
+    JSON.stringify(targets),
+    JSON.stringify([
+      {
+        reservationId: 'R-NO-PAY',
+        fallbackStatus: null,
+      },
+    ]),
+  );
+});

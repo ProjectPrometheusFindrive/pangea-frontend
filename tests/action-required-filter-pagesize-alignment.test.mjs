@@ -14,10 +14,10 @@ test('action required list request uses pageSize and forwards status priority as
   const pageSource = readProjectFile('src/app/pages/ActionRequired.tsx');
 
   assert.match(serviceSource, /pageSize\?: number;/u);
-  assert.match(serviceSource, /const \{ page, pageSize, status, priority, assignee, signal \} = options;/u);
-  assert.match(serviceSource, /query:\s*\{[\s\S]*page,\s*pageSize,\s*status,\s*priority,\s*assignee,/u);
+  assert.match(serviceSource, /const\s*\{\s*page,\s*pageSize,\s*status,\s*priority,\s*assignee,\s*reservationId,\s*signal,\s*\}\s*=\s*options;/u);
+  assert.match(serviceSource, /query:\s*\{[\s\S]*page,\s*pageSize,\s*status,\s*priority,\s*assignee,\s*reservationId,/u);
 
-  assert.match(pageSource, /getActionRequiredList\(\{\s*page,\s*pageSize,\s*status:/u);
+  assert.match(pageSource, /getActionRequiredListAll\(\{\s*pageSize:\s*100,\s*status:/u);
   assert.match(pageSource, /priority:\s*priorityFilter === 'all' \? undefined : priorityFilter,/u);
   assert.match(pageSource, /assignee:\s*assigneeFilter === 'all' \? undefined : assigneeFilter,/u);
 });

@@ -10,7 +10,6 @@ import {
   isPayloadEmpty,
   usePageEndpointState,
 } from '../hooks/usePageEndpointState';
-import { usePaymentStatusSync } from '../hooks/usePaymentStatusSync';
 import { useAuth } from '../context/AuthContext';
 import { useAuthorization } from '../context/AuthorizationContext';
 import { ACTION_PERMISSIONS, ROUTE_PERMISSIONS } from '../authorization';
@@ -22,6 +21,7 @@ import {
   patchActionRequiredMemo,
   patchActionRequiredStatus,
 } from '../../services/actionRequired';
+import { patchPaymentStatus } from '../../services/payments';
 import {
   getReservationDetail,
   returnReservation,
@@ -30,7 +30,11 @@ import { listSettingsMembers, type SettingsMember } from '../../services/setting
 import { formatDateKst, formatDateTimeKst } from '../utils/dateTimeFormat';
 import { toDateInputValue } from '../utils/dateInputValue';
 import { DateTextPicker } from '../components/DateTextPicker';
-import { paymentStatusToLabel, toCanonicalPaymentStatus } from '../utils/paymentStatusSync';
+import {
+  invalidatePaymentStatusCache,
+  paymentStatusToLabel,
+  toCanonicalPaymentStatus,
+} from '../utils/paymentStatusSync';
 
 type ActionStatusCode = 'pending' | 'in-progress' | 'resolved';
 
@@ -64,12 +68,13 @@ interface ActionItem {
   paymentInfo?: {
     paymentId?: string;
     reservationId?: string;
+    principalAmount: number;
+    additionalAmount: number;
     amount: number;
     overdueDays: number;
-    lateFee: number;
     totalAmount: number;
     dueDate: string;
-    paymentType: string;
+    paymentType: '카드' | '현금' | '계좌이체';
     status?: string;
     statusLabel?: string;
     updatedAt?: string;
@@ -128,6 +133,7 @@ interface AssigneeOption {
 }
 
 type LateReturnResolveDialogState = 'confirm-returned' | 'return-required' | null;
+type PaymentIssueResolveDialogState = 'choose-payment-resolution' | null;
 
 type IssueAssetKind = 'insurance' | 'inspection';
 
@@ -165,6 +171,25 @@ function toNumberValue(value: unknown): number | null {
     }
   }
   return null;
+}
+
+function toPaymentAmountFromInput(value: string): number {
+  const numeric = Number(String(value || '').replace(/[^\d.-]/g, ''));
+  if (!Number.isFinite(numeric)) {
+    return 0;
+  }
+  return Math.max(0, numeric);
+}
+
+function normalizePaymentType(value: string | null): '카드' | '현금' | '계좌이체' {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  if (normalized === '현금' || normalized === 'cash') {
+    return '현금';
+  }
+  if (normalized === '계좌이체' || normalized === 'transfer' || normalized === 'bank_transfer') {
+    return '계좌이체';
+  }
+  return '카드';
 }
 
 function pickString(source: Record<string, unknown>, keys: string[]): string | null {
@@ -772,21 +797,21 @@ function toPaymentInfo(source: Record<string, unknown>): ActionItem['paymentInfo
 
   const paymentId = pickString(paymentSource, ['paymentId', 'id']) ?? pickString(source, ['paymentId']);
   const reservationId = pickString(paymentSource, ['reservationId', 'rentalId']) ?? pickString(source, ['reservationId', 'rentalId']);
-  const amount = toNumberValue(paymentSource.amount);
+  const principalAmount = toNumberValue(paymentSource.principalAmount) ?? toNumberValue(paymentSource.amount) ?? 0;
+  const additionalAmount = toNumberValue(paymentSource.additionalAmount) ?? 0;
+  const totalAmount = toNumberValue(paymentSource.amount) ?? (principalAmount + additionalAmount);
   const dueDate = pickString(paymentSource, ['dueDate', 'paymentDueDate']);
   const overdueDays = toNumberValue(paymentSource.overdueDays) ?? 0;
-  const lateFee = toNumberValue(paymentSource.lateFee) ?? 0;
-  const totalAmount = toNumberValue(paymentSource.totalAmount) ?? (amount ?? 0) + lateFee;
   const rawStatus = pickString(paymentSource, ['status', 'paymentStatus']);
   const normalizedStatus = rawStatus ? toCanonicalPaymentStatus(rawStatus) : null;
   const statusLabel = normalizedStatus ? paymentStatusToLabel(normalizedStatus) : null;
   const updatedAt = pickString(paymentSource, ['updatedAt', 'statusUpdatedAt', 'paidAt', 'createdAt']);
 
   if (
-    amount === null
+    principalAmount === 0
+    && additionalAmount === 0
     && dueDate === null
     && overdueDays === 0
-    && lateFee === 0
     && !statusLabel
     && !paymentId
     && !reservationId
@@ -797,12 +822,13 @@ function toPaymentInfo(source: Record<string, unknown>): ActionItem['paymentInfo
   return {
     paymentId: paymentId ?? undefined,
     reservationId: reservationId ?? undefined,
-    amount: amount ?? 0,
+    principalAmount,
+    additionalAmount,
+    amount: totalAmount,
     overdueDays,
-    lateFee,
     totalAmount,
     dueDate: dueDate ?? '-',
-    paymentType: pickString(paymentSource, ['paymentType', 'type']) ?? '-',
+    paymentType: normalizePaymentType(pickString(paymentSource, ['paymentType', 'type', 'method', 'paymentMethod'])),
     status: normalizedStatus ?? undefined,
     statusLabel: statusLabel ?? undefined,
     updatedAt: updatedAt ?? undefined,
@@ -849,6 +875,18 @@ function toActionItem(row: unknown, index: number, fallbackId?: string): ActionI
     memos: memos.length > 0 ? memos : undefined,
     paymentInfo,
   };
+}
+
+function getActionItemPaymentMutationId(item: ActionItem): string | null {
+  const directPaymentId = (item.paymentId ?? item.paymentInfo?.paymentId ?? '').trim();
+  if (directPaymentId) {
+    return directPaymentId;
+  }
+  const reservationId = (item.reservationId ?? item.paymentInfo?.reservationId ?? '').trim();
+  if (!reservationId) {
+    return null;
+  }
+  return `AUTO-PAY-${reservationId}`;
 }
 
 function toTotalCount(payload: unknown, fallback: number): number {
@@ -943,6 +981,7 @@ export default function ActionRequired() {
   const { user } = useAuth();
   const { canPerformAction, canAccessRoute } = useAuthorization();
   const canWriteActionRequired = canPerformAction(ACTION_PERMISSIONS.actionRequiredWrite);
+  const canWritePayments = canPerformAction(ACTION_PERMISSIONS.paymentsWrite);
   const canViewAssets = canAccessRoute(ROUTE_PERMISSIONS.assets);
   const canViewReservations = canAccessRoute(ROUTE_PERMISSIONS.reservations);
 
@@ -971,6 +1010,12 @@ export default function ActionRequired() {
   const [isAssigneeSaving, setIsAssigneeSaving] = useState(false);
   const [assigneeOptions, setAssigneeOptions] = useState<AssigneeOption[]>([]);
   const [lateReturnResolveDialog, setLateReturnResolveDialog] = useState<LateReturnResolveDialogState>(null);
+  const [paymentIssueResolveDialog, setPaymentIssueResolveDialog] = useState<PaymentIssueResolveDialogState>(null);
+  const [paymentAmountDraft, setPaymentAmountDraft] = useState('');
+  const [paymentTypeDraft, setPaymentTypeDraft] = useState<'카드' | '현금' | '계좌이체'>('카드');
+  const [isPaymentAmountSaving, setIsPaymentAmountSaving] = useState(false);
+  const [isPaymentTypeSaving, setIsPaymentTypeSaving] = useState(false);
+  const [isPaymentInfoRefreshing, setIsPaymentInfoRefreshing] = useState(false);
 
   const [isDetailLoading, setIsDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
@@ -995,31 +1040,6 @@ export default function ActionRequired() {
 
   const isWriteSaving = isStatusSaving || isMemoSaving || isResolveSaving || isAssigneeSaving;
   const selectedItemDescription = selectedItem ? getIssueAssetDescription(selectedItem, issueAsset) : null;
-
-  const paymentSyncTargets = useMemo(() => (
-    sourceActionItems
-      .filter((item) => item.type === '미납/결제 문제' || Boolean(item.paymentInfo))
-      .map((item) => ({
-        reservationId: item.reservationId ?? item.paymentInfo?.reservationId ?? null,
-        paymentId: item.paymentId ?? item.paymentInfo?.paymentId ?? null,
-        fallbackStatus: item.paymentInfo?.status ?? null,
-        fallbackUpdatedAt: item.paymentInfo?.updatedAt ?? null,
-      }))
-      .filter((target) => Boolean(target.reservationId || target.paymentId))
-  ), [sourceActionItems]);
-
-  const {
-    byReservationId: syncedPaymentByReservationId,
-    byPaymentId: syncedPaymentByPaymentId,
-    isSyncing: isPaymentSyncing,
-    error: paymentSyncError,
-    usingLastKnown: isPaymentSyncUsingLastKnown,
-    retry: retryPaymentSync,
-  } = usePaymentStatusSync({
-    targets: paymentSyncTargets,
-    enabled: sourceActionItems.length > 0,
-    pollIntervalMs: 20_000,
-  });
 
   const requestActionItems = useCallback((signal: AbortSignal) => getActionRequiredListAll({
     pageSize: 100,
@@ -1249,6 +1269,28 @@ export default function ActionRequired() {
     }
   }, []);
 
+  const handleRefreshPaymentInfo = useCallback(async () => {
+    if (!selectedItem || selectedItem.type !== '미납/결제 문제' || isPaymentInfoRefreshing) {
+      return;
+    }
+    setIsPaymentInfoRefreshing(true);
+    setWriteError(null);
+    setWriteNotice(null);
+    try {
+      await hydrateActionItems();
+      await hydrateActionDetail(selectedItem.id, selectedItem);
+      setWriteNotice('결제 정보를 새로고침했습니다.');
+    } catch {
+      setWriteError({
+        kind: 'memo',
+        message: '결제 정보 새로고침에 실패했습니다. 잠시 후 다시 시도해 주세요.',
+        retryable: true,
+      });
+    } finally {
+      setIsPaymentInfoRefreshing(false);
+    }
+  }, [hydrateActionDetail, hydrateActionItems, isPaymentInfoRefreshing, selectedItem]);
+
   const handleOpenDetail = useCallback((item: ActionItem) => {
     setSelectedItem(item);
     setCurrentMemo('');
@@ -1273,41 +1315,7 @@ export default function ActionRequired() {
     clearWriteFeedback();
   }, [clearWriteFeedback, isWriteSaving]);
 
-  const allItems: ActionItem[] = useMemo(() => (
-    sourceActionItems.map((item) => {
-      const paymentSnapshot = (
-        (item.paymentId ? syncedPaymentByPaymentId[item.paymentId] : undefined)
-        ?? (item.reservationId ? syncedPaymentByReservationId[item.reservationId] : undefined)
-      );
-
-      if (!paymentSnapshot) {
-        return item;
-      }
-
-      if (!item.paymentInfo && item.type !== '미납/결제 문제') {
-        return item;
-      }
-
-      return {
-        ...item,
-        reservationId: item.reservationId ?? paymentSnapshot.reservationId ?? undefined,
-        paymentId: item.paymentId ?? paymentSnapshot.paymentId ?? undefined,
-        paymentInfo: {
-          amount: item.paymentInfo?.amount ?? 0,
-          overdueDays: item.paymentInfo?.overdueDays ?? 0,
-          lateFee: item.paymentInfo?.lateFee ?? 0,
-          totalAmount: item.paymentInfo?.totalAmount ?? 0,
-          dueDate: item.paymentInfo?.dueDate ?? '-',
-          paymentType: item.paymentInfo?.paymentType ?? '-',
-          paymentId: item.paymentInfo?.paymentId ?? paymentSnapshot.paymentId ?? undefined,
-          reservationId: item.paymentInfo?.reservationId ?? paymentSnapshot.reservationId ?? undefined,
-          status: paymentSnapshot.status,
-          statusLabel: paymentSnapshot.statusLabel,
-          updatedAt: paymentSnapshot.updatedAt ?? item.paymentInfo?.updatedAt ?? undefined,
-        },
-      };
-    })
-  ), [sourceActionItems, syncedPaymentByPaymentId, syncedPaymentByReservationId]);
+  const allItems: ActionItem[] = useMemo(() => sourceActionItems, [sourceActionItems]);
 
   useEffect(() => {
     setSelectedItem((previousItem) => {
@@ -1320,9 +1328,9 @@ export default function ActionRequired() {
         return previousItem;
       }
 
-      const previousStatus = previousItem.paymentInfo?.status ?? null;
-      const nextStatus = nextItem.paymentInfo?.status ?? null;
-      const hasPaymentChanged = previousStatus !== nextStatus;
+      const previousPaymentUpdatedAt = previousItem.paymentInfo?.updatedAt ?? null;
+      const nextPaymentUpdatedAt = nextItem.paymentInfo?.updatedAt ?? null;
+      const hasPaymentChanged = previousPaymentUpdatedAt !== nextPaymentUpdatedAt;
       const hasCoreChanged = previousItem.severity !== nextItem.severity
         || previousItem.status !== nextItem.status
         || previousItem.statusCode !== nextItem.statusCode
@@ -1349,6 +1357,21 @@ export default function ActionRequired() {
       };
     });
   }, [allItems]);
+
+  useEffect(() => {
+    if (!selectedItem || selectedItem.type !== '미납/결제 문제') {
+      setPaymentAmountDraft('');
+      setPaymentTypeDraft('카드');
+      return;
+    }
+    const amount = selectedItem.paymentInfo?.additionalAmount ?? 0;
+    setPaymentAmountDraft(String(Math.max(0, Math.trunc(amount))));
+    setPaymentTypeDraft(normalizePaymentType(selectedItem.paymentInfo?.paymentType ?? null));
+  }, [selectedItem]);
+
+  const isPaymentIssueResolved = selectedItem?.type === '미납/결제 문제'
+    && selectedItem.statusCode === 'resolved';
+  const canEditPaymentIssueFields = canWritePayments && !isPaymentIssueResolved;
 
   const toggleFilter = (filter: ActionIssueFilter) => {
     setPage(1);
@@ -1570,6 +1593,167 @@ export default function ActionRequired() {
     }
   }
 
+  async function runPaymentIssueResolution(
+    item: ActionItem,
+    nextStatus: 'paid' | 'canceled',
+  ): Promise<void> {
+    if (!canWritePayments) {
+      setWriteError({
+        kind: 'resolve',
+        message: '권한이 없어 결제 상태를 변경할 수 없습니다.',
+        retryable: false,
+      });
+      return;
+    }
+    const paymentId = getActionItemPaymentMutationId(item);
+    if (!paymentId) {
+      setWriteError({
+        kind: 'resolve',
+        message: '결제 정보를 찾을 수 없어 상태를 변경할 수 없습니다.',
+        retryable: false,
+      });
+      return;
+    }
+
+    setIsResolveSaving(true);
+    setWriteError(null);
+    setWriteNotice(null);
+    try {
+      await patchPaymentStatus(paymentId, {
+        status: nextStatus,
+        reservationId: item.reservationId ?? item.paymentInfo?.reservationId,
+      });
+      invalidatePaymentStatusCache({
+        reservationId: item.reservationId ?? item.paymentInfo?.reservationId ?? null,
+        paymentId,
+      });
+      setPaymentIssueResolveDialog(null);
+      setCurrentStatus('');
+      setWriteNotice(nextStatus === 'paid' ? '결제를 완료 처리했습니다.' : '결제를 면제 처리했습니다.');
+      retryActionRef.current = null;
+      await hydrateActionItems();
+      void hydrateActionDetail(item.id, item);
+    } catch (error) {
+      const mappedError = toActionWriteError('resolve', error);
+      setWriteError(mappedError);
+      if (mappedError.retryable) {
+        retryActionRef.current = () => runPaymentIssueResolution(item, nextStatus);
+      } else {
+        retryActionRef.current = null;
+      }
+    } finally {
+      setIsResolveSaving(false);
+    }
+  }
+
+  async function runPaymentAdditionalAmountSave(item: ActionItem): Promise<void> {
+    if (!canWritePayments) {
+      setWriteError({
+        kind: 'memo',
+        message: '권한이 없어 추가 결제 금액을 저장할 수 없습니다.',
+        retryable: false,
+      });
+      return;
+    }
+    if (isPaymentAmountSaving) {
+      return;
+    }
+
+    const paymentId = getActionItemPaymentMutationId(item);
+    if (!paymentId) {
+      setWriteError({
+        kind: 'memo',
+        message: '결제 정보를 찾을 수 없어 금액을 저장할 수 없습니다.',
+        retryable: false,
+      });
+      return;
+    }
+
+    const amount = toPaymentAmountFromInput(paymentAmountDraft);
+    setIsPaymentAmountSaving(true);
+    setWriteError(null);
+    setWriteNotice(null);
+    try {
+      await patchPaymentStatus(paymentId, {
+        status: 'overdue',
+        reservationId: item.reservationId ?? item.paymentInfo?.reservationId,
+        additionalAmount: amount,
+        force: true,
+        forceReason: 'manual-additional-payment',
+      });
+      invalidatePaymentStatusCache({
+        reservationId: item.reservationId ?? item.paymentInfo?.reservationId ?? null,
+        paymentId,
+      });
+      setWriteNotice('추가 결제 금액을 저장했습니다.');
+      await hydrateActionItems();
+      void hydrateActionDetail(item.id, item);
+    } catch (error) {
+      const mappedError = toActionWriteError('memo', error);
+      setWriteError(mappedError);
+    } finally {
+      setIsPaymentAmountSaving(false);
+    }
+  }
+
+  async function runPaymentTypeSave(item: ActionItem): Promise<void> {
+    if (!canWritePayments) {
+      setWriteError({
+        kind: 'memo',
+        message: '권한이 없어 결제 유형을 저장할 수 없습니다.',
+        retryable: false,
+      });
+      return;
+    }
+    if (isPaymentTypeSaving) {
+      return;
+    }
+
+    const paymentId = getActionItemPaymentMutationId(item);
+    if (!paymentId) {
+      setWriteError({
+        kind: 'memo',
+        message: '결제 정보를 찾을 수 없어 유형을 저장할 수 없습니다.',
+        retryable: false,
+      });
+      return;
+    }
+
+    const normalizedStatus = toCanonicalPaymentStatus(item.paymentInfo?.status ?? item.status);
+    const status = normalizedStatus === 'paid'
+      ? 'paid'
+      : normalizedStatus === 'canceled'
+        ? 'canceled'
+        : normalizedStatus === 'partial'
+          ? 'partial'
+          : normalizedStatus === 'unpaid'
+            ? 'overdue'
+            : 'pending';
+
+    setIsPaymentTypeSaving(true);
+    setWriteError(null);
+    setWriteNotice(null);
+    try {
+      await patchPaymentStatus(paymentId, {
+        status,
+        reservationId: item.reservationId ?? item.paymentInfo?.reservationId,
+        method: paymentTypeDraft,
+      });
+      invalidatePaymentStatusCache({
+        reservationId: item.reservationId ?? item.paymentInfo?.reservationId ?? null,
+        paymentId,
+      });
+      setWriteNotice('결제 유형을 저장했습니다.');
+      await hydrateActionItems();
+      void hydrateActionDetail(item.id, item);
+    } catch (error) {
+      const mappedError = toActionWriteError('memo', error);
+      setWriteError(mappedError);
+    } finally {
+      setIsPaymentTypeSaving(false);
+    }
+  }
+
   async function runAssigneeUpdate(actionId: string, nextAssigneeId: string): Promise<void> {
     if (!canWriteActionRequired) {
       setWriteError({
@@ -1787,6 +1971,9 @@ export default function ActionRequired() {
         return;
       }
     }
+    if (handlePaymentIssueStatusIntent(selectedItem, nextStatusCode)) {
+      return;
+    }
     if (handleLateReturnStatusIntent(selectedItem, nextStatusCode)) {
       return;
     }
@@ -1802,11 +1989,20 @@ export default function ActionRequired() {
       return;
     }
     const nextStatusCode = normalizeStatusCode(currentStatus || selectedItem.status);
+    if (selectedItem.type === '미납/결제 문제' && nextStatusCode === 'resolved') {
+      setPaymentIssueResolveDialog('choose-payment-resolution');
+      return;
+    }
     void runMemoWrite(selectedItem.id, memoContent, nextStatusCode);
   };
 
   const handleResolveIssue = () => {
     if (!selectedItem || isWriteSaving) {
+      return;
+    }
+
+    if (selectedItem.type === '미납/결제 문제') {
+      setPaymentIssueResolveDialog('choose-payment-resolution');
       return;
     }
 
@@ -1833,6 +2029,14 @@ export default function ActionRequired() {
   const handleLateReturnStatusIntent = (item: ActionItem, nextStatusCode: ActionStatusCode) => {
     if (nextStatusCode === 'resolved' && item.type === '반납 지연') {
       setLateReturnResolveDialog('confirm-returned');
+      return true;
+    }
+    return false;
+  };
+
+  const handlePaymentIssueStatusIntent = (item: ActionItem, nextStatusCode: ActionStatusCode) => {
+    if (nextStatusCode === 'resolved' && item.type === '미납/결제 문제') {
+      setPaymentIssueResolveDialog('choose-payment-resolution');
       return true;
     }
     return false;
@@ -2140,32 +2344,6 @@ export default function ActionRequired() {
             </div>
           </div>
 
-          {(paymentSyncError || isPaymentSyncing) && (
-            <div className={`hidden items-center justify-between gap-3 rounded-lg border px-3 py-2 text-xs ${
-              paymentSyncError
-                ? 'border-amber-200 bg-amber-50 text-amber-700'
-                : 'border-blue-200 bg-blue-50 text-blue-700'
-            }`}>
-              <span>
-                {paymentSyncError
-                  ? (
-                    isPaymentSyncUsingLastKnown
-                      ? '결제 상태 동기화에 실패해 마지막 정상 상태를 표시 중입니다.'
-                      : paymentSyncError
-                  )
-                  : '결제 상태를 동기화하는 중입니다.'}
-              </span>
-              {paymentSyncError && (
-                <button
-                  type="button"
-                  onClick={retryPaymentSync}
-                  className="rounded-md border border-amber-300 bg-white px-2 py-1 font-semibold text-amber-700 hover:bg-amber-100"
-                >
-                  재시도
-                </button>
-              )}
-            </div>
-          )}
         </div>
 
         <PageStateBoundary
@@ -2468,28 +2646,115 @@ export default function ActionRequired() {
 
                 {selectedItem.type === '미납/결제 문제' && selectedItem.paymentInfo && (
                   <div className="border-t border-gray-200 pt-4">
-                    <label className="text-sm font-semibold text-gray-600 mb-3 block">결제 정보</label>
+                    <div className="mb-3 flex items-center justify-between gap-2">
+                      <label className="text-sm font-semibold text-gray-600">결제 정보</label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void handleRefreshPaymentInfo();
+                        }}
+                        disabled={isPaymentInfoRefreshing || isWriteSaving}
+                        className="rounded-md border border-gray-300 bg-white px-2 py-1 text-xs font-semibold text-gray-700 hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {isPaymentInfoRefreshing ? '새로고침 중...' : '결제정보 새로고침'}
+                      </button>
+                    </div>
                     <div className="bg-red-50 rounded-lg p-4 space-y-2">
                       <div className="flex justify-between items-center">
                         <span className="text-sm text-gray-700">결제 유형</span>
-                        <span className="text-sm font-semibold text-gray-900">{selectedItem.paymentInfo.paymentType}</span>
+                        {canEditPaymentIssueFields ? (
+                          <div className="flex items-center gap-2">
+                            <select
+                              value={paymentTypeDraft}
+                              onChange={(event) => setPaymentTypeDraft(normalizePaymentType(event.target.value))}
+                              className="rounded-md border border-red-300 bg-white px-2 py-1 text-sm text-gray-900 focus:border-red-500 focus:outline-none focus:ring-2 focus:ring-red-200"
+                              aria-label="결제 유형"
+                              disabled={isPaymentTypeSaving || isWriteSaving}
+                            >
+                              <option value="카드">카드</option>
+                              <option value="현금">현금</option>
+                              <option value="계좌이체">계좌이체</option>
+                            </select>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                void runPaymentTypeSave(selectedItem);
+                              }}
+                              disabled={isPaymentTypeSaving || isWriteSaving}
+                              className="rounded-md bg-red-600 px-2 py-1 text-xs font-medium text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              {isPaymentTypeSaving ? '저장 중...' : '저장'}
+                            </button>
+                          </div>
+                        ) : (
+                          <span className="text-sm font-semibold text-gray-900">{selectedItem.paymentInfo.paymentType}</span>
+                        )}
                       </div>
                       <div className="flex justify-between items-center">
-                        <span className="text-sm text-gray-700">원금</span>
-                        <span className="text-sm font-semibold text-gray-900">{selectedItem.paymentInfo.amount.toLocaleString()}원</span>
+                        <span className="text-sm text-gray-700">기존 미납 금액</span>
+                        <span className="text-sm font-semibold text-gray-900">{selectedItem.paymentInfo.principalAmount.toLocaleString()}원</span>
+                      </div>
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-sm text-gray-700">추가 결제 금액</span>
+                        {canEditPaymentIssueFields ? (
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="text"
+                              value={paymentAmountDraft}
+                              onChange={(event) => setPaymentAmountDraft(event.target.value.replace(/[^\d]/g, ''))}
+                              className="w-32 rounded-lg border border-red-300 bg-white px-2 py-1 text-right text-sm font-semibold text-red-700 focus:border-red-500 focus:outline-none focus:ring-2 focus:ring-red-200"
+                              inputMode="numeric"
+                              aria-label="추가 결제 금액"
+                              disabled={isPaymentAmountSaving || isWriteSaving}
+                            />
+                            <span className="text-xs font-semibold text-red-700">원</span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                void runPaymentAdditionalAmountSave(selectedItem);
+                              }}
+                              disabled={isPaymentAmountSaving || isWriteSaving}
+                              className="rounded-md bg-red-600 px-2 py-1 text-xs font-medium text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              {isPaymentAmountSaving ? '저장 중...' : '저장'}
+                            </button>
+                          </div>
+                        ) : (
+                          <span className="text-sm font-semibold text-gray-900">{selectedItem.paymentInfo.additionalAmount.toLocaleString()}원</span>
+                        )}
                       </div>
                       <div className="flex justify-between items-center">
                         <span className="text-sm text-gray-700">연체 일수</span>
                         <span className="text-sm font-bold text-red-600">{selectedItem.paymentInfo.overdueDays}일</span>
                       </div>
-                      <div className="flex justify-between items-center">
-                        <span className="text-sm text-gray-700">연체료</span>
-                        <span className="text-sm font-semibold text-red-600">{selectedItem.paymentInfo.lateFee.toLocaleString()}원</span>
-                      </div>
                       <div className="border-t border-red-200 pt-2 mt-2 flex justify-between items-center">
                         <span className="text-base font-bold text-gray-900">총 청구금액</span>
                         <span className="text-lg font-bold text-red-600">{selectedItem.paymentInfo.totalAmount.toLocaleString()}원</span>
                       </div>
+                      {canEditPaymentIssueFields && (
+                        <div className="mt-2 flex flex-wrap items-center gap-2 pt-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              void runPaymentIssueResolution(selectedItem, 'paid');
+                            }}
+                            disabled={isWriteSaving}
+                            className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            결제 완료 처리
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              void runPaymentIssueResolution(selectedItem, 'canceled');
+                            }}
+                            disabled={isWriteSaving}
+                            className="rounded-lg bg-slate-600 px-3 py-2 text-xs font-medium text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            결제 면제 처리
+                          </button>
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}
@@ -2551,6 +2816,10 @@ export default function ActionRequired() {
                             });
                             return;
                           }
+                        }
+                        if (handlePaymentIssueStatusIntent(selectedItem, nextStatusCode)) {
+                          setCurrentStatus('');
+                          return;
                         }
                         if (handleLateReturnStatusIntent(selectedItem, nextStatusCode)) {
                           setCurrentStatus('');
@@ -2773,6 +3042,53 @@ export default function ActionRequired() {
                   type="button"
                   onClick={() => setLateReturnResolveDialog(null)}
                   className="w-full rounded-lg bg-gray-100 px-4 py-3 font-medium text-gray-700 hover:bg-gray-200"
+                >
+                  닫기
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {paymentIssueResolveDialog === 'choose-payment-resolution' && selectedItem?.type === '미납/결제 문제' && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50">
+            <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+              <h2 className="text-lg font-bold text-[#1e2939]">미납/결제 문제 완료 처리 방법 선택</h2>
+              <p className="mt-3 text-sm text-gray-600">
+                이슈를 바로 완료로 바꾸는 대신 결제 완료 또는 면제 처리로 완료해 주세요.
+              </p>
+              <div className="mt-6 grid grid-cols-1 gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!selectedItem) {
+                      return;
+                    }
+                    void runPaymentIssueResolution(selectedItem, 'paid');
+                  }}
+                  disabled={isResolveSaving}
+                  className="w-full rounded-lg bg-emerald-600 px-4 py-3 font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {isResolveSaving ? '처리 중...' : '결제 완료 처리'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!selectedItem) {
+                      return;
+                    }
+                    void runPaymentIssueResolution(selectedItem, 'canceled');
+                  }}
+                  disabled={isResolveSaving}
+                  className="w-full rounded-lg bg-slate-600 px-4 py-3 font-medium text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {isResolveSaving ? '처리 중...' : '결제 면제 처리'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPaymentIssueResolveDialog(null)}
+                  disabled={isResolveSaving}
+                  className="w-full rounded-lg bg-gray-100 px-4 py-3 font-medium text-gray-700 hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   닫기
                 </button>
