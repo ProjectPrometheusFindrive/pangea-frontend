@@ -6,17 +6,25 @@ const EMPTY_TOTALS = {
   netRevenue: 0,
   paidCount: 0,
   refundCount: 0,
+  unpaidAmount: 0,
+  unpaidCount: 0,
+  activeVehicleCount: 0,
+  utilizationRate: 0,
   currency: 'KRW',
 };
 
 export function isRevenueSummaryEmpty(summary: RevenueSummaryResponse): boolean {
-  return !summary.buckets.some((bucket) => (
+  const hasBucketData = summary.buckets.some((bucket) => (
     bucket.grossRevenue !== 0
     || bucket.refundAmount !== 0
     || bucket.netRevenue !== 0
     || bucket.paidCount > 0
     || bucket.refundCount > 0
   ));
+  return !hasBucketData
+    && summary.totals.unpaidAmount === 0
+    && summary.totals.unpaidCount === 0
+    && summary.totals.activeVehicleCount === 0;
 }
 
 export function createEmptyRevenueTrend(

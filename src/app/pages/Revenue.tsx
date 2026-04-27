@@ -8,9 +8,11 @@ import {
   getRevenueSummary,
   getRevenueTrend,
   type RevenueGranularity,
+  type RevenuePaymentMethod,
   type RevenueSummaryBucket,
   type RevenueSummaryResponse,
   type RevenueTrendResponse,
+  type RevenueVehicle,
 } from '../../services/revenue';
 import { listSettingsCompanies } from '../../services/settings';
 import { Layout } from '../components/Layout';
@@ -97,6 +99,10 @@ const EMPTY_TOTALS = {
   netRevenue: 0,
   paidCount: 0,
   refundCount: 0,
+  unpaidAmount: 0,
+  unpaidCount: 0,
+  activeVehicleCount: 0,
+  utilizationRate: 0,
   currency: 'KRW',
 };
 
@@ -110,11 +116,12 @@ type RevenueParityCard = {
 type RevenuePaymentMethodSlice = {
   name: string;
   amount: number;
+  count: number;
   percentage: number;
   tone: string;
 };
 
-type RevenueVehicleRow = {
+type RevenueModelRow = {
   rank: number;
   model: string;
   revenue: number;
@@ -122,22 +129,6 @@ type RevenueVehicleRow = {
   utilizationRate: number;
   shareRate: number;
 };
-
-export const REVENUE_FIGMA_CONTRACT_GAP_NOTE = '미납금, 활성 차량, 결제 방법별 분포, 차량별 매출 현황은 현재 revenue API 계약이 없어 FE에서 계산하거나 시각화할 수 없습니다.';
-
-export const REVENUE_FIGMA_UNSUPPORTED_SECTIONS: Array<{
-  title: string;
-  description: string;
-}> = [
-  {
-    title: '결제 방법별 분포',
-    description: '현재 revenue API는 결제 수단별 집계 데이터를 내려주지 않아 파이 차트로 분포를 구성할 수 없습니다.',
-  },
-  {
-    title: '차량별 매출 현황',
-    description: '현재 revenue API는 차량별 매출 합산과 활성 차량 데이터를 내려주지 않아 순위 표를 구성할 수 없습니다.',
-  },
-];
 
 function toIsoDate(value: Date): string {
   const year = value.getFullYear();
@@ -213,46 +204,87 @@ function formatPlainNumber(value: number): string {
   return Math.round(value).toLocaleString('ko-KR');
 }
 
-function buildRevenuePaymentMethodSlices(
-  totals: RevenueSummaryResponse['totals'],
-): RevenuePaymentMethodSlice[] {
-  const ratios = [0.45, 0.28, 0.27];
-  const labels = ['카드', '현금', '계좌이체'];
-  const tones = ['bg-blue-500', 'bg-sky-400', 'bg-cyan-300'];
-  const baseAmount = Math.max(totals.grossRevenue, totals.netRevenue, 0);
-  let allocatedAmount = 0;
-
-  return labels.map((name, index) => {
-    const amount = index === labels.length - 1
-      ? Math.max(baseAmount - allocatedAmount, 0)
-      : Math.round(baseAmount * ratios[index]);
-    allocatedAmount += amount;
-
-    return {
-      name,
-      amount,
-      percentage: Math.round(ratios[index] * 100),
-      tone: tones[index],
-    };
-  });
+function formatPercent(value: number): string {
+  if (!Number.isFinite(value)) {
+    return '0%';
+  }
+  const rounded = Math.round(value * 10) / 10;
+  return `${rounded.toLocaleString('ko-KR', { maximumFractionDigits: 1 })}%`;
 }
 
-function buildRevenueVehicleRows(
-  totals: RevenueSummaryResponse['totals'],
-): RevenueVehicleRow[] {
-  const models = ['그랜저', '팰리세이드', '쏘나타', 'K8', 'K5', '쏘렌토', '투싼', '아반떼'];
-  const ratios = [0.16, 0.145, 0.131, 0.128, 0.115, 0.113, 0.111, 0.098];
-  const baseRevenue = Math.max(totals.grossRevenue, totals.netRevenue, 0);
-  const baseCount = Math.max(totals.paidCount, models.length * 3);
+function toDisplayPercentage(value: number): number {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+  return Math.max(0, Math.min(100, value));
+}
 
-  return models.map((model, index) => ({
-    rank: index + 1,
-    model,
-    revenue: Math.round(baseRevenue * ratios[index]),
-    reservationCount: Math.max(1, Math.round(baseCount * (0.18 - (index * 0.01)))),
-    utilizationRate: Math.max(72, 92 - (index * 2)),
-    shareRate: Number((ratios[index] * 100).toFixed(1)),
+function buildRevenuePaymentMethodSlices(
+  paymentMethods: RevenuePaymentMethod[],
+): RevenuePaymentMethodSlice[] {
+  const tones = ['bg-blue-500', 'bg-sky-400', 'bg-cyan-300'];
+
+  return paymentMethods.map((item, index) => ({
+    name: item.method || '미지정',
+    amount: item.amount,
+    count: item.count,
+    percentage: toDisplayPercentage(item.percentage),
+    tone: tones[index % tones.length],
   }));
+}
+
+export function buildRevenueModelRows(
+  vehicles: RevenueVehicle[],
+): RevenueModelRow[] {
+  const grouped = new Map<string, {
+    model: string;
+    revenue: number;
+    reservationCount: number;
+    utilizationRateSum: number;
+    vehicleCount: number;
+  }>();
+
+  for (const item of vehicles) {
+    const normalizedModel = (item.model || '').trim() || '차종 미확인';
+    const current = grouped.get(normalizedModel) ?? {
+      model: normalizedModel,
+      revenue: 0,
+      reservationCount: 0,
+      utilizationRateSum: 0,
+      vehicleCount: 0,
+    };
+    current.revenue += item.revenue;
+    current.reservationCount += item.reservationCount;
+    current.utilizationRateSum += item.utilizationRate;
+    current.vehicleCount += 1;
+    grouped.set(normalizedModel, current);
+  }
+
+  const groupedRows = Array.from(grouped.values())
+    .sort((left, right) => {
+      if (right.revenue !== left.revenue) {
+        return right.revenue - left.revenue;
+      }
+      return left.model.localeCompare(right.model, 'ko-KR');
+    });
+
+  const totalRevenue = groupedRows.reduce((sum, row) => sum + row.revenue, 0);
+  return groupedRows.map((row, index) => {
+    const averageUtilization = row.vehicleCount > 0
+      ? row.utilizationRateSum / row.vehicleCount
+      : 0;
+    const shareRate = totalRevenue > 0
+      ? (row.revenue / totalRevenue) * 100
+      : 0;
+    return {
+      rank: index + 1,
+      model: row.model,
+      revenue: row.revenue,
+      reservationCount: row.reservationCount,
+      utilizationRate: averageUtilization * 100,
+      shareRate,
+    };
+  });
 }
 
 export function buildRevenueParityCards(
@@ -260,10 +292,6 @@ export function buildRevenueParityCards(
   growthRate: number,
 ): RevenueParityCard[] {
   const averageRentalAmount = totals.paidCount > 0 ? Math.round(totals.grossRevenue / totals.paidCount) : 0;
-  const unpaidAmount = Math.max(totals.refundAmount, Math.round(totals.grossRevenue * 0.08));
-  const unpaidContracts = Math.max(totals.refundCount, totals.refundAmount > 0 ? 1 : 0);
-  const activeVehicles = Math.max(1, Math.min(99, Math.round(Math.max(totals.paidCount, 1) * 0.8)));
-  const utilizationRate = Math.max(65, Math.min(97, 78 + Math.round(Math.abs(growthRate) / 2)));
 
   return [
     {
@@ -287,14 +315,14 @@ export function buildRevenueParityCards(
     {
       key: 'unpaidAmount',
       title: '미납금',
-      value: formatWanCurrency(unpaidAmount),
-      detail: unpaidContracts > 0 ? `${unpaidContracts}건 연체 중` : '연체 건 없음',
+      value: formatWanCurrency(totals.unpaidAmount),
+      detail: totals.unpaidCount > 0 ? `${totals.unpaidCount.toLocaleString('ko-KR')}건 미납` : '미납 건 없음',
     },
     {
       key: 'activeVehicles',
       title: '활성 차량',
-      value: `${formatPlainNumber(activeVehicles)}대`,
-      detail: `평균 가동률 ${utilizationRate}%`,
+      value: `${formatPlainNumber(totals.activeVehicleCount)}대`,
+      detail: `평균 가동률 ${formatPercent(totals.utilizationRate * 100)}`,
     },
   ];
 }
@@ -681,6 +709,8 @@ export default function Revenue() {
 
   const summaryTotals = snapshot?.summary.totals ?? EMPTY_TOTALS;
   const summaryBuckets = snapshot?.summary.buckets ?? [];
+  const summaryPaymentMethods = snapshot?.summary.paymentMethods ?? [];
+  const summaryVehicles = snapshot?.summary.vehicles ?? [];
   const growthRate = useMemo(() => calculateGrowthRate(summaryBuckets), [summaryBuckets]);
   const parityCards = useMemo(
     () => buildRevenueParityCards(summaryTotals, growthRate),
@@ -698,12 +728,12 @@ export default function Revenue() {
   );
 
   const paymentMethodSlices = useMemo(
-    () => buildRevenuePaymentMethodSlices(summaryTotals),
-    [summaryTotals],
+    () => buildRevenuePaymentMethodSlices(summaryPaymentMethods),
+    [summaryPaymentMethods],
   );
-  const vehicleRows = useMemo(
-    () => buildRevenueVehicleRows(summaryTotals),
-    [summaryTotals],
+  const modelRows = useMemo(
+    () => buildRevenueModelRows(summaryVehicles),
+    [summaryVehicles],
   );
 
   return (
@@ -828,28 +858,36 @@ export default function Revenue() {
                   </div>
                 </div>
                 <div className="space-y-3">
-                  {paymentMethodSlices.map((slice) => (
-                    <div key={slice.name} className="space-y-1">
-                      <div className="flex items-center justify-between text-sm font-medium text-gray-700">
-                        <span>{slice.name}</span>
-                        <span>{slice.percentage}%</span>
+                  {paymentMethodSlices.length > 0 ? (
+                    paymentMethodSlices.map((slice) => (
+                      <div key={slice.name} className="space-y-1">
+                        <div className="flex items-center justify-between text-sm font-medium text-gray-700">
+                          <span>{slice.name}</span>
+                          <span>{formatPercent(slice.percentage)}</span>
+                        </div>
+                        <div className="h-2 rounded-full bg-gray-100">
+                          <div
+                            className={`h-2 rounded-full ${slice.tone}`}
+                            style={{ width: `${slice.percentage}%` }}
+                          />
+                        </div>
+                        <p className="text-sm text-gray-500">
+                          {formatWanCurrency(slice.amount)} · {slice.count.toLocaleString('ko-KR')}건
+                        </p>
                       </div>
-                      <div className="h-2 rounded-full bg-gray-100">
-                        <div
-                          className={`h-2 rounded-full ${slice.tone}`}
-                          style={{ width: `${slice.percentage}%` }}
-                        />
-                      </div>
-                      <p className="text-sm text-gray-500">{formatWanCurrency(slice.amount)}</p>
-                    </div>
-                  ))}
+                    ))
+                  ) : (
+                    <p className="rounded-lg bg-gray-50 px-3 py-4 text-center text-sm text-gray-500">
+                      결제 수단별 매출 데이터가 없습니다
+                    </p>
+                  )}
                 </div>
               </div>
             </div>
           </div>
 
           <div className="rounded-xl bg-white p-5 shadow-sm">
-            <h3 className="mb-4 text-base font-bold text-gray-900">차량별 매출 현황</h3>
+            <h3 className="mb-4 text-base font-bold text-gray-900">차종별 매출 현황</h3>
             <div className="overflow-x-auto">
               <table className="min-w-full text-sm">
                 <thead>
@@ -863,16 +901,24 @@ export default function Revenue() {
                   </tr>
                 </thead>
                 <tbody>
-                  {vehicleRows.map((row) => (
-                    <tr key={row.rank} className="border-b border-gray-50 last:border-b-0">
-                      <td className="px-3 py-3 text-gray-700">{row.rank}</td>
-                      <td className="px-3 py-3 font-medium text-gray-900">{row.model}</td>
-                      <td className="px-3 py-3 text-gray-700">{formatWanCurrency(row.revenue)}</td>
-                      <td className="px-3 py-3 text-gray-700">{row.reservationCount}건</td>
-                      <td className="px-3 py-3 text-gray-700">{row.utilizationRate}%</td>
-                      <td className="px-3 py-3 text-gray-700">{row.shareRate}%</td>
+                  {modelRows.length > 0 ? (
+                    modelRows.map((row) => (
+                      <tr key={`${row.model}-${row.rank}`} className="border-b border-gray-50 last:border-b-0">
+                        <td className="px-3 py-3 text-gray-700">{row.rank}</td>
+                        <td className="px-3 py-3 font-medium text-gray-900">{row.model}</td>
+                        <td className="px-3 py-3 text-gray-700">{formatWanCurrency(row.revenue)}</td>
+                        <td className="px-3 py-3 text-gray-700">{row.reservationCount.toLocaleString('ko-KR')}건</td>
+                        <td className="px-3 py-3 text-gray-700">{formatPercent(row.utilizationRate)}</td>
+                        <td className="px-3 py-3 text-gray-700">{formatPercent(row.shareRate)}</td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan={6} className="px-3 py-8 text-center text-gray-500">
+                        차종별 매출 데이터가 없습니다
+                      </td>
                     </tr>
-                  ))}
+                  )}
                 </tbody>
               </table>
             </div>
