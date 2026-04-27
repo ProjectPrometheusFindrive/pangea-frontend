@@ -24,7 +24,7 @@ test('Revenue page keeps expected Korean UI copy without mojibake placeholders',
     '미납금',
     '활성 차량',
     '결제 방법별 분포',
-    '차량별 매출 현황',
+    '차종별 매출 현황',
     '월간 매출 추이',
     '결제 수단',
   ]) {

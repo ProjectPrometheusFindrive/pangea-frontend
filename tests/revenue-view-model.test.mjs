@@ -10,6 +10,19 @@ const projectRoot = path.resolve(__dirname, '..');
 
 let viteServer;
 
+const emptyTotals = {
+  grossRevenue: 0,
+  refundAmount: 0,
+  netRevenue: 0,
+  paidCount: 0,
+  refundCount: 0,
+  unpaidAmount: 0,
+  unpaidCount: 0,
+  activeVehicleCount: 0,
+  utilizationRate: 0,
+  currency: 'KRW',
+};
+
 function createSummary(overrides = {}) {
   return {
     period: {
@@ -18,15 +31,10 @@ function createSummary(overrides = {}) {
       granularity: 'week',
       timezone: 'Asia/Seoul',
     },
-    totals: {
-      grossRevenue: 0,
-      refundAmount: 0,
-      netRevenue: 0,
-      paidCount: 0,
-      refundCount: 0,
-      currency: 'KRW',
-    },
+    totals: emptyTotals,
     buckets: [],
+    paymentMethods: [],
+    vehicles: [],
     ...overrides,
   };
 }
@@ -97,12 +105,7 @@ test('revenue view model creates an empty trend payload for the active date rang
       timezone: 'Asia/Seoul',
     },
     totals: {
-      grossRevenue: 0,
-      refundAmount: 0,
-      netRevenue: 0,
-      paidCount: 0,
-      refundCount: 0,
-      currency: 'KRW',
+      ...emptyTotals,
       points: 0,
     },
     items: [],
@@ -151,12 +154,7 @@ test('revenue view model builds a snapshot with an empty trend fallback when tre
         timezone: 'Asia/Seoul',
       },
       totals: {
-        grossRevenue: 0,
-        refundAmount: 0,
-        netRevenue: 0,
-        paidCount: 0,
-        refundCount: 0,
-        currency: 'KRW',
+        ...emptyTotals,
         points: 0,
       },
       items: [],

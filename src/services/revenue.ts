@@ -15,6 +15,10 @@ export interface RevenueTotals {
   netRevenue: number;
   paidCount: number;
   refundCount: number;
+  unpaidAmount: number;
+  unpaidCount: number;
+  activeVehicleCount: number;
+  utilizationRate: number;
   currency: string;
 }
 
@@ -33,6 +37,26 @@ export interface RevenueSummaryResponse {
   period: RevenuePeriod;
   totals: RevenueTotals;
   buckets: RevenueSummaryBucket[];
+  paymentMethods: RevenuePaymentMethod[];
+  vehicles: RevenueVehicle[];
+}
+
+export interface RevenuePaymentMethod {
+  method: string;
+  amount: number;
+  count: number;
+  percentage: number;
+}
+
+export interface RevenueVehicle {
+  rank: number;
+  vehicleId: string;
+  vehicleNumber: string;
+  model: string;
+  revenue: number;
+  reservationCount: number;
+  utilizationRate: number;
+  shareRate: number;
 }
 
 export interface RevenueTrendItem {
@@ -136,6 +160,10 @@ function normalizeTotals(value: unknown): RevenueTotals {
       netRevenue: 0,
       paidCount: 0,
       refundCount: 0,
+      unpaidAmount: 0,
+      unpaidCount: 0,
+      activeVehicleCount: 0,
+      utilizationRate: 0,
       currency: 'KRW',
     };
   }
@@ -146,6 +174,10 @@ function normalizeTotals(value: unknown): RevenueTotals {
     netRevenue: toNumber(value.netRevenue),
     paidCount: toInteger(value.paidCount),
     refundCount: toInteger(value.refundCount),
+    unpaidAmount: toNumber(value.unpaidAmount),
+    unpaidCount: toInteger(value.unpaidCount),
+    activeVehicleCount: toInteger(value.activeVehicleCount),
+    utilizationRate: Math.max(0, Math.min(1, toNumber(value.utilizationRate))),
     currency: toText(value.currency, 'KRW'),
   };
 }
@@ -173,6 +205,50 @@ function normalizeSummaryBucket(value: unknown): RevenueSummaryBucket {
     netRevenue: toNumber(value.netRevenue),
     paidCount: toInteger(value.paidCount),
     refundCount: toInteger(value.refundCount),
+  };
+}
+
+function normalizePaymentMethod(value: unknown): RevenuePaymentMethod {
+  if (!isRecord(value)) {
+    return {
+      method: '미지정',
+      amount: 0,
+      count: 0,
+      percentage: 0,
+    };
+  }
+
+  return {
+    method: toText(value.method, '미지정') || '미지정',
+    amount: toNumber(value.amount),
+    count: toInteger(value.count),
+    percentage: Math.max(0, toNumber(value.percentage)),
+  };
+}
+
+function normalizeRevenueVehicle(value: unknown): RevenueVehicle {
+  if (!isRecord(value)) {
+    return {
+      rank: 0,
+      vehicleId: '',
+      vehicleNumber: '',
+      model: '차종 미확인',
+      revenue: 0,
+      reservationCount: 0,
+      utilizationRate: 0,
+      shareRate: 0,
+    };
+  }
+
+  return {
+    rank: toInteger(value.rank),
+    vehicleId: toText(value.vehicleId),
+    vehicleNumber: toText(value.vehicleNumber),
+    model: toText(value.model, '차종 미확인') || '차종 미확인',
+    revenue: toNumber(value.revenue),
+    reservationCount: toInteger(value.reservationCount),
+    utilizationRate: Math.max(0, Math.min(1, toNumber(value.utilizationRate))),
+    shareRate: Math.max(0, toNumber(value.shareRate)),
   };
 }
 
@@ -204,11 +280,15 @@ function normalizeRevenueSummary(
 ): RevenueSummaryResponse {
   const data = isRecord(payload) ? payload : {};
   const bucketsRaw = Array.isArray(data.buckets) ? data.buckets : [];
+  const paymentMethodsRaw = Array.isArray(data.paymentMethods) ? data.paymentMethods : [];
+  const vehiclesRaw = Array.isArray(data.vehicles) ? data.vehicles : [];
 
   return {
     period: normalizePeriod(data.period, defaults),
     totals: normalizeTotals(data.totals),
     buckets: bucketsRaw.map(normalizeSummaryBucket),
+    paymentMethods: paymentMethodsRaw.map(normalizePaymentMethod),
+    vehicles: vehiclesRaw.map(normalizeRevenueVehicle),
   };
 }
 
