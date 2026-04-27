@@ -1,7 +1,7 @@
 import { Layout } from '../components/Layout';
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useSearchParams, useNavigate } from 'react-router';
-import { ChevronLeft, ChevronRight, Plus, Car, Calendar, AlertCircle, DollarSign, AlertTriangle, Loader2, RefreshCw, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, Car, Calendar, AlertCircle, DollarSign, AlertTriangle, Loader2, RefreshCw, X, Edit2, Save, ArrowLeft } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   AccidentReportModal,
@@ -56,6 +56,7 @@ import {
   createReservation,
   getReservationDetail,
   getReservationsList,
+  patchReservation,
   reportReservationAccident,
   returnReservation,
   transitionReservation,
@@ -1265,6 +1266,13 @@ export default function Reservations() {
   const [activeReservationAction, setActiveReservationAction] = useState<'start' | 'cancel' | null>(null);
   const [reservationActionError, setReservationActionError] = useState<string | null>(null);
   const [reservationWarningPrompt, setReservationWarningPrompt] = useState<ReservationWarningPrompt | null>(null);
+  const [isEditMode, setIsEditMode] = useState(false);
+  const [editVin, setEditVin] = useState('');
+  const [editStartAt, setEditStartAt] = useState('');
+  const [editEndAt, setEditEndAt] = useState('');
+  const [editReason, setEditReason] = useState('');
+  const [isEditSubmitting, setIsEditSubmitting] = useState(false);
+  const [editSubmitError, setEditSubmitError] = useState<string | null>(null);
 
   // 동적 날짜 로딩을 위한 상태
   const [totalDaysToShow, setTotalDaysToShow] = useState(42); // 초기 6주
@@ -1741,6 +1749,9 @@ export default function Reservations() {
     setIsPaymentCompleting(false);
     setReservationActionError(null);
     setActiveReservationAction(null);
+    setIsEditMode(false);
+    setEditSubmitError(null);
+    setIsEditSubmitting(false);
   }, []);
 
   const hydrateReservationDetail = useCallback(async (reservationId: string, fallbackReservation: Reservation) => {
@@ -2471,6 +2482,128 @@ export default function Reservations() {
     selectedReservation,
   ]);
 
+  const handleEnterEditMode = useCallback(() => {
+    if (!selectedReservation || !canWriteReservations) {
+      return;
+    }
+    const currentVin = selectedReservation.vin ?? '';
+    setEditVin(currentVin);
+    const startFull = selectedReservation.startDateFull ?? '';
+    const endFull = selectedReservation.endDateFull ?? '';
+    setEditStartAt(startFull.length === 10 ? `${startFull}T09:00` : startFull.slice(0, 16));
+    setEditEndAt(endFull.length === 10 ? `${endFull}T18:00` : endFull.slice(0, 16));
+    setEditReason('');
+    setEditSubmitError(null);
+    setIsEditSubmitting(false);
+    setActiveTab('reservation');
+    setIsEditMode(true);
+  }, [canWriteReservations, selectedReservation]);
+
+  const handleCancelEditMode = useCallback(() => {
+    setIsEditMode(false);
+    setEditSubmitError(null);
+    setIsEditSubmitting(false);
+  }, []);
+
+  const handleSubmitEdit = useCallback(async () => {
+    if (!selectedReservation || isEditSubmitting) {
+      return;
+    }
+    if (!canWriteReservations) {
+      setEditSubmitError('예약 수정 권한이 없습니다.');
+      return;
+    }
+
+    const currentVin = selectedReservation.vin ?? '';
+    const vehicleChanged = editVin !== currentVin && editVin.length > 0;
+
+    const startIso = editStartAt ? new Date(editStartAt).toISOString() : undefined;
+    const endIso = editEndAt ? new Date(editEndAt).toISOString() : undefined;
+    if (startIso && endIso && new Date(startIso) >= new Date(endIso)) {
+      setEditSubmitError('종료일은 시작일보다 이후여야 합니다.');
+      return;
+    }
+
+    const payload: Record<string, string | undefined> = {};
+    if (startIso) {
+      payload.startAt = startIso;
+    }
+    if (endIso) {
+      payload.endAt = endIso;
+    }
+    if (vehicleChanged) {
+      const targetAsset = vehicleAssets.find((a) => a.vin === editVin);
+      payload.vin = editVin;
+      payload.assetId = editVin;
+      payload.plate = targetAsset?.vehicleNumber ?? undefined;
+      payload.vehicleNumber = targetAsset?.vehicleNumber ?? undefined;
+      if (editReason.trim()) {
+        payload.reason = editReason.trim();
+      }
+    }
+
+    if (!Object.keys(payload).length) {
+      setEditSubmitError('변경 사항이 없습니다.');
+      return;
+    }
+
+    setIsEditSubmitting(true);
+    setEditSubmitError(null);
+
+    try {
+      const result = await patchReservation(selectedReservation.id, payload);
+      const fallbackReservation: Reservation = {
+        ...selectedReservation,
+        ...(vehicleChanged && payload.vehicleNumber ? { vehicleNumber: payload.vehicleNumber } : {}),
+        ...(vehicleChanged && payload.vin ? { vin: payload.vin } : {}),
+      };
+      const updatedReservation = toReservationDetail(result, fallbackReservation);
+      setReservationsData((prev) => prev.map((r) => (r.id === updatedReservation.id ? updatedReservation : r)));
+      setSelectedReservation(updatedReservation);
+      const matchedAsset = vehicleAssets.find((a) => a.vehicleNumber === updatedReservation.vehicleNumber);
+      setSelectedVehicleAsset(matchedAsset ?? createReservationFallbackVehicleAsset(updatedReservation));
+      setIsEditMode(false);
+      refreshReservationsAfterMutation('예약이 수정되었지만 목록을 다시 불러오지 못했습니다.');
+      toast.success(vehicleChanged ? '차량이 변경되었습니다.' : '예약이 수정되었습니다.');
+    } catch (error) {
+      if (error instanceof ApiError) {
+        if (error.status === 400) {
+          setEditSubmitError(error.message || '입력 값을 확인해 주세요.');
+          return;
+        }
+        if (error.status === 403) {
+          setEditSubmitError('예약 수정 권한이 없습니다.');
+          return;
+        }
+        if (error.status === 404) {
+          setEditSubmitError('대상 차량 또는 예약을 찾을 수 없습니다.');
+          return;
+        }
+        if (error.status === 409) {
+          setEditSubmitError(error.message || '해당 차량에 겹치는 예약이 존재합니다.');
+          void hydrateReservationDetail(selectedReservation.id, selectedReservation);
+          return;
+        }
+        setEditSubmitError(error.message || '예약 수정 중 오류가 발생했습니다.');
+        return;
+      }
+      setEditSubmitError('예약 수정 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.');
+    } finally {
+      setIsEditSubmitting(false);
+    }
+  }, [
+    canWriteReservations,
+    editEndAt,
+    editReason,
+    editStartAt,
+    editVin,
+    hydrateReservationDetail,
+    isEditSubmitting,
+    refreshReservationsAfterMutation,
+    selectedReservation,
+    vehicleAssets,
+  ]);
+
   const handleReturnClick = useCallback(() => {
     if (!canWriteReservations) {
       setReturnSubmitError('차량 반납 처리 권한이 없습니다. 관리자에게 권한을 요청해 주세요.');
@@ -3183,9 +3316,11 @@ export default function Reservations() {
             <div className="bg-white rounded-xl w-[700px] max-h-[80vh] flex flex-col">
               <div className="p-6 border-b border-gray-200">
                 <div className="flex items-center justify-between">
-                  <h2 className="text-xl font-bold text-[#1e2939]">예약 상세 정보</h2>
+                  <h2 className="text-xl font-bold text-[#1e2939]">
+                    {isEditMode ? '예약 수정' : '예약 상세 정보'}
+                  </h2>
                   <button
-                    onClick={closeReservationDetail}
+                    onClick={isEditMode ? handleCancelEditMode : closeReservationDetail}
                     className="p-2 hover:bg-gray-100 rounded-lg"
                   >
                     <X className="w-5 h-5" />
@@ -3193,7 +3328,7 @@ export default function Reservations() {
                 </div>
 
                 {/* 탭 네비게이션 */}
-                <div className="flex gap-1 mt-4 border-b border-gray-200">
+                <div className={`flex gap-1 mt-4 border-b border-gray-200 ${isEditMode ? 'hidden' : ''}`}>
                   <button
                     onClick={() => setActiveTab('reservation')}
                     className={`px-4 py-2 font-medium text-sm transition-colors relative ${
@@ -3260,7 +3395,7 @@ export default function Reservations() {
               {/* 탭 컨텐츠 */}
               <div className="p-6 flex-1 overflow-y-auto">
                 {/* 예약 정보 탭 */}
-                {activeTab === 'reservation' && (
+                {activeTab === 'reservation' && !isEditMode && (
                   <div className="space-y-4">
                     <div className="grid grid-cols-2 gap-4">
                       <div>
@@ -3325,6 +3460,88 @@ export default function Reservations() {
                             </span>
                           ))}
                         </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* 예약 수정 폼 */}
+                {activeTab === 'reservation' && isEditMode && (
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="text-xs font-semibold text-gray-500 uppercase">예약번호</label>
+                        <p className="text-lg text-gray-900 mt-1 font-bold">{selectedReservation.id}</p>
+                      </div>
+                      <div>
+                        <label className="text-xs font-semibold text-gray-500 uppercase">고객명</label>
+                        <p className="text-lg text-gray-900 mt-1">{selectedReservation.customer}</p>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="text-xs font-semibold text-gray-500 uppercase mb-1 block">차량 선택</label>
+                      <select
+                        value={editVin}
+                        onChange={(e) => setEditVin(e.target.value)}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      >
+                        <option value="">차량을 선택하세요</option>
+                        {vehicleAssets
+                          .filter((a) => a.vin && a.vin !== '-')
+                          .map((asset) => (
+                            <option key={asset.vin} value={asset.vin}>
+                              {asset.vehicleNumber} ({asset.model}) — {asset.vin}
+                            </option>
+                          ))}
+                      </select>
+                      {editVin !== (selectedReservation.vin ?? '') && editVin.length > 0 && (
+                        <p className="text-xs text-amber-600 mt-1">
+                          차량이 변경됩니다: {selectedReservation.vehicleNumber} → {vehicleAssets.find((a) => a.vin === editVin)?.vehicleNumber ?? editVin}
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="text-xs font-semibold text-gray-500 uppercase mb-1 block">대여 시작일시</label>
+                        <input
+                          type="datetime-local"
+                          value={editStartAt}
+                          onChange={(e) => setEditStartAt(e.target.value)}
+                          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs font-semibold text-gray-500 uppercase mb-1 block">대여 종료일시</label>
+                        <input
+                          type="datetime-local"
+                          value={editEndAt}
+                          onChange={(e) => setEditEndAt(e.target.value)}
+                          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        />
+                      </div>
+                    </div>
+
+                    {editVin !== (selectedReservation.vin ?? '') && editVin.length > 0 && (
+                      <div>
+                        <label className="text-xs font-semibold text-gray-500 uppercase mb-1 block">변경 사유</label>
+                        <textarea
+                          value={editReason}
+                          onChange={(e) => setEditReason(e.target.value)}
+                          placeholder="차량 변경 사유를 입력하세요 (선택)"
+                          maxLength={500}
+                          rows={2}
+                          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+                        />
+                        <p className="text-xs text-gray-400 mt-1 text-right">{editReason.length}/500</p>
+                      </div>
+                    )}
+
+                    {editSubmitError && (
+                      <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 flex items-start gap-2">
+                        <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+                        <span>{editSubmitError}</span>
                       </div>
                     )}
                   </div>
@@ -3451,86 +3668,128 @@ export default function Reservations() {
               </div>
 
               {/* 액션 버튼 */}
-              <div className="p-6 border-t border-gray-200 flex gap-3 flex-wrap">
-                {reservationActionError && (
-                  <div className="w-full rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 flex items-start gap-2">
-                    <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
-                    <span>{reservationActionError}</span>
-                  </div>
-                )}
-                <button
-                  onClick={() => {
-                    if (!canViewAssets) {
-                      navigate('/forbidden');
-                      return;
-                    }
-                    navigate(`/assets?search=${encodeURIComponent(selectedReservation.vehicleNumber)}`);
-                  }}
-                  disabled={!canViewAssets}
-                  className="flex-1 min-w-[200px] px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  차량 자산 상세보기
-                </button>
-                <button
-                  onClick={() => {
-                    if (!canReportAccidentForReservation(selectedReservation)) {
-                      return;
-                    }
-                    setShowAccidentModal(true);
-                  }}
-                  disabled={!canWriteReservations || !canReportAccidentForReservation(selectedReservation)}
-                  className="flex-1 min-w-[200px] px-4 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  사고 등록
-                </button>
-                <button
-                  onClick={() => {
-                    if (!canViewActionRequired) {
-                      navigate('/forbidden');
-                      return;
-                    }
-                    navigate(`/action-required?search=${encodeURIComponent(selectedReservation.vehicleNumber)}`);
-                  }}
-                  disabled={!canViewActionRequired}
-                  className="flex-1 min-w-[200px] px-4 py-3 bg-gray-100 text-gray-700 hover:bg-gray-200 rounded-lg font-medium disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  이 차량의 조치항목 보기
-                </button>
-                {selectedReservation.type === 'reservation' && canTransitionReservations && canStartReservationNow(selectedReservation) && (
+              {isEditMode ? (
+                <div className="p-6 border-t border-gray-200 flex gap-3">
+                  <button
+                    onClick={handleCancelEditMode}
+                    disabled={isEditSubmitting}
+                    className="flex-1 px-4 py-3 bg-gray-100 text-gray-700 hover:bg-gray-200 rounded-lg font-medium flex items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    <ArrowLeft className="w-4 h-4" />
+                    취소
+                  </button>
+                  <button
+                    onClick={() => { void handleSubmitEdit(); }}
+                    data-testid="reservation-edit-submit-button"
+                    disabled={isEditSubmitting}
+                    className="flex-1 px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium flex items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {isEditSubmitting ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        저장 중...
+                      </>
+                    ) : (
+                      <>
+                        <Save className="w-4 h-4" />
+                        저장
+                      </>
+                    )}
+                  </button>
+                </div>
+              ) : (
+                <div className="p-6 border-t border-gray-200 flex gap-3 flex-wrap">
+                  {reservationActionError && (
+                    <div className="w-full rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 flex items-start gap-2">
+                      <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+                      <span>{reservationActionError}</span>
+                    </div>
+                  )}
+                  {canWriteReservations && selectedReservation.type !== 'return' && (
+                    <button
+                      onClick={handleEnterEditMode}
+                      data-testid="reservation-edit-button"
+                      disabled={activeReservationAction !== null}
+                      className="flex-1 min-w-[200px] px-4 py-3 bg-amber-500 text-white rounded-lg hover:bg-amber-600 font-medium flex items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      <Edit2 className="w-4 h-4" />
+                      예약 수정
+                    </button>
+                  )}
                   <button
                     onClick={() => {
-                      void handleStartReservation();
+                      if (!canViewAssets) {
+                        navigate('/forbidden');
+                        return;
+                      }
+                      navigate(`/assets?search=${encodeURIComponent(selectedReservation.vehicleNumber)}`);
                     }}
-                    data-testid="reservation-start-button"
-                    disabled={activeReservationAction !== null}
-                    className="flex-1 min-w-[200px] px-4 py-3 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 font-medium disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={!canViewAssets}
+                    className="flex-1 min-w-[200px] px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    {activeReservationAction === 'start' ? '처리 중...' : '차량 인수 처리'}
+                    차량 자산 상세보기
                   </button>
-                )}
-                {selectedReservation.type === 'reservation' && canTransitionReservations && (
                   <button
                     onClick={() => {
-                      void handleCancelReservation();
+                      if (!canReportAccidentForReservation(selectedReservation)) {
+                        return;
+                      }
+                      setShowAccidentModal(true);
                     }}
-                    data-testid="reservation-cancel-button"
-                    disabled={!canTransitionReservations || activeReservationAction !== null}
-                    className="flex-1 min-w-[200px] px-4 py-3 bg-gray-600 text-white rounded-lg hover:bg-gray-700 font-medium disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={!canWriteReservations || !canReportAccidentForReservation(selectedReservation)}
+                    className="flex-1 min-w-[200px] px-4 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    {activeReservationAction === 'cancel' ? '처리 중...' : '예약 취소'}
+                    사고 등록
                   </button>
-                )}
-                {selectedReservation.type === 'rental' && (
                   <button
-                    onClick={handleReturnClick}
-                    data-testid="reservation-return-button"
-                    disabled={!canWriteReservations}
-                    className="flex-1 min-w-[200px] px-4 py-3 bg-orange-600 text-white rounded-lg hover:bg-orange-700 font-medium disabled:cursor-not-allowed disabled:opacity-60"
+                    onClick={() => {
+                      if (!canViewActionRequired) {
+                        navigate('/forbidden');
+                        return;
+                      }
+                      navigate(`/action-required?search=${encodeURIComponent(selectedReservation.vehicleNumber)}`);
+                    }}
+                    disabled={!canViewActionRequired}
+                    className="flex-1 min-w-[200px] px-4 py-3 bg-gray-100 text-gray-700 hover:bg-gray-200 rounded-lg font-medium disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    차량 반납 처리
+                    이 차량의 조치항목 보기
                   </button>
-                )}
-              </div>
+                  {selectedReservation.type === 'reservation' && canTransitionReservations && canStartReservationNow(selectedReservation) && (
+                    <button
+                      onClick={() => {
+                        void handleStartReservation();
+                      }}
+                      data-testid="reservation-start-button"
+                      disabled={activeReservationAction !== null}
+                      className="flex-1 min-w-[200px] px-4 py-3 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 font-medium disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {activeReservationAction === 'start' ? '처리 중...' : '차량 인수 처리'}
+                    </button>
+                  )}
+                  {selectedReservation.type === 'reservation' && canTransitionReservations && (
+                    <button
+                      onClick={() => {
+                        void handleCancelReservation();
+                      }}
+                      data-testid="reservation-cancel-button"
+                      disabled={!canTransitionReservations || activeReservationAction !== null}
+                      className="flex-1 min-w-[200px] px-4 py-3 bg-gray-600 text-white rounded-lg hover:bg-gray-700 font-medium disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {activeReservationAction === 'cancel' ? '처리 중...' : '예약 취소'}
+                    </button>
+                  )}
+                  {selectedReservation.type === 'rental' && (
+                    <button
+                      onClick={handleReturnClick}
+                      data-testid="reservation-return-button"
+                      disabled={!canWriteReservations}
+                      className="flex-1 min-w-[200px] px-4 py-3 bg-orange-600 text-white rounded-lg hover:bg-orange-700 font-medium disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      차량 반납 처리
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         )}
