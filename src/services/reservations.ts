@@ -53,6 +53,17 @@ export interface TransitionReservationPayload {
   force?: boolean;
 }
 
+export interface PatchReservationPayload {
+  vin?: string;
+  assetId?: string;
+  plate?: string;
+  vehicleNumber?: string;
+  startAt?: string;
+  endAt?: string;
+  memo?: string;
+  reason?: string;
+}
+
 export interface CancelReservationPayload {
   reason?: string;
 }
@@ -149,6 +160,19 @@ export function createReservation(
   return apiClient.requestData<unknown>({
     path: '/api/v2/reservations',
     method: 'POST',
+    body: payload,
+    signal: options.signal,
+  });
+}
+
+export function patchReservation(
+  reservationId: string,
+  payload: PatchReservationPayload,
+  options: ReservationsRequestOptions = {},
+): Promise<unknown> {
+  return apiClient.requestData<unknown>({
+    path: `/api/v2/reservations/${encodeURIComponent(reservationId)}`,
+    method: 'PATCH',
     body: payload,
     signal: options.signal,
   });
