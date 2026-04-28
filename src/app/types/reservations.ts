@@ -20,6 +20,7 @@ export interface Reservation {
   startDate: number;
   endDate: number;
   returnedAt?: string;
+  lateReturn?: boolean;
   contractStatus?: string;
   scheduledStartAt?: string;
   scheduledEndAt?: string;

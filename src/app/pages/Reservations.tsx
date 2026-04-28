@@ -683,6 +683,20 @@ function toNumberValue(value: unknown): number | null {
   return null;
 }
 
+function toBooleanValue(value: unknown): boolean | null {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+  const text = toStringValue(value)?.toLowerCase();
+  if (text === 'true') {
+    return true;
+  }
+  if (text === 'false') {
+    return false;
+  }
+  return null;
+}
+
 function parseReservationMemoValue(memo: unknown, key: string): string | null {
   const memoText = toStringValue(memo);
   if (!memoText) {
@@ -796,6 +810,19 @@ function parseReservationDateTime(value: string | undefined): Date | null {
   return parsed;
 }
 
+function hasReturnedLate(reservation: Reservation, scheduledEndAt: Date | null, returnedAtDate: Date | null): boolean {
+  if (reservation.lateReturn === true) {
+    return true;
+  }
+  if (reservation.lateReturn === false) {
+    return false;
+  }
+  if (isReservationLateReturn(reservation)) {
+    return true;
+  }
+  return scheduledEndAt !== null && returnedAtDate !== null && returnedAtDate > scheduledEndAt;
+}
+
 export function getReservationOverdueSegment(
   reservation: Reservation,
   todayOffset = 0,
@@ -811,6 +838,9 @@ export function getReservationOverdueSegment(
   const returnedDateOffset = getReservationReturnedDateOffset(reservation);
 
   if (returnedDateOffset !== null) {
+    if (!hasReturnedLate(reservation, scheduledEndAt, returnedAtDate)) {
+      return null;
+    }
     const hasSameDayLateReturn = (
       scheduledEndAt !== null
       && returnedAtDate !== null
@@ -1344,7 +1374,8 @@ function toReservationRow(row: unknown, index: number): Reservation | null {
   const startDateLabel = normalizeDateParam(toStringValue(startSource)) ?? toDateLabelFromOffset(startDateOffset);
   const endDateLabel = normalizeDateParam(toStringValue(endSource)) ?? toDateLabelFromOffset(endDateOffset);
   const issues = normalizeIssues(row.issues);
-  const accidentReported = row.accidentReported === true || toStringValue(row.accidentReported)?.toLowerCase() === 'true';
+  const accidentReported = toBooleanValue(row.accidentReported) === true;
+  const lateReturn = toBooleanValue(row.lateReturn);
   const contractStatus = normalizeReservationContractStatus(
     toStringValue(row.contractStatus) ?? toStringValue(row.status) ?? toStringValue(row.type),
   );
@@ -1389,6 +1420,7 @@ function toReservationRow(row: unknown, index: number): Reservation | null {
     startDate: startDateOffset,
     endDate: endDateOffset,
     returnedAt: toStringValue(row.returnedAt) ?? undefined,
+    lateReturn: lateReturn ?? undefined,
     scheduledStartAt: toStringValue(startSource) ?? undefined,
     scheduledEndAt: toStringValue(endSource) ?? undefined,
     contractStatus: contractStatus ?? undefined,

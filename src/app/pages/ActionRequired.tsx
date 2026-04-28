@@ -213,7 +213,7 @@ function pickVehicleNumber(source: Record<string, unknown>): string | null {
     }
   }
   // 폴백: '?' 포함 여부 관계없이 첫 번째 유효 값 반환
-  return pickString(source, keys);
+  return pickString(source, keys) ?? pickString(source, ['vin', 'assetId', 'vehicleId']);
 }
 
 function formatActionDate(rawValue: string): string {
