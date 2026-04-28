@@ -5,6 +5,7 @@ import { RequireAuth } from './components/RequireAuth';
 import ActionRequired from './pages/ActionRequired';
 import Assets from './pages/Assets';
 import DeviceInstallation from './pages/DeviceInstallation';
+import DemoSimulationAdmin from './pages/DemoSimulationAdmin';
 import Forbidden from './pages/Forbidden';
 import Home from './pages/Home';
 import Login from './pages/Login';
@@ -82,6 +83,10 @@ export const router = createBrowserRouter([
           {
             path: '/support-center',
             Component: SupportCenter,
+          },
+          {
+            path: '/admin/demo-simulation',
+            Component: DemoSimulationAdmin,
           },
         ],
       },

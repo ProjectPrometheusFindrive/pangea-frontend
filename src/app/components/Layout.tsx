@@ -1,5 +1,5 @@
 import { Link, useLocation, useNavigate } from 'react-router';
-import { Home, AlertCircle, Car, Calendar, Settings, Bell, Menu, TrendingUp, X, AlertTriangle, Shield, Signal, DollarSign, AlertOctagon, Wrench, Clock, Sparkles, LogOut, User, Building2, Trash2, ChevronDown, Zap, Loader2, type LucideIcon } from 'lucide-react';
+import { Home, AlertCircle, Car, Calendar, Settings, Bell, Menu, TrendingUp, X, AlertTriangle, Shield, Signal, DollarSign, AlertOctagon, Wrench, Clock, Sparkles, LogOut, User, Building2, Trash2, ChevronDown, Zap, Loader2, DatabaseZap, type LucideIcon } from 'lucide-react';
 import { ReactNode, useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { ApiError } from '../../services/api';
 import {
@@ -423,6 +423,7 @@ export function Layout({ children, title }: LayoutProps) {
     { path: '/revenue', label: '매출 요약', icon: TrendingUp, permission: ROUTE_PERMISSIONS.revenue },
 { path: '/device-installation', label: '단말 장착/관리', icon: Zap, permission: ROUTE_PERMISSIONS.deviceInstallation },
     { path: '/settings', label: '설정', icon: Settings, permission: ROUTE_PERMISSIONS.settings },
+    { path: '/admin/demo-simulation', label: '데모 시뮬레이션', icon: DatabaseZap, permission: ROUTE_PERMISSIONS.demoSimulation },
   ];
 
   const filteredMenuItems = menuItems.filter((item) => canAccessRoute(item.permission));

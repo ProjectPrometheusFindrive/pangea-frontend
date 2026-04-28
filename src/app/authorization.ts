@@ -6,6 +6,7 @@ export const ROUTE_PERMISSIONS = {
   revenue: 'route.revenue',
   supportCenter: 'route.support-center',
   settings: 'route.settings',
+  demoSimulation: 'route.demo-simulation',
   deviceInstallation: 'route.device-installation',
 } as const;
 
@@ -18,6 +19,7 @@ export const ACTION_PERMISSIONS = {
   supportManage: 'action.support.manage',
   settingsWrite: 'action.settings.write',
   settingsMembersWrite: 'action.settings.members.write',
+  demoSimulationWrite: 'action.demo-simulation.write',
   deviceInstallationWrite: 'action.device-installation.write',
 } as const;
 
@@ -36,6 +38,7 @@ export const KNOWN_APP_PERMISSIONS: AppPermission[] = [
   ROUTE_PERMISSIONS.supportCenter,
   ROUTE_PERMISSIONS.settings,
   ROUTE_PERMISSIONS.deviceInstallation,
+  ROUTE_PERMISSIONS.demoSimulation,
   ACTION_PERMISSIONS.assetsWrite,
   ACTION_PERMISSIONS.reservationsWrite,
   ACTION_PERMISSIONS.actionRequiredWrite,
@@ -45,6 +48,7 @@ export const KNOWN_APP_PERMISSIONS: AppPermission[] = [
   ACTION_PERMISSIONS.settingsWrite,
   ACTION_PERMISSIONS.settingsMembersWrite,
   ACTION_PERMISSIONS.deviceInstallationWrite,
+  ACTION_PERMISSIONS.demoSimulationWrite,
 ];
 
 const PERMISSION_CONTAINER_KEYS = new Set([
@@ -195,6 +199,9 @@ export function resolveRoutePermissionForPath(pathname: string): AppRoutePermiss
   }
   if (pathname.startsWith('/device-installation')) {
     return ROUTE_PERMISSIONS.deviceInstallation;
+  }
+  if (pathname.startsWith('/admin/demo-simulation')) {
+    return ROUTE_PERMISSIONS.demoSimulation;
   }
   return null;
 }
