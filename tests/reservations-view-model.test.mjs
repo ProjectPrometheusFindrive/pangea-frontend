@@ -140,6 +140,50 @@ test('reservation view model keeps all asset rows and real models when reservati
   assert.equal(idleVehicle?.status, '가용');
 });
 
+test('reservation view model maps VIN-only reservation rows onto asset vehicle numbers', async () => {
+  const module = await viteServer.ssrLoadModule('/src/app/pages/reservationsViewModel.ts');
+
+  const rows = module.mergeVehicleRows(
+    {
+      assets: [
+        {
+          vehicleNumber: '100하1000',
+          model: '모닝',
+          status: '가용',
+          issues: [],
+          insuranceExpiry: '2026-12-31',
+          nextInspection: '2026-06-30',
+          vin: 'DEMO-VIN-0001',
+          year: '2024',
+          owner: '데모렌터카',
+        },
+      ],
+    },
+    [
+      {
+        id: 'R-1',
+        vehicleNumber: 'DEMO-VIN-0001',
+        vin: 'DEMO-VIN-0001',
+        customer: '김고객',
+        startDate: 0,
+        endDate: 1,
+        type: 'reservation',
+        issues: [],
+        phone: '010-1111-2222',
+        paymentMethod: '카드',
+        amount: '250,000원',
+        deposit: '50,000원',
+        paymentStatus: '대기',
+      },
+    ],
+  );
+
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0]?.vehicleNumber, '100하1000');
+  assert.equal(rows[0]?.vin, 'DEMO-VIN-0001');
+  assert.equal(rows[0]?.status, '예약');
+});
+
 test('reservation view model keeps completed reservations out of list payment sync targets', async () => {
   const module = await viteServer.ssrLoadModule('/src/app/pages/reservationsViewModel.ts');
 

@@ -282,7 +282,7 @@ export async function getActionItemTypeCounts(
       return;
     }
 
-    const vehicleNumber = pickString(row, ['vehicleNumber', 'plateNumber', 'vehicleNo', 'plate']);
+    const vehicleNumber = pickString(row, ['vehicleNumber', 'plateNumber', 'vehicleNo', 'plate', 'vin', 'assetId', 'vehicleId']);
     if (!vehicleNumber) {
       return;
     }
