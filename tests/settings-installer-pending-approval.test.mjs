@@ -9,7 +9,7 @@ function readProjectFile(relativePath) {
   return fs.readFileSync(path.join(projectRoot, relativePath), 'utf8');
 }
 
-test('settings keeps installer members visible and restricts pending installer review to super admins', () => {
+test('settings keeps installer review helpers scoped to super admins', () => {
   const serviceSource = readProjectFile('src/services/settings.ts');
   const pageSource = readProjectFile('src/app/pages/Settings.tsx');
 
