@@ -3493,42 +3493,46 @@ export default function Reservations() {
                 </button>
                 <button
                   onClick={() => handleViewFilterChange('reservation')}
-                  className={`px-3 py-1.5 rounded-lg text-sm font-medium ${
+                  className={`px-3 py-1.5 rounded-lg text-sm font-medium flex items-center gap-1.5 ${
                     viewFilter === 'reservation'
                       ? 'bg-blue-600 text-white'
                       : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                   }`}
                 >
+                  <span className="w-2.5 h-2.5 rounded-full bg-blue-500 shrink-0" />
                   예약
                 </button>
                 <button
                   onClick={() => handleViewFilterChange('rental')}
-                  className={`px-3 py-1.5 rounded-lg text-sm font-medium ${
+                  className={`px-3 py-1.5 rounded-lg text-sm font-medium flex items-center gap-1.5 ${
                     viewFilter === 'rental'
                       ? 'bg-blue-600 text-white'
                       : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                   }`}
                 >
+                  <span className="w-2.5 h-2.5 rounded-full bg-green-500 shrink-0" />
                   대여
                 </button>
                 <button
                   onClick={() => handleViewFilterChange('return')}
-                  className={`px-3 py-1.5 rounded-lg text-sm font-medium ${
+                  className={`px-3 py-1.5 rounded-lg text-sm font-medium flex items-center gap-1.5 ${
                     viewFilter === 'return'
                       ? 'bg-blue-600 text-white'
                       : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                   }`}
                 >
+                  <span className="w-2.5 h-2.5 rounded-full bg-gray-400 shrink-0" />
                   반납
                 </button>
                 <button
                   onClick={() => handleViewFilterChange('unpaid')}
-                  className={`px-3 py-1.5 rounded-lg text-sm font-medium ${
+                  className={`px-3 py-1.5 rounded-lg text-sm font-medium flex items-center gap-1.5 ${
                     viewFilter === 'unpaid'
                       ? 'bg-blue-600 text-white'
                       : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                   }`}
                 >
+                  <span className="w-2.5 h-2.5 rounded-full bg-red-500 shrink-0" />
                   미납
                 </button>
               </div>
@@ -3862,26 +3866,6 @@ export default function Reservations() {
               </div>
             </div>
           </PageStateBoundary>
-        </div>
-
-        {/* 범례 */}
-        <div className="flex gap-4 mt-3 shrink-0">
-          <div className="flex items-center gap-1.5">
-            <div className="w-3 h-3 bg-blue-500 rounded"></div>
-            <span className="text-xs text-gray-600">예약</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <div className="w-3 h-3 bg-green-500 rounded"></div>
-            <span className="text-xs text-gray-600">대여중</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <div className="w-3 h-3 bg-gray-400 rounded"></div>
-            <span className="text-xs text-gray-600">반납 완료</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <div className="w-3 h-3 bg-red-500 rounded"></div>
-            <span className="text-xs text-gray-600">미납 / 반납 지연</span>
-          </div>
         </div>
 
         {/* 예약 상세 팝업 */}
