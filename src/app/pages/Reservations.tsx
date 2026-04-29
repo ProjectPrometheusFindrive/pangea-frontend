@@ -2349,12 +2349,21 @@ export default function Reservations() {
 
   const getBlockColor = (reservation: Reservation) => {
     const endDate = toDateFromOffset(reservation.endDate);
-    
+
+    // 연체 후 반납 완료 → 초록색 (미납 체크보다 우선)
+    if (reservation.type === 'return') {
+      const scheduledEndAt = parseReservationDateTime(reservation.scheduledEndAt);
+      const returnedAtDate = parseReservationDateTime(reservation.returnedAt);
+      if (hasReturnedLate(reservation, scheduledEndAt, returnedAtDate)) {
+        return 'bg-green-500';
+      }
+    }
+
     // 미납 건
     if (reservation.issues && reservation.issues.includes('미납/결제 문제')) {
       return 'bg-red-500';
     }
-    
+
     // 반납 (수동 반납 처리 또는 과거 반납 완료) - 회색 통일
     if (reservation.type === 'return' || endDate < CALENDAR_BASE_DATE) {
       return 'bg-gray-400';
@@ -3840,7 +3849,7 @@ export default function Reservations() {
                                     ? `reservation-overdue-block-${res.id}`
                                     : `reservation-block-${res.id}`}
                                   className={`absolute top-1.5 h-11 ${
-                                    segment.kind === 'overdue' ? 'bg-red-500' : getBlockColor(res)
+                                    segment.kind === 'overdue' && res.type !== 'return' ? 'bg-red-500' : getBlockColor(res)
                                   } rounded px-2 py-1 text-white text-xs flex flex-col justify-between cursor-pointer hover:opacity-90 transition-opacity pointer-events-auto ${
                                     isHighlighted ? 'ring-4 ring-yellow-400' : ''
                                   }`}
