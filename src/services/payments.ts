@@ -23,6 +23,20 @@ export interface PatchPaymentStatusPayload {
 
 export interface PatchPaymentStatusOptions extends PaymentsRequestOptions {}
 
+export function getPaymentStatusesByReservations(
+  reservationIds: string[],
+  options: PaymentsRequestOptions = {},
+): Promise<unknown> {
+  return apiClient.requestData<unknown>({
+    path: '/api/v2/payments/status/batch',
+    method: 'POST',
+    body: {
+      reservationIds,
+    },
+    signal: options.signal,
+  });
+}
+
 export function getPaymentStatusByReservation(
   reservationId: string,
   options: PaymentsRequestOptions = {},

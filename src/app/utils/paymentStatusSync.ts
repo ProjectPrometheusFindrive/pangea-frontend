@@ -1,7 +1,7 @@
 import { ApiError } from '../../services/api';
 import {
   getPaymentById,
-  getPaymentStatusByReservation,
+  getPaymentStatusesByReservations,
 } from '../../services/payments';
 
 export type PaymentStatusCanonical =
@@ -73,6 +73,7 @@ const SOURCE_PRIORITY: Record<PaymentStatusSource, number> = {
 
 const CACHE_BY_RESERVATION_ID = new Map<string, PaymentStatusSnapshot>();
 const CACHE_BY_PAYMENT_ID = new Map<string, PaymentStatusSnapshot>();
+const PAYMENT_STATUS_BATCH_SIZE = 100;
 
 export function invalidatePaymentStatusCache(target: {
   reservationId?: string | null;
@@ -550,6 +551,61 @@ export function getCachedPaymentStatusByReservationId(reservationId: string): Pa
   return CACHE_BY_RESERVATION_ID.get(reservationId) ?? null;
 }
 
+async function loadStatusSnapshotsByReservationId(
+  reservationIds: string[],
+  options: ResolvePaymentStatusesOptions,
+): Promise<{
+  snapshotsByReservationId: Record<string, PaymentStatusSnapshot[]>;
+  missingReservationIds: Set<string>;
+  hasRetriableFailure: boolean;
+  errorMessage: string | null;
+}> {
+  const snapshotsByReservationId: Record<string, PaymentStatusSnapshot[]> = {};
+  const missingReservationIds = new Set(reservationIds);
+  let hasRetriableFailure = false;
+  let errorMessage: string | null = null;
+
+  for (let start = 0; start < reservationIds.length; start += PAYMENT_STATUS_BATCH_SIZE) {
+    const chunk = reservationIds.slice(start, start + PAYMENT_STATUS_BATCH_SIZE);
+    try {
+      const payload = await getPaymentStatusesByReservations(chunk, { signal: options.signal });
+      const snapshots = toRecordCollection(payload)
+        .map((row) => toSnapshotFromRecord(row, 'status-endpoint'))
+        .filter((snapshot): snapshot is PaymentStatusSnapshot => snapshot !== null);
+
+      for (const snapshot of snapshots) {
+        if (!snapshot.reservationId) {
+          continue;
+        }
+        if (!snapshotsByReservationId[snapshot.reservationId]) {
+          snapshotsByReservationId[snapshot.reservationId] = [];
+        }
+        snapshotsByReservationId[snapshot.reservationId].push(snapshot);
+        missingReservationIds.delete(snapshot.reservationId);
+      }
+    } catch (error) {
+      chunk.forEach((reservationId) => missingReservationIds.delete(reservationId));
+      if (error instanceof ApiError) {
+        errorMessage ??= resolveErrorMessage(error);
+        if (isRetryableApiError(error)) {
+          hasRetriableFailure = true;
+        }
+      } else if (error instanceof Error) {
+        errorMessage ??= error.message;
+      } else {
+        errorMessage ??= '결제 상태 동기화에 실패했습니다.';
+      }
+    }
+  }
+
+  return {
+    snapshotsByReservationId,
+    missingReservationIds,
+    hasRetriableFailure,
+    errorMessage,
+  };
+}
+
 export async function resolvePaymentStatuses(
   targets: PaymentSyncTarget[],
   options: ResolvePaymentStatusesOptions = {},
@@ -569,6 +625,21 @@ export async function resolvePaymentStatuses(
 
   let hasRetriableFailure = false;
   let errorMessage: string | null = null;
+  const reservationIdsForStatusEndpoint = Array.from(new Set(
+    normalizedTargets
+      .map((target) => target.reservationId?.trim())
+      .filter((reservationId): reservationId is string => Boolean(reservationId)),
+  ));
+  const batchStatusResult = reservationIdsForStatusEndpoint.length > 0
+    ? await loadStatusSnapshotsByReservationId(reservationIdsForStatusEndpoint, options)
+    : {
+      snapshotsByReservationId: {},
+      missingReservationIds: new Set<string>(),
+      hasRetriableFailure: false,
+      errorMessage: null,
+    };
+  hasRetriableFailure = batchStatusResult.hasRetriableFailure;
+  errorMessage = batchStatusResult.errorMessage;
 
   for (const target of normalizedTargets) {
     const cachedSnapshot = getCachedSnapshot(target);
@@ -591,33 +662,9 @@ export async function resolvePaymentStatuses(
     let isNotFoundFromStatusEndpoint = false;
 
     if (target.reservationId) {
-      try {
-        const payload = await getPaymentStatusByReservation(target.reservationId, { signal: options.signal });
-        const statusSnapshots = toRecordCollection(payload)
-          .map((row) => toSnapshotFromRecord(row, 'status-endpoint', { reservationId: target.reservationId }))
-          .filter((snapshot): snapshot is PaymentStatusSnapshot => snapshot !== null);
-
-        if (statusSnapshots.length === 0) {
-          isNotFoundFromStatusEndpoint = true;
-        }
-
-        candidates.push(...statusSnapshots);
-      } catch (error) {
-        if (error instanceof ApiError) {
-          if (error.status === 404) {
-            isNotFoundFromStatusEndpoint = true;
-          } else {
-            errorMessage ??= resolveErrorMessage(error);
-            if (isRetryableApiError(error)) {
-              hasRetriableFailure = true;
-            }
-          }
-        } else if (error instanceof Error) {
-          errorMessage ??= error.message;
-        } else {
-          errorMessage ??= '결제 상태 동기화에 실패했습니다.';
-        }
-      }
+      const statusSnapshots = batchStatusResult.snapshotsByReservationId[target.reservationId] ?? [];
+      isNotFoundFromStatusEndpoint = batchStatusResult.missingReservationIds.has(target.reservationId);
+      candidates.push(...statusSnapshots);
     }
 
     if (target.paymentId) {

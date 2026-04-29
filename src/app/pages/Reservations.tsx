@@ -1,5 +1,5 @@
 import { Layout } from '../components/Layout';
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { startTransition, useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useSearchParams, useNavigate } from 'react-router';
 import { ChevronLeft, ChevronRight, Plus, Car, Calendar, AlertCircle, DollarSign, AlertTriangle, Loader2, RefreshCw, X, Edit2, Save, ArrowLeft } from 'lucide-react';
 import { toast } from 'sonner';
@@ -89,7 +89,13 @@ function createTodayBaseDate(): Date {
 const CALENDAR_BASE_DATE = createTodayBaseDate();
 const DEFAULT_PAGE = 1;
 const DEFAULT_PAGE_SIZE = 20;
-const ASSET_FALLBACK_PAGE_SIZE = 500;
+const RESERVATION_FETCH_PAGE_SIZE = 500;
+const RESERVATION_FETCH_BUFFER_BEFORE_DAYS = 14;
+const RESERVATION_FETCH_BUFFER_AFTER_DAYS = 28;
+const RESERVATION_MAX_FETCH_WINDOW_DAYS = 90;
+const ASSET_FALLBACK_PAGE_SIZE = 200;
+const RESERVATION_CALENDAR_CACHE_KEY_PREFIX = 'pangea.reservations.calendar.v1';
+const RESERVATION_CALENDAR_CACHE_TTL_MS = 5 * 60 * 1000;
 const TOTAL_COUNT_KEYS = ['total', 'totalCount', 'count', 'size', 'itemsCount', 'totalElements'];
 const RETRY_TOAST_MESSAGE = '일시적인 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.';
 const ACTIVE_ACTION_STATUS_QUERY = 'open,in_progress';
@@ -783,6 +789,117 @@ function toDateOffset(value: unknown): number | null {
 
 function toDateLabelFromOffset(offset: number): string {
   return formatDateAsYmd(toDateFromOffset(offset));
+}
+
+type ReservationFetchWindow = {
+  from: string;
+  to: string;
+};
+
+type ReservationCalendarCachePayload = {
+  expiresAt: number;
+  total: number;
+  reservations: Reservation[];
+  vehicleAssets: VehicleAsset[];
+};
+
+function toOffsetFromDateLabel(value: string): number | null {
+  const parsed = parseDateOnly(value);
+  if (!parsed) {
+    return null;
+  }
+  return differenceInDays(CALENDAR_BASE_DATE, parsed);
+}
+
+function buildReservationFetchWindows({
+  currentWeekStart,
+  totalDaysToShow,
+  fromDate,
+  toDate,
+}: {
+  currentWeekStart: number;
+  totalDaysToShow: number;
+  fromDate: string | null;
+  toDate: string | null;
+}): ReservationFetchWindow[] {
+  const visibleStartOffset = currentWeekStart - RESERVATION_FETCH_BUFFER_BEFORE_DAYS;
+  const visibleEndOffset = currentWeekStart + totalDaysToShow - 1 + RESERVATION_FETCH_BUFFER_AFTER_DAYS;
+  const explicitFromOffset = fromDate ? toOffsetFromDateLabel(fromDate) : null;
+  const explicitToOffset = toDate ? toOffsetFromDateLabel(toDate) : null;
+  const hasExplicitDateRange = Boolean(fromDate || toDate);
+  const boundedStartOffset = hasExplicitDateRange
+    ? explicitFromOffset ?? visibleStartOffset
+    : visibleStartOffset;
+  const boundedEndOffset = hasExplicitDateRange
+    ? explicitToOffset ?? visibleEndOffset
+    : visibleEndOffset;
+
+  if (boundedStartOffset > boundedEndOffset) {
+    return [];
+  }
+
+  const windows: ReservationFetchWindow[] = [];
+  let windowStart = boundedStartOffset;
+  while (windowStart <= boundedEndOffset) {
+    const windowEnd = Math.min(
+      windowStart + RESERVATION_MAX_FETCH_WINDOW_DAYS - 1,
+      boundedEndOffset,
+    );
+    windows.push({
+      from: toDateLabelFromOffset(windowStart),
+      to: toDateLabelFromOffset(windowEnd),
+    });
+    windowStart = windowEnd + 1;
+  }
+  return windows;
+}
+
+function readReservationCalendarCache(cacheKey: string): ReservationCalendarCachePayload | null {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+  try {
+    const rawValue = window.sessionStorage.getItem(cacheKey);
+    if (!rawValue) {
+      return null;
+    }
+    const parsedValue = JSON.parse(rawValue) as Partial<ReservationCalendarCachePayload>;
+    if (
+      !parsedValue
+      || typeof parsedValue.expiresAt !== 'number'
+      || parsedValue.expiresAt <= Date.now()
+      || !Array.isArray(parsedValue.reservations)
+      || !Array.isArray(parsedValue.vehicleAssets)
+    ) {
+      window.sessionStorage.removeItem(cacheKey);
+      return null;
+    }
+    return {
+      expiresAt: parsedValue.expiresAt,
+      total: typeof parsedValue.total === 'number' ? parsedValue.total : parsedValue.reservations.length,
+      reservations: parsedValue.reservations as Reservation[],
+      vehicleAssets: parsedValue.vehicleAssets as VehicleAsset[],
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writeReservationCalendarCache(
+  cacheKey: string,
+  payload: Omit<ReservationCalendarCachePayload, 'expiresAt'>,
+): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  try {
+    window.sessionStorage.setItem(cacheKey, JSON.stringify({
+      ...payload,
+      expiresAt: Date.now() + RESERVATION_CALENDAR_CACHE_TTL_MS,
+    }));
+  } catch {
+    // sessionStorage quota or privacy restrictions should not block page rendering.
+  }
 }
 
 type ReservationCalendarSegment = {
@@ -1695,6 +1812,23 @@ export default function Reservations() {
   const detailRequestSequenceRef = useRef(0);
   const detailControllerRef = useRef<AbortController | null>(null);
   const reservationWarningResolverRef = useRef<((confirmed: boolean) => void) | null>(null);
+  const reservationCalendarCacheKey = useMemo(() => {
+    const fetchWindows = buildReservationFetchWindows({
+      currentWeekStart,
+      totalDaysToShow,
+      fromDate,
+      toDate,
+    });
+    return [
+      RESERVATION_CALENDAR_CACHE_KEY_PREFIX,
+      user?.companyId ?? 'no-company',
+      user?.userId ?? 'anonymous',
+      viewFilter,
+      dueFilter ?? 'none',
+      paymentScope,
+      fetchWindows.map((window) => `${window.from}..${window.to}`).join(','),
+    ].join('|');
+  }, [currentWeekStart, dueFilter, fromDate, paymentScope, toDate, totalDaysToShow, user?.companyId, user?.userId, viewFilter]);
 
   // 드래그 선택 상태
   const [isDragging, setIsDragging] = useState(false);
@@ -1915,6 +2049,35 @@ export default function Reservations() {
     }, true);
   }, [searchParams, updateReservationSearchParams]);
 
+  const applyReservationsHydrationPayload = useCallback((
+    payload: ReservationsHydrationPayload,
+    options: { cache?: boolean; transition?: boolean } = {},
+  ) => {
+    const reservationRows = toReservationRows(payload.reservationsPayload);
+    const vehicleRows = mergeVehicleRows(payload.assetPayload ?? payload.reservationsPayload, reservationRows);
+    const total = toTotalCount(payload.reservationsPayload, reservationRows.length);
+    const applyState = () => {
+      setReservationsData(reservationRows);
+      setVehicleAssets(vehicleRows);
+      setTotalReservationCount(total);
+      setPageErrorStatus(null);
+    };
+
+    if (options.transition === false) {
+      applyState();
+    } else {
+      startTransition(applyState);
+    }
+
+    if (options.cache !== false) {
+      writeReservationCalendarCache(reservationCalendarCacheKey, {
+        reservations: reservationRows,
+        vehicleAssets: vehicleRows,
+        total,
+      });
+    }
+  }, [reservationCalendarCacheKey]);
+
   const requestReservations = useCallback(async (signal: AbortSignal) => {
     if (fromDate && toDate && fromDate > toDate) {
       setPageErrorStatus(400);
@@ -1927,50 +2090,122 @@ export default function Reservations() {
 
     try {
       const reservationsRequest = (async () => {
-        const mergedReservationRows: unknown[] = [];
-        let nextPage = DEFAULT_PAGE;
-        let totalCount = 0;
+        const reservationRowsById = new Map<string, unknown>();
+        const reservationRowsWithoutId: unknown[] = [];
+        const fetchWindows = buildReservationFetchWindows({
+          currentWeekStart,
+          totalDaysToShow,
+          fromDate,
+          toDate,
+        });
 
-        while (true) {
-          if (signal.aborted) {
-            throw new DOMException('Aborted', 'AbortError');
-          }
-
-          const payload = await getReservationsList({
-            page: nextPage,
-            size: pageSize,
-            status: toStatusQueryValue(viewFilter, dueFilter),
-            contractStatus: toApiContractStatus(viewFilter, dueFilter),
-            paymentScope: isDelinquentPaymentScopeActive(viewFilter, paymentScope) ? 'delinquent' : undefined,
-            from: fromDate ?? undefined,
-            to: toDate ?? undefined,
-            due: viewFilter === 'overdue' ? 'overdue' : (dueFilter ?? undefined),
-            signal,
-          });
-
-          const pageRows = getCollectionFromPayload(payload, ['reservations', 'items', 'rows', 'list']) ?? [];
-          mergedReservationRows.push(...pageRows);
-          totalCount = Math.max(totalCount, toTotalCount(payload, mergedReservationRows.length));
-
-          if (pageRows.length === 0 || mergedReservationRows.length >= totalCount || pageRows.length < pageSize) {
-            return {
-              ...(isRecord(payload) ? payload : {}),
-              items: mergedReservationRows,
-              total: totalCount || mergedReservationRows.length,
-              page: DEFAULT_PAGE,
-              size: pageSize,
-            };
-          }
-
-          nextPage += 1;
+        if (fetchWindows.length === 0) {
+          return {
+            items: [],
+            total: 0,
+            page: DEFAULT_PAGE,
+            size: RESERVATION_FETCH_PAGE_SIZE,
+          };
         }
+
+        for (const fetchWindow of fetchWindows) {
+          let nextPage = DEFAULT_PAGE;
+          let windowRowsCount = 0;
+          let windowTotalCount = 0;
+
+          while (true) {
+            if (signal.aborted) {
+              throw new DOMException('Aborted', 'AbortError');
+            }
+
+            const payload = await getReservationsList({
+              page: nextPage,
+              size: RESERVATION_FETCH_PAGE_SIZE,
+              status: toStatusQueryValue(viewFilter, dueFilter),
+              contractStatus: toApiContractStatus(viewFilter, dueFilter),
+              paymentScope: isDelinquentPaymentScopeActive(viewFilter, paymentScope) ? 'delinquent' : undefined,
+              from: fetchWindow.from,
+              to: fetchWindow.to,
+              due: viewFilter === 'overdue' ? 'overdue' : (dueFilter ?? undefined),
+              signal,
+            });
+
+            const pageRows = getCollectionFromPayload(payload, ['reservations', 'items', 'rows', 'list']) ?? [];
+            for (const row of pageRows) {
+              const reservationId = isRecord(row)
+                ? toStringValue(row.reservationId) ?? toStringValue(row.rentalId) ?? toStringValue(row.id)
+                : null;
+              if (reservationId) {
+                reservationRowsById.set(reservationId, row);
+              } else {
+                reservationRowsWithoutId.push(row);
+              }
+            }
+            windowRowsCount += pageRows.length;
+            windowTotalCount = Math.max(windowTotalCount, toTotalCount(payload, windowRowsCount));
+            const partialReservationRows = [
+              ...reservationRowsById.values(),
+              ...reservationRowsWithoutId,
+            ];
+            applyReservationsHydrationPayload({
+              reservationsPayload: {
+                items: partialReservationRows,
+                total: partialReservationRows.length,
+                page: DEFAULT_PAGE,
+                size: RESERVATION_FETCH_PAGE_SIZE,
+              },
+            }, { cache: false });
+
+            if (
+              pageRows.length === 0
+              || windowRowsCount >= windowTotalCount
+              || pageRows.length < RESERVATION_FETCH_PAGE_SIZE
+            ) {
+              break;
+            }
+
+            nextPage += 1;
+          }
+        }
+
+        const mergedReservationRows = [
+          ...reservationRowsById.values(),
+          ...reservationRowsWithoutId,
+        ];
+        return {
+          items: mergedReservationRows,
+          total: mergedReservationRows.length,
+          page: DEFAULT_PAGE,
+          size: RESERVATION_FETCH_PAGE_SIZE,
+        };
       })();
       const assetRequest = canViewAssets
-        ? getAssetsList({
-          page: 1,
-          size: ASSET_FALLBACK_PAGE_SIZE,
-          signal,
-        }).catch(() => undefined)
+        ? (async () => {
+          const assetRows: unknown[] = [];
+          let nextPage = DEFAULT_PAGE;
+          let totalCount = 0;
+
+          while (true) {
+            const payload = await getAssetsList({
+              page: nextPage,
+              size: ASSET_FALLBACK_PAGE_SIZE,
+              signal,
+            });
+            const pageRows = getCollectionFromPayload(payload, ['vehicleAssets', 'vehicles', 'assets', 'items', 'rows', 'list']) ?? [];
+            assetRows.push(...pageRows);
+            totalCount = Math.max(totalCount, toTotalCount(payload, assetRows.length));
+            if (pageRows.length === 0 || assetRows.length >= totalCount || pageRows.length < ASSET_FALLBACK_PAGE_SIZE) {
+              return {
+                ...(isRecord(payload) ? payload : {}),
+                items: assetRows,
+                total: totalCount || assetRows.length,
+                page: DEFAULT_PAGE,
+                pageSize: ASSET_FALLBACK_PAGE_SIZE,
+              };
+            }
+            nextPage += 1;
+          }
+        })().catch(() => undefined)
         : Promise.resolve(undefined);
 
       const [reservationsPayload, assetPayload] = await Promise.all([reservationsRequest, assetRequest]);
@@ -1983,17 +2218,11 @@ export default function Reservations() {
       setPageErrorStatus(error instanceof ApiError ? error.status ?? null : null);
       throw error;
     }
-  }, [canViewAssets, dueFilter, fromDate, page, pageSize, paymentScope, toDate, viewFilter]);
+  }, [applyReservationsHydrationPayload, canViewAssets, currentWeekStart, dueFilter, fromDate, paymentScope, toDate, totalDaysToShow, viewFilter]);
 
   const handleReservationsSuccess = useCallback((payload: ReservationsHydrationPayload) => {
-    const reservationRows = toReservationRows(payload.reservationsPayload);
-    const vehicleRows = mergeVehicleRows(payload.assetPayload ?? payload.reservationsPayload, reservationRows);
-
-    setReservationsData(reservationRows);
-    setVehicleAssets(vehicleRows);
-    setTotalReservationCount(toTotalCount(payload.reservationsPayload, reservationRows.length));
-    setPageErrorStatus(null);
-  }, []);
+    applyReservationsHydrationPayload(payload, { cache: true });
+  }, [applyReservationsHydrationPayload]);
 
   const isReservationsResponseEmpty = useCallback((payload: ReservationsHydrationPayload) => {
     const rows = getCollectionFromPayload(payload.reservationsPayload, ['reservations', 'items', 'rows', 'list']);
@@ -2013,6 +2242,18 @@ export default function Reservations() {
     onSuccess: handleReservationsSuccess,
     isEmpty: isReservationsResponseEmpty,
   });
+
+  useEffect(() => {
+    const cachedPayload = readReservationCalendarCache(reservationCalendarCacheKey);
+    if (!cachedPayload) {
+      return;
+    }
+
+    setReservationsData(cachedPayload.reservations);
+    setVehicleAssets(cachedPayload.vehicleAssets);
+    setTotalReservationCount(cachedPayload.total);
+    setPageErrorStatus(null);
+  }, [reservationCalendarCacheKey]);
 
   useEffect(() => {
     void hydrateReservationsData();
@@ -2279,7 +2520,14 @@ export default function Reservations() {
   };
 
   // 차량 목록
-  const vehicles = vehicleAssets.map(v => v.vehicleNumber);
+  const vehicles = useMemo(() => vehicleAssets.map(v => v.vehicleNumber), [vehicleAssets]);
+  const vehicleAssetByNumber = useMemo(() => {
+    const map = new Map<string, VehicleAsset>();
+    vehicleAssets.forEach((vehicleAsset) => {
+      map.set(vehicleAsset.vehicleNumber, vehicleAsset);
+    });
+    return map;
+  }, [vehicleAssets]);
   
   // 0 = 월요일, 1 = 화요일, ... 6 = 일요일
   const daysOfWeek = ['월', '화', '수', '목', '금', '토', '일'];
@@ -2297,14 +2545,19 @@ export default function Reservations() {
   ), [reservationsData, syncedPaymentByReservationId]);
 
   // 고유 차종 목록 추출
-  const uniqueModels = Array.from(new Set(vehicleAssets.map(v => v.model))).sort();
+  const uniqueModels = useMemo(
+    () => Array.from(new Set(vehicleAssets.map(v => v.model))).sort(),
+    [vehicleAssets],
+  );
 
   // 먼저 예약 필터링 (상태 필터 + 검색어 적용)
-  const filteredReservations = reservations.filter((reservation) => matchesReservationFilters(reservation, {
-    viewFilter,
-    paymentScope,
-    searchQuery,
-  }));
+  const filteredReservations = useMemo(() => (
+    reservations.filter((reservation) => matchesReservationFilters(reservation, {
+      viewFilter,
+      paymentScope,
+      searchQuery,
+    }))
+  ), [paymentScope, reservations, searchQuery, viewFilter]);
   const reservationsByVehicle = useMemo(() => {
     const groupedReservations = new Map<string, Reservation[]>();
 
@@ -2317,6 +2570,19 @@ export default function Reservations() {
 
     return groupedReservations;
   }, [filteredReservations, vehicleAssets]);
+  const reservationIntervalsByVehicle = useMemo(() => {
+    const groupedIntervals = new Map<string, Array<{ start: number; end: number }>>();
+    reservationsByVehicle.forEach((vehicleReservations, vehicleNumber) => {
+      groupedIntervals.set(
+        vehicleNumber,
+        vehicleReservations.map((reservation) => ({
+          start: reservation.startDate,
+          end: getReservationOccupiedEndDate(reservation),
+        })),
+      );
+    });
+    return groupedIntervals;
+  }, [reservationsByVehicle]);
 
   const totalPages = Math.max(1, Math.ceil((totalReservationCount || 0) / pageSize));
   const hasPrevPage = page > 1;
@@ -2325,27 +2591,31 @@ export default function Reservations() {
   const pageErrorDescription = pageErrorStatus === 400
     ? '기간 또는 필터 조건이 올바르지 않습니다. 기간을 확인하거나 필터를 초기화해 주세요.'
     : '예약 캘린더 데이터를 불러오는 중 문제가 발생했습니다.';
+  const isCalendarBlockingLoading = isPageLoading && reservationsData.length === 0 && vehicleAssets.length === 0;
+  const canStartReservationMutation = canWriteReservations && !isPageLoading;
 
   // 차량 필터링 로직 (차종 + 상태 필터 AND 조건)
-  const filteredVehicles = vehicles.filter(vehicleNumber => {
-    const asset = vehicleAssets.find(a => a.vehicleNumber === vehicleNumber);
-    
-    // 차종 필터
-    const matchesModel = modelFilter === 'all' || (asset && asset.model === modelFilter);
-    
-    // 차량번호 검색
-    const matchesSearch = vehicleSearchQuery === '' || vehicleNumber.includes(vehicleSearchQuery);
-    
-    // 상태 필터에 따른 차량 필터링 (해당 차량의 예약이 필터 조건에 맞는 경우만)
-    if (viewFilter !== 'all') {
-      const hasMatchingReservation = (reservationsByVehicle.get(vehicleNumber)?.length ?? 0) > 0;
-      if (!hasMatchingReservation) {
-        return false;
+  const filteredVehicles = useMemo(() => (
+    vehicles.filter(vehicleNumber => {
+      const asset = vehicleAssetByNumber.get(vehicleNumber);
+
+      // 차종 필터
+      const matchesModel = modelFilter === 'all' || (asset && asset.model === modelFilter);
+
+      // 차량번호 검색
+      const matchesSearch = vehicleSearchQuery === '' || vehicleNumber.includes(vehicleSearchQuery);
+
+      // 상태 필터에 따른 차량 필터링 (해당 차량의 예약이 필터 조건에 맞는 경우만)
+      if (viewFilter !== 'all') {
+        const hasMatchingReservation = (reservationsByVehicle.get(vehicleNumber)?.length ?? 0) > 0;
+        if (!hasMatchingReservation) {
+          return false;
+        }
       }
-    }
-    
-    return matchesModel && matchesSearch;
-  });
+
+      return matchesModel && matchesSearch;
+    })
+  ), [modelFilter, reservationsByVehicle, vehicleAssetByNumber, vehicleSearchQuery, vehicles, viewFilter]);
 
   const getBlockColor = (reservation: Reservation) => {
     const endDate = toDateFromOffset(reservation.endDate);
@@ -3549,14 +3819,16 @@ export default function Reservations() {
 
             <button
               onClick={() => {
-                if (!canWriteReservations) {
-                  toast.error('예약 생성 권한이 없습니다.');
+                if (!canStartReservationMutation) {
+                  toast.error(isPageLoading
+                    ? '예약 데이터를 최신 상태로 불러온 뒤 다시 시도해 주세요.'
+                    : '예약 생성 권한이 없습니다.');
                   return;
                 }
                 setShowModal(true);
               }}
               data-testid="reservation-new-contract-button"
-              disabled={!canWriteReservations}
+              disabled={!canStartReservationMutation}
               className="px-4 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium flex items-center gap-2 text-sm disabled:cursor-not-allowed disabled:opacity-60"
             >
               <Plus className="w-4 h-4" />
@@ -3696,9 +3968,9 @@ export default function Reservations() {
           
           {/* 가로 스크롤 가능한 컨테이너 */}
           <PageStateBoundary
-            isLoading={isPageLoading}
+            isLoading={isCalendarBlockingLoading}
             error={pageError}
-            isEmpty={!isPageLoading && !pageError && filteredVehicles.length === 0}
+            isEmpty={!isCalendarBlockingLoading && !pageError && filteredVehicles.length === 0}
             errorDescription={pageErrorDescription}
             emptyTitle="조건에 맞는 차량이 없습니다"
             emptyDescription="필터를 완화하거나 차량번호 검색어를 지워 다시 확인해 주세요."
@@ -3744,6 +4016,7 @@ export default function Reservations() {
                 {/* 차량 행 */}
                 {filteredVehicles.map((vehicle, vIndex) => {
                   const vehicleReservations = reservationsByVehicle.get(vehicle) ?? [];
+                  const vehicleReservationIntervals = reservationIntervalsByVehicle.get(vehicle) ?? [];
 
                   return (
                   <div key={vIndex} className="relative border-b border-gray-200">
@@ -3762,10 +4035,9 @@ export default function Reservations() {
                           cellDate <= Math.max(dragStart.date, dragEnd.date);
 
                         // 충돌 검증: 이 셀에 기존 예약이 있는지 확인
-                        const hasConflict = vehicleReservations.some((res) => {
-                          const occupiedEndDate = getReservationOccupiedEndDate(res);
-                          return cellDate >= res.startDate && cellDate <= occupiedEndDate;
-                        });
+                        const hasConflict = vehicleReservationIntervals.some((interval) => (
+                          cellDate >= interval.start && cellDate <= interval.end
+                        ));
 
                         return (
                           <div
@@ -3798,8 +4070,10 @@ export default function Reservations() {
                                 if (conflicts.length > 0) {
                                   alert(`선택한 기간에 이미 예약이 있습니다.\\n\\n${conflicts.map(c => `${c.customer}: ${c.startDateFull} ~ ${c.endDateFull}`).join('\\n')}`);
                                 } else {
-                                  if (!canWriteReservations) {
-                                    toast.error('예약 생성 권한이 없습니다.');
+                                  if (!canStartReservationMutation) {
+                                    toast.error(isPageLoading
+                                      ? '예약 데이터를 최신 상태로 불러온 뒤 다시 시도해 주세요.'
+                                      : '예약 생성 권한이 없습니다.');
                                     return;
                                   }
                                   setDragSelection({ vehicleNumber: vehicle, startDate, endDate });
