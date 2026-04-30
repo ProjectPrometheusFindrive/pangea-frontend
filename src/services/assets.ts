@@ -10,6 +10,7 @@ export interface GetAssetsListParams extends AssetsRequestOptions {
   status?: string;
   q?: string;
   model?: string;
+  includeDocumentUrls?: boolean;
 }
 
 export interface CreateAssetPayload {
@@ -79,6 +80,7 @@ export function getAssetsList({
   status,
   q,
   model,
+  includeDocumentUrls,
   signal,
 }: GetAssetsListParams): Promise<unknown> {
   return apiClient.requestData<unknown>({
@@ -90,6 +92,7 @@ export function getAssetsList({
       status,
       q,
       model,
+      includeDocumentUrls,
     },
     signal,
   });
