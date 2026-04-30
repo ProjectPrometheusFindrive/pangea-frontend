@@ -166,7 +166,7 @@ interface OcrDocConfig {
 
 const DEFAULT_PAGE = 1;
 const DEFAULT_PAGE_SIZE = 20;
-const MODEL_CATALOG_PAGE_SIZE = 200;
+const MAX_ASSET_PAGE_SIZE = 200;
 const PAGE_SIZE_OPTIONS = [10, 20, 50];
 const TOTAL_COUNT_KEYS = ['total', 'totalCount', 'count', 'itemsCount', 'totalElements'];
 const DEFAULT_CREATE_FORM_STATE: CreateFormState = {
@@ -544,6 +544,10 @@ function toPositiveInteger(value: string | null, fallbackValue: number): number 
     return fallbackValue;
   }
   return parsed;
+}
+
+function toBoundedPositiveInteger(value: string | null, fallbackValue: number, maxValue: number): number {
+  return Math.min(toPositiveInteger(value, fallbackValue), maxValue);
 }
 
 function toStatusFilterCode(statusValue: string | null): StatusFilterCode {
@@ -1158,7 +1162,7 @@ export default function Assets() {
   const canWriteAssets = canPerformAction(ACTION_PERMISSIONS.assetsWrite);
 
   const page = toPositiveInteger(searchParams.get('page'), DEFAULT_PAGE);
-  const pageSize = toPositiveInteger(searchParams.get('size'), DEFAULT_PAGE_SIZE);
+  const pageSize = toBoundedPositiveInteger(searchParams.get('size'), DEFAULT_PAGE_SIZE, MAX_ASSET_PAGE_SIZE);
   const statusParam = searchParams.get('status');
   const statusFilterCode = toStatusFilterCode(statusParam);
   const statusQueryValue = toStatusQueryValue(statusParam);
@@ -1247,6 +1251,22 @@ export default function Assets() {
   }, [searchParams, updateAssetsSearchParams]);
 
   useEffect(() => {
+    const rawPageSize = searchParams.get('size');
+    if (rawPageSize === null) {
+      return;
+    }
+
+    const normalizedPageSize = String(toBoundedPositiveInteger(rawPageSize, DEFAULT_PAGE_SIZE, MAX_ASSET_PAGE_SIZE));
+    if (rawPageSize === normalizedPageSize) {
+      return;
+    }
+
+    updateAssetsSearchParams((params) => {
+      params.set('size', normalizedPageSize);
+    }, true);
+  }, [searchParams, updateAssetsSearchParams]);
+
+  useEffect(() => {
     const canonicalStatus = toCanonicalKnownStatus(statusParam);
     if (!statusParam || !canonicalStatus || statusParam === canonicalStatus) {
       return;
@@ -1262,7 +1282,7 @@ export default function Assets() {
     options: { status?: string; query?: string } = {},
   ) => {
     const catalogAssets: Asset[] = [];
-    const catalogPageSize = Math.max(pageSize, MODEL_CATALOG_PAGE_SIZE);
+    const catalogPageSize = Math.max(pageSize, MAX_ASSET_PAGE_SIZE);
     let catalogPage = 1;
     let catalogTotal = 1;
 
@@ -1292,10 +1312,26 @@ export default function Assets() {
 
   const requestAssets = useCallback(async (signal: AbortSignal): Promise<AssetsHydrationPayload> => {
     try {
+      const catalogRequestCache = new Map<string, Promise<Asset[]>>();
+      const getCatalog = (options: { status?: string; query?: string } = {}) => {
+        const cacheKey = JSON.stringify({
+          status: options.status ?? null,
+          query: options.query ?? null,
+        });
+        const cachedRequest = catalogRequestCache.get(cacheKey);
+        if (cachedRequest) {
+          return cachedRequest;
+        }
+
+        const nextRequest = loadAssetsCatalog(signal, options);
+        catalogRequestCache.set(cacheKey, nextRequest);
+        return nextRequest;
+      };
+
       const [fullCatalog, fullStatusCountCatalog, fullTenantCatalog] = await Promise.all([
-        loadAssetsCatalog(signal, { status: statusQueryValue, query: keyword || undefined }),
-        loadAssetsCatalog(signal, { query: keyword || undefined }),
-        loadAssetsCatalog(signal),
+        getCatalog({ status: statusQueryValue, query: keyword || undefined }),
+        getCatalog({ query: keyword || undefined }),
+        getCatalog(),
       ]);
 
       const statusCountCatalog = filterAssetsByModel(fullStatusCountCatalog, modelFilter);
