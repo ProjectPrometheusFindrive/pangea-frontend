@@ -1358,20 +1358,11 @@ export default function Assets() {
         };
       }
 
-      const payload = await getAssetsList({
-        page,
-        size: pageSize,
-        status: statusQueryValue,
-        q: keyword || undefined,
-        model: modelFilter || undefined,
-        signal,
-      });
-
-      const pageAssets = toAssetRows(payload);
+      const pageAssets = paginateAssets(filteredCatalog, page, pageSize);
 
       return {
         items: pageAssets,
-        total: getTotalCountFromObject(payload) ?? pageAssets.length,
+        total: filteredCatalog.length,
         page,
         pageSize,
         modelOptions: toModelOptions(fullCatalog),
@@ -1382,7 +1373,7 @@ export default function Assets() {
       setAssetsErrorStatus(error instanceof ApiError ? error.status ?? null : null);
       throw error;
     }
-  }, [loadAssetsCatalog, modelFilter, page, pageSize, statusQueryValue]);
+  }, [keyword, loadAssetsCatalog, modelFilter, page, pageSize, statusQueryValue]);
 
   const handleAssetsSuccess = useCallback((payload: AssetsHydrationPayload) => {
     setAssets(payload.items);
