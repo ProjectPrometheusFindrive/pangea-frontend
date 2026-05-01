@@ -30,6 +30,12 @@ export interface SupportTicketStatusHistoryEntry {
   note?: string;
 }
 
+export interface SupportTicketReplyHistoryEntry {
+  content: string;
+  repliedAt?: string;
+  repliedBy?: string;
+}
+
 export interface SupportTicket {
   id: string;
   companyId?: string;
@@ -41,6 +47,10 @@ export interface SupportTicket {
   requesterName?: string;
   requesterRole?: string;
   status: SupportTicketStatus;
+  replyContent?: string;
+  replyHistory: SupportTicketReplyHistoryEntry[];
+  repliedAt?: string;
+  repliedBy?: string;
   statusHistory: SupportTicketStatusHistoryEntry[];
   attachments: SupportTicketAttachment[];
   createdAt?: string;
@@ -79,6 +89,7 @@ export interface SupportTicketDetailOptions extends SupportRequestOptions {
 
 export interface UpdateSupportTicketStatusPayload {
   status: SupportTicketStatus;
+  replyContent?: string;
   note?: string;
 }
 
@@ -194,6 +205,27 @@ function toSupportStatusHistoryEntry(value: unknown): SupportTicketStatusHistory
   };
 }
 
+function toSupportTicketReplyHistoryEntry(value: unknown): SupportTicketReplyHistoryEntry | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const content = toStringValue(value.replyContent)
+    ?? toStringValue(value.content)
+    ?? toStringValue(value.answer)
+    ?? toStringValue(value.reply)
+    ?? toStringValue(value.responseContent);
+  if (!content) {
+    return null;
+  }
+
+  return {
+    content,
+    repliedAt: toStringValue(value.repliedAt) ?? toStringValue(value.createdAt) ?? toStringValue(value.updatedAt) ?? undefined,
+    repliedBy: toStringValue(value.repliedBy) ?? toStringValue(value.userId) ?? toStringValue(value.createdBy) ?? undefined,
+  };
+}
+
 function toSupportTicket(value: unknown): SupportTicket | null {
   if (!isRecord(value)) {
     return null;
@@ -213,6 +245,11 @@ function toSupportTicket(value: unknown): SupportTicket | null {
   const statusHistory = rawHistory
     .map((entry) => toSupportStatusHistoryEntry(entry))
     .filter((entry): entry is SupportTicketStatusHistoryEntry => entry !== null);
+
+  const rawReplyHistory = Array.isArray(value.replyHistory) ? value.replyHistory : [];
+  const replyHistory = rawReplyHistory
+    .map((entry) => toSupportTicketReplyHistoryEntry(entry))
+    .filter((entry): entry is SupportTicketReplyHistoryEntry => entry !== null);
 
   const rawAttachments = Array.isArray(value.attachments)
     ? value.attachments
@@ -235,6 +272,10 @@ function toSupportTicket(value: unknown): SupportTicket | null {
     requesterName: toStringValue(value.requesterName) ?? undefined,
     requesterRole: toStringValue(value.requesterRole) ?? undefined,
     status: normalizeSupportTicketStatus(value.status),
+    replyContent: toStringValue(value.replyContent) ?? undefined,
+    replyHistory,
+    repliedAt: toStringValue(value.repliedAt) ?? undefined,
+    repliedBy: toStringValue(value.repliedBy) ?? undefined,
     statusHistory,
     attachments,
     createdAt: toStringValue(value.createdAt) ?? undefined,
@@ -564,6 +605,7 @@ export async function updateSupportTicketStatus(
 ): Promise<SupportTicket> {
   const normalizedTicketId = ticketId.trim();
   const nextStatus = normalizeSupportTicketStatus(payload.status);
+  const replyContent = toStringValue(payload.replyContent) ?? undefined;
   const note = toStringValue(payload.note) ?? undefined;
 
   if (!normalizedTicketId) {
@@ -578,6 +620,7 @@ export async function updateSupportTicketStatus(
     },
     body: {
       status: nextStatus,
+      replyContent,
       note,
     },
     signal: options.signal,

@@ -381,6 +381,7 @@ function restoreTicketFromReceipt(receipt: StoredSupportReceipt): SupportTicket 
     title: receipt.title,
     content: '',
     status: receipt.status,
+    replyHistory: [],
     statusHistory: [],
     attachments: [],
     createdAt: receipt.createdAt,
@@ -663,7 +664,7 @@ function SupportAdminManagementView({
         selectedTicket.id,
         {
           status: statusDraft,
-          note: statusNote,
+          replyContent: statusNote,
         },
         {
           companyId: selectedTicket.companyId,
@@ -1029,6 +1030,12 @@ function SupportAdminManagementView({
                       <dt className="text-xs text-gray-500">내용</dt>
                       <dd className="whitespace-pre-wrap font-medium text-gray-900">{selectedTicket.content || '-'}</dd>
                     </div>
+                    <div className="sm:col-span-2">
+                      <dt className="text-xs text-gray-500">Reply</dt>
+                      <dd className="whitespace-pre-wrap font-medium text-gray-900" data-testid="support-detail-reply-content">
+                        {selectedTicket.replyContent || '-'}
+                      </dd>
+                    </div>
                   </dl>
                 </div>
 
@@ -1066,7 +1073,7 @@ function SupportAdminManagementView({
 
                         <div>
                           <label htmlFor="support-admin-status-note" className="mb-1 block text-sm font-medium text-gray-700">
-                            메모 (선택)
+                            답변 내용 (선택)
                           </label>
                           <textarea
                             id="support-admin-status-note"
@@ -1074,7 +1081,7 @@ function SupportAdminManagementView({
                             value={statusNote}
                             onChange={(event) => setStatusNote(event.target.value)}
                             rows={3}
-                            placeholder="처리 메모를 남길 수 있습니다."
+                            placeholder="고객에게 표시할 답변 내용을 입력할 수 있습니다."
                             className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
                           />
                         </div>
@@ -1103,6 +1110,26 @@ function SupportAdminManagementView({
                     </>
                   )}
                 </div>
+
+                {selectedTicket.replyHistory.length > 0 && (
+                  <div className="rounded-xl border border-gray-200 bg-white p-4">
+                    <h4 className="text-sm font-semibold text-gray-900">Reply history</h4>
+                    <ul className="mt-3 space-y-2">
+                      {selectedTicket.replyHistory.map((entry, index) => (
+                        <li
+                          key={`${selectedTicket.companyId ?? 'unknown'}-${selectedTicket.id}-reply-${index + 1}`}
+                          className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-2 text-sm text-gray-700"
+                        >
+                          <div className="flex flex-wrap items-center gap-2">
+                            {entry.repliedAt && <span className="text-xs text-gray-500">{formatDateTime(entry.repliedAt)}</span>}
+                            {entry.repliedBy && <span className="text-xs text-gray-500">{entry.repliedBy}</span>}
+                          </div>
+                          <p className="mt-1 whitespace-pre-wrap text-sm text-gray-700">{entry.content}</p>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
 
                 {isSuperAdmin && selectedTicket.statusHistory.length > 0 && (
                   <div className="rounded-xl border border-gray-200 bg-white p-4">
@@ -1793,6 +1820,89 @@ function SupportTicketSubmitView({
             </p>
           </div>
         )}
+
+        <div className="rounded-lg bg-white p-5 shadow-sm">
+          <div className="mb-4 flex items-start justify-between gap-4">
+            <div>
+              <h3 className="text-base font-semibold text-gray-900">Ticket status</h3>
+              <p className="mt-1 text-sm text-gray-500">Check the latest status and customer-visible reply.</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                void refreshTicketStatus();
+              }}
+              disabled={isLookupLoading}
+              className="inline-flex items-center gap-2 rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isLookupLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
+              Refresh
+            </button>
+          </div>
+
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <input
+              type="text"
+              value={lookupTicketId}
+              onChange={(event) => setLookupTicketId(event.target.value)}
+              placeholder="Ticket ID"
+              className="min-w-0 flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+            />
+            <button
+              type="button"
+              onClick={() => {
+                void refreshTicketStatus();
+              }}
+              disabled={isLookupLoading}
+              className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-400"
+            >
+              {isLookupLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+              Search
+            </button>
+          </div>
+
+          {lookupError && (
+            <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+              <p>{lookupError.message}</p>
+              {lookupErrorActionLabel && (
+                <button
+                  type="button"
+                  onClick={handleLookupErrorAction}
+                  className="mt-2 rounded-md border border-red-200 bg-white px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-100"
+                >
+                  {lookupErrorActionLabel}
+                </button>
+              )}
+            </div>
+          )}
+
+          {lookupTicket && (
+            <div className="mt-4 rounded-xl border border-gray-200 bg-gray-50 p-4 text-sm">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-semibold text-gray-900">{lookupTicket.id}</span>
+                <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${toSupportStatusBadgeClass(lookupTicket.status)}`}>
+                  {toSupportStatusLabel(lookupTicket.status)}
+                </span>
+              </div>
+              <dl className="mt-3 grid gap-3 text-gray-700 sm:grid-cols-2">
+                <div>
+                  <dt className="text-xs text-gray-500">Title</dt>
+                  <dd className="font-medium text-gray-900">{lookupTicket.title}</dd>
+                </div>
+                <div>
+                  <dt className="text-xs text-gray-500">Updated</dt>
+                  <dd className="font-medium text-gray-900">{formatDateTime(lookupTicket.updatedAt)}</dd>
+                </div>
+                <div className="sm:col-span-2">
+                  <dt className="text-xs text-gray-500">Reply</dt>
+                  <dd className="whitespace-pre-wrap font-medium text-gray-900" data-testid="support-customer-reply-content">
+                    {lookupTicket.replyContent || '-'}
+                  </dd>
+                </div>
+              </dl>
+            </div>
+          )}
+        </div>
     </div>
   );
 }
