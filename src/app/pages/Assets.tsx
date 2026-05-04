@@ -1238,14 +1238,14 @@ export default function Assets() {
   }, [searchParams, setSearchParams]);
 
   useEffect(() => {
-    const legacySearch = searchParams.get('search');
+    const compatSearch = searchParams.get('search');
     const canonicalQuery = searchParams.get('q');
-    if (!legacySearch || canonicalQuery) {
+    if (!compatSearch || canonicalQuery) {
       return;
     }
 
     updateAssetsSearchParams((params) => {
-      params.set('q', legacySearch);
+      params.set('q', compatSearch);
       params.delete('search');
     }, true);
   }, [searchParams, updateAssetsSearchParams]);

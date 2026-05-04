@@ -44,9 +44,11 @@ import { useAuthorization } from '../context/AuthorizationContext';
 import { ACTION_PERMISSIONS, ROUTE_PERMISSIONS } from '../authorization';
 import { formatDateKst, formatDateTimeKst } from '../utils/dateTimeFormat';
 import type { VehicleAsset } from '../types/assets';
-import type { Reservation } from '../types/reservations';
+import type { Reservation, ReservationAccidentClaim, ReservationAccidentReport, ReservationBillingSummary, ReservationChargeItem, ReservationDocumentChecklistItem, ReservationParties, ReservationParty, ReservationPaymentRecord } from '../types/reservations';
 import { ApiError } from '../../services/api';
+import { signAssetUpload, uploadFileToSignedUrl } from '../../services/assetOcr';
 import { getAssetsList } from '../../services/assets';
+import { createReservationChargeItem, getUploadDownloadUrl, patchChargeItem, patchPaymentRecord } from '../../services/billing';
 import { patchPaymentStatus } from '../../services/payments';
 import {
   getActionRequiredList,
@@ -59,6 +61,8 @@ import {
   getReservationDetail,
   getReservationsList,
   patchReservation,
+  patchReservationAccidentFollowup,
+  prepareReservationCreation,
   reportReservationAccident,
   returnReservation,
   transitionReservation,
@@ -78,7 +82,9 @@ type ReservationWarningPrompt = {
   dismissResult: boolean;
 };
 type ViewFilter = 'all' | 'reservation' | 'rental' | 'return' | 'unpaid' | 'overdue';
+const PAYMENT_ISSUE_LABELS = new Set(['미납/결제 문제', '정산/수납']);
 type PaymentScope = 'all' | 'delinquent';
+type RentalTypeFilter = 'all' | 'short_term' | 'long_term' | 'accident_replacement';
 type DueFilter = 'pickup' | 'return' | null;
 
 function createTodayBaseDate(): Date {
@@ -467,6 +473,17 @@ function withoutIssueLabel(issues: string[] | undefined, label: string): string[
   return issues.filter((issue) => issue !== label);
 }
 
+function withoutPaymentIssueLabels(issues: string[] | undefined): string[] {
+  if (!Array.isArray(issues) || issues.length === 0) {
+    return [];
+  }
+  return issues.filter((issue) => !PAYMENT_ISSUE_LABELS.has(issue));
+}
+
+function hasPaymentIssueLabel(issues: string[] | undefined): boolean {
+  return Array.isArray(issues) && issues.some((issue) => PAYMENT_ISSUE_LABELS.has(issue));
+}
+
 function areIssueListsEqual(left: string[] | undefined, right: string[] | undefined): boolean {
   const leftList = Array.isArray(left) ? left : [];
   const rightList = Array.isArray(right) ? right : [];
@@ -534,6 +551,41 @@ function canStartReservationNow(reservation: Reservation, now = Date.now()): boo
   return startTimestamp <= now;
 }
 
+function resolveReservationAttachmentContentType(file: File): string {
+  if (file.type.trim()) {
+    return file.type.trim();
+  }
+  const lowerName = file.name.toLowerCase();
+  if (lowerName.endsWith('.mp4')) {
+    return 'video/mp4';
+  }
+  if (lowerName.endsWith('.mov')) {
+    return 'video/quicktime';
+  }
+  if (lowerName.endsWith('.pdf')) {
+    return 'application/pdf';
+  }
+  if (lowerName.endsWith('.png')) {
+    return 'image/png';
+  }
+  if (lowerName.endsWith('.jpg') || lowerName.endsWith('.jpeg')) {
+    return 'image/jpeg';
+  }
+  return 'application/octet-stream';
+}
+
+async function uploadReservationCreationDocument(file: File, reservationId: string): Promise<string> {
+  const contentType = resolveReservationAttachmentContentType(file);
+  const signedUpload = await signAssetUpload({
+    fileName: file.name,
+    folder: `reservations/${reservationId}/documents`,
+    contentType,
+    fileSize: file.size,
+  });
+  await uploadFileToSignedUrl(signedUpload.uploadUrl, file, signedUpload.contentType || contentType);
+  return signedUpload.objectName;
+}
+
 function applySyncedPaymentStatusToReservation(
   reservation: Reservation,
   syncedPaymentStatus: PaymentStatusSnapshot,
@@ -545,7 +597,7 @@ function applySyncedPaymentStatusToReservation(
   const nextPaymentStatus = toReservationPaymentStatus(syncedPaymentStatus.status);
   const nextIssues = isUnpaidPaymentStatus(syncedPaymentStatus.status)
     ? withIssueLabel(reservation.issues, '미납/결제 문제')
-    : withoutIssueLabel(reservation.issues, '미납/결제 문제');
+    : withoutPaymentIssueLabels(reservation.issues);
 
   return {
     ...reservation,
@@ -596,7 +648,7 @@ function applyCompletedPaymentToReservation(reservation: Reservation): Reservati
       method: reservation.paymentInfo?.method ?? reservation.paymentMethod,
       updatedAt: reservation.paymentInfo?.updatedAt,
     },
-    issues: withoutIssueLabel(reservation.issues, '미납/결제 문제'),
+    issues: withoutPaymentIssueLabels(reservation.issues),
   };
 }
 
@@ -687,6 +739,112 @@ function toNumberValue(value: unknown): number | null {
     }
   }
   return null;
+}
+
+function toReservationParty(value: unknown): ReservationParty | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const party: ReservationParty = {
+    type: toStringValue(value.type) ?? undefined,
+    source: toStringValue(value.source) ?? undefined,
+    name: toStringValue(value.name) ?? undefined,
+    organizationName: toStringValue(value.organizationName) ?? undefined,
+    contactName: toStringValue(value.contactName) ?? undefined,
+    phone: toStringValue(value.phone) ?? undefined,
+    businessNumber: toStringValue(value.businessNumber) ?? undefined,
+    address: toStringValue(value.address) ?? undefined,
+    licenseNumber: toStringValue(value.licenseNumber) ?? undefined,
+    licenseDocumentObjectName: toStringValue(value.licenseDocumentObjectName) ?? undefined,
+    billingAccount: toStringValue(value.billingAccount) ?? undefined,
+    insurerName: toStringValue(value.insurerName) ?? undefined,
+    claimNo: toStringValue(value.claimNo) ?? undefined,
+    externalRequestNo: toStringValue(value.externalRequestNo) ?? undefined,
+  };
+  return Object.values(party).some(Boolean) ? party : undefined;
+}
+
+function toReservationParties(value: unknown): ReservationParties | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const parties: ReservationParties = {
+    contractor: toReservationParty(value.contractor),
+    driver: toReservationParty(value.driver),
+    requester: toReservationParty(value.requester),
+    payer: toReservationParty(value.payer),
+  };
+  return Object.values(parties).some(Boolean) ? parties : undefined;
+}
+
+function toReservationDocumentChecklist(value: unknown): ReservationDocumentChecklistItem[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const items = value
+    .filter(isRecord)
+    .map((item): ReservationDocumentChecklistItem | null => {
+      const key = toStringValue(item.key);
+      const label = toStringValue(item.label);
+      const status = toStringValue(item.status);
+      if (!key || !label || !status) {
+        return null;
+      }
+      return {
+        key,
+        label,
+        status,
+        required: item.required === true,
+        objectName: toStringValue(item.objectName) ?? undefined,
+        reasonType: toStringValue(item.reasonType) ?? undefined,
+      };
+    })
+    .filter((item): item is ReservationDocumentChecklistItem => item !== null);
+  return items.length > 0 ? items : undefined;
+}
+
+function reservationDocumentStatusLabel(status: string): string {
+  switch (status) {
+    case 'ready':
+      return '완료';
+    case 'missing':
+      return '누락';
+    case 'optional':
+      return '선택';
+    case 'pickup_blocked':
+      return '인수 전 필요';
+    case 'action_required':
+      return '조치 필요';
+    case 'not_applicable':
+      return '해당 없음';
+    default:
+      return status;
+  }
+}
+
+function reservationDocumentStatusClass(status: string): string {
+  switch (status) {
+    case 'ready':
+      return 'border-emerald-200 bg-emerald-50 text-emerald-700';
+    case 'pickup_blocked':
+    case 'action_required':
+      return 'border-amber-200 bg-amber-50 text-amber-800';
+    case 'missing':
+      return 'border-red-200 bg-red-50 text-red-700';
+    case 'optional':
+    case 'not_applicable':
+      return 'border-gray-200 bg-gray-50 text-gray-600';
+    default:
+      return 'border-slate-200 bg-slate-50 text-slate-700';
+  }
+}
+
+function reservationDisplayName(row: Record<string, unknown>, parties: ReservationParties | undefined): string {
+  return parties?.driver?.name
+    ?? parties?.contractor?.name
+    ?? parties?.requester?.organizationName
+    ?? parties?.requester?.name
+    ?? '고객 미확인';
 }
 
 function toBooleanValue(value: unknown): boolean | null {
@@ -1265,18 +1423,75 @@ export function matchesReservationFilters(
   options: {
     viewFilter: ViewFilter;
     paymentScope: PaymentScope;
+    rentalTypeFilter?: RentalTypeFilter;
     searchQuery: string;
   },
 ): boolean {
-  const { viewFilter, paymentScope, searchQuery } = options;
+  const { viewFilter, paymentScope, rentalTypeFilter = 'all', searchQuery } = options;
 
-  if (viewFilter === 'unpaid' && !isDelinquentPaymentScopeActive(viewFilter, paymentScope) && !(reservation.issues && reservation.issues.includes('미납/결제 문제'))) {
+  if (rentalTypeFilter !== 'all' && (reservation.rentalType ?? 'short_term') !== rentalTypeFilter) {
+    return false;
+  }
+  if (viewFilter === 'unpaid' && !isDelinquentPaymentScopeActive(viewFilter, paymentScope) && !hasPaymentIssueLabel(reservation.issues)) {
     return false;
   }
   if (!searchQuery) {
     return true;
   }
-  return reservation.customer.includes(searchQuery) || reservation.vehicleNumber.includes(searchQuery);
+  const normalizedSearch = searchQuery.trim().toLowerCase();
+  if (!normalizedSearch) {
+    return true;
+  }
+  const parties = reservation.parties ?? {};
+  const accidentClaim = reservation.accidentClaim;
+  const searchableValues = [
+    reservation.id,
+    reservation.vehicleNumber,
+    reservation.vin,
+    reservation.customer,
+    reservation.phone,
+    parties.driver?.name,
+    parties.driver?.phone,
+    parties.driver?.licenseNumber,
+    parties.contractor?.name,
+    parties.contractor?.organizationName,
+    parties.contractor?.contactName,
+    parties.contractor?.phone,
+    parties.requester?.name,
+    parties.requester?.organizationName,
+    parties.requester?.phone,
+    parties.payer?.name,
+    parties.payer?.organizationName,
+    parties.payer?.contactName,
+    parties.payer?.phone,
+    parties.payer?.insurerName,
+    parties.payer?.claimNo,
+    accidentClaim?.insurerName,
+    accidentClaim?.claimNo,
+    accidentClaim?.repairShopName,
+    accidentClaim?.requesterName,
+    accidentClaim?.requesterOrganizationName,
+    accidentClaim?.requesterPhone,
+  ];
+  return searchableValues.some((value) => String(value ?? '').trim().toLowerCase().includes(normalizedSearch));
+}
+
+function normalizeRentalTypeFilter(value: string | null): RentalTypeFilter {
+  const normalized = (value ?? '').trim().toLowerCase();
+  if (normalized === 'short_term' || normalized === 'long_term' || normalized === 'accident_replacement') {
+    return normalized;
+  }
+  return 'all';
+}
+
+function getRentalTypeBadgeLabel(value: string | null | undefined): string {
+  if (value === 'long_term') {
+    return '장기';
+  }
+  if (value === 'accident_replacement') {
+    return '대차';
+  }
+  return '단기';
 }
 
 function normalizeViewFilter(value: string | null): ViewFilter {
@@ -1397,6 +1612,314 @@ function toMemberDisplayName(member: SettingsMember): string | null {
   return toStringValue(member.email) ?? toStringValue(member.userId);
 }
 
+function toReservationChargeItem(row: unknown): ReservationChargeItem | null {
+  if (!isRecord(row)) {
+    return null;
+  }
+  const id = toStringValue(row.id);
+  if (!id) {
+    return null;
+  }
+  const amount = normalizeAdditionalPaymentAmount(toCurrencyNumberValue(row.amount)) ?? 0;
+  const paidAmount = normalizeAdditionalPaymentAmount(toCurrencyNumberValue(row.paidAmount)) ?? 0;
+  const remainingAmount = normalizeAdditionalPaymentAmount(toCurrencyNumberValue(row.remainingAmount)) ?? Math.max(amount - paidAmount, 0);
+  const changeHistory = toBillingChangeHistory(row.changeHistory);
+  const evidenceRefs = Array.isArray(row.evidenceRefs)
+    ? row.evidenceRefs
+      .filter(isRecord)
+      .map((ref) => ({
+        objectName: toStringValue(ref.objectName) ?? '',
+        fileName: toStringValue(ref.fileName) ?? undefined,
+        contentType: toStringValue(ref.contentType) ?? undefined,
+        attachedAt: toStringValue(ref.attachedAt) ?? undefined,
+        attachedByName: toStringValue(ref.attachedByName) ?? undefined,
+      }))
+      .filter((ref) => Boolean(ref.objectName))
+    : undefined;
+  return {
+    id,
+    reservationId: toStringValue(row.reservationId) ?? undefined,
+    rentalType: toStringValue(row.rentalType) ?? undefined,
+    sequenceNo: toNumberValue(row.sequenceNo) ?? undefined,
+    chargeType: toStringValue(row.chargeType) ?? 'rental_fee',
+    payerType: toStringValue(row.payerType) ?? undefined,
+    billingPeriodStart: toStringValue(row.billingPeriodStart) ?? undefined,
+    billingPeriodEnd: toStringValue(row.billingPeriodEnd) ?? undefined,
+    dueDate: toStringValue(row.dueDate) ?? undefined,
+    amount,
+    paidAmount,
+    remainingAmount,
+    status: toStringValue(row.status) ?? 'pending',
+    memo: toStringValue(row.memo) ?? undefined,
+    refundCompletedAt: toStringValue(row.refundCompletedAt) ?? undefined,
+    refundMethod: toStringValue(row.refundMethod) ?? undefined,
+    refundReason: toStringValue(row.refundReason) ?? undefined,
+    evidenceRefs,
+    changeHistory,
+  };
+}
+
+function toBillingChangeHistory(value: unknown) {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const rows = value
+    .filter(isRecord)
+    .map((entry) => ({
+      action: toStringValue(entry.action) ?? undefined,
+      changedAt: toStringValue(entry.changedAt) ?? undefined,
+      changedByName: toStringValue(entry.changedByName) ?? undefined,
+      changedBy: toStringValue(entry.changedBy) ?? undefined,
+      changes: isRecord(entry.changes) ? entry.changes : undefined,
+    }));
+  return rows.length > 0 ? rows : undefined;
+}
+
+function formatBillingChangeValue(value: unknown): string {
+  if (value === undefined || value === null || value === '') {
+    return '-';
+  }
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value.toLocaleString('ko-KR') : '-';
+  }
+  if (typeof value === 'boolean') {
+    return value ? '예' : '아니오';
+  }
+  if (Array.isArray(value)) {
+    return `${value.length}건`;
+  }
+  if (isRecord(value)) {
+    return JSON.stringify(value);
+  }
+  return String(value);
+}
+
+function formatBillingChangeSummary(changes: Record<string, { from?: unknown; to?: unknown }> | undefined): string {
+  if (!changes) {
+    return '';
+  }
+  return Object.entries(changes)
+    .slice(0, 4)
+    .map(([field, diff]) => `${field}: ${formatBillingChangeValue(diff?.from)} -> ${formatBillingChangeValue(diff?.to)}`)
+    .join(' / ');
+}
+
+function toReservationChargeItems(value: unknown): ReservationChargeItem[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .map((item) => toReservationChargeItem(item))
+    .filter((item): item is ReservationChargeItem => item !== null);
+}
+
+function toReservationPaymentRecord(row: unknown): ReservationPaymentRecord | null {
+  if (!isRecord(row)) {
+    return null;
+  }
+  const id = toStringValue(row.id);
+  if (!id) {
+    return null;
+  }
+  const evidenceRefs = Array.isArray(row.evidenceRefs)
+    ? row.evidenceRefs
+      .filter(isRecord)
+      .map((ref) => ({
+        objectName: toStringValue(ref.objectName) ?? '',
+        fileName: toStringValue(ref.fileName) ?? undefined,
+        contentType: toStringValue(ref.contentType) ?? undefined,
+        attachedAt: toStringValue(ref.attachedAt) ?? undefined,
+        attachedByName: toStringValue(ref.attachedByName) ?? undefined,
+      }))
+      .filter((ref) => Boolean(ref.objectName))
+    : undefined;
+  return {
+    id,
+    reservationId: toStringValue(row.reservationId) ?? undefined,
+    payerType: toStringValue(row.payerType) ?? undefined,
+    paidAt: toStringValue(row.paidAt) ?? undefined,
+    amount: normalizeAdditionalPaymentAmount(toCurrencyNumberValue(row.amount)) ?? 0,
+    method: toStringValue(row.method) ?? undefined,
+    confirmationStatus: toStringValue(row.confirmationStatus) ?? 'needs_confirmation',
+    depositorName: toStringValue(row.depositorName) ?? undefined,
+    approvalNo: toStringValue(row.approvalNo) ?? undefined,
+    allocations: Array.isArray(row.allocations)
+      ? row.allocations
+        .filter(isRecord)
+        .map((allocation) => ({
+          chargeItemId: toStringValue(allocation.chargeItemId) ?? undefined,
+          amount: normalizeAdditionalPaymentAmount(toCurrencyNumberValue(allocation.amount)) ?? undefined,
+        }))
+      : undefined,
+    memo: toStringValue(row.memo) ?? undefined,
+    evidenceRefs,
+    status: toStringValue(row.status) ?? undefined,
+    changeHistory: toBillingChangeHistory(row.changeHistory),
+  };
+}
+
+function toReservationPaymentRecords(value: unknown): ReservationPaymentRecord[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .map((item) => toReservationPaymentRecord(item))
+    .filter((item): item is ReservationPaymentRecord => item !== null);
+}
+
+function toReservationBillingSummary(value: unknown): ReservationBillingSummary | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const chargeItems = toReservationChargeItems(value.chargeItems);
+  const paymentRecords = toReservationPaymentRecords(value.paymentRecords);
+  const billingPlan = isRecord(value.billingPlan)
+    ? {
+      id: toStringValue(value.billingPlan.id) ?? undefined,
+      reservationId: toStringValue(value.billingPlan.reservationId) ?? undefined,
+      monthlyAmount: normalizeAdditionalPaymentAmount(toCurrencyNumberValue(value.billingPlan.monthlyAmount)) ?? undefined,
+      billingDay: toNumberValue(value.billingPlan.billingDay) ?? undefined,
+      billingTiming: toStringValue(value.billingPlan.billingTiming) ?? undefined,
+      cycleMonths: toNumberValue(value.billingPlan.cycleMonths) ?? undefined,
+      graceDays: toNumberValue(value.billingPlan.graceDays) ?? undefined,
+      deposit: normalizeAdditionalPaymentAmount(toCurrencyNumberValue(value.billingPlan.deposit)) ?? undefined,
+      advancePayment: normalizeAdditionalPaymentAmount(toCurrencyNumberValue(value.billingPlan.advancePayment)) ?? undefined,
+      installmentCount: toNumberValue(value.billingPlan.installmentCount) ?? undefined,
+    }
+    : null;
+  return {
+    reservationId: toStringValue(value.reservationId) ?? undefined,
+    paymentSummaryStatus: toStringValue(value.paymentSummaryStatus) ?? 'none',
+    paymentSummaryLabel: toStringValue(value.paymentSummaryLabel) ?? '결제정보 없음',
+    totalAmount: normalizeAdditionalPaymentAmount(toCurrencyNumberValue(value.totalAmount)) ?? 0,
+    paidAmount: normalizeAdditionalPaymentAmount(toCurrencyNumberValue(value.paidAmount)) ?? 0,
+    remainingAmount: normalizeAdditionalPaymentAmount(toCurrencyNumberValue(value.remainingAmount)) ?? 0,
+    overdueAmount: normalizeAdditionalPaymentAmount(toCurrencyNumberValue(value.overdueAmount)) ?? 0,
+    refundAmount: normalizeAdditionalPaymentAmount(toCurrencyNumberValue(value.refundAmount)) ?? 0,
+    chargeItemCount: Math.max(0, Math.trunc(toNumberValue(value.chargeItemCount) ?? chargeItems.length)),
+    paymentRecordCount: Math.max(0, Math.trunc(toNumberValue(value.paymentRecordCount) ?? paymentRecords.length)),
+    confirmationNeededCount: Math.max(0, Math.trunc(toNumberValue(value.confirmationNeededCount) ?? 0)),
+    currency: toStringValue(value.currency) ?? undefined,
+    billingPlan,
+    chargeItems,
+    paymentRecords,
+  };
+}
+
+function toReservationAccidentClaim(value: unknown): ReservationAccidentClaim | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  return {
+    id: toStringValue(value.id) ?? undefined,
+    reservationId: toStringValue(value.reservationId) ?? undefined,
+    requestSource: toStringValue(value.requestSource) ?? undefined,
+    requesterOrganizationName: toStringValue(value.requesterOrganizationName) ?? undefined,
+    requesterName: toStringValue(value.requesterName) ?? undefined,
+    requesterPhone: toStringValue(value.requesterPhone) ?? undefined,
+    insurerName: toStringValue(value.insurerName) ?? undefined,
+    claimNo: toStringValue(value.claimNo) ?? undefined,
+    adjusterName: toStringValue(value.adjusterName) ?? undefined,
+    adjusterPhone: toStringValue(value.adjusterPhone) ?? undefined,
+    repairShopName: toStringValue(value.repairShopName) ?? undefined,
+    repairShopLocation: toStringValue(value.repairShopLocation) ?? undefined,
+    damagedVehicleNumber: toStringValue(value.damagedVehicleNumber) ?? undefined,
+    damagedVehicleModel: toStringValue(value.damagedVehicleModel) ?? undefined,
+    deliveryLocation: toStringValue(value.deliveryLocation) ?? undefined,
+    billedAmount: normalizeAdditionalPaymentAmount(toCurrencyNumberValue(value.billedAmount)) ?? undefined,
+    recognizedAmount: normalizeAdditionalPaymentAmount(toCurrencyNumberValue(value.recognizedAmount)) ?? undefined,
+    differenceAmount: normalizeAdditionalPaymentAmount(toCurrencyNumberValue(value.differenceAmount)) ?? undefined,
+    differencePayerType: toStringValue(value.differencePayerType) ?? undefined,
+    documentStatus: toStringValue(value.documentStatus) ?? undefined,
+    claimStatus: toStringValue(value.claimStatus) ?? undefined,
+    documentObjectNames: Array.isArray(value.documentObjectNames)
+      ? value.documentObjectNames.map((item) => toStringValue(item)).filter((item): item is string => Boolean(item))
+      : undefined,
+    submittedAt: toStringValue(value.submittedAt) ?? undefined,
+    supplementMemo: toStringValue(value.supplementMemo) ?? undefined,
+  };
+}
+
+function toReservationAccidentReport(value: unknown): ReservationAccidentReport | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  return {
+    accidentDate: toStringValue(value.accidentDate) ?? undefined,
+    accidentDateTime: toStringValue(value.accidentDateTime) ?? undefined,
+    accidentDisplayTime: toStringValue(value.accidentDisplayTime) ?? undefined,
+    blackboxFileName: toStringValue(value.blackboxFileName) ?? undefined,
+    blackboxGcsObjectName: toStringValue(value.blackboxGcsObjectName) ?? undefined,
+    handlerName: toStringValue(value.handlerName) ?? undefined,
+    accidentLocation: toStringValue(value.accidentLocation) ?? undefined,
+    opponentInfo: toStringValue(value.opponentInfo) ?? undefined,
+    insuranceClaimNo: toStringValue(value.insuranceClaimNo) ?? undefined,
+    evidenceStatus: toStringValue(value.evidenceStatus) ?? undefined,
+    insuranceProcessStatus: toStringValue(value.insuranceProcessStatus) ?? undefined,
+    customerChargeAmount: normalizeAdditionalPaymentAmount(toCurrencyNumberValue(value.customerChargeAmount)) ?? undefined,
+    customerChargeStatus: toStringValue(value.customerChargeStatus) ?? undefined,
+    followupUpdatedAt: toStringValue(value.followupUpdatedAt) ?? undefined,
+    memo: toStringValue(value.memo) ?? undefined,
+  };
+}
+
+function getChargeTypeLabel(value: string | undefined): string {
+  switch ((value ?? '').trim()) {
+    case 'rental_fee':
+      return '대여료';
+    case 'additional_fee':
+      return '추가비용';
+    case 'monthly_fee':
+      return '월 렌트료';
+    case 'insurance_claim':
+      return '보험청구';
+    case 'deductible':
+      return '자기부담금';
+    case 'refund':
+      return '환불';
+    default:
+      return value || '청구항목';
+  }
+}
+
+function getPayerTypeLabel(value: string | undefined): string {
+  switch ((value ?? '').trim()) {
+    case 'customer':
+      return '고객';
+    case 'insurer':
+      return '보험사';
+    case 'repair_shop':
+      return '정비소';
+    case 'partner':
+      return '제휴처';
+    default:
+      return value || '-';
+  }
+}
+
+function getChargeStatusLabel(value: string | undefined): string {
+  switch ((value ?? '').trim()) {
+    case 'paid':
+      return '완납';
+    case 'partial':
+      return '부분납부';
+    case 'overdue':
+      return '연체';
+    case 'waived':
+      return '면제';
+    case 'refund_due':
+      return '환불필요';
+    case 'disputed':
+      return '보류';
+    case 'scheduled':
+      return '예정';
+    case 'pending':
+      return '대기';
+    default:
+      return value || '대기';
+  }
+}
+
 function toReservationPaymentInfo(
   row: Record<string, unknown>,
   options: {
@@ -1476,7 +1999,8 @@ function toReservationRow(row: unknown, index: number): Reservation | null {
     return null;
   }
 
-  const customer = toStringValue(row.customerName) ?? toStringValue(row.customer) ?? toStringValue(row.userName) ?? '고객 미확인';
+  const parties = toReservationParties(row.parties);
+  const customer = reservationDisplayName(row, parties);
   const reservationId = toStringValue(row.id)
     ?? toStringValue(row.reservationId)
     ?? toStringValue(row.rentalId)
@@ -1500,16 +2024,17 @@ function toReservationRow(row: unknown, index: number): Reservation | null {
     issues.unshift('사고 접수');
   }
 
-  const paymentMethodSource = toStringValue(row.paymentMethod)
-    ?? toStringValue(row.paymentType)
-    ?? parseReservationMemoValue(row.memo, 'paymentMethod');
-  const paymentStatusSource = toStringValue(row.paymentStatus)
-    ?? parseReservationMemoValue(row.memo, 'paymentStatus');
+  const paymentMethodSource = null;
+  const billingSummary = toReservationBillingSummary(row.billingSummary);
+  const chargeItemsPreview = toReservationChargeItems(row.chargeItemsPreview);
+  const accidentClaim = toReservationAccidentClaim(row.accidentClaim);
+  const accidentReport = toReservationAccidentReport(row.accidentReport);
+  const documentChecklist = toReservationDocumentChecklist(row.documentChecklist);
+  const paymentStatusSource = toStringValue(row.paymentSummaryStatus);
   const hasPaymentInfo = (
     paymentMethodSource !== null
     || paymentStatusSource !== null
-    || toCurrencyNumberValue(row.amount) !== null
-    || toCurrencyNumberValue(row.deposit) !== null
+    || Boolean(billingSummary)
   );
   const additionalPaymentAmount = normalizeAdditionalPaymentAmount(
     toCurrencyNumberValue(row.additionalPaymentAmount)
@@ -1531,6 +2056,8 @@ function toReservationRow(row: unknown, index: number): Reservation | null {
   return {
     id: reservationId,
     companyId: toStringValue(row.companyId) ?? undefined,
+    rentalType: toStringValue(row.rentalType) ?? undefined,
+    creationMode: toStringValue(row.creationMode) ?? undefined,
     vehicleNumber: fallbackVehicleNumber,
     vin: toStringValue(row.vin) ?? toStringValue(row.chassisNumber) ?? undefined,
     customer,
@@ -1544,18 +2071,26 @@ function toReservationRow(row: unknown, index: number): Reservation | null {
     type: normalizeReservationType(contractStatus ?? toStringValue(row.type) ?? toStringValue(row.status)),
     issues,
     phone: (
-      toStringValue(row.phone)
-      ?? toStringValue(row.customerPhone)
-      ?? parseReservationMemoValue(row.memo, 'phone')
+      parties?.driver?.phone
       ?? '-'
     ),
     paymentMethod: normalizePaymentMethod(paymentMethodSource),
     amount: toCurrencyValue(row.amount),
     deposit: toCurrencyValue(row.deposit),
+    licenseDocumentObjectName: parties?.driver?.licenseDocumentObjectName ?? undefined,
+    contractDocumentObjectName: toStringValue(row.contractDocumentObjectName) ?? undefined,
+    contractDocumentType: toStringValue(row.contractDocumentType) ?? undefined,
+    documentChecklist,
     paymentStatus: normalizeReservationPaymentStatus(paymentStatusSource),
     hasPaymentInfo: hasPaymentInfo || Boolean(paymentInfo),
     additionalPaymentAmount: additionalPaymentAmount ?? undefined,
     paymentInfo,
+    paymentSummaryStatus: toStringValue(row.paymentSummaryStatus) ?? billingSummary?.paymentSummaryStatus ?? undefined,
+    billingSummary,
+    chargeItemsPreview: chargeItemsPreview.length > 0 ? chargeItemsPreview : undefined,
+    accidentClaim,
+    accidentReport,
+    parties,
     startDateFull: startDateLabel,
     endDateFull: endDateLabel,
   };
@@ -1588,6 +2123,18 @@ function mergeReservationDetail(detailRow: Reservation, fallbackReservation: Res
   }
   if (!detailRow.paymentInfo && fallbackReservation.paymentInfo) {
     mergedReservation.paymentInfo = fallbackReservation.paymentInfo;
+  }
+  if (!detailRow.billingSummary && fallbackReservation.billingSummary) {
+    mergedReservation.billingSummary = fallbackReservation.billingSummary;
+  }
+  if (!detailRow.chargeItemsPreview && fallbackReservation.chargeItemsPreview) {
+    mergedReservation.chargeItemsPreview = fallbackReservation.chargeItemsPreview;
+  }
+  if (!detailRow.accidentClaim && fallbackReservation.accidentClaim) {
+    mergedReservation.accidentClaim = fallbackReservation.accidentClaim;
+  }
+  if (!detailRow.accidentReport && fallbackReservation.accidentReport) {
+    mergedReservation.accidentReport = fallbackReservation.accidentReport;
   }
   return mergedReservation;
 }
@@ -1760,6 +2307,7 @@ export default function Reservations() {
     searchParams.get('status') ?? searchParams.get('filter') ?? searchParams.get('contractStatus'),
   );
   const paymentScope = normalizePaymentScope(searchParams.get('paymentScope'));
+  const rentalTypeFilter = normalizeRentalTypeFilter(searchParams.get('rentalType'));
 
   const [currentWeekStart, setCurrentWeekStart] = useState(0);
   const [showModal, setShowModal] = useState(false);
@@ -1795,6 +2343,7 @@ export default function Reservations() {
   const [paymentMethodDraft, setPaymentMethodDraft] = useState<Reservation['paymentMethod']>('카드');
   const [isPaymentMethodSaving, setIsPaymentMethodSaving] = useState(false);
   const [isPaymentAmountSaving, setIsPaymentAmountSaving] = useState(false);
+  const [activePaymentRecordMutationId, setActivePaymentRecordMutationId] = useState<string | null>(null);
   const [activeReservationAction, setActiveReservationAction] = useState<'start' | 'cancel' | null>(null);
   const [reservationActionError, setReservationActionError] = useState<string | null>(null);
   const [reservationWarningPrompt, setReservationWarningPrompt] = useState<ReservationWarningPrompt | null>(null);
@@ -1874,6 +2423,9 @@ export default function Reservations() {
     }
     if (!nextParams.get('due')) {
       nextParams.delete('due');
+    }
+    if (!nextParams.get('rentalType') || nextParams.get('rentalType') === 'all') {
+      nextParams.delete('rentalType');
     }
 
     nextParams.delete('filter');
@@ -1969,13 +2521,13 @@ export default function Reservations() {
 
 
   useEffect(() => {
-    const legacyFilter = searchParams.get('filter');
-    const legacyContractStatus = searchParams.get('contractStatus');
-    const legacySearch = searchParams.get('search');
+    const compatFilter = searchParams.get('filter');
+    const compatContractStatus = searchParams.get('contractStatus');
+    const compatSearch = searchParams.get('search');
     const canonicalStatus = searchParams.get('status');
     const canonicalQ = searchParams.get('q');
     const canonicalSize = searchParams.get('size');
-    const legacyPageSize = searchParams.get('pageSize');
+    const compatPageSize = searchParams.get('pageSize');
     const currentDue = searchParams.get('due');
     const normalizedDue = normalizeDueFilter(currentDue);
     const currentPaymentScope = searchParams.get('paymentScope');
@@ -1984,16 +2536,16 @@ export default function Reservations() {
     const normalizedToDate = normalizeDateParam(searchParams.get('to'));
     const currentFromDate = searchParams.get('from');
     const currentToDate = searchParams.get('to');
-    const normalizedStatus = normalizeViewFilter(canonicalStatus ?? legacyFilter ?? legacyContractStatus);
+    const normalizedStatus = normalizeViewFilter(canonicalStatus ?? compatFilter ?? compatContractStatus);
     const shouldNormalizeStatus = normalizedStatus !== 'all';
 
     const currentPage = searchParams.get('page');
     const needsNormalization = (
-      Boolean(legacyFilter)
-      || Boolean(legacyContractStatus)
-      || Boolean(legacySearch)
+      Boolean(compatFilter)
+      || Boolean(compatContractStatus)
+      || Boolean(compatSearch)
       || Boolean(canonicalSize)
-      || Boolean(legacyPageSize)
+      || Boolean(compatPageSize)
       || Boolean(currentFromDate && normalizedFromDate && currentFromDate !== normalizedFromDate)
       || Boolean(currentToDate && normalizedToDate && currentToDate !== normalizedToDate)
       || Boolean(currentDue && currentDue !== normalizedDue)
@@ -2016,11 +2568,11 @@ export default function Reservations() {
         params.delete('status');
       }
 
-      if (legacySearch && !canonicalQ) {
-        params.set('q', legacySearch);
+      if (compatSearch && !canonicalQ) {
+        params.set('q', compatSearch);
       }
-      if (legacyPageSize && !canonicalSize) {
-        params.set('size', legacyPageSize);
+      if (compatPageSize && !canonicalSize) {
+        params.set('size', compatPageSize);
       }
 
       if (normalizedFromDate) {
@@ -2370,6 +2922,7 @@ export default function Reservations() {
       params.delete('q');
       params.delete('due');
       params.delete('paymentScope');
+      params.delete('rentalType');
       params.set('page', String(DEFAULT_PAGE));
       params.set('size', String(DEFAULT_PAGE_SIZE));
     });
@@ -2471,6 +3024,17 @@ export default function Reservations() {
     });
   }, [updateReservationSearchParams]);
 
+  const handleRentalTypeFilterChange = useCallback((nextFilter: RentalTypeFilter) => {
+    updateReservationSearchParams((params) => {
+      if (nextFilter === 'all') {
+        params.delete('rentalType');
+      } else {
+        params.set('rentalType', nextFilter);
+      }
+      params.set('page', String(DEFAULT_PAGE));
+    });
+  }, [updateReservationSearchParams]);
+
   const handleFromDateChange = useCallback((nextFromDate: string) => {
     updateReservationSearchParams((params) => {
       if (nextFromDate) {
@@ -2555,9 +3119,10 @@ export default function Reservations() {
     reservations.filter((reservation) => matchesReservationFilters(reservation, {
       viewFilter,
       paymentScope,
+      rentalTypeFilter,
       searchQuery,
     }))
-  ), [paymentScope, reservations, searchQuery, viewFilter]);
+  ), [paymentScope, rentalTypeFilter, reservations, searchQuery, viewFilter]);
   const reservationsByVehicle = useMemo(() => {
     const groupedReservations = new Map<string, Reservation[]>();
 
@@ -2630,7 +3195,11 @@ export default function Reservations() {
     }
 
     // 미납 건
-    if (reservation.issues && reservation.issues.includes('미납/결제 문제')) {
+    const syncedPaymentStatus = syncedPaymentByReservationId[reservation.id];
+    if (
+      (syncedPaymentStatus && isUnpaidPaymentStatus(syncedPaymentStatus.status))
+      || hasPaymentIssueLabel(reservation.issues)
+    ) {
       return 'bg-red-500';
     }
 
@@ -2704,6 +3273,20 @@ export default function Reservations() {
   const selectedReservationPaymentUpdatedAt = selectedReservation
     ? resolveReservationPaymentUpdatedAt(selectedReservation, selectedReservationPaymentSync)
     : null;
+  const selectedReservationBillingSummary = selectedReservation?.billingSummary ?? null;
+  const selectedReservationChargeItems = selectedReservation
+    ? selectedReservation.chargeItemsPreview ?? selectedReservationBillingSummary?.chargeItems ?? []
+    : [];
+  const selectedReservationPaymentRecords = selectedReservationBillingSummary?.paymentRecords ?? [];
+  const selectedReservationBillingLabel = selectedReservationBillingSummary?.paymentSummaryLabel
+    ?? selectedReservationPaymentStatus;
+  const selectedReservationBillingTotalAmount = selectedReservationBillingSummary?.totalAmount
+    ?? selectedReservationTotalAmount;
+  const selectedReservationBillingPaidAmount = selectedReservationBillingSummary?.paidAmount
+    ?? (selectedReservationPaymentStatus === '완료' ? selectedReservationTotalAmount : 0);
+  const selectedReservationBillingRemainingAmount = selectedReservationBillingSummary?.remainingAmount
+    ?? (selectedReservationPaymentStatus === '완료' ? 0 : selectedReservationTotalAmount);
+  const selectedReservationBillingConfirmationCount = selectedReservationBillingSummary?.confirmationNeededCount ?? 0;
   const canEditReservationPaymentFields = selectedReservation
     ? canWritePayments && canManageReservationPaymentIssue(selectedReservation, selectedReservationPaymentSync)
     : false;
@@ -2792,9 +3375,9 @@ export default function Reservations() {
       };
     }
 
-    if (new Date(endAt).getTime() < new Date(startAt).getTime()) {
+    if (new Date(endAt).getTime() <= new Date(startAt).getTime()) {
       return {
-        formError: '반납 일시는 픽업 일시보다 빠를 수 없습니다.',
+        formError: '반납 일시는 픽업 일시보다 이후여야 합니다.',
         fieldErrors: {
           endDate: '반납 일시를 다시 확인해 주세요.',
         },
@@ -2826,15 +3409,103 @@ export default function Reservations() {
       }
     }
 
-    const reservationId = `R-${Date.now()}-${Math.floor(Math.random() * 1000).toString().padStart(3, '0')}`;
+    const idempotencyKey = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `reservation-create-${Date.now()}-${Math.floor(Math.random() * 1000000)}`;
+    let preparedReservationId: string | null = null;
+    try {
+      const prepared = await prepareReservationCreation({ idempotencyKey });
+      if (isRecord(prepared.existingReservation)) {
+        const existingId = toStringValue(prepared.existingReservation.id)
+          ?? toStringValue(prepared.existingReservation.reservationId)
+          ?? toStringValue(prepared.existingReservation.rentalId);
+        if (existingId) {
+          const existingReservation = toReservationDetail(prepared.existingReservation, {
+            id: existingId,
+            vehicleNumber: formValues.selectedVehicle,
+            customer: formValues.customerName.trim() || '고객 미확인',
+            startDate: 0,
+            endDate: 0,
+            type: 'reservation',
+            issues: [],
+            phone: formValues.customerPhone.trim(),
+            paymentMethod: '계좌이체',
+            amount: '0',
+            deposit: '0',
+            paymentStatus: '대기',
+          });
+          setShowModal(false);
+          openReservationDetail(existingReservation);
+          await hydrateReservationsData();
+          return null;
+        }
+      }
+      preparedReservationId = toStringValue(prepared.reservationId);
+    } catch {
+      return {
+        formError: '예약번호 발급에 실패했습니다.',
+      };
+    }
+    const reservationId = preparedReservationId;
+    if (!reservationId) {
+      return {
+        formError: '예약번호 발급에 실패했습니다.',
+      };
+    }
     const startDateOffset = toDateOffset(startAt) ?? 0;
     const endDateOffset = toDateOffset(endAt) ?? startDateOffset;
-    const fallbackAmount = toCurrencyNumberFromInput(formValues.amount);
+    const fallbackAmount = formValues.rentalType === 'long_term'
+      ? toCurrencyNumberFromInput(formValues.monthlyAmount)
+      : toCurrencyNumberFromInput(formValues.amount);
     const fallbackDeposit = toCurrencyNumberFromInput(formValues.deposit);
+    const fallbackAdvancePayment = toCurrencyNumberFromInput(formValues.advancePayment);
+    const fallbackBilledAmount = toCurrencyNumberFromInput(formValues.billedAmount);
+    const usesInitialBilling = formValues.rentalType === 'short_term';
+    const longTermPayerType = formValues.contractorType === 'corporate' ? formValues.payerType : 'customer';
+    const longTermContractorName = formValues.contractorName.trim();
+    const longTermContractorPhone = formValues.contractorContactPhone.trim();
+    const longTermPayerName = formValues.payerName.trim()
+      || formValues.contractorContactName.trim()
+      || longTermContractorName;
+    const longTermPayerPhone = formValues.payerPhone.trim() || longTermContractorPhone;
+    const fallbackDisplayAmount = formValues.rentalType === 'long_term'
+      ? toCurrencyDisplayFromInput(formValues.monthlyAmount)
+      : toCurrencyDisplayFromInput(formValues.amount);
+    const fallbackPaymentStatus = usesInitialBilling ? formValues.paymentStatus : '대기';
+    const initialBillingStatus = (() => {
+      if (!usesInitialBilling) {
+        return undefined;
+      }
+      const canonical = toCanonicalPaymentStatus(formValues.paymentStatus);
+      if (canonical === 'paid') {
+        return 'paid';
+      }
+      if (canonical === 'partial') {
+        return 'partial';
+      }
+      if (canonical === 'unpaid') {
+        return 'overdue';
+      }
+      return 'pending';
+    })();
+    const initialBillingPaymentAmount = (() => {
+      if (!usesInitialBilling || fallbackAmount <= 0) {
+        return 0;
+      }
+      if (initialBillingStatus === 'paid') {
+        return fallbackAmount;
+      }
+      if (initialBillingStatus === 'partial') {
+        return Math.min(fallbackDeposit, fallbackAmount);
+      }
+      return 0;
+    })();
     const fallbackReservation: Reservation = {
       id: reservationId,
+      rentalType: formValues.rentalType,
+      creationMode: 'ui_confirmed',
       vehicleNumber: formValues.selectedVehicle,
-      customer: formValues.customerName.trim(),
+      customer: formValues.customerName.trim() || '고객 미확인',
       startDate: Math.min(startDateOffset, endDateOffset),
       endDate: Math.max(startDateOffset, endDateOffset),
       scheduledStartAt: startAt,
@@ -2842,40 +3513,185 @@ export default function Reservations() {
       type: 'reservation',
       issues: [],
       phone: formValues.customerPhone.trim(),
-      paymentMethod: formValues.paymentMethod,
-      amount: toCurrencyDisplayFromInput(formValues.amount),
+      paymentMethod: usesInitialBilling ? formValues.paymentMethod : '계좌이체',
+      amount: fallbackDisplayAmount,
       deposit: toCurrencyDisplayFromInput(formValues.deposit),
-      paymentStatus: formValues.paymentStatus,
-      hasPaymentInfo: true,
-      additionalPaymentAmount: Math.max(fallbackAmount - fallbackDeposit, 0),
+      paymentStatus: fallbackPaymentStatus,
+      hasPaymentInfo: usesInitialBilling,
+      additionalPaymentAmount: usesInitialBilling ? Math.max(fallbackAmount - fallbackDeposit, 0) : 0,
       startDateFull: formValues.startDate,
       endDateFull: formValues.endDate,
     };
 
     try {
+      let licenseDocumentObjectName: string | undefined;
+      let contractDocumentObjectName: string | undefined;
+
+      if (formValues.licenseFile) {
+        try {
+          licenseDocumentObjectName = await uploadReservationCreationDocument(formValues.licenseFile, reservationId);
+        } catch {
+          return {
+            formError: '운전면허증 파일 업로드에 실패했습니다.',
+            fieldErrors: {
+              licenseFile: '파일 업로드 후 다시 시도해 주세요.',
+            },
+          };
+        }
+      }
+
+      if (formValues.contractFile) {
+        try {
+          contractDocumentObjectName = await uploadReservationCreationDocument(formValues.contractFile, reservationId);
+        } catch {
+          return {
+            formError: '계약서 파일 업로드에 실패했습니다.',
+            fieldErrors: {
+              contractFile: '파일 업로드 후 다시 시도해 주세요.',
+            },
+          };
+        }
+      }
+
+      const driverParty = {
+        name: formValues.customerName.trim() || undefined,
+        phone: formValues.customerPhone.trim() || undefined,
+        licenseNumber: formValues.customerLicense.trim() || undefined,
+        address: formValues.customerAddress.trim() || undefined,
+        licenseDocumentObjectName,
+      };
+      const longTermContractorParty = formValues.rentalType === 'long_term'
+        ? {
+          type: formValues.contractorType,
+          name: longTermContractorName || undefined,
+          businessNumber: formValues.contractorType === 'corporate'
+            ? formValues.contractorBusinessNumber.trim() || undefined
+            : undefined,
+          contactName: formValues.contractorContactName.trim() || undefined,
+          phone: longTermContractorPhone || undefined,
+          address: formValues.customerAddress.trim() || undefined,
+        }
+        : undefined;
+      const parties = {
+        contractor: formValues.rentalType === 'accident_replacement'
+          ? undefined
+          : formValues.rentalType === 'long_term'
+            ? longTermContractorParty
+            : {
+            name: formValues.customerName.trim() || undefined,
+            phone: formValues.customerPhone.trim() || undefined,
+            address: formValues.customerAddress.trim() || undefined,
+          },
+        driver: Object.values(driverParty).some(Boolean) ? driverParty : undefined,
+        requester: formValues.rentalType === 'accident_replacement'
+          ? {
+            source: formValues.requestSource,
+            organizationName: formValues.requesterOrganizationName.trim() || undefined,
+            name: formValues.requesterName.trim() || undefined,
+            phone: formValues.requesterPhone.trim() || undefined,
+            externalRequestNo: formValues.claimNo.trim() || undefined,
+          }
+          : undefined,
+        payer: formValues.rentalType === 'accident_replacement'
+          ? {
+            type: 'insurer',
+            insurerName: formValues.insurerName.trim() || undefined,
+            claimNo: formValues.claimNo.trim() || undefined,
+          }
+          : formValues.rentalType === 'long_term'
+            ? {
+              type: longTermPayerType,
+              name: longTermPayerName || undefined,
+              phone: longTermPayerPhone || undefined,
+              billingAccount: formValues.billingAccount.trim() || undefined,
+            }
+            : {
+              type: 'customer',
+              name: formValues.customerName.trim() || undefined,
+              phone: formValues.customerPhone.trim() || undefined,
+            },
+      };
+
       const payload = await createReservation({
         reservationId,
+        idempotencyKey,
         vin,
+        rentalType: formValues.rentalType,
+        creationMode: 'ui_confirmed',
         startAt,
         endAt,
         contractStatus: '예약중',
         vehicleNumber: formValues.selectedVehicle,
         plate: formValues.selectedVehicle,
-        customerName: formValues.customerName.trim(),
-        phone: formValues.customerPhone.trim(),
-        licenseNumber: formValues.customerLicense.trim() || undefined,
-        address: formValues.customerAddress.trim() || undefined,
-        paymentMethod: formValues.paymentMethod,
-        paymentStatus: formValues.paymentStatus,
-        amount: fallbackAmount,
-        deposit: fallbackDeposit,
+        parties,
+        payerType: formValues.rentalType === 'long_term' ? longTermPayerType : undefined,
+        contractDocumentObjectName,
+        contractDocumentType: contractDocumentObjectName
+          ? (formValues.rentalType === 'long_term'
+            ? 'long_term_contract'
+            : formValues.rentalType === 'accident_replacement'
+              ? 'accident_replacement_request'
+              : 'rental_contract')
+          : undefined,
+        initialBilling: usesInitialBilling
+          ? {
+            amount: fallbackAmount,
+            deposit: fallbackDeposit,
+            chargeType: 'rental_fee',
+            payerType: 'customer',
+            status: initialBillingStatus,
+            dueDate: startAt.slice(0, 10),
+            memo: '단기렌트 대여료',
+            paymentRecord: initialBillingPaymentAmount > 0
+              ? {
+                amount: initialBillingPaymentAmount,
+                method: formValues.paymentMethod,
+                payerType: 'customer',
+                confirmationStatus: 'confirmed',
+                depositorName: formValues.paymentDepositorName.trim() || undefined,
+                approvalNo: formValues.paymentApprovalNo.trim() || undefined,
+              }
+              : undefined,
+          }
+          : undefined,
+        billingPlan: formValues.rentalType === 'long_term'
+          ? {
+            monthlyAmount: fallbackAmount,
+            billingDay: Number(formValues.billingDay || 1),
+            billingTiming: formValues.billingTiming,
+            cycleMonths: 1,
+            graceDays: Number(formValues.graceDays || 0),
+            deposit: fallbackDeposit,
+            advancePayment: fallbackAdvancePayment,
+            payerType: longTermPayerType,
+          }
+          : undefined,
+        accidentClaim: formValues.rentalType === 'accident_replacement'
+          ? {
+            requestSource: formValues.requestSource,
+            requesterOrganizationName: formValues.requesterOrganizationName.trim() || undefined,
+            requesterName: formValues.requesterName.trim() || undefined,
+            requesterPhone: formValues.requesterPhone.trim() || undefined,
+            insurerName: formValues.insurerName.trim() || undefined,
+            claimNo: formValues.claimNo.trim() || undefined,
+            adjusterName: formValues.adjusterName.trim() || undefined,
+            adjusterPhone: formValues.adjusterPhone.trim() || undefined,
+            repairShopName: formValues.repairShopName.trim() || undefined,
+            repairShopLocation: formValues.repairShopLocation.trim() || undefined,
+            damagedVehicleNumber: formValues.damagedVehicleNumber.trim() || undefined,
+            damagedVehicleModel: formValues.damagedVehicleModel.trim() || undefined,
+            deliveryLocation: formValues.deliveryLocation.trim() || formValues.pickupLocation.trim() || undefined,
+            billedAmount: fallbackBilledAmount > 0 ? fallbackBilledAmount : undefined,
+            documentStatus: 'intake_required',
+            claimStatus: 'intake',
+          }
+          : undefined,
         pickupLocation: formValues.pickupLocation.trim() || undefined,
         returnLocation: formValues.returnLocation.trim() || undefined,
         memo: [
           `pickup=${formValues.pickupLocation.trim()}`,
           `return=${formValues.returnLocation.trim()}`,
-          `paymentMethod=${formValues.paymentMethod}`,
-          `paymentStatus=${formValues.paymentStatus}`,
+          `rentalType=${formValues.rentalType}`,
         ].join(', '),
       });
 
@@ -3131,6 +3947,108 @@ export default function Reservations() {
     selectedReservation,
     selectedReservationPaymentSync,
   ]);
+
+  const handleOpenPaymentEvidence = useCallback(async (objectName: string) => {
+    try {
+      const payload = await getUploadDownloadUrl(objectName);
+      window.open(payload.downloadUrl, '_blank', 'noopener,noreferrer');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '수납 증빙 링크를 열지 못했습니다.');
+    }
+  }, []);
+
+  const handleVoidPaymentRecord = useCallback(async (record: ReservationPaymentRecord) => {
+    if (!selectedReservation || !canWritePayments || activePaymentRecordMutationId) {
+      return;
+    }
+    setActivePaymentRecordMutationId(record.id);
+    setReservationActionError(null);
+    try {
+      await patchPaymentRecord(record.id, {
+        status: 'voided',
+        memo: '예약 상세에서 수납 기록 무효 처리',
+      });
+      toast.success('수납 기록을 무효 처리했습니다.');
+      void hydrateReservationDetail(selectedReservation.id, selectedReservation);
+      refreshReservationsAfterMutation('수납 기록은 변경되었지만 목록을 다시 불러오지 못했습니다. 새로고침 후 확인해 주세요.');
+    } catch (error) {
+      setReservationActionError(error instanceof Error ? error.message : '수납 기록 무효 처리 중 오류가 발생했습니다.');
+    } finally {
+      setActivePaymentRecordMutationId(null);
+    }
+  }, [activePaymentRecordMutationId, canWritePayments, hydrateReservationDetail, refreshReservationsAfterMutation, selectedReservation]);
+
+  const handleCreateRefundChargeItem = useCallback(async (record: ReservationPaymentRecord) => {
+    if (!selectedReservation || !canWritePayments || activePaymentRecordMutationId) {
+      return;
+    }
+    setActivePaymentRecordMutationId(record.id);
+    setReservationActionError(null);
+    try {
+      await createReservationChargeItem(selectedReservation.id, {
+        amount: record.amount,
+        chargeType: 'refund',
+        payerType: record.payerType ?? 'customer',
+        status: 'refund_due',
+        memo: `수납 기록 ${record.id} 환불 예정`,
+      });
+      toast.success('환불 예정 항목을 등록했습니다.');
+      void hydrateReservationDetail(selectedReservation.id, selectedReservation);
+      refreshReservationsAfterMutation('환불 예정 항목은 등록되었지만 목록을 다시 불러오지 못했습니다. 새로고침 후 확인해 주세요.');
+    } catch (error) {
+      setReservationActionError(error instanceof Error ? error.message : '환불 예정 항목 등록 중 오류가 발생했습니다.');
+    } finally {
+      setActivePaymentRecordMutationId(null);
+    }
+  }, [activePaymentRecordMutationId, canWritePayments, hydrateReservationDetail, refreshReservationsAfterMutation, selectedReservation]);
+
+  const handleCompleteRefundChargeItem = useCallback(async (item: ReservationChargeItem) => {
+    if (!selectedReservation || !canWritePayments || activePaymentRecordMutationId) {
+      return;
+    }
+    setActivePaymentRecordMutationId(item.id);
+    setReservationActionError(null);
+    try {
+      await patchChargeItem(item.id, {
+        status: 'paid',
+        paidAmount: item.amount,
+        refundCompletedAt: new Date().toISOString(),
+        refundMethod: 'manual',
+        refundReason: item.memo ?? '예약 상세에서 환불 완료 처리',
+        memo: item.memo ?? '예약 상세에서 환불 완료 처리',
+      });
+      toast.success('환불 예정 항목을 완료 처리했습니다.');
+      void hydrateReservationDetail(selectedReservation.id, selectedReservation);
+      refreshReservationsAfterMutation('환불 완료 처리는 저장되었지만 목록을 다시 불러오지 못했습니다. 새로고침 후 확인해 주세요.');
+    } catch (error) {
+      setReservationActionError(error instanceof Error ? error.message : '환불 완료 처리 중 오류가 발생했습니다.');
+    } finally {
+      setActivePaymentRecordMutationId(null);
+    }
+  }, [activePaymentRecordMutationId, canWritePayments, hydrateReservationDetail, refreshReservationsAfterMutation, selectedReservation]);
+
+  const handleWaiveRefundChargeItem = useCallback(async (item: ReservationChargeItem) => {
+    if (!selectedReservation || !canWritePayments || activePaymentRecordMutationId) {
+      return;
+    }
+    setActivePaymentRecordMutationId(item.id);
+    setReservationActionError(null);
+    try {
+      await patchChargeItem(item.id, {
+        status: 'waived',
+        paidAmount: 0,
+        refundReason: item.memo ?? '예약 상세에서 환불 면제 처리',
+        memo: item.memo ?? '예약 상세에서 환불 면제 처리',
+      });
+      toast.success('환불 예정 항목을 면제 처리했습니다.');
+      void hydrateReservationDetail(selectedReservation.id, selectedReservation);
+      refreshReservationsAfterMutation('환불 면제 처리는 저장되었지만 목록을 다시 불러오지 못했습니다. 새로고침 후 확인해 주세요.');
+    } catch (error) {
+      setReservationActionError(error instanceof Error ? error.message : '환불 면제 처리 중 오류가 발생했습니다.');
+    } finally {
+      setActivePaymentRecordMutationId(null);
+    }
+  }, [activePaymentRecordMutationId, canWritePayments, hydrateReservationDetail, refreshReservationsAfterMutation, selectedReservation]);
 
   const handleStartReservation = useCallback(async () => {
     if (!canTransitionReservations) {
@@ -3663,9 +4581,16 @@ export default function Reservations() {
     const accidentDateTime = now.toISOString();
     const accidentDisplayTime = toAccidentDisplayTime(now);
     const blackboxFileName = sanitizeFileName(report.blackboxFile.name);
-    const blackboxGcsObjectName = `rentals/${selectedReservation.id}/blackbox/${blackboxFileName}`;
 
     try {
+      const contentType = resolveReservationAttachmentContentType(report.blackboxFile);
+      const signedUpload = await signAssetUpload({
+        fileName: blackboxFileName,
+        folder: `rentals/${selectedReservation.id}/blackbox`,
+        contentType,
+        fileSize: report.blackboxFile.size,
+      });
+      await uploadFileToSignedUrl(signedUpload.uploadUrl, report.blackboxFile, signedUpload.contentType || contentType);
       const payload = await reportReservationAccident(selectedReservation.id, {
         accidentReport: {
           accidentDate,
@@ -3675,7 +4600,7 @@ export default function Reservations() {
           accidentDateTime,
           accidentDisplayTime,
           blackboxFileName,
-          blackboxGcsObjectName,
+          blackboxGcsObjectName: signedUpload.objectName,
           handlerName: report.assignee,
           recordedAt: accidentDateTime,
         },
@@ -3711,7 +4636,7 @@ export default function Reservations() {
       void hydrateReservationDetail(nextReservation.id, nextReservation);
       toast.success('사고가 등록되었습니다.');
       if (canViewActionRequired) {
-        navigate('/action-required?filter=사고 접수');
+        navigate('/action-required?filter=대여 중 사고');
       }
       return null;
     } catch (error) {
@@ -3940,6 +4865,22 @@ export default function Reservations() {
                 ))}
               </select>
             </div>
+
+            <div className="flex items-center gap-2">
+              <label htmlFor="reservations-rental-type-filter" className="text-xs font-semibold text-gray-600">계약유형:</label>
+              <select
+                id="reservations-rental-type-filter"
+                name="rentalTypeFilter"
+                value={rentalTypeFilter}
+                onChange={(event) => handleRentalTypeFilterChange(event.target.value as RentalTypeFilter)}
+                className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+              >
+                <option value="all">전체</option>
+                <option value="short_term">단기렌트</option>
+                <option value="long_term">장기렌트</option>
+                <option value="accident_replacement">사고대차</option>
+              </select>
+            </div>
             
             <div className="flex items-center gap-2">
               <label htmlFor="reservations-vehicle-search-query" className="text-xs font-semibold text-gray-600">차량번호:</label>
@@ -4131,9 +5072,14 @@ export default function Reservations() {
                                     left: `${left}%`,
                                     width: `${width}%`,
                                   }}
-                                >
-                                  <span className="font-medium truncate">{res.customer}</span>
-                                  {segmentIssueLabel && (
+	                                >
+	                                  <div className="flex min-w-0 items-center gap-1">
+	                                    <span className="rounded bg-white/25 px-1 text-[10px] font-semibold text-white">
+	                                      {getRentalTypeBadgeLabel(res.rentalType)}
+	                                    </span>
+	                                    <span className="min-w-0 truncate font-medium">{res.customer}</span>
+	                                  </div>
+	                                  {segmentIssueLabel && (
                                     <span className="bg-white/30 px-1 rounded text-[10px]">
                                       {segmentIssueLabel}
                                     </span>
@@ -4407,6 +5353,279 @@ export default function Reservations() {
                         </p>
                       </div>
                     </div>
+                    <div className="rounded-lg border border-gray-200 bg-white p-4">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                          <p className="text-xs font-semibold uppercase text-gray-500">청구/수납 요약</p>
+                          <p className="mt-1 text-lg font-bold text-gray-900">{selectedReservationBillingLabel}</p>
+                        </div>
+                        {selectedReservationBillingConfirmationCount > 0 && (
+                          <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700">
+                            확인 필요 {selectedReservationBillingConfirmationCount}건
+                          </span>
+                        )}
+                      </div>
+                      <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-4">
+                        <div>
+                          <span className="text-xs text-gray-500">총 청구</span>
+                          <p className="mt-1 text-sm font-bold text-gray-900">{toCurrencyValue(selectedReservationBillingTotalAmount)}</p>
+                        </div>
+                        <div>
+                          <span className="text-xs text-gray-500">수납 완료</span>
+                          <p className="mt-1 text-sm font-bold text-emerald-700">{toCurrencyValue(selectedReservationBillingPaidAmount)}</p>
+                        </div>
+                        <div>
+                          <span className="text-xs text-gray-500">잔액</span>
+                          <p className="mt-1 text-sm font-bold text-red-600">{toCurrencyValue(selectedReservationBillingRemainingAmount)}</p>
+                        </div>
+                        <div>
+                          <span className="text-xs text-gray-500">청구/수납 건수</span>
+                          <p className="mt-1 text-sm font-bold text-gray-900">
+                            {(selectedReservationBillingSummary?.chargeItemCount ?? selectedReservationChargeItems.length)} / {(selectedReservationBillingSummary?.paymentRecordCount ?? 0)}
+                          </p>
+                        </div>
+                      </div>
+                      {selectedReservationChargeItems.length > 0 && (
+                        <div className="mt-4 overflow-x-auto rounded-md border border-gray-200">
+                          <div className="min-w-[760px]">
+                            <div className="grid grid-cols-[1.1fr_0.8fr_1fr_1fr_0.8fr_1.2fr] bg-gray-50 px-3 py-2 text-xs font-semibold text-gray-500">
+                              <span>항목</span>
+                              <span>청구처</span>
+                              <span className="text-right">청구액</span>
+                              <span className="text-right">잔액</span>
+                              <span className="text-right">상태</span>
+                              <span>정정/이력</span>
+                            </div>
+                            {selectedReservationChargeItems.map((item) => (
+                              <div
+                                key={item.id}
+                                className="grid grid-cols-[1.1fr_0.8fr_1fr_1fr_0.8fr_1.2fr] border-t border-gray-100 px-3 py-2 text-sm text-gray-800"
+                              >
+                                <span className="min-w-0">
+                                  <span className="block truncate font-medium">{getChargeTypeLabel(item.chargeType)}</span>
+                                  {(item.billingPeriodStart || item.billingPeriodEnd || item.dueDate) && (
+                                    <span className="block truncate text-xs text-gray-500">
+                                      {[item.billingPeriodStart && item.billingPeriodEnd ? `${item.billingPeriodStart}~${item.billingPeriodEnd}` : null, item.dueDate ? `납부 ${item.dueDate}` : null].filter(Boolean).join(' / ')}
+                                    </span>
+                                  )}
+                                </span>
+                                <span className="min-w-0 truncate text-gray-600">{getPayerTypeLabel(item.payerType)}</span>
+                                <span className="text-right font-semibold">{toCurrencyValue(item.amount)}</span>
+                                <span className="text-right font-semibold text-red-600">{toCurrencyValue(item.remainingAmount)}</span>
+                                <span className="text-right text-gray-600">{getChargeStatusLabel(item.status)}</span>
+                                <span className="min-w-0 space-y-1">
+                                  {canWritePayments && item.chargeType === 'refund' && item.status === 'refund_due' && (
+                                    <span className="flex flex-wrap gap-1">
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          void handleCompleteRefundChargeItem(item);
+                                        }}
+                                        disabled={activePaymentRecordMutationId === item.id}
+                                        className="rounded-md bg-emerald-600 px-2 py-1 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                                      >
+                                        환불완료
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          void handleWaiveRefundChargeItem(item);
+                                        }}
+                                        disabled={activePaymentRecordMutationId === item.id}
+                                        className="rounded-md bg-slate-600 px-2 py-1 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                                      >
+                                        환불면제
+                                      </button>
+                                    </span>
+                                  )}
+                                  {item.changeHistory && item.changeHistory.length > 0 && (
+                                    <details className="text-xs text-gray-500">
+                                      <summary className="cursor-pointer font-semibold text-gray-600">이력 {item.changeHistory.length}건</summary>
+                                      <div className="mt-1 space-y-1">
+                                        {item.changeHistory.slice(-3).reverse().map((entry, index) => (
+                                          <p key={`${item.id}-history-${index}`} className="rounded bg-gray-50 px-2 py-1">
+                                            {entry.changedAt ? formatDateTimeKst(entry.changedAt, '-') : '-'} · {entry.changedByName || entry.changedBy || '사용자'} · {entry.action || 'updated'}
+                                            {formatBillingChangeSummary(entry.changes) && (
+                                              <span className="block text-gray-400">{formatBillingChangeSummary(entry.changes)}</span>
+                                            )}
+                                          </p>
+                                        ))}
+                                      </div>
+                                    </details>
+                                  )}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {selectedReservationPaymentRecords.length > 0 && (
+                        <div className="mt-4 overflow-x-auto rounded-md border border-gray-200">
+                          <div className="min-w-[820px]">
+                            <div className="grid grid-cols-[0.9fr_0.9fr_0.8fr_1fr_1.2fr_1.1fr] bg-gray-50 px-3 py-2 text-xs font-semibold text-gray-500">
+                              <span>수납일</span>
+                              <span className="text-right">수납액</span>
+                              <span>수단</span>
+                              <span>확인 상태</span>
+                              <span>선택 증빙</span>
+                              <span>정정/이력</span>
+                            </div>
+                            {selectedReservationPaymentRecords.map((record) => (
+                              <div
+                                key={record.id}
+                                className="grid grid-cols-[0.9fr_0.9fr_0.8fr_1fr_1.2fr_1.1fr] border-t border-gray-100 px-3 py-2 text-sm text-gray-800"
+                              >
+                                <span className="min-w-0 truncate">{record.paidAt ? formatDateKst(record.paidAt, '-') : '-'}</span>
+                                <span className="text-right font-semibold">{toCurrencyValue(record.amount)}</span>
+                                <span className="min-w-0 truncate text-gray-600">{record.method || '-'}</span>
+                                <span className="min-w-0 truncate text-gray-600">{record.status === 'voided' ? 'voided' : record.confirmationStatus}</span>
+                                <span className="min-w-0 space-y-1">
+                                  {record.evidenceRefs && record.evidenceRefs.length > 0 ? (
+                                    record.evidenceRefs.map((evidence) => (
+                                      <button
+                                        key={evidence.objectName}
+                                        type="button"
+                                        onClick={() => {
+                                          void handleOpenPaymentEvidence(evidence.objectName);
+                                        }}
+                                        className="block max-w-full truncate text-left text-xs font-semibold text-blue-700 hover:text-blue-900"
+                                      >
+                                        {evidence.fileName || evidence.objectName.split('/').pop() || evidence.objectName}
+                                      </button>
+                                    ))
+                                  ) : (
+                                    <span className="text-xs text-gray-400">선택 첨부 없음</span>
+                                  )}
+                                </span>
+                                <span className="min-w-0 space-y-1">
+                                  {canWritePayments && record.status !== 'voided' && (
+                                    <span className="flex flex-wrap gap-1">
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          void handleVoidPaymentRecord(record);
+                                        }}
+                                        disabled={activePaymentRecordMutationId === record.id}
+                                        className="rounded-md bg-slate-700 px-2 py-1 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                                      >
+                                        무효
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          void handleCreateRefundChargeItem(record);
+                                        }}
+                                        disabled={activePaymentRecordMutationId === record.id}
+                                        className="rounded-md bg-orange-600 px-2 py-1 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                                      >
+                                        환불예정
+                                      </button>
+                                    </span>
+                                  )}
+                                  {record.changeHistory && record.changeHistory.length > 0 && (
+                                    <details className="text-xs text-gray-500">
+                                      <summary className="cursor-pointer font-semibold text-gray-600">이력 {record.changeHistory.length}건</summary>
+                                      <div className="mt-1 space-y-1">
+                                        {record.changeHistory.slice(-3).reverse().map((entry, index) => (
+                                          <p key={`${record.id}-history-${index}`} className="rounded bg-gray-50 px-2 py-1">
+                                            {entry.changedAt ? formatDateTimeKst(entry.changedAt, '-') : '-'} · {entry.changedByName || entry.changedBy || '사용자'} · {entry.action || 'updated'}
+                                            {formatBillingChangeSummary(entry.changes) && (
+                                              <span className="block text-gray-400">{formatBillingChangeSummary(entry.changes)}</span>
+                                            )}
+                                          </p>
+                                        ))}
+                                      </div>
+                                    </details>
+                                  )}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                    {selectedReservation.documentChecklist && selectedReservation.documentChecklist.length > 0 && (
+                      <div className="rounded-lg border border-slate-200 bg-white p-4">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div>
+                            <p className="text-xs font-semibold uppercase text-slate-500">문서 상태</p>
+                            <p className="mt-1 text-sm font-semibold text-gray-900">
+                              렌트 유형별 필수/선택 문서
+                            </p>
+                          </div>
+                          <span className="text-xs font-medium text-slate-500">
+                            {selectedReservation.documentChecklist.filter((item) => item.required).length}개 필수
+                          </span>
+                        </div>
+                        <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2">
+                          {selectedReservation.documentChecklist.map((item) => (
+                            <div key={item.key} className="flex min-h-14 items-center justify-between gap-3 rounded-md border border-gray-200 bg-gray-50 px-3 py-2">
+                              <div className="min-w-0">
+                                <p className="truncate text-sm font-semibold text-gray-900">{item.label}</p>
+                                <p className="mt-0.5 truncate text-xs text-gray-500">
+                                  {item.required ? '필수 문서' : '선택 문서'}
+                                  {item.objectName ? ` · ${item.objectName.split('/').pop() ?? item.objectName}` : ''}
+                                </p>
+                              </div>
+                              <span className={`shrink-0 rounded-full border px-2 py-1 text-xs font-semibold ${reservationDocumentStatusClass(item.status)}`}>
+                                {reservationDocumentStatusLabel(item.status)}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {selectedReservation.rentalType === 'accident_replacement' && selectedReservation.accidentClaim && (
+                      <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-4">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div>
+                            <p className="text-xs font-semibold uppercase text-indigo-700">보험/청구</p>
+                            <p className="mt-1 text-lg font-bold text-gray-900">
+                              {selectedReservation.accidentClaim.claimNo || '접수번호 미입력'}
+                            </p>
+                          </div>
+                          <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-indigo-700">
+                            {selectedReservation.accidentClaim.claimStatus || 'intake'}
+                          </span>
+                        </div>
+                        <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-4">
+                          <div>
+                            <span className="text-xs text-indigo-700">보험사</span>
+                            <p className="mt-1 text-sm font-semibold text-gray-900">{selectedReservation.accidentClaim.insurerName || '-'}</p>
+                          </div>
+                          <div>
+                            <span className="text-xs text-indigo-700">정비공장</span>
+                            <p className="mt-1 text-sm font-semibold text-gray-900">{selectedReservation.accidentClaim.repairShopName || '-'}</p>
+                          </div>
+                          <div>
+                            <span className="text-xs text-indigo-700">청구액</span>
+                            <p className="mt-1 text-sm font-bold text-gray-900">{toCurrencyValue(selectedReservation.accidentClaim.billedAmount ?? 0)}</p>
+                          </div>
+                          <div>
+                            <span className="text-xs text-indigo-700">차액</span>
+                            <p className="mt-1 text-sm font-bold text-red-600">{toCurrencyValue(selectedReservation.accidentClaim.differenceAmount ?? 0)}</p>
+                          </div>
+                        </div>
+                        <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-4">
+                          <div>
+                            <span className="text-xs text-indigo-700">요청자</span>
+                            <p className="mt-1 text-sm font-semibold text-gray-900">{selectedReservation.accidentClaim.requesterName || '-'}</p>
+                          </div>
+                          <div>
+                            <span className="text-xs text-indigo-700">피해차량</span>
+                            <p className="mt-1 text-sm font-semibold text-gray-900">{selectedReservation.accidentClaim.damagedVehicleNumber || '-'}</p>
+                          </div>
+                          <div>
+                            <span className="text-xs text-indigo-700">문서 상태</span>
+                            <p className="mt-1 text-sm font-semibold text-gray-900">{selectedReservation.accidentClaim.documentStatus || '-'}</p>
+                          </div>
+                          <div>
+                            <span className="text-xs text-indigo-700">인정액</span>
+                            <p className="mt-1 text-sm font-bold text-emerald-700">{toCurrencyValue(selectedReservation.accidentClaim.recognizedAmount ?? 0)}</p>
+                          </div>
+                        </div>
+                      </div>
+                    )}
                     <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 space-y-2">
                       <div className="flex items-center justify-between gap-3">
                         <span className="text-sm text-gray-700">결제 유형</span>
@@ -4681,7 +5900,7 @@ export default function Reservations() {
                         navigate('/forbidden');
                         return;
                       }
-                      navigate(`/action-required?search=${encodeURIComponent(selectedReservation.vehicleNumber)}`);
+                      navigate(`/action-required?reservationId=${encodeURIComponent(selectedReservation.id)}`);
                     }}
                     disabled={!canViewActionRequired}
                     className="flex-1 min-w-[200px] px-4 py-3 bg-gray-100 text-gray-700 hover:bg-gray-200 rounded-lg font-medium disabled:cursor-not-allowed disabled:opacity-60"

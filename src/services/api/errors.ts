@@ -135,8 +135,7 @@ export function isApiErrorEnvelope(payload: unknown): payload is ApiErrorEnvelop
     return false;
   }
   const isCanonicalError = payload.status === 'error';
-  const isLegacyError = payload.success === false;
-  if (!isCanonicalError && !isLegacyError) {
+  if (!isCanonicalError) {
     return false;
   }
   if (!isRecord(payload.error)) {
@@ -158,8 +157,7 @@ export function isApiSuccessEnvelope<TData = unknown>(
     return false;
   }
   const isCanonicalSuccess = payload.status === 'success';
-  const isLegacySuccess = payload.success === true;
-  return (isCanonicalSuccess || isLegacySuccess) && 'data' in payload;
+  return isCanonicalSuccess && 'data' in payload;
 }
 
 export function buildApiErrorFromResponse(
@@ -169,8 +167,7 @@ export function buildApiErrorFromResponse(
 ): ApiError {
   if (isApiErrorEnvelope(payload)) {
     const canonicalType = toNonEmptyString(payload.error.type);
-    const legacyCode = toNonEmptyString(payload.error.code);
-    const errorCode = canonicalType || legacyCode || mapStatusToErrorCode(status);
+    const errorCode = canonicalType || mapStatusToErrorCode(status);
     const fields = toApiErrorFields(payload.error.details) ?? toApiErrorFields(payload.error.fields);
 
     return new ApiError(errorCode, payload.error.message, {

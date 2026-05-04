@@ -9,6 +9,7 @@ interface DragSelection {
 }
 
 export type NewContractField =
+  | 'rentalType'
   | 'selectedVehicle'
   | 'startDate'
   | 'endDate'
@@ -18,13 +19,36 @@ export type NewContractField =
   | 'customerPhone'
   | 'customerLicense'
   | 'customerAddress'
+  | 'contractorName'
+  | 'contractorBusinessNumber'
+  | 'contractorContactName'
+  | 'contractorContactPhone'
+  | 'payerType'
+  | 'payerName'
+  | 'payerPhone'
+  | 'billingAccount'
   | 'pickupLocation'
   | 'returnLocation'
   | 'amount'
   | 'deposit'
-  | 'licenseFile';
+  | 'monthlyAmount'
+  | 'billingDay'
+  | 'requesterName'
+  | 'requesterPhone'
+  | 'requesterOrganizationName'
+  | 'insurerName'
+  | 'claimNo'
+  | 'adjusterPhone'
+  | 'repairShopName'
+  | 'repairShopLocation'
+  | 'damagedVehicleNumber'
+  | 'paymentDepositorName'
+  | 'paymentApprovalNo'
+  | 'licenseFile'
+  | 'contractFile';
 
 export interface NewContractFormValues {
+  rentalType: 'short_term' | 'long_term' | 'accident_replacement';
   selectedVehicle: string;
   startDate: string;
   endDate: string;
@@ -34,13 +58,43 @@ export interface NewContractFormValues {
   customerPhone: string;
   customerLicense: string;
   customerAddress: string;
+  contractorType: 'individual' | 'corporate';
+  contractorName: string;
+  contractorBusinessNumber: string;
+  contractorContactName: string;
+  contractorContactPhone: string;
+  payerType: 'customer' | 'corporate';
+  payerName: string;
+  payerPhone: string;
+  billingAccount: string;
   pickupLocation: string;
   returnLocation: string;
   amount: string;
   deposit: string;
+  monthlyAmount: string;
+  billingDay: string;
+  billingTiming: 'prepaid' | 'postpaid';
+  graceDays: string;
+  advancePayment: string;
+  requestSource: 'customer' | 'repair_shop' | 'insurer' | 'partner_platform' | 'corporate_partner' | 'dealer' | 'other';
+  requesterOrganizationName: string;
+  requesterName: string;
+  requesterPhone: string;
+  insurerName: string;
+  claimNo: string;
+  adjusterName: string;
+  adjusterPhone: string;
+  repairShopName: string;
+  repairShopLocation: string;
+  damagedVehicleNumber: string;
+  damagedVehicleModel: string;
+  deliveryLocation: string;
+  billedAmount: string;
   paymentMethod: '카드' | '현금' | '계좌이체';
   paymentStatus: '대기' | '완료' | '미납' | '부분납부';
-  licenseFile: File;
+  paymentDepositorName: string;
+  paymentApprovalNo: string;
+  licenseFile: File | null;
   contractFile: File | null;
 }
 
@@ -66,8 +120,11 @@ function createTodayBaseDate(): Date {
 
 const CALENDAR_BASE_DATE = createTodayBaseDate();
 const PHONE_REGEX = /^010-\d{4}-\d{4}$/;
+const CONTACT_PHONE_REGEX = /^(010-\d{4}-\d{4}|0\d{1,2}-\d{3,4}-\d{4}|1\d{3}-\d{4})$/;
 const LICENSE_REGEX = /^\d{2}-\d{6}-\d{2}$/;
+const BUSINESS_NUMBER_REGEX = /^\d{3}-\d{2}-\d{5}$/;
 const FIELD_LABELS: Record<NewContractField, string> = {
+  rentalType: '계약 유형',
   selectedVehicle: '차량',
   startDate: '대여 시작일',
   endDate: '대여 종료일',
@@ -77,11 +134,33 @@ const FIELD_LABELS: Record<NewContractField, string> = {
   customerPhone: '연락처',
   customerLicense: '면허번호',
   customerAddress: '주소',
+  contractorName: '계약 주체',
+  contractorBusinessNumber: '사업자번호',
+  contractorContactName: '계약 담당자',
+  contractorContactPhone: '계약 담당자 연락처',
+  payerType: '청구 대상',
+  payerName: '청구 담당자',
+  payerPhone: '청구 담당자 연락처',
+  billingAccount: '청구 계정',
   pickupLocation: '대여 장소',
   returnLocation: '반납 장소',
   amount: '대여 요금',
   deposit: '선금',
+  monthlyAmount: '월 렌트료',
+  billingDay: '월 납부일',
+  requesterOrganizationName: '요청 기관명',
+  requesterName: '요청자명',
+  requesterPhone: '요청자 연락처',
+  insurerName: '보험사',
+  claimNo: '사고접수번호',
+  adjusterPhone: '담당자 연락처',
+  repairShopName: '정비공장',
+  repairShopLocation: '정비공장 주소',
+  damagedVehicleNumber: '피해차량 번호',
+  paymentDepositorName: '입금자명',
+  paymentApprovalNo: '승인번호',
   licenseFile: '운전면허증 파일',
+  contractFile: '계약서 파일',
 };
 
 function hasTextValue(value: string): boolean {
@@ -95,6 +174,14 @@ function formatCurrencyInput(value: string): string {
   }
 
   return Number(digitsOnly).toLocaleString('ko-KR');
+}
+
+function currencyInputToNumber(value: string): number {
+  const digitsOnly = value.replace(/\D/g, '');
+  if (!digitsOnly) {
+    return 0;
+  }
+  return Number(digitsOnly);
 }
 
 function formatDateAsYmd(date: Date): string {
@@ -146,6 +233,7 @@ export function NewContractModal({
 }: NewContractModalProps) {
   const [step, setStep] = useState<1 | 2 | 3>(1);
 
+  const [rentalType, setRentalType] = useState<'short_term' | 'long_term' | 'accident_replacement'>('short_term');
   const [selectedVehicle, setSelectedVehicle] = useState('');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
@@ -155,12 +243,42 @@ export function NewContractModal({
   const [customerPhone, setCustomerPhone] = useState('');
   const [customerLicense, setCustomerLicense] = useState('');
   const [customerAddress, setCustomerAddress] = useState('');
+  const [contractorType, setContractorType] = useState<'individual' | 'corporate'>('corporate');
+  const [contractorName, setContractorName] = useState('');
+  const [contractorBusinessNumber, setContractorBusinessNumber] = useState('');
+  const [contractorContactName, setContractorContactName] = useState('');
+  const [contractorContactPhone, setContractorContactPhone] = useState('');
+  const [payerType, setPayerType] = useState<'customer' | 'corporate'>('corporate');
+  const [payerName, setPayerName] = useState('');
+  const [payerPhone, setPayerPhone] = useState('');
+  const [billingAccount, setBillingAccount] = useState('');
   const [pickupLocation, setPickupLocation] = useState('');
   const [returnLocation, setReturnLocation] = useState('');
   const [amount, setAmount] = useState('');
   const [deposit, setDeposit] = useState('');
+  const [monthlyAmount, setMonthlyAmount] = useState('');
+  const [billingDay, setBillingDay] = useState('5');
+  const [billingTiming, setBillingTiming] = useState<'prepaid' | 'postpaid'>('prepaid');
+  const [graceDays, setGraceDays] = useState('0');
+  const [advancePayment, setAdvancePayment] = useState('');
+  const [requestSource, setRequestSource] = useState<NewContractFormValues['requestSource']>('repair_shop');
+  const [requesterOrganizationName, setRequesterOrganizationName] = useState('');
+  const [requesterName, setRequesterName] = useState('');
+  const [requesterPhone, setRequesterPhone] = useState('');
+  const [insurerName, setInsurerName] = useState('');
+  const [claimNo, setClaimNo] = useState('');
+  const [adjusterName, setAdjusterName] = useState('');
+  const [adjusterPhone, setAdjusterPhone] = useState('');
+  const [repairShopName, setRepairShopName] = useState('');
+  const [repairShopLocation, setRepairShopLocation] = useState('');
+  const [damagedVehicleNumber, setDamagedVehicleNumber] = useState('');
+  const [damagedVehicleModel, setDamagedVehicleModel] = useState('');
+  const [deliveryLocation, setDeliveryLocation] = useState('');
+  const [billedAmount, setBilledAmount] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<'카드' | '현금' | '계좌이체'>('카드');
   const [paymentStatus, setPaymentStatus] = useState<'대기' | '완료' | '미납' | '부분납부'>('대기');
+  const [paymentDepositorName, setPaymentDepositorName] = useState('');
+  const [paymentApprovalNo, setPaymentApprovalNo] = useState('');
   const [licenseFile, setLicenseFile] = useState<File | null>(null);
   const [contractFile, setContractFile] = useState<File | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -214,6 +332,7 @@ export function NewContractModal({
 
   const resetState = () => {
     setStep(1);
+    setRentalType('short_term');
     setSelectedVehicle('');
     setStartDate('');
     setEndDate('');
@@ -223,12 +342,42 @@ export function NewContractModal({
     setCustomerPhone('');
     setCustomerLicense('');
     setCustomerAddress('');
+    setContractorType('corporate');
+    setContractorName('');
+    setContractorBusinessNumber('');
+    setContractorContactName('');
+    setContractorContactPhone('');
+    setPayerType('corporate');
+    setPayerName('');
+    setPayerPhone('');
+    setBillingAccount('');
     setPickupLocation('');
     setReturnLocation('');
     setAmount('');
     setDeposit('');
+    setMonthlyAmount('');
+    setBillingDay('5');
+    setBillingTiming('prepaid');
+    setGraceDays('0');
+    setAdvancePayment('');
+    setRequestSource('repair_shop');
+    setRequesterOrganizationName('');
+    setRequesterName('');
+    setRequesterPhone('');
+    setInsurerName('');
+    setClaimNo('');
+    setAdjusterName('');
+    setAdjusterPhone('');
+    setRepairShopName('');
+    setRepairShopLocation('');
+    setDamagedVehicleNumber('');
+    setDamagedVehicleModel('');
+    setDeliveryLocation('');
+    setBilledAmount('');
     setPaymentMethod('카드');
     setPaymentStatus('대기');
+    setPaymentDepositorName('');
+    setPaymentApprovalNo('');
     setLicenseFile(null);
     setContractFile(null);
     setSubmitError(null);
@@ -273,8 +422,8 @@ export function NewContractModal({
       const today = createTodayBaseDate();
       if (Number.isNaN(startAt.getTime()) || Number.isNaN(endAt.getTime()) || !startDay) {
         nextErrors.startDate = '유효한 날짜를 입력해 주세요.';
-      } else if (endAt < startAt) {
-        nextErrors.endDate = '반납 일시는 픽업 일시보다 빠를 수 없습니다.';
+      } else if (endAt <= startAt) {
+        nextErrors.endDate = '반납 일시는 픽업 일시보다 이후여야 합니다.';
       } else if (startDay < today) {
         nextErrors.startDate = '대여 시작일은 오늘 이후로 입력해 주세요.';
       }
@@ -291,22 +440,46 @@ export function NewContractModal({
 
   const handleStepTwoNext = () => {
     const nextErrors: Partial<Record<NewContractField, string>> = {};
-    if (!hasTextValue(customerName)) {
-      nextErrors.customerName = '고객명을 입력해 주세요.';
+    const requiresDriverAtCreation = rentalType !== 'accident_replacement';
+    if (rentalType === 'long_term') {
+      if (!hasTextValue(contractorName)) {
+        nextErrors.contractorName = contractorType === 'corporate' ? '법인명을 입력해 주세요.' : '계약자명을 입력해 주세요.';
+      }
+      if (contractorType === 'corporate') {
+        if (!hasTextValue(contractorBusinessNumber)) {
+          nextErrors.contractorBusinessNumber = '사업자번호를 입력해 주세요.';
+        } else if (!BUSINESS_NUMBER_REGEX.test(contractorBusinessNumber.trim())) {
+          nextErrors.contractorBusinessNumber = '사업자번호는 000-00-00000 형식으로 입력해 주세요.';
+        }
+        if (!hasTextValue(contractorContactName)) {
+          nextErrors.contractorContactName = '계약 담당자명을 입력해 주세요.';
+        }
+      }
+      if (!hasTextValue(contractorContactPhone)) {
+        nextErrors.contractorContactPhone = contractorType === 'corporate' ? '계약 담당자 연락처를 입력해 주세요.' : '계약자 연락처를 입력해 주세요.';
+      } else if (!CONTACT_PHONE_REGEX.test(contractorContactPhone.trim())) {
+        nextErrors.contractorContactPhone = '연락처는 010-0000-0000, 02-0000-0000 또는 1588-0000 형식으로 입력해 주세요.';
+      }
+      if (hasTextValue(payerPhone) && !CONTACT_PHONE_REGEX.test(payerPhone.trim())) {
+        nextErrors.payerPhone = '청구 담당자 연락처는 010-0000-0000, 02-0000-0000 또는 1588-0000 형식으로 입력해 주세요.';
+      }
     }
-    if (!hasTextValue(customerPhone)) {
+    if (requiresDriverAtCreation && !hasTextValue(customerName)) {
+      nextErrors.customerName = rentalType === 'long_term' ? '실제 운전자명을 입력해 주세요.' : '고객명을 입력해 주세요.';
+    }
+    if (requiresDriverAtCreation && !hasTextValue(customerPhone)) {
       nextErrors.customerPhone = '연락처를 입력해 주세요.';
-    } else if (!PHONE_REGEX.test(customerPhone.trim())) {
+    } else if (hasTextValue(customerPhone) && !PHONE_REGEX.test(customerPhone.trim())) {
       nextErrors.customerPhone = '전화번호는 010-0000-0000 형식으로 입력해 주세요.';
     }
-    if (!hasTextValue(customerLicense)) {
+    if (requiresDriverAtCreation && !hasTextValue(customerLicense)) {
       nextErrors.customerLicense = '면허번호를 입력해 주세요.';
-    } else if (!LICENSE_REGEX.test(customerLicense.trim())) {
+    } else if (hasTextValue(customerLicense) && !LICENSE_REGEX.test(customerLicense.trim())) {
       nextErrors.customerLicense = '면허번호는 XX-XXXXXX-XX 형식으로 입력해 주세요. (예: 11-123456-78)';
     }
-    if (!hasTextValue(customerAddress)) {
+    if (requiresDriverAtCreation && !hasTextValue(customerAddress)) {
       nextErrors.customerAddress = '주소를 입력해 주세요.';
-    } else if (customerAddress.trim().length < 5) {
+    } else if (hasTextValue(customerAddress) && customerAddress.trim().length < 5) {
       nextErrors.customerAddress = '주소는 5자 이상 입력해 주세요.';
     }
     if (!hasTextValue(pickupLocation)) {
@@ -315,11 +488,88 @@ export function NewContractModal({
     if (!hasTextValue(returnLocation)) {
       nextErrors.returnLocation = '반납 장소를 입력해 주세요.';
     }
-    if (!hasTextValue(amount)) {
-      nextErrors.amount = '대여 요금을 입력해 주세요.';
-    }
-    if (!hasTextValue(deposit)) {
-      nextErrors.deposit = '선금을 입력해 주세요.';
+    if (rentalType === 'accident_replacement') {
+      const requestSourceLabel = {
+        repair_shop: '정비공장',
+        insurer: '보험사',
+        customer: '고객 직접',
+        partner_platform: '제휴 플랫폼',
+        corporate_partner: '법인 제휴',
+        dealer: '딜러',
+        other: '기타',
+      }[requestSource];
+      if (!hasTextValue(requesterName)) {
+        nextErrors.requesterName = '요청자명을 입력해 주세요.';
+      }
+      if (hasTextValue(requesterPhone) && !CONTACT_PHONE_REGEX.test(requesterPhone.trim())) {
+        nextErrors.requesterPhone = '요청자 연락처는 010-0000-0000, 02-0000-0000 또는 1588-0000 형식으로 입력해 주세요.';
+      }
+      if (hasTextValue(adjusterPhone) && !CONTACT_PHONE_REGEX.test(adjusterPhone.trim())) {
+        nextErrors.adjusterPhone = '담당자 연락처는 010-0000-0000, 02-0000-0000 또는 1588-0000 형식으로 입력해 주세요.';
+      }
+      if (requestSource === 'repair_shop') {
+        if (!hasTextValue(requesterPhone)) {
+          nextErrors.requesterPhone = '정비공장 요청자 연락처를 입력해 주세요.';
+        }
+        if (!hasTextValue(repairShopName)) {
+          nextErrors.repairShopName = '정비공장을 입력해 주세요.';
+        }
+        if (!hasTextValue(repairShopLocation)) {
+          nextErrors.repairShopLocation = '정비공장 주소를 입력해 주세요.';
+        }
+      } else if (requestSource === 'insurer') {
+        if (!hasTextValue(insurerName)) {
+          nextErrors.insurerName = '보험사를 입력해 주세요.';
+        }
+        if (!hasTextValue(requesterPhone) && !hasTextValue(adjusterPhone)) {
+          nextErrors.requesterPhone = '보험사 요청자 또는 담당자 연락처를 입력해 주세요.';
+          nextErrors.adjusterPhone = '보험사 요청자 또는 담당자 연락처를 입력해 주세요.';
+        }
+      } else if (requestSource === 'customer') {
+        if (!hasTextValue(customerName)) {
+          nextErrors.customerName = '고객명을 입력해 주세요.';
+        }
+        if (!hasTextValue(customerPhone)) {
+          nextErrors.customerPhone = '고객 연락처를 입력해 주세요.';
+        }
+      } else if (requestSource === 'partner_platform') {
+        if (!hasTextValue(requesterOrganizationName)) {
+          nextErrors.requesterOrganizationName = '요청 기관명을 입력해 주세요.';
+        }
+        if (!hasTextValue(claimNo)) {
+          nextErrors.claimNo = '외부 접수번호를 입력해 주세요.';
+        }
+        if (!hasTextValue(requesterPhone)) {
+          nextErrors.requesterPhone = '제휴 플랫폼 연락처를 입력해 주세요.';
+        }
+      } else if (!hasTextValue(requesterPhone)) {
+        nextErrors.requesterPhone = `${requestSourceLabel} 요청자 연락처를 입력해 주세요.`;
+      }
+      if (!hasTextValue(insurerName) && !hasTextValue(claimNo)) {
+        nextErrors.insurerName = '보험사 또는 사고접수번호 중 하나를 입력해 주세요.';
+        nextErrors.claimNo = '보험사 또는 사고접수번호 중 하나를 입력해 주세요.';
+      }
+    } else if (rentalType === 'long_term') {
+      if (!hasTextValue(monthlyAmount)) {
+        nextErrors.monthlyAmount = '월 렌트료를 입력해 주세요.';
+      } else if (currencyInputToNumber(monthlyAmount) <= 0) {
+        nextErrors.monthlyAmount = '월 렌트료는 0보다 커야 합니다.';
+      }
+      const billingDayValue = Number(billingDay);
+      if (!hasTextValue(billingDay) || !Number.isInteger(billingDayValue) || billingDayValue < 1 || billingDayValue > 31) {
+        nextErrors.billingDay = '월 납부일은 1일부터 31일 사이로 입력해 주세요.';
+      }
+    } else {
+      if (!hasTextValue(amount)) {
+        nextErrors.amount = '대여 요금을 입력해 주세요.';
+      } else if (currencyInputToNumber(amount) <= 0) {
+        nextErrors.amount = '대여 요금은 0보다 커야 합니다.';
+      }
+      const amountValue = currencyInputToNumber(amount);
+      const depositValue = currencyInputToNumber(deposit);
+      if (depositValue > amountValue) {
+        nextErrors.deposit = '선금은 대여 요금을 초과할 수 없습니다.';
+      }
     }
 
     if (Object.keys(nextErrors).length > 0) {
@@ -337,8 +587,11 @@ export function NewContractModal({
     }
 
     const nextErrors: Partial<Record<NewContractField, string>> = {};
-    if (!licenseFile) {
+    if (rentalType !== 'accident_replacement' && !licenseFile) {
       nextErrors.licenseFile = '운전면허증 파일은 필수입니다.';
+    }
+    if (rentalType === 'long_term' && !contractFile) {
+      nextErrors.contractFile = '장기렌트 계약서 또는 납부 일정표 파일은 필수입니다.';
     }
 
     if (Object.keys(nextErrors).length > 0) {
@@ -352,6 +605,7 @@ export function NewContractModal({
 
     try {
       const feedback = await onSubmit({
+        rentalType,
         selectedVehicle,
         startDate,
         endDate,
@@ -361,12 +615,42 @@ export function NewContractModal({
         customerPhone,
         customerLicense,
         customerAddress,
+        contractorType,
+        contractorName,
+        contractorBusinessNumber,
+        contractorContactName,
+        contractorContactPhone,
+        payerType,
+        payerName,
+        payerPhone,
+        billingAccount,
         pickupLocation,
         returnLocation,
         amount,
         deposit,
+        monthlyAmount,
+        billingDay,
+        billingTiming,
+        graceDays,
+        advancePayment,
+        requestSource,
+        requesterOrganizationName,
+        requesterName,
+        requesterPhone,
+        insurerName,
+        claimNo,
+        adjusterName,
+        adjusterPhone,
+        repairShopName,
+        repairShopLocation,
+        damagedVehicleNumber,
+        damagedVehicleModel,
+        deliveryLocation,
+        billedAmount,
         paymentMethod,
         paymentStatus,
+        paymentDepositorName,
+        paymentApprovalNo,
         licenseFile,
         contractFile,
       });
@@ -423,7 +707,9 @@ export function NewContractModal({
                 <div className={`w-8 h-8 rounded-full flex items-center justify-center ${step >= 2 ? 'bg-blue-600 text-white' : 'bg-gray-200'}`}>
                   {step > 2 ? <CheckCircle className="w-5 h-5" /> : '2'}
                 </div>
-                <span className="text-sm font-medium">고객 정보</span>
+                <span className="text-sm font-medium">
+                  {rentalType === 'long_term' ? '월 납부 조건' : rentalType === 'accident_replacement' ? '사고/보험 정보' : '고객 정보'}
+                </span>
               </div>
               <div className="w-12 h-0.5 bg-gray-300" />
               <div className={`flex items-center gap-2 ${step === 3 ? 'text-blue-600' : 'text-gray-400'}`}>
@@ -446,6 +732,35 @@ export function NewContractModal({
 
           {step === 1 && (
             <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-semibold text-gray-600 mb-2">
+                  계약 유형 <span className="text-red-600">*</span>
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  {[
+                    { value: 'short_term', label: '단기렌트' },
+                    { value: 'long_term', label: '장기렌트' },
+                    { value: 'accident_replacement', label: '사고대차' },
+                  ].map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => {
+                        setRentalType(option.value as NewContractFormValues['rentalType']);
+                        clearFieldError('rentalType');
+                      }}
+                      className={`rounded-lg border px-3 py-2 text-sm font-semibold ${
+                        rentalType === option.value
+                          ? 'border-blue-600 bg-blue-50 text-blue-700'
+                          : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
+                      }`}
+                      disabled={isSubmitting}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
               <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
                 <h3 className="text-sm font-semibold text-blue-900 mb-3">📅 선택한 정보</h3>
 
@@ -661,9 +976,121 @@ export function NewContractModal({
 
           {step === 2 && (
             <div className="space-y-4">
+              <h3 className="text-sm font-bold text-gray-700">
+                {rentalType === 'long_term' ? '계약 주체/운전자/월 납부 조건' : rentalType === 'accident_replacement' ? '사고/보험 정보' : '고객/결제 조건'}
+              </h3>
+              {rentalType === 'long_term' && (
+                <div className="border border-gray-200 rounded-lg p-4 space-y-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <h4 className="text-sm font-bold text-gray-700">계약 주체</h4>
+                    <div className="inline-flex rounded-lg border border-gray-300 p-1">
+                      {[
+                        { value: 'corporate', label: '법인' },
+                        { value: 'individual', label: '개인' },
+                      ].map((option) => (
+                        <button
+                          key={option.value}
+                          type="button"
+                          onClick={() => {
+                            const nextType = option.value as 'individual' | 'corporate';
+                            setContractorType(nextType);
+                            setPayerType(nextType === 'corporate' ? 'corporate' : 'customer');
+                            clearFieldError('contractorName');
+                            clearFieldError('contractorBusinessNumber');
+                            clearFieldError('contractorContactName');
+                            clearFieldError('contractorContactPhone');
+                          }}
+                          className={`px-3 py-1.5 text-sm font-semibold rounded-md ${
+                            contractorType === option.value ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'
+                          }`}
+                          disabled={isSubmitting}
+                        >
+                          {option.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-600 mb-2">
+                        {contractorType === 'corporate' ? '법인명' : '계약자명'} <span className="text-red-600">*</span>
+                      </label>
+                      <input
+                        data-testid="new-contract-contractor-name-input"
+                        type="text"
+                        value={contractorName}
+                        onChange={(event) => {
+                          setContractorName(event.target.value);
+                          clearFieldError('contractorName');
+                        }}
+                        placeholder={contractorType === 'corporate' ? '주식회사 판게아렌탈' : '계약자 이름'}
+                        className={fieldInputClass('contractorName')}
+                        disabled={isSubmitting}
+                      />
+                      {fieldErrors.contractorName && <p className="mt-1 text-xs text-red-600">{fieldErrors.contractorName}</p>}
+                    </div>
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-600 mb-2">
+                        사업자번호 {contractorType === 'corporate' && <span className="text-red-600">*</span>}
+                      </label>
+                      <input
+                        data-testid="new-contract-contractor-business-number-input"
+                        type="text"
+                        value={contractorBusinessNumber}
+                        onChange={(event) => {
+                          setContractorBusinessNumber(event.target.value);
+                          clearFieldError('contractorBusinessNumber');
+                        }}
+                        placeholder="000-00-00000"
+                        className={fieldInputClass('contractorBusinessNumber')}
+                        disabled={isSubmitting || contractorType !== 'corporate'}
+                      />
+                      {fieldErrors.contractorBusinessNumber && <p className="mt-1 text-xs text-red-600">{fieldErrors.contractorBusinessNumber}</p>}
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-600 mb-2">
+                        {contractorType === 'corporate' ? '계약 담당자명' : '계약자 연락 담당'} {contractorType === 'corporate' && <span className="text-red-600">*</span>}
+                      </label>
+                      <input
+                        data-testid="new-contract-contractor-contact-name-input"
+                        type="text"
+                        value={contractorContactName}
+                        onChange={(event) => {
+                          setContractorContactName(event.target.value);
+                          clearFieldError('contractorContactName');
+                        }}
+                        className={fieldInputClass('contractorContactName')}
+                        disabled={isSubmitting}
+                      />
+                      {fieldErrors.contractorContactName && <p className="mt-1 text-xs text-red-600">{fieldErrors.contractorContactName}</p>}
+                    </div>
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-600 mb-2">
+                        {contractorType === 'corporate' ? '계약 담당자 연락처' : '계약자 연락처'} <span className="text-red-600">*</span>
+                      </label>
+                      <input
+                        data-testid="new-contract-contractor-contact-phone-input"
+                        type="tel"
+                        value={contractorContactPhone}
+                        onChange={(event) => {
+                          setContractorContactPhone(event.target.value);
+                          clearFieldError('contractorContactPhone');
+                        }}
+                        placeholder="010-0000-0000"
+                        className={fieldInputClass('contractorContactPhone')}
+                        disabled={isSubmitting}
+                      />
+                      {fieldErrors.contractorContactPhone && <p className="mt-1 text-xs text-red-600">{fieldErrors.contractorContactPhone}</p>}
+                    </div>
+                  </div>
+                </div>
+              )}
+              {rentalType === 'long_term' && <h4 className="pt-2 text-sm font-bold text-gray-700">실제 운전자</h4>}
               <div>
                 <label className="block text-sm font-semibold text-gray-600 mb-2">
-                  고객명 <span className="text-red-600">*</span>
+                  {rentalType === 'long_term' ? '운전자명' : '고객명'} {rentalType !== 'accident_replacement' && <span className="text-red-600">*</span>}
                 </label>
                 <input
                   data-testid="new-contract-customer-name-input"
@@ -673,7 +1100,7 @@ export function NewContractModal({
                     setCustomerName(event.target.value);
                     clearFieldError('customerName');
                   }}
-                  placeholder="고객 이름"
+                  placeholder={rentalType === 'long_term' ? '실제 운전자 이름' : '고객 이름'}
                   className={fieldInputClass('customerName')}
                   disabled={isSubmitting}
                 />
@@ -682,7 +1109,7 @@ export function NewContractModal({
 
               <div>
                 <label className="block text-sm font-semibold text-gray-600 mb-2">
-                  연락처 <span className="text-red-600">*</span>
+                  연락처 {rentalType !== 'accident_replacement' && <span className="text-red-600">*</span>}
                 </label>
                 <input
                   data-testid="new-contract-customer-phone-input"
@@ -701,7 +1128,7 @@ export function NewContractModal({
 
               <div>
                 <label className="block text-sm font-semibold text-gray-600 mb-2">
-                  면허번호 <span className="text-red-600">*</span>
+                  면허번호 {rentalType !== 'accident_replacement' && <span className="text-red-600">*</span>}
                 </label>
                 <input
                   data-testid="new-contract-customer-license-input"
@@ -720,7 +1147,7 @@ export function NewContractModal({
 
               <div>
                 <label className="block text-sm font-semibold text-gray-600 mb-2">
-                  주소 <span className="text-red-600">*</span>
+                  주소 {rentalType !== 'accident_replacement' && <span className="text-red-600">*</span>}
                 </label>
                 <input
                   data-testid="new-contract-customer-address-input"
@@ -816,86 +1243,429 @@ export function NewContractModal({
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-semibold text-gray-600 mb-2">
-                    대여 요금 <span className="text-red-600">*</span>
-                  </label>
-                  <input
-                    data-testid="new-contract-amount-input"
-                    type="text"
-                    value={amount}
-                    onChange={(event) => {
-                      setAmount(formatCurrencyInput(event.target.value));
-                      clearFieldError('amount');
-                    }}
-                    placeholder="450,000"
-                    className={fieldInputClass('amount')}
-                    disabled={isSubmitting}
-                  />
-                  {fieldErrors.amount && <p className="mt-1 text-xs text-red-600">{fieldErrors.amount}</p>}
+              {rentalType === 'long_term' ? (
+                <div className="border-t border-gray-200 pt-4 mt-6 space-y-4">
+                  <h3 className="text-sm font-bold text-gray-700">월 납부 조건</h3>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-600 mb-2">청구 대상</label>
+                      <select
+                        data-testid="new-contract-payer-type-input"
+                        value={payerType}
+                        onChange={(event) => {
+                          setPayerType(event.target.value as 'customer' | 'corporate');
+                          clearFieldError('payerType');
+                        }}
+                        className={fieldInputClass('payerType')}
+                        disabled={isSubmitting}
+                      >
+                        <option value="corporate">법인</option>
+                        <option value="customer">개인/고객</option>
+                      </select>
+                      {fieldErrors.payerType && <p className="mt-1 text-xs text-red-600">{fieldErrors.payerType}</p>}
+                    </div>
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-600 mb-2">청구 계정</label>
+                      <input
+                        data-testid="new-contract-billing-account-input"
+                        type="text"
+                        value={billingAccount}
+                        onChange={(event) => {
+                          setBillingAccount(event.target.value);
+                          clearFieldError('billingAccount');
+                        }}
+                        placeholder="거래처 코드 또는 계좌 메모"
+                        className={fieldInputClass('billingAccount')}
+                        disabled={isSubmitting}
+                      />
+                      {fieldErrors.billingAccount && <p className="mt-1 text-xs text-red-600">{fieldErrors.billingAccount}</p>}
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-600 mb-2">청구 담당자</label>
+                      <input
+                        data-testid="new-contract-payer-name-input"
+                        type="text"
+                        value={payerName}
+                        onChange={(event) => {
+                          setPayerName(event.target.value);
+                          clearFieldError('payerName');
+                        }}
+                        className={fieldInputClass('payerName')}
+                        disabled={isSubmitting}
+                      />
+                      {fieldErrors.payerName && <p className="mt-1 text-xs text-red-600">{fieldErrors.payerName}</p>}
+                    </div>
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-600 mb-2">청구 담당자 연락처</label>
+                      <input
+                        data-testid="new-contract-payer-phone-input"
+                        type="tel"
+                        value={payerPhone}
+                        onChange={(event) => {
+                          setPayerPhone(event.target.value);
+                          clearFieldError('payerPhone');
+                        }}
+                        placeholder="010-0000-0000"
+                        className={fieldInputClass('payerPhone')}
+                        disabled={isSubmitting}
+                      />
+                      {fieldErrors.payerPhone && <p className="mt-1 text-xs text-red-600">{fieldErrors.payerPhone}</p>}
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-600 mb-2">
+                        월 렌트료 <span className="text-red-600">*</span>
+                      </label>
+                      <input
+                        data-testid="new-contract-monthly-amount-input"
+                        type="text"
+                        value={monthlyAmount}
+                        onChange={(event) => {
+                          setMonthlyAmount(formatCurrencyInput(event.target.value));
+                          setAmount(formatCurrencyInput(event.target.value));
+                          clearFieldError('monthlyAmount');
+                        }}
+                        placeholder="550,000"
+                        className={fieldInputClass('monthlyAmount')}
+                        disabled={isSubmitting}
+                      />
+                      {fieldErrors.monthlyAmount && <p className="mt-1 text-xs text-red-600">{fieldErrors.monthlyAmount}</p>}
+                    </div>
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-600 mb-2">
+                        월 납부일 <span className="text-red-600">*</span>
+                      </label>
+                      <input
+                        data-testid="new-contract-billing-day-input"
+                        type="number"
+                        min={1}
+                        max={31}
+                        value={billingDay}
+                        onChange={(event) => {
+                          setBillingDay(event.target.value.replace(/[^\d]/g, ''));
+                          clearFieldError('billingDay');
+                        }}
+                        className={fieldInputClass('billingDay')}
+                        disabled={isSubmitting}
+                      />
+                      {fieldErrors.billingDay && <p className="mt-1 text-xs text-red-600">{fieldErrors.billingDay}</p>}
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-600 mb-2">
+                        보증금
+                      </label>
+                      <input
+                        data-testid="new-contract-deposit-input"
+                        type="text"
+                        value={deposit}
+                        onChange={(event) => {
+                          setDeposit(formatCurrencyInput(event.target.value));
+                          clearFieldError('deposit');
+                        }}
+                        placeholder="1,000,000"
+                        className={fieldInputClass('deposit')}
+                        disabled={isSubmitting}
+                      />
+                      {fieldErrors.deposit && <p className="mt-1 text-xs text-red-600">{fieldErrors.deposit}</p>}
+                    </div>
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-600 mb-2">
+                        선수금
+                      </label>
+                      <input
+                        data-testid="new-contract-advance-payment-input"
+                        type="text"
+                        value={advancePayment}
+                        onChange={(event) => setAdvancePayment(formatCurrencyInput(event.target.value))}
+                        placeholder="550,000"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        disabled={isSubmitting}
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-600 mb-2">
+                        납부 방식
+                      </label>
+                      <select
+                        value={billingTiming}
+                        onChange={(event) => setBillingTiming(event.target.value as 'prepaid' | 'postpaid')}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        disabled={isSubmitting}
+                      >
+                        <option value="prepaid">선불</option>
+                        <option value="postpaid">후불</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-600 mb-2">
+                        연체 유예일
+                      </label>
+                      <input
+                        type="number"
+                        min={0}
+                        value={graceDays}
+                        onChange={(event) => setGraceDays(event.target.value.replace(/[^\d]/g, ''))}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        disabled={isSubmitting}
+                      />
+                    </div>
+                  </div>
                 </div>
-                <div>
-                  <label className="block text-sm font-semibold text-gray-600 mb-2">
-                    선금 <span className="text-red-600">*</span>
-                  </label>
-                  <input
-                    data-testid="new-contract-deposit-input"
-                    type="text"
-                    value={deposit}
-                    onChange={(event) => {
-                      setDeposit(formatCurrencyInput(event.target.value));
-                      clearFieldError('deposit');
-                    }}
-                    placeholder="500,000"
-                    className={fieldInputClass('deposit')}
-                    disabled={isSubmitting}
-                  />
-                  {fieldErrors.deposit && <p className="mt-1 text-xs text-red-600">{fieldErrors.deposit}</p>}
+              ) : rentalType === 'accident_replacement' ? (
+                <div className="border-t border-gray-200 pt-4 mt-6 space-y-4">
+                  <h3 className="text-sm font-bold text-gray-700">사고/보험 정보</h3>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-600 mb-2">요청 출처</label>
+                      <select
+                        value={requestSource}
+                        onChange={(event) => setRequestSource(event.target.value as NewContractFormValues['requestSource'])}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        disabled={isSubmitting}
+                      >
+                        <option value="repair_shop">정비공장</option>
+                        <option value="insurer">보험사</option>
+                        <option value="customer">고객 직접</option>
+                        <option value="partner_platform">제휴 플랫폼</option>
+                        <option value="corporate_partner">법인 제휴</option>
+                        <option value="dealer">딜러</option>
+                        <option value="other">기타</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-600 mb-2">요청 기관명</label>
+                      <input
+                        type="text"
+                        value={requesterOrganizationName}
+                        onChange={(event) => {
+                          setRequesterOrganizationName(event.target.value);
+                          clearFieldError('requesterOrganizationName');
+                        }}
+                        placeholder="정비공장/보험사/제휴처"
+                        className={fieldInputClass('requesterOrganizationName')}
+                        disabled={isSubmitting}
+                      />
+                      {fieldErrors.requesterOrganizationName && <p className="mt-1 text-xs text-red-600">{fieldErrors.requesterOrganizationName}</p>}
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-600 mb-2">요청자명 <span className="text-red-600">*</span></label>
+                      <input
+                        type="text"
+                        value={requesterName}
+                        onChange={(event) => {
+                          setRequesterName(event.target.value);
+                          clearFieldError('requesterName');
+                        }}
+                        className={fieldInputClass('requesterName')}
+                        disabled={isSubmitting}
+                      />
+                      {fieldErrors.requesterName && <p className="mt-1 text-xs text-red-600">{fieldErrors.requesterName}</p>}
+                    </div>
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-600 mb-2">요청자 연락처 <span className="text-red-600">*</span></label>
+                      <input
+                        type="tel"
+                        value={requesterPhone}
+                        onChange={(event) => {
+                          setRequesterPhone(event.target.value);
+                          clearFieldError('requesterPhone');
+                        }}
+                        placeholder="010-0000-0000"
+                        className={fieldInputClass('requesterPhone')}
+                        disabled={isSubmitting}
+                      />
+                      {fieldErrors.requesterPhone && <p className="mt-1 text-xs text-red-600">{fieldErrors.requesterPhone}</p>}
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-600 mb-2">보험사 <span className="text-xs font-medium text-gray-400">(번호 없을 때 필수)</span></label>
+                      <input type="text" value={insurerName} onChange={(event) => { setInsurerName(event.target.value); clearFieldError('insurerName'); }} className={fieldInputClass('insurerName')} disabled={isSubmitting} />
+                      {fieldErrors.insurerName && <p className="mt-1 text-xs text-red-600">{fieldErrors.insurerName}</p>}
+                    </div>
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-600 mb-2">사고접수번호 <span className="text-xs font-medium text-gray-400">(보험사 없을 때 필수)</span></label>
+                      <input type="text" value={claimNo} onChange={(event) => { setClaimNo(event.target.value); clearFieldError('claimNo'); }} className={fieldInputClass('claimNo')} disabled={isSubmitting} />
+                      {fieldErrors.claimNo && <p className="mt-1 text-xs text-red-600">{fieldErrors.claimNo}</p>}
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-600 mb-2">보험 담당자</label>
+                      <input type="text" value={adjusterName} onChange={(event) => setAdjusterName(event.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" disabled={isSubmitting} />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-600 mb-2">담당자 연락처</label>
+                      <input type="tel" value={adjusterPhone} onChange={(event) => { setAdjusterPhone(event.target.value); clearFieldError('adjusterPhone'); }} className={fieldInputClass('adjusterPhone')} disabled={isSubmitting} />
+                      {fieldErrors.adjusterPhone && <p className="mt-1 text-xs text-red-600">{fieldErrors.adjusterPhone}</p>}
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-600 mb-2">정비공장 <span className="text-red-600">*</span></label>
+                      <input type="text" value={repairShopName} onChange={(event) => { setRepairShopName(event.target.value); clearFieldError('repairShopName'); }} className={fieldInputClass('repairShopName')} disabled={isSubmitting} />
+                      {fieldErrors.repairShopName && <p className="mt-1 text-xs text-red-600">{fieldErrors.repairShopName}</p>}
+                    </div>
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-600 mb-2">정비공장 주소</label>
+                      <input type="text" value={repairShopLocation} onChange={(event) => { setRepairShopLocation(event.target.value); clearFieldError('repairShopLocation'); }} placeholder="정비공장 주소" className={fieldInputClass('repairShopLocation')} disabled={isSubmitting} />
+                      {fieldErrors.repairShopLocation && <p className="mt-1 text-xs text-red-600">{fieldErrors.repairShopLocation}</p>}
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-600 mb-2">실제 인도지</label>
+                      <input type="text" value={deliveryLocation} onChange={(event) => setDeliveryLocation(event.target.value)} placeholder="비워두면 대여 장소 사용" className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" disabled={isSubmitting} />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-600 mb-2">피해차량 번호</label>
+                      <input type="text" value={damagedVehicleNumber} onChange={(event) => { setDamagedVehicleNumber(event.target.value); clearFieldError('damagedVehicleNumber'); }} className={fieldInputClass('damagedVehicleNumber')} disabled={isSubmitting} />
+                      {fieldErrors.damagedVehicleNumber && <p className="mt-1 text-xs text-red-600">{fieldErrors.damagedVehicleNumber}</p>}
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-600 mb-2">피해차량 차종/차급</label>
+                      <input type="text" value={damagedVehicleModel} onChange={(event) => setDamagedVehicleModel(event.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" disabled={isSubmitting} />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-600 mb-2">예상 보험청구액</label>
+                      <input type="text" value={billedAmount} onChange={(event) => setBilledAmount(formatCurrencyInput(event.target.value))} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" disabled={isSubmitting} />
+                    </div>
+                  </div>
                 </div>
-              </div>
+              ) : (
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-600 mb-2">
+                      대여 요금 <span className="text-red-600">*</span>
+                    </label>
+                    <input
+                      data-testid="new-contract-amount-input"
+                      type="text"
+                      value={amount}
+                      onChange={(event) => {
+                        setAmount(formatCurrencyInput(event.target.value));
+                        clearFieldError('amount');
+                      }}
+                      placeholder="450,000"
+                      className={fieldInputClass('amount')}
+                      disabled={isSubmitting}
+                    />
+                    {fieldErrors.amount && <p className="mt-1 text-xs text-red-600">{fieldErrors.amount}</p>}
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-600 mb-2">
+                      선금
+                    </label>
+                    <input
+                      data-testid="new-contract-deposit-input"
+                      type="text"
+                      value={deposit}
+                      onChange={(event) => {
+                        setDeposit(formatCurrencyInput(event.target.value));
+                        clearFieldError('deposit');
+                      }}
+                      placeholder="500,000"
+                      className={fieldInputClass('deposit')}
+                      disabled={isSubmitting}
+                    />
+                    {fieldErrors.deposit && <p className="mt-1 text-xs text-red-600">{fieldErrors.deposit}</p>}
+                  </div>
+                </div>
+              )}
 
-              <div>
-                <label className="block text-sm font-semibold text-gray-600 mb-2">
-                  결제 방법 <span className="text-red-600">*</span>
-                </label>
-                <select
-                  value={paymentMethod}
-                  onChange={(event) => {
-                    setPaymentMethod(event.target.value as '카드' | '현금' | '계좌이체');
-                    setSubmitError(null);
-                  }}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  disabled={isSubmitting}
-                >
-                  <option value="카드">카드</option>
-                  <option value="현금">현금</option>
-                  <option value="계좌이체">계좌이체</option>
-                </select>
-              </div>
+              {rentalType === 'short_term' && (
+                <>
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-600 mb-2">
+                      결제 방법 <span className="text-red-600">*</span>
+                    </label>
+                    <select
+                      value={paymentMethod}
+                      onChange={(event) => {
+                        setPaymentMethod(event.target.value as '카드' | '현금' | '계좌이체');
+                        setSubmitError(null);
+                      }}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      disabled={isSubmitting}
+                    >
+                      <option value="카드">카드</option>
+                      <option value="현금">현금</option>
+                      <option value="계좌이체">계좌이체</option>
+                    </select>
+                  </div>
 
-              <div>
-                <label className="block text-sm font-semibold text-gray-600 mb-2">
-                  결제 상태 <span className="text-red-600">*</span>
-                </label>
-                <select
-                  value={paymentStatus}
-                  onChange={(event) => {
-                    setPaymentStatus(event.target.value as '대기' | '완료' | '미납' | '부분납부');
-                    setSubmitError(null);
-                  }}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  disabled={isSubmitting}
-                >
-                  <option value="대기">대기 (아직 결제 예정일 전)</option>
-                  <option value="완료">완납 (전액 결제 완료)</option>
-                  <option value="미납">미납 (결제 안됨)</option>
-                  <option value="부분납부">부분납부 (일부만 결제됨)</option>
-                </select>
-                <p className="text-xs text-gray-500 mt-1">
-                  💡 현장에서 결제받은 경우 '완납'을 선택하세요
-                </p>
-              </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-600 mb-2">
+                      결제 상태 <span className="text-red-600">*</span>
+                    </label>
+                    <select
+                      value={paymentStatus}
+                      onChange={(event) => {
+                        setPaymentStatus(event.target.value as '대기' | '완료' | '미납' | '부분납부');
+                        setSubmitError(null);
+                      }}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      disabled={isSubmitting}
+                    >
+                      <option value="대기">대기 (아직 결제 예정일 전)</option>
+                      <option value="완료">완납 (전액 결제 완료)</option>
+                      <option value="미납">미납 (결제 안됨)</option>
+                      <option value="부분납부">부분납부 (일부만 결제됨)</option>
+                    </select>
+                    <p className="text-xs text-gray-500 mt-1">
+                      현장에서 결제받은 경우 '완료'를 선택하세요
+                    </p>
+                  </div>
+
+                  {(paymentStatus === '완료' || paymentStatus === '부분납부') && (
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-semibold text-gray-600 mb-2">입금자명</label>
+                        <input
+                          data-testid="new-contract-payment-depositor-input"
+                          type="text"
+                          value={paymentDepositorName}
+                          onChange={(event) => {
+                            setPaymentDepositorName(event.target.value);
+                            clearFieldError('paymentDepositorName');
+                          }}
+                          placeholder="입금자 또는 카드 명의"
+                          className={fieldInputClass('paymentDepositorName')}
+                          disabled={isSubmitting}
+                        />
+                        {fieldErrors.paymentDepositorName && <p className="mt-1 text-xs text-red-600">{fieldErrors.paymentDepositorName}</p>}
+                      </div>
+                      <div>
+                        <label className="block text-sm font-semibold text-gray-600 mb-2">승인번호</label>
+                        <input
+                          data-testid="new-contract-payment-approval-input"
+                          type="text"
+                          value={paymentApprovalNo}
+                          onChange={(event) => {
+                            setPaymentApprovalNo(event.target.value);
+                            clearFieldError('paymentApprovalNo');
+                          }}
+                          placeholder="카드 승인번호 또는 입금 메모"
+                          className={fieldInputClass('paymentApprovalNo')}
+                          disabled={isSubmitting}
+                        />
+                        {fieldErrors.paymentApprovalNo && <p className="mt-1 text-xs text-red-600">{fieldErrors.paymentApprovalNo}</p>}
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
 
               <div className="flex gap-3 pt-4">
                 <button
@@ -921,7 +1691,7 @@ export function NewContractModal({
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-semibold text-gray-600 mb-2">
-                  운전면허증 <span className="text-red-600">*</span>
+                  운전면허증 {rentalType !== 'accident_replacement' && <span className="text-red-600">*</span>}
                 </label>
                 <label className="cursor-pointer block">
                   <div className={`flex items-center gap-2 p-3 text-gray-700 rounded-lg border justify-center transition-colors ${
@@ -953,15 +1723,24 @@ export function NewContractModal({
                   <p className="text-xs text-green-600 mt-1">✓ 파일이 선택되었습니다</p>
                 )}
                 {fieldErrors.licenseFile && <p className="mt-1 text-xs text-red-600">{fieldErrors.licenseFile}</p>}
-                <p className="text-xs text-gray-500 mt-1">면허증 앞면 또는 전체 사진을 업로드하세요</p>
+                <p className="text-xs text-gray-500 mt-1">
+                  {rentalType === 'accident_replacement'
+                    ? '정비소 배차 접수 단계에서는 선택 입력입니다. 실제 운전자 인수 전 확보하세요'
+                    : '면허증 앞면 또는 전체 사진을 업로드하세요'}
+                </p>
               </div>
 
               <div>
                 <label className="block text-sm font-semibold text-gray-600 mb-2">
-                  대여계약서 (선택)
+                  {rentalType === 'long_term' ? '장기렌트 계약서/납부 일정표' : '대여계약서'}
+                  {rentalType === 'long_term' ? <span className="text-red-600"> *</span> : ' (선택)'}
                 </label>
                 <label className="cursor-pointer block">
-                  <div className="flex items-center gap-2 p-3 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 border border-gray-300 justify-center transition-colors">
+                  <div className={`flex items-center gap-2 p-3 text-gray-700 rounded-lg border justify-center transition-colors ${
+                    fieldErrors.contractFile
+                      ? 'bg-red-50 border-red-300'
+                      : 'bg-gray-100 border-gray-300 hover:bg-gray-200'
+                  }`}>
                     <Upload className="w-4 h-4" />
                     <span className="text-sm font-medium">
                       {contractFile ? contractFile.name : '파일 선택'}
@@ -975,6 +1754,7 @@ export function NewContractModal({
                       const file = event.target.files?.[0];
                       if (file) {
                         setContractFile(file);
+                        clearFieldError('contractFile');
                         setSubmitError(null);
                       }
                     }}
@@ -984,7 +1764,14 @@ export function NewContractModal({
                 {contractFile && (
                   <p className="text-xs text-green-600 mt-1">✓ 파일이 선택되었습니다</p>
                 )}
-                <p className="text-xs text-gray-500 mt-1">계약서가 있는 경우 업로드하세요</p>
+                {fieldErrors.contractFile && <p className="mt-1 text-xs text-red-600">{fieldErrors.contractFile}</p>}
+                <p className="text-xs text-gray-500 mt-1">
+                  {rentalType === 'long_term'
+                    ? '월 납부 조건 확인을 위해 계약서 또는 납부 일정표를 업로드하세요'
+                    : rentalType === 'accident_replacement'
+                      ? '보험사/정비소 요청서 또는 대차 확인서가 있는 경우 업로드하세요'
+                      : '계약서가 있는 경우 업로드하세요'}
+                </p>
               </div>
 
               <div className="flex gap-3 pt-4">

@@ -1,6 +1,8 @@
 import { apiClient } from './api';
 
 export type RevenueGranularity = 'day' | 'week' | 'month';
+export type RevenueRentalType = 'short_term' | 'long_term' | 'accident_replacement';
+export type RevenuePayerType = 'customer' | 'insurer' | 'corporate' | 'repair_shop';
 
 export interface RevenuePeriod {
   from: string;
@@ -38,11 +40,27 @@ export interface RevenueSummaryResponse {
   totals: RevenueTotals;
   buckets: RevenueSummaryBucket[];
   paymentMethods: RevenuePaymentMethod[];
+  rentalTypes: RevenueRentalTypeBreakdown[];
+  payerTypes: RevenuePayerTypeBreakdown[];
   vehicles: RevenueVehicle[];
 }
 
 export interface RevenuePaymentMethod {
   method: string;
+  amount: number;
+  count: number;
+  percentage: number;
+}
+
+export interface RevenueRentalTypeBreakdown {
+  rentalType: string;
+  amount: number;
+  count: number;
+  percentage: number;
+}
+
+export interface RevenuePayerTypeBreakdown {
+  payerType: string;
   amount: number;
   count: number;
   percentage: number;
@@ -85,12 +103,16 @@ export interface RevenueSummaryRequestParams extends RevenueRequestOptions {
   to: string;
   granularity: RevenueGranularity;
   companyId?: string;
+  rentalType?: RevenueRentalType;
+  payerType?: RevenuePayerType;
 }
 
 export interface RevenueTrendRequestParams extends RevenueRequestOptions {
   from: string;
   to: string;
   companyId?: string;
+  rentalType?: RevenueRentalType;
+  payerType?: RevenuePayerType;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -226,6 +248,26 @@ function normalizePaymentMethod(value: unknown): RevenuePaymentMethod {
   };
 }
 
+function normalizeRentalTypeBreakdown(value: unknown): RevenueRentalTypeBreakdown {
+  const data = isRecord(value) ? value : {};
+  return {
+    rentalType: String(data.rentalType ?? 'short_term'),
+    amount: toNumber(data.amount),
+    count: toInteger(data.count),
+    percentage: toNumber(data.percentage),
+  };
+}
+
+function normalizePayerTypeBreakdown(value: unknown): RevenuePayerTypeBreakdown {
+  const data = isRecord(value) ? value : {};
+  return {
+    payerType: String(data.payerType ?? 'customer'),
+    amount: toNumber(data.amount),
+    count: toInteger(data.count),
+    percentage: toNumber(data.percentage),
+  };
+}
+
 function normalizeRevenueVehicle(value: unknown): RevenueVehicle {
   if (!isRecord(value)) {
     return {
@@ -281,6 +323,8 @@ function normalizeRevenueSummary(
   const data = isRecord(payload) ? payload : {};
   const bucketsRaw = Array.isArray(data.buckets) ? data.buckets : [];
   const paymentMethodsRaw = Array.isArray(data.paymentMethods) ? data.paymentMethods : [];
+  const rentalTypesRaw = Array.isArray(data.rentalTypes) ? data.rentalTypes : [];
+  const payerTypesRaw = Array.isArray(data.payerTypes) ? data.payerTypes : [];
   const vehiclesRaw = Array.isArray(data.vehicles) ? data.vehicles : [];
 
   return {
@@ -288,6 +332,8 @@ function normalizeRevenueSummary(
     totals: normalizeTotals(data.totals),
     buckets: bucketsRaw.map(normalizeSummaryBucket),
     paymentMethods: paymentMethodsRaw.map(normalizePaymentMethod),
+    rentalTypes: rentalTypesRaw.map(normalizeRentalTypeBreakdown),
+    payerTypes: payerTypesRaw.map(normalizePayerTypeBreakdown),
     vehicles: vehiclesRaw.map(normalizeRevenueVehicle),
   };
 }
@@ -319,6 +365,8 @@ export async function getRevenueSummary({
   to,
   granularity,
   companyId,
+  rentalType,
+  payerType,
   signal,
 }: RevenueSummaryRequestParams): Promise<RevenueSummaryResponse> {
   const payload = await apiClient.requestData<unknown>({
@@ -329,6 +377,8 @@ export async function getRevenueSummary({
       to,
       granularity,
       companyId,
+      rentalType,
+      payerType,
     },
     signal,
   });
@@ -344,6 +394,8 @@ export async function getRevenueTrend({
   from,
   to,
   companyId,
+  rentalType,
+  payerType,
   signal,
 }: RevenueTrendRequestParams): Promise<RevenueTrendResponse> {
   const payload = await apiClient.requestData<unknown>({
@@ -353,6 +405,8 @@ export async function getRevenueTrend({
       from,
       to,
       companyId,
+      rentalType,
+      payerType,
     },
     signal,
   });

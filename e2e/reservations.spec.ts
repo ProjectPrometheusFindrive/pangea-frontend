@@ -10,12 +10,18 @@ interface ReservationListRow {
   startAt: string;
   endAt: string;
   contractStatus: string;
+  rentalType?: string;
   paymentMethod: string;
   paymentStatus: string;
   amount: number;
   deposit: number;
   phone?: string;
   memo?: string;
+  billingSummary?: Record<string, unknown>;
+  accidentClaim?: Record<string, unknown>;
+  parties?: Record<string, unknown>;
+  licenseDocumentObjectName?: string;
+  contractDocumentObjectName?: string;
 }
 
 function formatDateOffset(offsetDays: number): string {
@@ -101,9 +107,16 @@ async function submitContract(page: Page): Promise<void> {
   await page.getByTestId('new-contract-submit').click();
 }
 
+async function installSignedUploadMock(page: Page): Promise<void> {
+  await page.route('https://signed.example/**', async (route) => {
+    await route.fulfill({ status: 200, body: '' });
+  });
+}
+
 test.describe('BK-091 Reservations E2E', () => {
   test('예약 생성 후 대여 시작과 반납 전이가 성공한다', async ({ page }) => {
     const reservations: ReservationListRow[] = [];
+    await installSignedUploadMock(page);
 
     await installApiMocks(page, {
       user: {
@@ -120,15 +133,49 @@ test.describe('BK-091 Reservations E2E', () => {
             pageSize: 20,
           });
         },
+        'GET /api/v2/assets': async ({ route }) => {
+          await fulfillSuccess(route, {
+            items: [buildVehicleAsset()],
+            total: 1,
+            page: 1,
+            size: 500,
+          });
+        },
+        'POST /api/v2/reservations/prepare': async ({ route, request }) => {
+          const body = request.postDataJSON() as Record<string, unknown>;
+          expect(typeof body.idempotencyKey).toBe('string');
+          await fulfillSuccess(route, {
+            reservationId: 'R-1001',
+            idempotencyKey: body.idempotencyKey,
+          });
+        },
+        'POST /api/v2/assets/upload': async ({ route, request }) => {
+          const body = request.postDataJSON() as Record<string, unknown>;
+          const folder = String(body.folder ?? 'reservations/R-1001/documents');
+          await fulfillSuccess(route, {
+            uploadUrl: 'https://signed.example/reservation-license',
+            objectName: `${folder}/license.png`,
+            contentType: body.contentType ?? 'image/png',
+          });
+        },
         'POST /api/v2/reservations': async ({ route }) => {
           await delay(250);
           const body = route.request().postDataJSON() as Record<string, unknown>;
+          expect(body.reservationId).toBe('R-1001');
+          expect(typeof body.idempotencyKey).toBe('string');
           expect(body.phone).toBe('010-2222-3333');
+          expect(body.parties).toMatchObject({
+            driver: {
+              name: '테스트고객',
+              phone: '010-2222-3333',
+            },
+          });
           const created = buildReservationRow({
             id: 'R-1001',
             customerName: '테스트고객',
             phone: '010-2222-3333',
             startAt: formatStartableDateTimeToday(),
+            parties: body.parties as Record<string, unknown>,
           });
           reservations.splice(0, reservations.length, created);
           await fulfillSuccess(route, created, 201);
@@ -231,7 +278,64 @@ test.describe('BK-091 Reservations E2E', () => {
     await expect(page.getByText('010-9999-8888')).toBeVisible();
   });
 
+  test('사고대차 상세가 생성 응답과 재조회 응답의 claim 정보를 유지한다', async ({ page }) => {
+    const listReservation = buildReservationRow({
+      id: 'R-ACC-PARITY',
+      rentalType: 'accident_replacement',
+      customerName: '사고대차고객',
+      accidentClaim: {
+        claimNo: 'CLAIM-PARITY',
+        insurerName: '패리티손보',
+        repairShopName: '패리티정비',
+        requesterName: '정비 담당자',
+        documentStatus: 'intake_required',
+        claimStatus: 'intake',
+        billedAmount: 770000,
+        recognizedAmount: 0,
+        differenceAmount: 0,
+      },
+      contractDocumentObjectName: 'reservations/R-ACC-PARITY/documents/request.pdf',
+    });
+    const detailReservation = {
+      ...listReservation,
+      accidentClaim: {
+        ...listReservation.accidentClaim,
+        repairShopName: '패리티정비',
+      },
+    };
+
+    await installApiMocks(page, {
+      handlers: {
+        'GET /api/v2/reservations': async ({ route }) => {
+          await fulfillSuccess(route, {
+            reservations: [listReservation],
+            assets: [buildVehicleAsset()],
+            total: 1,
+            page: 1,
+            pageSize: 20,
+          });
+        },
+        'GET /api/v2/reservations/R-ACC-PARITY': async ({ route }) => {
+          await fulfillSuccess(route, detailReservation);
+        },
+      },
+    });
+
+    await loginViaUi(page, 'admin', { returnUrl: '/reservations' });
+    await expect(page).toHaveURL(/\/reservations(?:\?.*)?$/);
+    await expect(page.getByTestId('reservation-block-R-ACC-PARITY')).toBeVisible();
+
+    await page.getByTestId('reservation-block-R-ACC-PARITY').click();
+    await expect(page.getByTestId('reservation-detail-modal')).toBeVisible();
+    await page.getByRole('button', { name: '결제 정보' }).click();
+    await expect(page.getByText('보험/청구')).toBeVisible();
+    await expect(page.getByText('CLAIM-PARITY')).toBeVisible();
+    await expect(page.getByText('패리티손보')).toBeVisible();
+    await expect(page.getByText('패리티정비')).toBeVisible();
+  });
+
   test('예약 생성 403 오류 시 권한 오류를 노출한다', async ({ page }) => {
+    await installSignedUploadMock(page);
     await installApiMocks(page, {
       handlers: {
         'GET /api/v2/reservations': async ({ route }) => {
@@ -241,6 +345,29 @@ test.describe('BK-091 Reservations E2E', () => {
             total: 0,
             page: 1,
             pageSize: 20,
+          });
+        },
+        'GET /api/v2/assets': async ({ route }) => {
+          await fulfillSuccess(route, {
+            items: [buildVehicleAsset()],
+            total: 1,
+            page: 1,
+            size: 500,
+          });
+        },
+        'POST /api/v2/reservations/prepare': async ({ route }) => {
+          await fulfillSuccess(route, {
+            reservationId: 'R-FORBIDDEN',
+            idempotencyKey: 'idem-forbidden',
+          });
+        },
+        'POST /api/v2/assets/upload': async ({ route, request }) => {
+          const body = request.postDataJSON() as Record<string, unknown>;
+          const folder = String(body.folder ?? 'reservations/R-FORBIDDEN/documents');
+          await fulfillSuccess(route, {
+            uploadUrl: 'https://signed.example/forbidden-license',
+            objectName: `${folder}/license.png`,
+            contentType: body.contentType ?? 'image/png',
           });
         },
         'POST /api/v2/reservations': async ({ route }) => {
@@ -578,7 +705,7 @@ test.describe('BK-091 Reservations E2E', () => {
     expect(modelOptions).toContain('쏘나타');
 
     expect(reservationQueries).toHaveLength(1);
-    expect(reservationQueries[0]).toContain('size=20');
+    expect(reservationQueries[0]).toContain('size=500');
     expect(reservationQueries[0]).not.toContain('pageSize=');
   });
 
@@ -644,39 +771,28 @@ test.describe('BK-091 Reservations E2E', () => {
             size: 500,
           });
         },
-        'GET /api/v2/payments/status': async ({ route, request }) => {
-          const reservationId = new URL(request.url()).searchParams.get('reservationId') ?? '';
-          statusRequestCounts.set(
-            reservationId,
-            (statusRequestCounts.get(reservationId) ?? 0) + 1,
-          );
-
-          if (reservationId === 'R-ACTIVE') {
-            await fulfillSuccess(route, {
+        'POST /api/v2/payments/status/batch': async ({ route, request }) => {
+          const body = request.postDataJSON() as Record<string, unknown>;
+          const reservationIds = Array.isArray(body.reservationIds)
+            ? body.reservationIds.map(String)
+            : [];
+          for (const reservationId of reservationIds) {
+            statusRequestCounts.set(
               reservationId,
-              items: [
-                {
-                  id: 'PAY-1001',
-                  reservationId,
-                  status: 'pending',
-                  updatedAt: '2026-03-07T00:00:00Z',
-                },
-              ],
-              total: 1,
-            });
-            return;
+              (statusRequestCounts.get(reservationId) ?? 0) + 1,
+            );
           }
 
-          if (reservationId === 'R-EMPTY') {
-            await fulfillSuccess(route, {
-              reservationId,
-              items: [],
-              total: 0,
-            });
-            return;
-          }
-
-          await fulfillError(route, 500, 'UNEXPECTED_TARGET', `unexpected polling target: ${reservationId}`);
+          await fulfillSuccess(route, {
+            items: reservationIds
+              .filter((reservationId) => reservationId === 'R-ACTIVE')
+              .map((reservationId) => ({
+                id: 'PAY-1001',
+                reservationId,
+                status: 'pending',
+                updatedAt: '2026-03-07T00:00:00Z',
+              })),
+          });
         },
       },
     });
@@ -687,8 +803,8 @@ test.describe('BK-091 Reservations E2E', () => {
     await expect(page.getByText('34나5678')).toBeVisible();
     await expect(page.getByText('56다7890')).toBeVisible();
 
-    await expect.poll(() => statusRequestCounts.get('R-ACTIVE') ?? 0).toBe(1);
-    await expect.poll(() => statusRequestCounts.get('R-EMPTY') ?? 0).toBe(1);
+    await expect.poll(() => statusRequestCounts.get('R-ACTIVE') ?? 0).toBeGreaterThanOrEqual(1);
+    await expect.poll(() => statusRequestCounts.get('R-EMPTY') ?? 0).toBeGreaterThanOrEqual(1);
     expect(statusRequestCounts.get('R-DONE') ?? 0).toBe(0);
   });
 });

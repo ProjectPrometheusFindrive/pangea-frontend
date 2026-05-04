@@ -5,10 +5,19 @@ import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAx
 
 import { ApiError } from '../../services/api';
 import {
+  getBillingLedger,
+  getBillingLedgerCsv,
+  type BillingLedgerResponse,
+} from '../../services/billing';
+import {
   getRevenueSummary,
   getRevenueTrend,
   type RevenueGranularity,
+  type RevenuePayerType,
+  type RevenuePayerTypeBreakdown,
   type RevenuePaymentMethod,
+  type RevenueRentalTypeBreakdown,
+  type RevenueRentalType,
   type RevenueSummaryBucket,
   type RevenueSummaryResponse,
   type RevenueTrendResponse,
@@ -35,11 +44,14 @@ import {
 import { formatDateKst } from '../utils/dateTimeFormat';
 
 type PeriodPreset = 'last7Days' | 'last30Days' | 'last365Days';
+type RevenueTab = 'summary' | 'ledger';
 
 interface RevenueFilters {
   preset: PeriodPreset;
   granularity: RevenueGranularity;
   companyId: string | null;
+  rentalType: RevenueRentalType | null;
+  payerType: RevenuePayerType | null;
 }
 
 interface RevenueSnapshot {
@@ -87,10 +99,47 @@ function normalizeRevenueGranularity(value: string | null): RevenueGranularity {
     : DEFAULT_REVENUE_GRANULARITY;
 }
 
+function normalizeRevenueRentalType(value: string | null): RevenueRentalType | null {
+  return RENTAL_TYPE_OPTIONS.some((option) => option.value === value) && value !== 'all'
+    ? value as RevenueRentalType
+    : null;
+}
+
+function normalizeRevenuePayerType(value: string | null): RevenuePayerType | null {
+  return PAYER_TYPE_OPTIONS.some((option) => option.value === value) && value !== 'all'
+    ? value as RevenuePayerType
+    : null;
+}
+
 const GRANULARITY_OPTIONS: Array<{ value: RevenueGranularity; label: string }> = [
   { value: 'day', label: '일별' },
   { value: 'week', label: '주별' },
   { value: 'month', label: '월별' },
+];
+
+const RENTAL_TYPE_OPTIONS: Array<{ value: RevenueRentalType | 'all'; label: string }> = [
+  { value: 'all', label: '전체 유형' },
+  { value: 'short_term', label: '단기렌트' },
+  { value: 'long_term', label: '장기렌트' },
+  { value: 'accident_replacement', label: '사고대차' },
+];
+
+const PAYER_TYPE_OPTIONS: Array<{ value: RevenuePayerType | 'all'; label: string }> = [
+  { value: 'all', label: '전체 책임자' },
+  { value: 'customer', label: '고객' },
+  { value: 'insurer', label: '보험사' },
+  { value: 'corporate', label: '법인' },
+  { value: 'repair_shop', label: '정비공장' },
+];
+
+const LEDGER_STATUS_OPTIONS = [
+  { value: 'all', label: '전체 상태' },
+  { value: 'pending', label: '수납 예정' },
+  { value: 'partial', label: '부분 수납' },
+  { value: 'paid', label: '수납 완료' },
+  { value: 'waived', label: '면제' },
+  { value: 'confirmed', label: '확정 수납' },
+  { value: 'needs_confirmation', label: '확인 필요' },
 ];
 
 const EMPTY_TOTALS = {
@@ -204,6 +253,30 @@ function formatPlainNumber(value: number): string {
   return Math.round(value).toLocaleString('ko-KR');
 }
 
+function triggerCsvDownload(filename: string, csv: string): void {
+  const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
+function getRentalTypeLabel(value?: string | null): string {
+  return RENTAL_TYPE_OPTIONS.find((option) => option.value === value)?.label ?? '단기렌트';
+}
+
+function getPayerTypeLabel(value?: string | null): string {
+  return PAYER_TYPE_OPTIONS.find((option) => option.value === value)?.label ?? '고객';
+}
+
+function getLedgerEntryTypeLabel(value?: string | null): string {
+  return value === 'payment' ? '수납' : '청구';
+}
+
 function formatPercent(value: number): string {
   if (!Number.isFinite(value)) {
     return '0%';
@@ -230,6 +303,24 @@ function buildRevenuePaymentMethodSlices(
     count: item.count,
     percentage: toDisplayPercentage(item.percentage),
     tone: tones[index % tones.length],
+  }));
+}
+
+function normalizeRevenueRentalTypeRows(rows: RevenueRentalTypeBreakdown[]) {
+  return rows.map((item) => ({
+    label: getRentalTypeLabel(item.rentalType),
+    amount: item.amount,
+    count: item.count,
+    percentage: toDisplayPercentage(item.percentage),
+  }));
+}
+
+function normalizeRevenuePayerTypeRows(rows: RevenuePayerTypeBreakdown[]) {
+  return rows.map((item) => ({
+    label: getPayerTypeLabel(item.payerType),
+    amount: item.amount,
+    count: item.count,
+    percentage: toDisplayPercentage(item.percentage),
   }));
 }
 
@@ -429,6 +520,14 @@ export default function Revenue() {
   const [refreshErrorKind, setRefreshErrorKind] = useState<PageErrorKind | null>(null);
   const [trendError, setTrendError] = useState<string | null>(null);
   const [isEmpty, setIsEmpty] = useState(false);
+  const [activeTab, setActiveTab] = useState<RevenueTab>('summary');
+  const [ledgerReservationId, setLedgerReservationId] = useState('');
+  const [ledgerVehicleNumber, setLedgerVehicleNumber] = useState('');
+  const [ledgerStatus, setLedgerStatus] = useState('all');
+  const [ledgerData, setLedgerData] = useState<BillingLedgerResponse | null>(null);
+  const [isLedgerLoading, setIsLedgerLoading] = useState(false);
+  const [ledgerError, setLedgerError] = useState<string | null>(null);
+  const [isLedgerCsvDownloading, setIsLedgerCsvDownloading] = useState(false);
 
   const mountedRef = useRef(true);
   const requestSequenceRef = useRef(0);
@@ -448,6 +547,14 @@ export default function Revenue() {
     () => resolveDashboardCompanyScope(searchParams.get('companyId'), user?.companyId, user?.role),
     [searchParams, user?.companyId, user?.role],
   );
+  const selectedRentalType = useMemo(
+    () => normalizeRevenueRentalType(searchParams.get('rentalType')),
+    [searchParams],
+  );
+  const selectedPayerType = useMemo(
+    () => normalizeRevenuePayerType(searchParams.get('payerType')),
+    [searchParams],
+  );
   const isSuperAdmin = shouldShowDashboardCompanySelector(user?.role);
   const effectiveCompanyId = isSuperAdmin && companyOptionsError ? null : selectedCompanyId;
 
@@ -456,6 +563,8 @@ export default function Revenue() {
       preset?: string | null;
       granularity?: string | null;
       companyId?: string | null;
+      rentalType?: string | null;
+      payerType?: string | null;
     },
     replace = false,
   ) => {
@@ -473,6 +582,8 @@ export default function Revenue() {
       preset: selectedPreset,
       granularity: selectedGranularity,
       companyId: selectedCompanyId,
+      rentalType: selectedRentalType,
+      payerType: selectedPayerType,
     });
     if (!nextParams.get('preset')) {
       nextParams.set('preset', selectedPreset);
@@ -486,7 +597,7 @@ export default function Revenue() {
     }
 
     setSearchParams(nextParams, { replace: true });
-  }, [searchParams, selectedCompanyId, selectedGranularity, selectedPreset, setSearchParams]);
+  }, [searchParams, selectedCompanyId, selectedGranularity, selectedPayerType, selectedPreset, selectedRentalType, setSearchParams]);
 
   useEffect(() => {
     if (!isSuperAdmin) {
@@ -572,12 +683,16 @@ export default function Revenue() {
           to,
           granularity: filters.granularity,
           companyId: filters.companyId ?? undefined,
+          rentalType: filters.rentalType ?? undefined,
+          payerType: filters.payerType ?? undefined,
           signal: controller.signal,
         }),
         trendPromise: getRevenueTrend({
           from,
           to,
           companyId: filters.companyId ?? undefined,
+          rentalType: filters.rentalType ?? undefined,
+          payerType: filters.payerType ?? undefined,
           signal: controller.signal,
         }),
         hasPreviousSnapshot: hasSnapshot,
@@ -604,12 +719,16 @@ export default function Revenue() {
             previousSnapshot.filters.preset !== filters.preset
             || previousSnapshot.filters.granularity !== filters.granularity
             || previousSnapshot.filters.companyId !== filters.companyId
+            || previousSnapshot.filters.rentalType !== filters.rentalType
+            || previousSnapshot.filters.payerType !== filters.payerType
           ) {
             skipNextAutoHydrateRef.current = true;
             updateRevenueSearchParams({
               preset: previousSnapshot.filters.preset,
               granularity: previousSnapshot.filters.granularity,
               companyId: previousSnapshot.filters.companyId,
+              rentalType: previousSnapshot.filters.rentalType,
+              payerType: previousSnapshot.filters.payerType,
             }, true);
           }
           setTrendError(previousSnapshot.trendErrorMessage);
@@ -653,12 +772,16 @@ export default function Revenue() {
           previousSnapshot.filters.preset !== filters.preset
           || previousSnapshot.filters.granularity !== filters.granularity
           || previousSnapshot.filters.companyId !== filters.companyId
+          || previousSnapshot.filters.rentalType !== filters.rentalType
+          || previousSnapshot.filters.payerType !== filters.payerType
         ) {
           skipNextAutoHydrateRef.current = true;
           updateRevenueSearchParams({
             preset: previousSnapshot.filters.preset,
             granularity: previousSnapshot.filters.granularity,
             companyId: previousSnapshot.filters.companyId,
+            rentalType: previousSnapshot.filters.rentalType,
+            payerType: previousSnapshot.filters.payerType,
           }, true);
         }
         setTrendError(previousSnapshot.trendErrorMessage);
@@ -688,16 +811,20 @@ export default function Revenue() {
       preset: selectedPreset,
       granularity: selectedGranularity,
       companyId: effectiveCompanyId,
+      rentalType: selectedRentalType,
+      payerType: selectedPayerType,
     });
-  }, [effectiveCompanyId, hydrateRevenue, selectedGranularity, selectedPreset]);
+  }, [effectiveCompanyId, hydrateRevenue, selectedGranularity, selectedPayerType, selectedPreset, selectedRentalType]);
 
   const handleRetry = useCallback(() => {
     void hydrateRevenue({
       preset: selectedPreset,
       granularity: selectedGranularity,
       companyId: effectiveCompanyId,
+      rentalType: selectedRentalType,
+      payerType: selectedPayerType,
     });
-  }, [effectiveCompanyId, hydrateRevenue, selectedGranularity, selectedPreset]);
+  }, [effectiveCompanyId, hydrateRevenue, selectedGranularity, selectedPayerType, selectedPreset, selectedRentalType]);
 
   const handleBlockingErrorAction = useCallback(() => {
     handlePageErrorAction(blockingErrorKind, navigate);
@@ -710,6 +837,8 @@ export default function Revenue() {
   const summaryTotals = snapshot?.summary.totals ?? EMPTY_TOTALS;
   const summaryBuckets = snapshot?.summary.buckets ?? [];
   const summaryPaymentMethods = snapshot?.summary.paymentMethods ?? [];
+  const summaryRentalTypes = snapshot?.summary.rentalTypes ?? [];
+  const summaryPayerTypes = snapshot?.summary.payerTypes ?? [];
   const summaryVehicles = snapshot?.summary.vehicles ?? [];
   const growthRate = useMemo(() => calculateGrowthRate(summaryBuckets), [summaryBuckets]);
   const parityCards = useMemo(
@@ -731,10 +860,71 @@ export default function Revenue() {
     () => buildRevenuePaymentMethodSlices(summaryPaymentMethods),
     [summaryPaymentMethods],
   );
+  const rentalTypeRows = useMemo(
+    () => normalizeRevenueRentalTypeRows(summaryRentalTypes),
+    [summaryRentalTypes],
+  );
+  const payerTypeRows = useMemo(
+    () => normalizeRevenuePayerTypeRows(summaryPayerTypes),
+    [summaryPayerTypes],
+  );
   const modelRows = useMemo(
     () => buildRevenueModelRows(summaryVehicles),
     [summaryVehicles],
   );
+  const ledgerDateRange = useMemo(() => resolveDateRange(selectedPreset), [selectedPreset]);
+
+  const loadLedger = useCallback(async () => {
+    setIsLedgerLoading(true);
+    setLedgerError(null);
+    try {
+      const data = await getBillingLedger({
+        from: ledgerDateRange.from,
+        to: ledgerDateRange.to,
+        reservationId: ledgerReservationId.trim() || undefined,
+        vehicleNumber: ledgerVehicleNumber.trim() || undefined,
+        rentalType: selectedRentalType ?? undefined,
+        payerType: selectedPayerType ?? undefined,
+        status: ledgerStatus === 'all' ? undefined : ledgerStatus,
+        page: 1,
+        pageSize: 200,
+      });
+      setLedgerData(data);
+    } catch (error) {
+      setLedgerData(null);
+      setLedgerError(error instanceof Error ? error.message : '정산 원장을 불러오지 못했습니다.');
+    } finally {
+      setIsLedgerLoading(false);
+    }
+  }, [ledgerDateRange.from, ledgerDateRange.to, ledgerReservationId, ledgerStatus, ledgerVehicleNumber, selectedPayerType, selectedRentalType]);
+
+  useEffect(() => {
+    if (activeTab !== 'ledger') {
+      return;
+    }
+    void loadLedger();
+  }, [activeTab, loadLedger]);
+
+  const handleDownloadLedgerCsv = useCallback(async () => {
+    setIsLedgerCsvDownloading(true);
+    setLedgerError(null);
+    try {
+      const csv = await getBillingLedgerCsv({
+        from: ledgerDateRange.from,
+        to: ledgerDateRange.to,
+        reservationId: ledgerReservationId.trim() || undefined,
+        vehicleNumber: ledgerVehicleNumber.trim() || undefined,
+        rentalType: selectedRentalType ?? undefined,
+        payerType: selectedPayerType ?? undefined,
+        status: ledgerStatus === 'all' ? undefined : ledgerStatus,
+      });
+      triggerCsvDownload(`billing-ledger-${ledgerDateRange.from}-${ledgerDateRange.to}.csv`, csv);
+    } catch (error) {
+      setLedgerError(error instanceof Error ? error.message : '정산 원장 CSV 다운로드에 실패했습니다.');
+    } finally {
+      setIsLedgerCsvDownloading(false);
+    }
+  }, [ledgerDateRange.from, ledgerDateRange.to, ledgerReservationId, ledgerStatus, ledgerVehicleNumber, selectedPayerType, selectedRentalType]);
 
   return (
     <Layout title="매출 요약">
@@ -754,11 +944,70 @@ export default function Revenue() {
             {option.label}
           </button>
         ))}
+        <div className="mx-2 hidden h-6 w-px bg-gray-200 md:block" />
+        <label className="flex items-center gap-2 text-sm font-semibold text-gray-600">
+          집계:
+          <select
+            value={selectedGranularity}
+            onChange={(event) => updateRevenueSearchParams({ granularity: event.target.value })}
+            className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+          >
+            {GRANULARITY_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+        </label>
+        <label className="flex items-center gap-2 text-sm font-semibold text-gray-600">
+          계약유형:
+          <select
+            value={selectedRentalType ?? 'all'}
+            onChange={(event) => updateRevenueSearchParams({
+              rentalType: event.target.value === 'all' ? null : event.target.value,
+            })}
+            className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+          >
+            {RENTAL_TYPE_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+        </label>
+        <label className="flex items-center gap-2 text-sm font-semibold text-gray-600">
+          지급책임자:
+          <select
+            value={selectedPayerType ?? 'all'}
+            onChange={(event) => updateRevenueSearchParams({
+              payerType: event.target.value === 'all' ? null : event.target.value,
+            })}
+            className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+          >
+            {PAYER_TYPE_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+        </label>
+        {isSuperAdmin ? (
+          <label className="flex items-center gap-2 text-sm font-semibold text-gray-600">
+            회사:
+            <select
+              value={selectedCompanyId ?? 'all'}
+              disabled={isCompanyOptionsLoading || companyOptionsError !== null}
+              onChange={(event) => updateRevenueSearchParams({
+                companyId: event.target.value === 'all' ? null : event.target.value,
+              })}
+              className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-gray-50 disabled:text-gray-400"
+            >
+              <option value="all">전체 회사</option>
+              {companyOptions.map((option) => (
+                <option key={option.companyId} value={option.companyId}>{option.name}</option>
+              ))}
+            </select>
+          </label>
+        ) : null}
       </div>
       <PageStateBoundary
         isLoading={isLoading}
         error={blockingError}
-        isEmpty={isEmpty}
+        isEmpty={activeTab === 'summary' && isEmpty}
         errorDescription="매출 데이터를 불러오는 중 문제가 발생했습니다."
         emptyTitle="조회 기간에 매출 데이터가 없습니다"
         emptyDescription="기간을 변경한 뒤 다시 조회해 주세요."
@@ -770,6 +1019,152 @@ export default function Revenue() {
         className="m-4 min-h-[320px]"
       >
         <div className="h-full space-y-4 overflow-auto p-4">
+          <div className="flex flex-wrap items-center gap-2 border-b border-gray-200 pb-3">
+            {([
+              ['summary', '요약'],
+              ['ledger', '정산 원장'],
+            ] as Array<[RevenueTab, string]>).map(([tab, label]) => (
+              <button
+                key={tab}
+                type="button"
+                onClick={() => setActiveTab(tab)}
+                className={`rounded-lg px-3 py-2 text-sm font-semibold ${
+                  activeTab === tab
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {activeTab === 'ledger' ? (
+            <div className="space-y-4">
+              <div className="rounded-xl bg-white p-4 shadow-sm">
+                <div className="flex flex-wrap items-end gap-3">
+                  <label className="flex flex-col gap-1 text-sm font-semibold text-gray-600">
+                    예약번호
+                    <input
+                      value={ledgerReservationId}
+                      onChange={(event) => setLedgerReservationId(event.target.value)}
+                      className="rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                      placeholder="R-..."
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1 text-sm font-semibold text-gray-600">
+                    차량번호
+                    <input
+                      value={ledgerVehicleNumber}
+                      onChange={(event) => setLedgerVehicleNumber(event.target.value)}
+                      className="rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                      placeholder="12가3456"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1 text-sm font-semibold text-gray-600">
+                    상태
+                    <select
+                      value={ledgerStatus}
+                      onChange={(event) => setLedgerStatus(event.target.value)}
+                      className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                    >
+                      {LEDGER_STATUS_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>{option.label}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => void loadLedger()}
+                    disabled={isLedgerLoading}
+                    className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {isLedgerLoading ? '조회 중...' : '정산 원장 조회'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleDownloadLedgerCsv()}
+                    disabled={isLedgerCsvDownloading || isLedgerLoading}
+                    className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {isLedgerCsvDownloading ? '다운로드 중...' : 'CSV 다운로드'}
+                  </button>
+                </div>
+                {ledgerError && (
+                  <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm font-semibold text-red-700">{ledgerError}</p>
+                )}
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-5">
+                {[
+                  ['총 청구', ledgerData?.totals.chargeAmount ?? 0],
+                  ['수납액', ledgerData?.totals.paymentAmount ?? 0],
+                  ['미수액', ledgerData?.totals.remainingAmount ?? 0],
+                  ['청구 건수', ledgerData?.totals.chargeCount ?? 0],
+                  ['수납 건수', ledgerData?.totals.paymentCount ?? 0],
+                ].map(([label, value]) => (
+                  <div key={label} className="rounded-xl bg-white p-4 shadow-sm">
+                    <span className="text-xs font-semibold text-gray-500">{label}</span>
+                    <p className="mt-1 text-lg font-bold text-gray-900">
+                      {typeof value === 'number' && String(label).includes('건수')
+                        ? `${value.toLocaleString('ko-KR')}건`
+                        : formatCurrency(Number(value), summaryTotals.currency)}
+                    </p>
+                  </div>
+                ))}
+              </div>
+
+              <div className="rounded-xl bg-white p-5 shadow-sm">
+                <div className="mb-4 flex items-center justify-between">
+                  <h3 className="text-base font-bold text-gray-900">기간별 정산 원장</h3>
+                  <span className="text-sm text-gray-500">총 {(ledgerData?.total ?? 0).toLocaleString('ko-KR')}건</span>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="min-w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-gray-100 text-left text-gray-500">
+                        <th className="px-3 py-3 font-medium">구분</th>
+                        <th className="px-3 py-3 font-medium">일자</th>
+                        <th className="px-3 py-3 font-medium">예약</th>
+                        <th className="px-3 py-3 font-medium">차량</th>
+                        <th className="px-3 py-3 font-medium">유형</th>
+                        <th className="px-3 py-3 font-medium">청구처</th>
+                        <th className="px-3 py-3 text-right font-medium">금액</th>
+                        <th className="px-3 py-3 text-right font-medium">수납</th>
+                        <th className="px-3 py-3 text-right font-medium">잔액</th>
+                        <th className="px-3 py-3 font-medium">상태</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {ledgerData?.items.length ? (
+                        ledgerData.items.map((item) => (
+                          <tr key={`${item.entryType}-${item.id}`} className="border-b border-gray-50 last:border-b-0">
+                            <td className="px-3 py-3 font-semibold text-gray-900">{getLedgerEntryTypeLabel(item.entryType)}</td>
+                            <td className="px-3 py-3 text-gray-700">{item.eventDate ? formatDateKst(item.eventDate, '-') : '-'}</td>
+                            <td className="px-3 py-3 text-gray-700">{item.reservationId || '-'}</td>
+                            <td className="px-3 py-3 text-gray-700">{item.vehicleNumber || '-'}</td>
+                            <td className="px-3 py-3 text-gray-700">{getRentalTypeLabel(item.rentalType)}</td>
+                            <td className="px-3 py-3 text-gray-700">{getPayerTypeLabel(item.payerType)}</td>
+                            <td className="px-3 py-3 text-right font-semibold text-gray-900">{formatCurrency(item.amount, summaryTotals.currency)}</td>
+                            <td className="px-3 py-3 text-right text-emerald-700">{formatCurrency(item.paidAmount, summaryTotals.currency)}</td>
+                            <td className="px-3 py-3 text-right text-red-600">{formatCurrency(item.remainingAmount, summaryTotals.currency)}</td>
+                            <td className="px-3 py-3 text-gray-700">{item.status || '-'}</td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td colSpan={10} className="px-3 py-8 text-center text-gray-500">
+                            조회 기간에 정산 원장 데이터가 없습니다
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
             {parityCards.map((card) => (
               <div key={card.key} className="rounded-xl bg-white p-5 shadow-sm">
@@ -886,6 +1281,52 @@ export default function Revenue() {
             </div>
           </div>
 
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <div className="rounded-xl bg-white p-5 shadow-sm">
+              <h3 className="mb-4 text-base font-bold text-gray-900">렌트 유형별 매출</h3>
+              <div className="space-y-3">
+                {rentalTypeRows.length > 0 ? (
+                  rentalTypeRows.map((row) => (
+                    <div key={row.label} className="space-y-1">
+                      <div className="flex items-center justify-between text-sm font-medium text-gray-700">
+                        <span>{row.label}</span>
+                        <span>{formatPercent(row.percentage)}</span>
+                      </div>
+                      <div className="h-2 rounded-full bg-gray-100">
+                        <div className="h-2 rounded-full bg-indigo-500" style={{ width: `${row.percentage}%` }} />
+                      </div>
+                      <p className="text-sm text-gray-500">{formatWanCurrency(row.amount)} · {row.count.toLocaleString('ko-KR')}건</p>
+                    </div>
+                  ))
+                ) : (
+                  <p className="rounded-lg bg-gray-50 px-3 py-4 text-center text-sm text-gray-500">렌트 유형별 매출 데이터가 없습니다</p>
+                )}
+              </div>
+            </div>
+
+            <div className="rounded-xl bg-white p-5 shadow-sm">
+              <h3 className="mb-4 text-base font-bold text-gray-900">청구 주체별 매출</h3>
+              <div className="space-y-3">
+                {payerTypeRows.length > 0 ? (
+                  payerTypeRows.map((row) => (
+                    <div key={row.label} className="space-y-1">
+                      <div className="flex items-center justify-between text-sm font-medium text-gray-700">
+                        <span>{row.label}</span>
+                        <span>{formatPercent(row.percentage)}</span>
+                      </div>
+                      <div className="h-2 rounded-full bg-gray-100">
+                        <div className="h-2 rounded-full bg-emerald-500" style={{ width: `${row.percentage}%` }} />
+                      </div>
+                      <p className="text-sm text-gray-500">{formatWanCurrency(row.amount)} · {row.count.toLocaleString('ko-KR')}건</p>
+                    </div>
+                  ))
+                ) : (
+                  <p className="rounded-lg bg-gray-50 px-3 py-4 text-center text-sm text-gray-500">청구 주체별 매출 데이터가 없습니다</p>
+                )}
+              </div>
+            </div>
+          </div>
+
           <div className="rounded-xl bg-white p-5 shadow-sm">
             <h3 className="mb-4 text-base font-bold text-gray-900">차종별 매출 현황</h3>
             <div className="overflow-x-auto">
@@ -923,6 +1364,8 @@ export default function Revenue() {
               </table>
             </div>
           </div>
+            </>
+          )}
         </div>
       </PageStateBoundary>
     </Layout>
