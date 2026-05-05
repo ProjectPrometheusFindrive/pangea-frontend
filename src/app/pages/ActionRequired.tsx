@@ -1,7 +1,7 @@
 import { Layout } from '../components/Layout';
 import { useSearchParams, useNavigate } from 'react-router';
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { Search, X, ArrowUp, ArrowDown, Clock, User, CheckCircle2, Loader2, AlertTriangle, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Search, X, ArrowUp, ArrowDown, Clock, User, CheckCircle2, Loader2, AlertTriangle, ChevronLeft, ChevronRight, Calendar, DollarSign, Car, Info, Activity } from 'lucide-react';
 import { PageStateBoundary } from '../components/PageStateBoundary';
 import {
   getCollectionFromPayload,
@@ -14,7 +14,7 @@ import { useAuth } from '../context/AuthContext';
 import { useAuthorization } from '../context/AuthorizationContext';
 import { ACTION_PERMISSIONS, ROUTE_PERMISSIONS } from '../authorization';
 import { ApiError } from '../../services/api';
-import { getAssetsList, patchAsset } from '../../services/assets';
+import { getAssetDetail, getAssetsList, patchAsset } from '../../services/assets';
 import { signAssetUpload, uploadFileToSignedUrl } from '../../services/assetOcr';
 import {
   getActionRequiredDetail,
@@ -57,6 +57,15 @@ import {
   normalizeActionMainCategory,
   normalizeActionSubCategory,
 } from '../utils/actionItemTaxonomy';
+import {
+  type ActionItemWorkChargeItem,
+  type ActionItemWorkContext,
+  WorkContextPanel,
+  isRefundChargeItem,
+  isWorkChargeSettled,
+  toWorkChargeItems,
+  toWorkContext,
+} from './action-required/workContext';
 
 type ActionStatusCode = 'pending' | 'in-progress' | 'resolved';
 
@@ -94,6 +103,7 @@ interface ActionItem {
   description?: string;
   memos?: MemoLog[];
   documentDetails?: ActionDocumentDetail[];
+  workContext?: ActionItemWorkContext;
   paymentInfo?: {
     paymentId?: string;
     reservationId?: string;
@@ -155,6 +165,7 @@ interface AssigneeOption {
 
 type LateReturnResolveDialogState = 'confirm-returned' | 'return-required' | null;
 type PaymentIssueResolveDialogState = 'choose-payment-resolution' | null;
+type RelatedContextPanelKind = 'reservation' | 'asset' | 'billing' | 'claim';
 
 type IssueAssetKind = 'insurance' | 'inspection';
 
@@ -579,6 +590,447 @@ function unwrapApiData(payload: unknown): unknown {
   return payload;
 }
 
+function unwrapDetailRecord(payload: unknown): Record<string, unknown> {
+  const source = unwrapApiData(payload);
+  if (isRecord(source) && isRecord(source.item)) {
+    return source.item;
+  }
+  if (isRecord(source) && isRecord(source.reservation)) {
+    return source.reservation;
+  }
+  if (isRecord(source) && isRecord(source.asset)) {
+    return source.asset;
+  }
+  return isRecord(source) ? source : {};
+}
+
+function formatCurrencyValue(value: unknown): string {
+  const amount = toNumberValue(value) ?? 0;
+  return `${Math.trunc(amount).toLocaleString()}원`;
+}
+
+function formatRelatedDate(value: unknown): string {
+  const text = toStringValue(value);
+  return text ? formatActionDate(text) : '-';
+}
+
+function getRelatedStatusLabel(value: unknown): string {
+  const status = toStringValue(value);
+  switch (status) {
+    case 'paid':
+      return '수납 완료';
+    case 'waived':
+      return '면제';
+    case 'refunded':
+      return '환불 완료';
+    case 'refund_due':
+      return '환불 필요';
+    case 'overdue':
+      return '연체';
+    case 'partial':
+      return '일부 정리';
+    case 'pending':
+      return '처리 대기';
+    case 'submitted':
+      return '청구 제출';
+    case 'recognized':
+      return '보험금 인정';
+    case 'approved':
+      return '승인';
+    case 'rejected':
+      return '반려';
+    default:
+      return status ?? '-';
+  }
+}
+
+function getRelatedChargeTypeLabel(value: unknown): string {
+  const chargeType = toStringValue(value);
+  switch (chargeType) {
+    case 'additional_fee':
+      return '추가요금';
+    case 'late_fee':
+      return '지연료';
+    case 'monthly_fee':
+      return '월 렌트료';
+    case 'deductible':
+      return '고객부담금';
+    case 'difference':
+      return '대차료 차액';
+    case 'refund':
+      return '환불';
+    case 'rental_fee':
+      return '대여료';
+    default:
+      return chargeType ?? '청구 항목';
+  }
+}
+
+function RelatedInfoRow({ label, value }: { label: string; value: unknown }) {
+  const formatted = typeof value === 'number'
+    ? value.toLocaleString()
+    : toStringValue(value) ?? '-';
+  return (
+    <div>
+      <p className="text-xs font-semibold text-gray-500">{label}</p>
+      <p className="mt-1 break-words text-sm font-semibold text-gray-900">{formatted}</p>
+    </div>
+  );
+}
+
+function RelatedContextDrawer({
+  kind,
+  payload,
+  isLoading,
+  error,
+  onClose,
+}: {
+  kind: RelatedContextPanelKind;
+  payload: unknown;
+  isLoading: boolean;
+  error: string | null;
+  onClose: () => void;
+}) {
+  const [detailTab, setDetailTab] = useState<'reservation' | 'payment' | 'vehicle' | 'info' | 'history' | 'sensor'>(
+    kind === 'asset' ? 'info' : 'reservation',
+  );
+  const title = {
+    reservation: '예약 상세',
+    asset: '차량 상세',
+    billing: '청구 원장',
+    claim: '보험청구 상세',
+  }[kind];
+  const row = unwrapDetailRecord(payload);
+  const billingChargeItems = isRecord(payload) && Array.isArray(payload.chargeItems)
+    ? payload.chargeItems.filter((item): item is ActionItemWorkChargeItem => isRecord(item))
+    : [];
+  const billingPaymentInfo = isRecord(payload) && isRecord(payload.paymentInfo) ? payload.paymentInfo : {};
+  const reservationBillingSummary = isRecord(row.billingSummary) ? row.billingSummary : {};
+  const reservationChargeItems = Array.isArray(row.chargeItemsPreview)
+    ? row.chargeItemsPreview.filter(isRecord)
+    : Array.isArray(reservationBillingSummary.chargeItems)
+      ? reservationBillingSummary.chargeItems.filter(isRecord)
+      : [];
+  const reservationPaymentRecords = Array.isArray(reservationBillingSummary.paymentRecords)
+    ? reservationBillingSummary.paymentRecords.filter(isRecord)
+    : [];
+  const reservationAccidentClaim = isRecord(row.accidentClaim) ? row.accidentClaim : null;
+
+  if (kind === 'reservation' || kind === 'asset') {
+    const modalTitle = kind === 'reservation' ? '예약 상세 정보' : '차량 상세 정보';
+    return (
+      <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50">
+        <div className="flex max-h-[85vh] w-[900px] max-w-[92vw] flex-col rounded-xl bg-white shadow-2xl">
+          <div className="border-b border-gray-200 p-6">
+            <div className="flex items-center justify-between">
+              <h3 className="text-xl font-bold text-[#1e2939]">{modalTitle}</h3>
+              <button type="button" onClick={onClose} className="rounded-lg p-2 hover:bg-gray-100" aria-label={`${modalTitle} 닫기`}>
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {kind === 'reservation' ? (
+              <div className="mt-4 flex gap-1 border-b border-gray-200">
+                {[
+                  { key: 'reservation', label: '예약 정보', icon: Calendar },
+                  { key: 'payment', label: '결제 정보', icon: DollarSign },
+                  { key: 'vehicle', label: '차량 정보', icon: Car },
+                ].map((entry) => {
+                  const Icon = entry.icon;
+                  return (
+                    <button
+                      key={entry.key}
+                      type="button"
+                      onClick={() => setDetailTab(entry.key as typeof detailTab)}
+                      className={`relative px-4 py-2 text-sm font-medium transition-colors ${
+                        detailTab === entry.key ? 'text-blue-600' : 'text-gray-500 hover:text-gray-700'
+                      }`}
+                    >
+                      <Icon className="mr-2 inline h-4 w-4" />
+                      {entry.label}
+                      {detailTab === entry.key && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="mt-4 flex gap-1 border-b border-gray-200">
+                {[
+                  { key: 'info', label: '기본 정보', icon: Info },
+                  { key: 'history', label: '예약 히스토리', icon: Clock },
+                  { key: 'sensor', label: '차량 이상 히스토리', icon: Activity },
+                ].map((entry) => {
+                  const Icon = entry.icon;
+                  return (
+                    <button
+                      key={entry.key}
+                      type="button"
+                      onClick={() => setDetailTab(entry.key as typeof detailTab)}
+                      className={`relative flex items-center gap-2 px-4 py-2 text-sm font-medium transition-colors ${
+                        detailTab === entry.key ? 'text-blue-600' : 'text-gray-600 hover:text-gray-900'
+                      }`}
+                    >
+                      <Icon className="h-4 w-4" />
+                      {entry.label}
+                      {detailTab === entry.key && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            {isLoading && (
+              <div className="mt-4 flex items-center gap-2 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-sm text-blue-700">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                상세 데이터를 불러오는 중입니다.
+              </div>
+            )}
+            {error && (
+              <div className="mt-4 flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>{error}</span>
+              </div>
+            )}
+          </div>
+
+          <div className="flex-1 overflow-y-auto p-6">
+            {!isLoading && !error && kind === 'reservation' && detailTab === 'reservation' && (
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <RelatedInfoRow label="예약번호" value={pickString(row, ['id', 'reservationId', 'rentalId'])} />
+                  <RelatedInfoRow label="고객명" value={pickString(row, ['customerName', 'customer', 'name'])} />
+                  <RelatedInfoRow label="연락처" value={pickString(row, ['phone', 'customerPhone'])} />
+                  <RelatedInfoRow label="예약 유형" value={getRelatedStatusLabel(row.contractStatus ?? row.status ?? row.type)} />
+                  <RelatedInfoRow label="차량번호" value={pickString(row, ['vehicleNumber', 'plate'])} />
+                  <RelatedInfoRow label="대여 유형" value={pickString(row, ['rentalType'])} />
+                  <RelatedInfoRow label="대여 시작일" value={formatRelatedDate(row.startAt ?? row.startDateFull ?? row.startDate ?? row.rentalStartAt)} />
+                  <RelatedInfoRow label="대여 종료일" value={formatRelatedDate(row.endAt ?? row.endDateFull ?? row.endDate ?? row.rentalEndAt)} />
+                </div>
+                {Array.isArray(row.issues) && row.issues.length > 0 && (
+                  <div>
+                    <p className="mb-2 text-xs font-semibold uppercase text-gray-500">이슈</p>
+                    <div className="flex flex-wrap gap-2">
+                      {row.issues.map((issue, index) => (
+                        <span key={`${String(issue)}-${index}`} className="rounded-lg bg-red-100 px-3 py-2 text-sm font-medium text-red-700">
+                          {toStringValue(issue) ?? '-'}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {!isLoading && !error && kind === 'reservation' && detailTab === 'payment' && (
+              <div className="space-y-4">
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                  <RelatedInfoRow label="대여 요금" value={formatCurrencyValue(row.amount)} />
+                  <RelatedInfoRow label="선금" value={formatCurrencyValue(row.deposit)} />
+                  <RelatedInfoRow label="결제 상태" value={getRelatedStatusLabel(row.paymentSummaryStatus ?? reservationBillingSummary.paymentSummaryStatus)} />
+                </div>
+                <div className="rounded-lg border border-gray-200 bg-white p-4">
+                  <p className="text-xs font-semibold uppercase text-gray-500">청구/수납 요약</p>
+                  <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-4">
+                    <RelatedInfoRow label="총 청구" value={formatCurrencyValue(reservationBillingSummary.totalAmount)} />
+                    <RelatedInfoRow label="수납 완료" value={formatCurrencyValue(reservationBillingSummary.paidAmount)} />
+                    <RelatedInfoRow label="잔액" value={formatCurrencyValue(reservationBillingSummary.remainingAmount)} />
+                    <RelatedInfoRow label="확인 필요" value={reservationBillingSummary.confirmationNeededCount ?? 0} />
+                  </div>
+                </div>
+                {reservationChargeItems.length > 0 && (
+                  <div className="overflow-x-auto rounded-md border border-gray-200">
+                    <div className="min-w-[680px]">
+                      <div className="grid grid-cols-[1.2fr_0.8fr_1fr_1fr_0.9fr] bg-gray-50 px-3 py-2 text-xs font-semibold text-gray-500">
+                        <span>항목</span>
+                        <span>청구처</span>
+                        <span className="text-right">청구액</span>
+                        <span className="text-right">잔액</span>
+                        <span className="text-right">상태</span>
+                      </div>
+                      {reservationChargeItems.map((item, index) => (
+                        <div key={pickString(item, ['id']) ?? index} className="grid grid-cols-[1.2fr_0.8fr_1fr_1fr_0.9fr] border-t border-gray-100 px-3 py-2 text-sm text-gray-800">
+                          <span className="truncate font-medium">{getRelatedChargeTypeLabel(item.chargeType)}</span>
+                          <span className="truncate text-gray-600">{pickString(item, ['payerType']) ?? '-'}</span>
+                          <span className="text-right font-semibold">{formatCurrencyValue(item.amount)}</span>
+                          <span className="text-right font-semibold text-red-600">{formatCurrencyValue(item.remainingAmount)}</span>
+                          <span className="text-right text-gray-600">{getRelatedStatusLabel(item.status)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {reservationPaymentRecords.length > 0 && (
+                  <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm text-gray-700">
+                    수납 이력 {reservationPaymentRecords.length}건이 연결되어 있습니다.
+                  </div>
+                )}
+                {reservationAccidentClaim && (
+                  <div className="rounded-lg border border-indigo-100 bg-indigo-50 p-4">
+                    <p className="text-xs font-semibold text-indigo-700">사고대차 보험청구</p>
+                    <div className="mt-3 grid grid-cols-2 gap-3">
+                      <RelatedInfoRow label="접수번호" value={pickString(reservationAccidentClaim, ['claimNo'])} />
+                      <RelatedInfoRow label="보험사" value={pickString(reservationAccidentClaim, ['insurerName'])} />
+                      <RelatedInfoRow label="청구액" value={formatCurrencyValue(reservationAccidentClaim.billedAmount)} />
+                      <RelatedInfoRow label="차액" value={formatCurrencyValue(reservationAccidentClaim.differenceAmount)} />
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {!isLoading && !error && kind === 'reservation' && detailTab === 'vehicle' && (
+              <div className="grid grid-cols-2 gap-4">
+                <RelatedInfoRow label="차량번호" value={pickString(row, ['vehicleNumber', 'plate'])} />
+                <RelatedInfoRow label="차대번호" value={pickString(row, ['vin'])} />
+                <RelatedInfoRow label="대여 시작일" value={formatRelatedDate(row.startAt ?? row.startDateFull ?? row.startDate)} />
+                <RelatedInfoRow label="대여 종료일" value={formatRelatedDate(row.endAt ?? row.endDateFull ?? row.endDate)} />
+              </div>
+            )}
+
+            {!isLoading && !error && kind === 'asset' && detailTab === 'info' && (
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <RelatedInfoRow label="차량번호" value={pickString(row, ['vehicleNumber', 'plate'])} />
+                  <RelatedInfoRow label="차종" value={pickString(row, ['model'])} />
+                  <RelatedInfoRow label="연식" value={pickString(row, ['year'])} />
+                  <RelatedInfoRow label="차대번호" value={pickString(row, ['vin'])} />
+                  <RelatedInfoRow label="현재 상태" value={pickString(row, ['status', 'contractStatus'])} />
+                  <RelatedInfoRow label="소유주" value={pickString(row, ['owner'])} />
+                  <RelatedInfoRow label="보험만료일" value={pickString(row, ['insuranceExpiry', 'insuranceExpiryDate'])} />
+                  <RelatedInfoRow label="다음 정기점검일" value={pickString(row, ['nextInspection', 'nextInspectionDate'])} />
+                </div>
+                <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm text-gray-600">
+                  문서 수정과 저장 기능은 차량 자산 상세 페이지와 동일한 controller 공통화 후 활성화됩니다.
+                </div>
+              </div>
+            )}
+
+            {!isLoading && !error && kind === 'asset' && detailTab === 'history' && (
+              <div className="py-12 text-center text-gray-400">
+                <Clock className="mx-auto mb-3 h-12 w-12 opacity-30" />
+                <p className="text-sm">이 차량의 활동 이력은 차량 자산 상세 controller 공통화 후 표시됩니다.</p>
+              </div>
+            )}
+
+            {!isLoading && !error && kind === 'asset' && detailTab === 'sensor' && (
+              <div className="rounded-lg border border-purple-200 bg-purple-50 p-6">
+                <p className="font-bold text-purple-800">차량 이상 히스토리</p>
+                <p className="mt-2 text-sm text-purple-700">단말/센서 상세 이력은 차량 자산 상세 controller 공통화 후 표시됩니다.</p>
+              </div>
+            )}
+          </div>
+
+          <div className="border-t border-gray-200 p-6">
+            <button type="button" onClick={onClose} className="w-full rounded-lg bg-gray-100 px-4 py-3 font-medium text-gray-700 hover:bg-gray-200">
+              닫기
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="fixed inset-0 z-[70] flex justify-end bg-black/30">
+      <div className="h-full w-[460px] max-w-[92vw] overflow-y-auto bg-white shadow-2xl">
+        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-gray-200 bg-white px-5 py-4">
+          <h3 className="text-lg font-bold text-[#1e2939]">{title}</h3>
+          <button type="button" onClick={onClose} className="rounded-lg p-2 hover:bg-gray-100" aria-label={`${title} 닫기`}>
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+        <div className="space-y-4 p-5">
+          {isLoading && (
+            <div className="flex items-center gap-2 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-sm text-blue-700">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              상세 정보를 불러오는 중입니다.
+            </div>
+          )}
+          {error && (
+            <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>{error}</span>
+            </div>
+          )}
+          {!isLoading && !error && kind === 'reservation' && (
+            <div className="grid grid-cols-2 gap-4">
+              <RelatedInfoRow label="고객명" value={pickString(row, ['customerName', 'customer', 'name'])} />
+              <RelatedInfoRow label="차량번호" value={pickString(row, ['vehicleNumber', 'plate'])} />
+              <RelatedInfoRow label="대여 시작" value={formatRelatedDate(row.startAt ?? row.startDate ?? row.rentalStartAt)} />
+              <RelatedInfoRow label="대여 종료" value={formatRelatedDate(row.endAt ?? row.endDate ?? row.rentalEndAt)} />
+              <RelatedInfoRow label="예약 상태" value={pickString(row, ['status', 'contractStatus', 'type'])} />
+              <RelatedInfoRow label="대여 유형" value={pickString(row, ['rentalType'])} />
+            </div>
+          )}
+          {!isLoading && !error && kind === 'asset' && (
+            <div className="grid grid-cols-2 gap-4">
+              <RelatedInfoRow label="차량번호" value={pickString(row, ['vehicleNumber', 'plate'])} />
+              <RelatedInfoRow label="모델" value={pickString(row, ['model'])} />
+              <RelatedInfoRow label="차고지" value={pickString(row, ['garage', 'location'])} />
+              <RelatedInfoRow label="상태" value={pickString(row, ['status', 'contractStatus'])} />
+              <RelatedInfoRow label="보험 만료일" value={pickString(row, ['insuranceExpiry', 'insuranceExpiryDate'])} />
+              <RelatedInfoRow label="다음 점검일" value={pickString(row, ['nextInspection', 'nextInspectionDate'])} />
+              <RelatedInfoRow label="차대번호" value={pickString(row, ['vin'])} />
+              <RelatedInfoRow label="단말 상태" value={pickString(row, ['terminalStatus', 'terminalInstallationStatus', 'deviceStatus'])} />
+            </div>
+          )}
+          {!isLoading && !error && kind === 'claim' && (
+            <div className="grid grid-cols-2 gap-4">
+              <RelatedInfoRow label="접수번호" value={pickString(row, ['claimNo', 'claimNumber'])} />
+              <RelatedInfoRow label="보험사" value={pickString(row, ['insurerName', 'insuranceCompany'])} />
+              <RelatedInfoRow label="정비공장" value={pickString(row, ['repairShopName', 'garageName'])} />
+              <RelatedInfoRow label="청구 상태" value={getRelatedStatusLabel(row.claimStatus)} />
+              <RelatedInfoRow label="승인 상태" value={getRelatedStatusLabel(row.approvalStatus)} />
+              <RelatedInfoRow label="문서 상태" value={getRelatedStatusLabel(row.documentStatus)} />
+              <RelatedInfoRow label="청구액" value={formatCurrencyValue(row.billedAmount)} />
+              <RelatedInfoRow label="인정액" value={formatCurrencyValue(row.recognizedAmount)} />
+              <RelatedInfoRow label="차액" value={formatCurrencyValue(row.differenceAmount)} />
+              <RelatedInfoRow label="차액 부담" value={pickString(row, ['differencePayerType'])} />
+            </div>
+          )}
+          {!isLoading && !error && kind === 'billing' && (
+            <div className="space-y-4">
+              {Object.keys(billingPaymentInfo).length > 0 && (
+                <div className="grid grid-cols-2 gap-4 rounded-lg border border-gray-200 bg-gray-50 p-4">
+                  <RelatedInfoRow label="총 금액" value={formatCurrencyValue(billingPaymentInfo.totalAmount ?? billingPaymentInfo.amount)} />
+                  <RelatedInfoRow label="기존 미납" value={formatCurrencyValue(billingPaymentInfo.principalAmount)} />
+                  <RelatedInfoRow label="추가 금액" value={formatCurrencyValue(billingPaymentInfo.additionalAmount)} />
+                  <RelatedInfoRow label="상태" value={getRelatedStatusLabel(billingPaymentInfo.status ?? billingPaymentInfo.statusLabel)} />
+                </div>
+              )}
+              {billingChargeItems.length > 0 ? (
+                <div className="space-y-2">
+                  {billingChargeItems.map((charge) => (
+                    <div key={charge.id} className="rounded-lg border border-gray-200 bg-white px-3 py-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-bold text-gray-900">{charge.description || getRelatedChargeTypeLabel(charge.chargeType)}</p>
+                          <p className="mt-1 text-xs text-gray-500">
+                            {getRelatedStatusLabel(charge.status)}
+                            {charge.dueDate ? ` · 기한 ${charge.dueDate}` : ''}
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-sm font-bold text-gray-900">{formatCurrencyValue(charge.amount)}</p>
+                          <p className="text-xs font-semibold text-red-600">잔액 {formatCurrencyValue(charge.remainingAmount)}</p>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-3 text-sm text-gray-600">
+                  연결된 청구/환불 항목이 없습니다.
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function toAccidentClaimDraft(payload: unknown): AccidentClaimDraft {
   const row = unwrapApiData(payload);
   const source = isRecord(row) ? row : {};
@@ -820,7 +1272,11 @@ function normalizeMemoStatus(rawValue: string | null): MemoLog['status'] {
 function toActionWriteError(kind: ActionWriteKind, error: unknown): ActionWriteErrorState {
   if (error instanceof ApiError) {
     const fields = error.fields?.map((field) => ({
-      name: typeof field.name === 'string' ? field.name : undefined,
+      name: typeof field.label === 'string'
+        ? field.label
+        : typeof field.name === 'string'
+          ? field.name
+          : undefined,
       reason: typeof field.reason === 'string' ? field.reason : undefined,
     }));
     if (error.status === 400) {
@@ -1099,6 +1555,7 @@ function toActionItem(row: unknown, index: number, fallbackId?: string): ActionI
 
   const id = pickString(row, ['id', 'actionId', 'actionItemId', 'paymentId']) ?? fallbackId ?? `action-${index + 1}`;
   const paymentInfo = toPaymentInfo(row);
+  const workContext = toWorkContext(row);
   const reservationId = pickString(row, ['reservationId', 'rentalId']) ?? paymentInfo?.reservationId;
   const paymentId = pickString(row, ['paymentId']) ?? paymentInfo?.paymentId;
   const type = normalizeActionItemType(
@@ -1143,6 +1600,7 @@ function toActionItem(row: unknown, index: number, fallbackId?: string): ActionI
     paymentId: paymentId ?? undefined,
     description: pickString(row, ['description', 'detail']),
     memos: memos.length > 0 ? memos : undefined,
+    workContext,
     paymentInfo,
   };
 }
@@ -1237,6 +1695,7 @@ function toActionItemDetail(payload: unknown, fallbackItem: ActionItem): ActionI
         ...fallbackItem,
         ...detailItem,
         paymentInfo: detailItem.paymentInfo ?? fallbackItem.paymentInfo,
+        workContext: detailItem.workContext ?? fallbackItem.workContext,
         memos: detailItem.memos ?? fallbackItem.memos,
       };
     }
@@ -1248,6 +1707,7 @@ function toActionItemDetail(payload: unknown, fallbackItem: ActionItem): ActionI
       ...fallbackItem,
       ...detailItem,
       paymentInfo: detailItem.paymentInfo ?? fallbackItem.paymentInfo,
+      workContext: detailItem.workContext ?? fallbackItem.workContext,
       memos: detailItem.memos ?? fallbackItem.memos,
     };
   }
@@ -1296,10 +1756,20 @@ export default function ActionRequired() {
   const [paymentAmountDraft, setPaymentAmountDraft] = useState('');
   const [paymentTypeDraft, setPaymentTypeDraft] = useState<'카드' | '현금' | '계좌이체'>('카드');
   const [paymentEvidenceFile, setPaymentEvidenceFile] = useState<File | null>(null);
+  const [refundAmountDraft, setRefundAmountDraft] = useState('');
+  const [refundMethodDraft, setRefundMethodDraft] = useState('계좌이체');
+  const [refundCompletedAtDraft, setRefundCompletedAtDraft] = useState(toDateInputValue(new Date().toISOString()));
+  const [refundMemoDraft, setRefundMemoDraft] = useState('');
+  const [refundEvidenceFile, setRefundEvidenceFile] = useState<File | null>(null);
   const [isPaymentAmountSaving, setIsPaymentAmountSaving] = useState(false);
   const [isPaymentTypeSaving, setIsPaymentTypeSaving] = useState(false);
   const [isPaymentInfoRefreshing, setIsPaymentInfoRefreshing] = useState(false);
   const [isDomainActionSaving, setIsDomainActionSaving] = useState(false);
+  const [isWorkActionSaving, setIsWorkActionSaving] = useState(false);
+  const [relatedContextKind, setRelatedContextKind] = useState<RelatedContextPanelKind | null>(null);
+  const [relatedContextPayload, setRelatedContextPayload] = useState<unknown>(null);
+  const [relatedContextError, setRelatedContextError] = useState<string | null>(null);
+  const [isRelatedContextLoading, setIsRelatedContextLoading] = useState(false);
 
   const [isDetailLoading, setIsDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
@@ -1370,7 +1840,7 @@ export default function ActionRequired() {
   const detailControllerRef = useRef<AbortController | null>(null);
   const retryActionRef = useRef<(() => Promise<void>) | null>(null);
 
-  const isWriteSaving = isStatusSaving || isMemoSaving || isResolveSaving || isAssigneeSaving || isAccidentClaimSaving || isRentalAccidentSaving || isAccidentReplacementDriverSaving || isDomainActionSaving;
+  const isWriteSaving = isStatusSaving || isMemoSaving || isResolveSaving || isAssigneeSaving || isAccidentClaimSaving || isRentalAccidentSaving || isAccidentReplacementDriverSaving || isDomainActionSaving || isWorkActionSaving;
   const selectedItemDescription = selectedItem ? getIssueAssetDescription(selectedItem, issueAsset) : null;
 
   const requestActionItems = useCallback((signal: AbortSignal) => getActionRequiredListAll({
@@ -1443,9 +1913,13 @@ export default function ActionRequired() {
     if (!selectedItem) {
       setLateReturnResolveDialog(null);
       setCurrentAssigneeId('');
-      return;
+    } else {
+      setCurrentAssigneeId(selectedItem.assigneeId ?? '');
     }
-    setCurrentAssigneeId(selectedItem.assigneeId ?? '');
+    setRelatedContextKind(null);
+    setRelatedContextPayload(null);
+    setRelatedContextError(null);
+    setIsRelatedContextLoading(false);
   }, [selectedItem?.id, selectedItem?.assigneeId]);
 
   useEffect(() => {
@@ -1837,17 +2311,105 @@ export default function ActionRequired() {
       setPaymentAmountDraft('');
       setPaymentTypeDraft('카드');
       setPaymentEvidenceFile(null);
+      setRefundAmountDraft('');
+      setRefundMethodDraft('계좌이체');
+      setRefundCompletedAtDraft(toDateInputValue(new Date().toISOString()));
+      setRefundMemoDraft('');
+      setRefundEvidenceFile(null);
       return;
     }
     const amount = selectedItem.paymentInfo?.additionalAmount ?? 0;
     setPaymentAmountDraft(String(Math.max(0, Math.trunc(amount))));
     setPaymentTypeDraft(normalizePaymentType(selectedItem.paymentInfo?.paymentType ?? null));
     setPaymentEvidenceFile(null);
+    const refundCharge = toWorkChargeItems(selectedItem.workContext).find((charge) => isRefundChargeItem(charge));
+    const refundAmount = refundCharge?.remainingAmount || refundCharge?.amount || selectedItem.paymentInfo?.totalAmount || selectedItem.paymentInfo?.amount || 0;
+    setRefundAmountDraft(String(Math.max(0, Math.trunc(refundAmount))));
+    setRefundMethodDraft('계좌이체');
+    setRefundCompletedAtDraft(toDateInputValue(new Date().toISOString()));
+    setRefundMemoDraft('');
+    setRefundEvidenceFile(null);
   }, [selectedItem]);
 
   const isPaymentIssueResolved = isSelectedPaymentIssue
     && selectedItem?.statusCode === 'resolved';
   const canEditPaymentIssueFields = canWritePayments && !isPaymentIssueResolved;
+
+  const closeRelatedContext = useCallback(() => {
+    setRelatedContextKind(null);
+    setRelatedContextPayload(null);
+    setRelatedContextError(null);
+    setIsRelatedContextLoading(false);
+  }, []);
+
+  const openRelatedContext = useCallback(async (kind: RelatedContextPanelKind) => {
+    if (!selectedItem) {
+      return;
+    }
+    setRelatedContextKind(kind);
+    setRelatedContextPayload(null);
+    setRelatedContextError(null);
+
+    if (kind === 'billing') {
+      setRelatedContextPayload({
+        chargeItems: toWorkChargeItems(selectedItem.workContext),
+        paymentInfo: selectedItem.paymentInfo ?? null,
+      });
+      return;
+    }
+
+    setIsRelatedContextLoading(true);
+    try {
+      if (kind === 'reservation') {
+        if (!selectedItem.reservationId) {
+          throw new Error('연결된 예약 정보를 찾을 수 없습니다.');
+        }
+        const payload = await getReservationDetail(selectedItem.reservationId);
+        setRelatedContextPayload(payload);
+        return;
+      }
+
+      if (kind === 'asset') {
+        let assetId = issueAsset?.id ?? '';
+        if (!assetId) {
+          const listPayload = await getAssetsList({
+            page: 1,
+            size: 20,
+            q: selectedItem.vehicleNumber,
+          });
+          const rows = getCollectionFromPayload(listPayload, ['items', 'rows', 'list']) ?? [];
+          const matchedAsset = rows
+            .filter(isRecord)
+            .find((row) => pickVehicleNumber(row) === selectedItem.vehicleNumber);
+          assetId = pickString(matchedAsset ?? {}, ['id', 'vin']) ?? '';
+          if (!assetId && matchedAsset) {
+            setRelatedContextPayload(matchedAsset);
+            return;
+          }
+        }
+        if (!assetId) {
+          throw new Error('연결된 차량 자산을 찾을 수 없습니다.');
+        }
+        const payload = await getAssetDetail(assetId);
+        setRelatedContextPayload(payload);
+        return;
+      }
+
+      if (kind === 'claim') {
+        if (!selectedItem.reservationId) {
+          throw new Error('연결된 예약 정보를 찾을 수 없습니다.');
+        }
+        const payload = await getAccidentClaim(selectedItem.reservationId);
+        setRelatedContextPayload(payload);
+      }
+    } catch (error) {
+      setRelatedContextError(error instanceof ApiError || error instanceof Error
+        ? error.message
+        : '상세 정보를 불러오지 못했습니다.');
+    } finally {
+      setIsRelatedContextLoading(false);
+    }
+  }, [issueAsset, selectedItem]);
 
   const toggleFilter = (filter: ActionIssueFilter) => {
     setPage(1);
@@ -2906,6 +3468,103 @@ export default function ActionRequired() {
     }
   }, [hydrateActionDetail, hydrateActionItems, isDomainActionSaving, selectedItemCapabilities.canUseOperationalDomainActions]);
 
+  const runWorkChargeSettlement = useCallback(async (
+    item: ActionItem,
+    charge: ActionItemWorkChargeItem,
+    mode: 'paid' | 'waived' | 'refunded',
+  ) => {
+    if (!canWritePayments) {
+      setWriteError({
+        kind: 'resolve',
+        message: '권한이 없어 청구/환불 항목을 변경할 수 없습니다.',
+        retryable: false,
+      });
+      return;
+    }
+    const reservationId = getActionItemReservationId(item);
+    if (!reservationId || !charge.id) {
+      setWriteError({
+        kind: 'resolve',
+        message: '연결된 예약 또는 청구 항목을 찾을 수 없습니다.',
+        retryable: false,
+      });
+      return;
+    }
+    const fallbackAmount = Math.max(charge.remainingAmount || charge.amount || 0, 0);
+    const refundAmount = toPaymentAmountFromInput(refundAmountDraft) || fallbackAmount;
+    const amount = mode === 'refunded' ? refundAmount : fallbackAmount;
+    if (amount <= 0 && mode !== 'waived') {
+      setWriteError({
+        kind: 'resolve',
+        message: '처리할 금액을 확인할 수 없습니다.',
+        retryable: false,
+      });
+      return;
+    }
+
+    setIsWorkActionSaving(true);
+    setWriteError(null);
+    setWriteNotice(null);
+    try {
+      if (mode === 'paid') {
+        const evidenceRefs = paymentEvidenceFile
+          ? [await uploadPaymentEvidenceFile(reservationId, paymentEvidenceFile)]
+          : undefined;
+        await createReservationPaymentRecord(reservationId, {
+          amount,
+          method: paymentTypeDraft,
+          payerType: charge.payerType || 'customer',
+          confirmationStatus: 'confirmed',
+          allocations: [{ chargeItemId: charge.id, amount }],
+          evidenceRefs,
+          memo: 'Action Required에서 청구 항목 수납 완료 처리',
+        });
+        setPaymentEvidenceFile(null);
+      } else if (mode === 'refunded') {
+        const evidenceRefs = refundEvidenceFile
+          ? [await uploadPaymentEvidenceFile(reservationId, refundEvidenceFile)]
+          : undefined;
+        await patchChargeItem(charge.id, {
+          status: 'refunded',
+          paidAmount: amount,
+          refundCompletedAt: refundCompletedAtDraft || toDateInputValue(new Date().toISOString()),
+          refundMethod: refundMethodDraft.trim() || '계좌이체',
+          evidenceRefs,
+          memo: refundMemoDraft.trim() || 'Action Required에서 환불 완료 처리',
+        });
+        setRefundEvidenceFile(null);
+      } else {
+        await patchChargeItem(charge.id, {
+          status: 'waived',
+          memo: 'Action Required에서 면제 처리',
+        });
+      }
+      await tryResolveCurrentActionItem(item, {
+        notice: mode === 'refunded'
+          ? '환불 항목을 완료 처리하고 이슈 완료를 시도했습니다.'
+          : '청구 항목을 정리하고 이슈 완료를 시도했습니다.',
+      });
+      await hydrateActionItems();
+      void hydrateActionDetail(item.id, item);
+    } catch (error) {
+      setWriteError(toActionWriteError('resolve', error));
+    } finally {
+      setIsWorkActionSaving(false);
+    }
+  }, [
+    canWritePayments,
+    hydrateActionDetail,
+    hydrateActionItems,
+    paymentEvidenceFile,
+    paymentTypeDraft,
+    refundAmountDraft,
+    refundCompletedAtDraft,
+    refundEvidenceFile,
+    refundMemoDraft,
+    refundMethodDraft,
+    tryResolveCurrentActionItem,
+  ]);
+
   const runAccidentClaimAction = useCallback(async (action: 'save-info' | 'submit' | 'recognize') => {
     if (!selectedItem?.reservationId) {
       setAccidentClaimError('연결된 예약건을 찾을 수 없습니다.');
@@ -2991,6 +3650,75 @@ export default function ActionRequired() {
       setIsAccidentClaimSaving(false);
     }
   }, [accidentClaimDocumentFile, accidentClaimDraft, hydrateActionDetail, hydrateActionItems, selectedItem, selectedItemCapabilities.canUseAccidentClaimActions, tryResolveCurrentActionItem]);
+
+  const handleWorkContextAction = useCallback((actionKey: string, chargeItem?: ActionItemWorkChargeItem) => {
+    if (!selectedItem) {
+      return;
+    }
+    if (chargeItem) {
+      if (actionKey === 'refund_complete') {
+        void runWorkChargeSettlement(selectedItem, chargeItem, 'refunded');
+        return;
+      }
+      if (actionKey === 'charge_paid') {
+        void runWorkChargeSettlement(selectedItem, chargeItem, 'paid');
+        return;
+      }
+      if (actionKey === 'charge_waive') {
+        void runWorkChargeSettlement(selectedItem, chargeItem, 'waived');
+        return;
+      }
+    }
+
+    if (actionKey === 'payment_record_create') {
+      void runPaymentIssueResolution(selectedItem, 'paid');
+      return;
+    }
+    if (actionKey === 'payment_waive') {
+      void runPaymentIssueResolution(selectedItem, 'canceled');
+      return;
+    }
+    if (actionKey === 'refund_complete') {
+      const refundCharge = toWorkChargeItems(selectedItem.workContext).find((charge) => isRefundChargeItem(charge) && !isWorkChargeSettled(charge));
+      if (refundCharge) {
+        void runWorkChargeSettlement(selectedItem, refundCharge, 'refunded');
+      }
+      return;
+    }
+    if (actionKey === 'closeout_settle') {
+      const nextCharge = toWorkChargeItems(selectedItem.workContext).find((charge) => !isWorkChargeSettled(charge));
+      if (nextCharge) {
+        void runWorkChargeSettlement(selectedItem, nextCharge, isRefundChargeItem(nextCharge) ? 'refunded' : 'paid');
+      }
+      return;
+    }
+    if (actionKey === 'return_reservation') {
+      handleLateReturnStatusIntent(selectedItem, 'resolved');
+      return;
+    }
+    if (actionKey === 'status_update') {
+      void runStatusUpdate(selectedItem.id, 'resolved', 'status');
+      return;
+    }
+    if (actionKey === 'accident_claim_submit') {
+      void runAccidentClaimAction('submit');
+      return;
+    }
+    if (actionKey === 'accident_claim_recognize') {
+      void runAccidentClaimAction('recognize');
+      return;
+    }
+    const domainEntry = (OPERATIONAL_DOMAIN_ACTIONS[selectedItem.issueCode ?? ''] ?? []).find((entry) => entry.action === actionKey);
+    if (domainEntry) {
+      void runOperationalDomainAction(selectedItem, domainEntry.action, domainEntry.label);
+    }
+  }, [
+    runAccidentClaimAction,
+    runOperationalDomainAction,
+    runPaymentIssueResolution,
+    runWorkChargeSettlement,
+    selectedItem,
+  ]);
 
   const runRentalAccidentFollowupSave = useCallback(async () => {
     if (!selectedItem?.reservationId) {
@@ -3440,45 +4168,47 @@ export default function ActionRequired() {
                   <p className="text-base text-gray-900 mt-1">{selectedItem.subCategory ?? '-'}</p>
                 </div>
 
-                {selectedItem.relatedChargeItemId && (
+                <div className="grid grid-cols-2 gap-3 rounded-lg border border-gray-200 bg-gray-50 p-3">
                   <div>
-                    <label className="text-sm font-semibold text-gray-600">연결 청구 항목</label>
-                    <p className="text-base text-gray-900 mt-1">{selectedItem.relatedChargeItemId}</p>
+                    <label className="text-xs font-semibold text-gray-500">차량번호</label>
+                    <p className="mt-1 text-sm font-bold text-gray-900">{selectedItem.vehicleNumber}</p>
                   </div>
-                )}
-
-                <div>
-                  <label className="text-sm font-semibold text-gray-600">차량번호</label>
-                  <p className="text-base text-gray-900 mt-1">{selectedItem.vehicleNumber}</p>
-                </div>
-
-                <div>
-                  <label className="text-sm font-semibold text-gray-600">고객명</label>
-                  <p className="text-base text-gray-900 mt-1">{selectedItem.customerName}</p>
-                </div>
-
-                <div>
-                  <label className="text-sm font-semibold text-gray-600">발생일</label>
-                  <p className="text-base text-gray-900 mt-1">{formatActionDateOnly(selectedItem.date)}</p>
-                </div>
-
-                <div>
-                  <label className="text-sm font-semibold text-gray-600">심각도</label>
-                  <p className="text-base text-gray-900 mt-1">
-                    {getDisplayedSeverity(selectedItem) === '-' ? (
-                      <span className="text-sm text-gray-400">-</span>
-                    ) : (
-                      <span className={`px-2 py-1 text-xs font-medium rounded-full ${getSeverityColor(selectedItem.severity)}`}>
-                        {selectedItem.severity}
-                      </span>
-                    )}
-                  </p>
+                  <div>
+                    <label className="text-xs font-semibold text-gray-500">고객명</label>
+                    <p className="mt-1 text-sm font-bold text-gray-900">{selectedItem.customerName}</p>
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-gray-500">발생일</label>
+                    <p className="mt-1 text-sm font-semibold text-gray-900">{formatActionDateOnly(selectedItem.date)}</p>
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-gray-500">심각도</label>
+                    <p className="mt-1">
+                      {getDisplayedSeverity(selectedItem) === '-' ? (
+                        <span className="text-sm text-gray-400">-</span>
+                      ) : (
+                        <span className={`px-2 py-1 text-xs font-medium rounded-full ${getSeverityColor(selectedItem.severity)}`}>
+                          {selectedItem.severity}
+                        </span>
+                      )}
+                    </p>
+                  </div>
                 </div>
 
                 {selectedItemDescription && (
                   <div>
                     <label className="text-sm font-semibold text-gray-600">상세 설명</label>
                     <p className="text-sm text-gray-700 mt-1 whitespace-pre-wrap">{selectedItemDescription}</p>
+                  </div>
+                )}
+
+                {selectedItem.workContext && (
+                  <div className="border-t border-gray-200 pt-4">
+                    <WorkContextPanel
+                      workContext={selectedItem.workContext}
+                      onAction={handleWorkContextAction}
+                      isSaving={isWriteSaving}
+                    />
                   </div>
                 )}
 
@@ -4092,6 +4822,56 @@ export default function ActionRequired() {
                         <span className="text-base font-bold text-gray-900">총 청구금액</span>
                         <span className="text-lg font-bold text-red-600">{selectedItem.paymentInfo.totalAmount.toLocaleString()}원</span>
                       </div>
+                      {selectedItem.workContext?.module === 'payment_deposit_refund' && (
+                        <div className="mt-3 space-y-2 rounded-lg border border-emerald-200 bg-white p-3">
+                          <p className="text-xs font-semibold text-emerald-700">보증금 환불 완료 입력</p>
+                          <div className="grid gap-2 sm:grid-cols-3">
+                            <input
+                              type="text"
+                              value={refundAmountDraft}
+                              onChange={(event) => setRefundAmountDraft(event.target.value.replace(/[^\d]/g, ''))}
+                              placeholder="환불금액"
+                              inputMode="numeric"
+                              disabled={isWriteSaving}
+                              className="rounded-lg border border-emerald-200 px-3 py-2 text-sm"
+                            />
+                            <select
+                              value={refundMethodDraft}
+                              onChange={(event) => setRefundMethodDraft(event.target.value)}
+                              disabled={isWriteSaving}
+                              className="rounded-lg border border-emerald-200 px-3 py-2 text-sm"
+                            >
+                              <option value="계좌이체">계좌이체</option>
+                              <option value="카드취소">카드취소</option>
+                              <option value="현금">현금</option>
+                            </select>
+                            <DateTextPicker
+                              value={refundCompletedAtDraft}
+                              ariaLabel="환불 완료일"
+                              onChange={setRefundCompletedAtDraft}
+                              disabled={isWriteSaving}
+                            />
+                          </div>
+                          <textarea
+                            rows={2}
+                            value={refundMemoDraft}
+                            onChange={(event) => setRefundMemoDraft(event.target.value)}
+                            placeholder="환불 메모"
+                            disabled={isWriteSaving}
+                            className="w-full rounded-lg border border-emerald-200 px-3 py-2 text-sm"
+                          />
+                          <label className="inline-flex cursor-pointer items-center rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-700 hover:bg-emerald-100">
+                            <input
+                              type="file"
+                              accept="image/*,application/pdf"
+                              className="sr-only"
+                              onChange={(event) => setRefundEvidenceFile(event.target.files?.[0] ?? null)}
+                              disabled={isWriteSaving}
+                            />
+                            {refundEvidenceFile ? `환불 증빙: ${refundEvidenceFile.name}` : '환불 증빙 선택 첨부'}
+                          </label>
+                        </div>
+                      )}
                       {canEditPaymentIssueFields && (
                         <div className="mt-2 flex flex-wrap items-center gap-2 pt-2">
                           <label className="inline-flex cursor-pointer items-center rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs font-medium text-gray-700 hover:bg-gray-50">
@@ -4277,35 +5057,76 @@ export default function ActionRequired() {
                   </div>
                 )}
 
-                <div className="pt-4 space-y-2">
-                  <button
-                    className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium"
-                    onClick={() => {
-                      if (!canViewAssets) {
-                        navigate('/forbidden');
-                        return;
-                      }
-                      navigate(`/assets?vehicle=${encodeURIComponent(selectedItem.vehicleNumber)}`);
-                    }}
-                    disabled={!canViewAssets}
-                  >
-                    관련 자산 보기
-                  </button>
-                  <button
-                    className="w-full px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 font-medium"
-                    onClick={() => {
-                      if (!canViewReservations) {
-                        navigate('/forbidden');
-                        return;
-                      }
-                      const reservationSearch = selectedItem.reservationId || selectedItem.customerName;
-                      navigate(`/reservations?search=${encodeURIComponent(reservationSearch)}`);
-                    }}
-                    disabled={!canViewReservations}
-                  >
-                    관련 예약 보기
-                  </button>
+                <div className="border-t border-gray-200 pt-4">
+                  <label className="mb-3 block text-sm font-semibold text-gray-600">관련 데이터</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                      onClick={() => void openRelatedContext('reservation')}
+                      disabled={!canViewReservations || !selectedItem.reservationId}
+                    >
+                      예약 상세 열기
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                      onClick={() => void openRelatedContext('asset')}
+                      disabled={!canViewAssets || !selectedItem.vehicleNumber}
+                    >
+                      차량 상세 열기
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                      onClick={() => void openRelatedContext('billing')}
+                      disabled={!selectedItem.paymentInfo && toWorkChargeItems(selectedItem.workContext).length === 0}
+                    >
+                      청구 원장 열기
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                      onClick={() => void openRelatedContext('claim')}
+                      disabled={!selectedItem.reservationId || !(selectedItem.type === '대차/보험청구' || selectedItem.workContext?.module.startsWith('accident_claim'))}
+                    >
+                      보험청구 상세 열기
+                    </button>
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-2 text-xs">
+                    <button
+                      type="button"
+                      className="font-semibold text-blue-700 hover:underline disabled:text-gray-400 disabled:no-underline"
+                      onClick={() => {
+                        if (!canViewAssets) {
+                          navigate('/forbidden');
+                          return;
+                        }
+                        navigate(`/assets?vehicle=${encodeURIComponent(selectedItem.vehicleNumber)}`);
+                      }}
+                      disabled={!canViewAssets}
+                    >
+                      자산 페이지로 이동
+                    </button>
+                    <button
+                      type="button"
+                      className="font-semibold text-blue-700 hover:underline disabled:text-gray-400 disabled:no-underline"
+                      onClick={() => {
+                        if (!canViewReservations) {
+                          navigate('/forbidden');
+                          return;
+                        }
+                        const reservationSearch = selectedItem.reservationId || selectedItem.customerName;
+                        navigate(`/reservations?search=${encodeURIComponent(reservationSearch)}`);
+                      }}
+                      disabled={!canViewReservations}
+                    >
+                      예약 페이지로 이동
+                    </button>
+                  </div>
+                </div>
 
+                <div className="pt-4 space-y-2">
                   {selectedItem.status !== '완료' && (
                     <button
                       className="w-full px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium flex items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-50"
@@ -4329,6 +5150,17 @@ export default function ActionRequired() {
               </div>
             </div>
           </div>
+        )}
+
+        {relatedContextKind && (
+          <RelatedContextDrawer
+            key={relatedContextKind}
+            kind={relatedContextKind}
+            payload={relatedContextPayload}
+            isLoading={isRelatedContextLoading}
+            error={relatedContextError}
+            onClose={closeRelatedContext}
+          />
         )}
 
         {issueAssetPrompt && (
