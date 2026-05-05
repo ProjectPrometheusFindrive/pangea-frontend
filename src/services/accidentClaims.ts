@@ -14,6 +14,10 @@ export interface AccidentClaimPatchPayload {
   billedAmount?: number;
   recognizedAmount?: number;
   differencePayerType?: string;
+  approvalRequired?: boolean;
+  approvalStatus?: string;
+  approvalDocumentObjectName?: string;
+  approvalMemo?: string;
   documentObjectNames?: string[];
   submittedAt?: string;
   supplementMemo?: string;

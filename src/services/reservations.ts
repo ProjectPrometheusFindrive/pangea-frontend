@@ -112,6 +112,9 @@ export interface CreateReservationPayload {
     billedAmount?: number;
     documentStatus?: string;
     claimStatus?: string;
+    approvalRequired?: boolean;
+    approvalStatus?: string;
+    approvalDocumentObjectName?: string;
   };
   memo?: string;
   pickupLocation?: string;

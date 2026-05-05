@@ -171,6 +171,9 @@ interface AccidentClaimDraft {
   insurerName: string;
   repairShopName: string;
   billingAccount: string;
+  approvalStatus: string;
+  approvalDocumentObjectName: string;
+  approvalMemo: string;
   billedAmount: string;
   recognizedAmount: string;
   differencePayerType: string;
@@ -584,6 +587,9 @@ function toAccidentClaimDraft(payload: unknown): AccidentClaimDraft {
     insurerName: pickString(source, ['insurerName', 'insuranceCompany']) ?? '',
     repairShopName: pickString(source, ['repairShopName', 'garageName']) ?? '',
     billingAccount: pickString(source, ['billingAccount']) ?? '',
+    approvalStatus: pickString(source, ['approvalStatus']) ?? 'pending',
+    approvalDocumentObjectName: pickString(source, ['approvalDocumentObjectName']) ?? '',
+    approvalMemo: pickString(source, ['approvalMemo']) ?? '',
     billedAmount: String(Math.max(0, Math.trunc(toNumberValue(source.billedAmount) ?? 0)) || ''),
     recognizedAmount: String(Math.max(0, Math.trunc(toNumberValue(source.recognizedAmount) ?? 0)) || ''),
     differencePayerType: pickString(source, ['differencePayerType']) ?? 'customer',
@@ -1269,6 +1275,7 @@ export default function ActionRequired() {
   const [pageSize, setPageSize] = useState(20);
 
   const [selectedItem, setSelectedItem] = useState<ActionItem | null>(null);
+  const selectedItemCapabilities = getActionItemCapabilities(selectedItem, canWritePayments, canWriteActionRequired);
   const [searchQuery, setSearchQuery] = useState('');
   const [sortField, setSortField] = useState<SortField | null>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>(null);
@@ -1315,6 +1322,9 @@ export default function ActionRequired() {
     insurerName: '',
     repairShopName: '',
     billingAccount: '',
+    approvalStatus: 'pending',
+    approvalDocumentObjectName: '',
+    approvalMemo: '',
     billedAmount: '',
     recognizedAmount: '',
     differencePayerType: 'customer',
@@ -1501,6 +1511,9 @@ export default function ActionRequired() {
         insurerName: '',
         repairShopName: '',
         billingAccount: '',
+        approvalStatus: 'pending',
+        approvalDocumentObjectName: '',
+        approvalMemo: '',
         billedAmount: '',
         recognizedAmount: '',
         differencePayerType: 'customer',
@@ -1835,7 +1848,6 @@ export default function ActionRequired() {
   const isPaymentIssueResolved = isSelectedPaymentIssue
     && selectedItem?.statusCode === 'resolved';
   const canEditPaymentIssueFields = canWritePayments && !isPaymentIssueResolved;
-  const selectedItemCapabilities = getActionItemCapabilities(selectedItem, canWritePayments, canWriteActionRequired);
 
   const toggleFilter = (filter: ActionIssueFilter) => {
     setPage(1);
@@ -2917,6 +2929,14 @@ export default function ActionRequired() {
           insurerName: accidentClaimDraft.insurerName.trim(),
           repairShopName: accidentClaimDraft.repairShopName.trim(),
           billingAccount: accidentClaimDraft.billingAccount.trim(),
+          ...(selectedItem.reasonType === 'accident_replacement_approval_required'
+            ? {
+                approvalRequired: true,
+                approvalStatus: accidentClaimDraft.approvalStatus,
+                approvalDocumentObjectName: accidentClaimDraft.approvalDocumentObjectName.trim(),
+                approvalMemo: accidentClaimDraft.approvalMemo.trim(),
+              }
+            : {}),
           supplementMemo: accidentClaimDraft.supplementMemo.trim(),
           billedAmount,
           memo: 'Action Required에서 사고대차 접수 정보를 저장',
@@ -3813,7 +3833,38 @@ export default function ActionRequired() {
                           />
                         </div>
                       )}
+                      {selectedItem.reasonType === 'accident_replacement_approval_required' && (
+                        <div className="space-y-2">
+                          <select
+                            value={accidentClaimDraft.approvalStatus}
+                            onChange={(event) => setAccidentClaimDraft((prev) => ({ ...prev, approvalStatus: event.target.value }))}
+                            disabled={isAccidentClaimSaving || isAccidentClaimLoading}
+                            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                          >
+                            <option value="pending">승인 대기</option>
+                            <option value="approved">승인 완료</option>
+                            <option value="rejected">승인 반려</option>
+                          </select>
+                          <input
+                            type="text"
+                            value={accidentClaimDraft.approvalDocumentObjectName}
+                            onChange={(event) => setAccidentClaimDraft((prev) => ({ ...prev, approvalDocumentObjectName: event.target.value }))}
+                            placeholder="승인 문서 objectName"
+                            disabled={isAccidentClaimSaving || isAccidentClaimLoading}
+                            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                          />
+                          <textarea
+                            rows={2}
+                            value={accidentClaimDraft.approvalMemo}
+                            onChange={(event) => setAccidentClaimDraft((prev) => ({ ...prev, approvalMemo: event.target.value }))}
+                            placeholder="승인 확인 메모"
+                            disabled={isAccidentClaimSaving || isAccidentClaimLoading}
+                            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                          />
+                        </div>
+                      )}
                       {(selectedItem.reasonType === 'accident_claim_documents_required'
+                        || selectedItem.reasonType === 'accident_claim_delayed'
                         || selectedItem.reasonType === 'accident_claim_payment_check'
                         || selectedItem.reasonType === 'accident_claim_difference') && (
                         <div className="space-y-2">
@@ -3910,7 +3961,18 @@ export default function ActionRequired() {
                             접수 정보 저장
                           </button>
                         )}
-                        {selectedItem.reasonType === 'accident_claim_documents_required' && (
+                        {selectedItem.reasonType === 'accident_replacement_approval_required' && (
+                          <button
+                            type="button"
+                            onClick={() => void runAccidentClaimAction('save-info')}
+                            disabled={isAccidentClaimSaving || isAccidentClaimLoading}
+                            className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            승인 상태 저장
+                          </button>
+                        )}
+                        {(selectedItem.reasonType === 'accident_claim_documents_required'
+                          || selectedItem.reasonType === 'accident_claim_delayed') && (
                           <button
                             type="button"
                             onClick={() => void runAccidentClaimAction('submit')}
