@@ -41,6 +41,9 @@ export interface ActionItemWorkContext {
   module: IssueWorkModuleKey;
   title: string;
   outcome: string;
+  currentSituation?: string;
+  requiredAction?: string;
+  completionCriteria?: string;
   entityRefs: Record<string, unknown>;
   sourceSnapshot: Record<string, unknown>;
   checklist: ActionItemWorkChecklistItem[];
@@ -64,7 +67,7 @@ const ISSUE_WORK_MODULE_LABELS: Record<IssueWorkModuleKey, string> = {
   payment_additional_fee: '추가요금 수납',
   payment_deposit_refund: '보증금 반환',
   payment_monthly: '월/미납 정산',
-  return_late: '반납 지연',
+  return_late: '차량 반납/회수',
   return_closeout: '종료 정산',
   rental_accident_followup: '대여 중 사고',
   accident_claim_intake: '보험청구 접수',
@@ -206,6 +209,9 @@ export function toWorkContext(source: Record<string, unknown>): ActionItemWorkCo
     module,
     title: pickString(workSource, ['title']) ?? ISSUE_WORK_MODULE_REGISTRY[module].label,
     outcome: pickString(workSource, ['outcome']) ?? '',
+    currentSituation: pickString(workSource, ['currentSituation']) ?? undefined,
+    requiredAction: pickString(workSource, ['requiredAction']) ?? undefined,
+    completionCriteria: pickString(workSource, ['completionCriteria']) ?? undefined,
     entityRefs: isRecord(workSource.entityRefs) ? workSource.entityRefs : {},
     sourceSnapshot: isRecord(workSource.sourceSnapshot) ? workSource.sourceSnapshot : {},
     checklist: toWorkChecklistItems(workSource.checklist),
@@ -300,6 +306,17 @@ const WORK_CONTEXT_PANEL_ACTIONS = new Set([
   'accident_claim_submit',
   'accident_claim_recognize',
 ]);
+
+const WORK_CONTEXT_ACTIONS_BY_ISSUE_CODE: Record<string, Set<string>> = {
+  'accident_claim.info_missing': new Set(['status_update']),
+  'accident_claim.driver_license_required': new Set(['status_update']),
+  'accident_claim.approval_required': new Set(['status_update']),
+  'accident_claim.submission_required': new Set(['status_update', 'accident_claim_submit']),
+  'accident_claim.payment_check': new Set(['status_update', 'accident_claim_recognize']),
+  'accident_claim.difference': new Set(['status_update', 'accident_claim_recognize']),
+  'accident_claim.settlement_required': new Set(['status_update', 'accident_claim_recognize']),
+  'payment.deposit_refund_due': new Set(['refund_complete', 'status_update']),
+};
 
 const DOMAIN_ACTION_KEYS = new Set([
   'maintenance_requested',
@@ -423,7 +440,7 @@ function getWorkActionGuide(module: IssueWorkModuleKey, chargeItems: ActionItemW
     case 'accident_claim_approval':
       return '대차 승인 상태와 승인 근거를 확인하고 저장하세요.';
     case 'accident_claim_submission':
-      return '보험청구 제출, 보험금 인정, 차액 정리 중 현재 필요한 단계를 처리하세요.';
+      return '보험청구 제출 또는 보완 상태를 확인하고 현재 필요한 단계를 처리하세요.';
     case 'accident_claim_intake':
       return '보험청구 기본 정보를 입력해 청구 진행이 가능하도록 만드세요.';
     case 'asset_compliance':
@@ -452,9 +469,13 @@ function shouldShowChecklistItem(item: ActionItemWorkChecklistItem): boolean {
     && !RAW_FIELD_LABELS.has(item.label);
 }
 
-function shouldRenderWorkAction(action: ActionItemWorkAction): boolean {
+function shouldRenderWorkAction(action: ActionItemWorkAction, workContext: ActionItemWorkContext): boolean {
   if (ACTIONS_RENDERED_ELSEWHERE.has(action.key)) {
     return false;
+  }
+  const allowedActions = WORK_CONTEXT_ACTIONS_BY_ISSUE_CODE[workContext.issueCode];
+  if (allowedActions) {
+    return allowedActions.has(action.key);
   }
   return WORK_CONTEXT_PANEL_ACTIONS.has(action.key) || DOMAIN_ACTION_KEYS.has(action.key);
 }
@@ -465,75 +486,80 @@ export function getWorkContextSummary(workContext: ActionItemWorkContext): WorkC
   const defaultCompletion = unsettledCount > 0
     ? `미정리 항목 ${unsettledCount}건을 정리해야 완료할 수 있습니다.`
     : '완료 전 확인사항이 해소되면 이슈 완료 처리를 진행할 수 있습니다.';
+  const fromContext = (fallback: WorkContextSummary): WorkContextSummary => ({
+    situation: workContext.currentSituation || fallback.situation,
+    nextAction: workContext.requiredAction || fallback.nextAction,
+    completion: workContext.completionCriteria || fallback.completion,
+  });
 
   switch (workContext.module) {
     case 'payment_deposit_refund':
-      return {
+      return fromContext({
         situation: workContext.outcome || '보증금 반환 대상이 남아 있습니다.',
         nextAction: '환불 금액, 환불 수단, 환불일과 증빙을 확인한 뒤 환불 완료 처리하세요.',
         completion: unsettledCount > 0 ? '연결된 환불 항목이 환불 완료 또는 면제 상태가 되어야 합니다.' : defaultCompletion,
-      };
+      });
     case 'payment_additional_fee':
     case 'payment_monthly':
-      return {
+      return fromContext({
         situation: workContext.outcome || '정리되지 않은 미수 청구가 있습니다.',
         nextAction: '미수 금액을 수납하거나 면제 처리하세요.',
         completion: unsettledCount > 0 ? '연결된 청구 항목의 잔액이 정리되어야 합니다.' : defaultCompletion,
-      };
+      });
     case 'return_closeout':
-      return {
+      return fromContext({
         situation: workContext.outcome || '장기렌트 종료 후 정산 항목이 남아 있습니다.',
         nextAction: '미정리 청구/환불 항목을 수납, 면제 또는 환불 완료 처리하세요.',
         completion: unsettledCount > 0 ? `미정리 청구/환불 항목 ${unsettledCount}건을 모두 정리해야 합니다.` : '모든 정산 항목이 정리되었습니다.',
-      };
+      });
     case 'return_late':
-      return {
+      return fromContext({
         situation: workContext.outcome || '반납 예정 시간이 지났지만 반납 완료가 확인되지 않았습니다.',
         nextAction: '실제 반납 여부를 확인하고 반납 완료 처리를 진행하세요.',
         completion: '예약이 반납 완료 상태가 되면 이슈 완료 처리를 진행할 수 있습니다.',
-      };
+      });
     case 'rental_accident_followup':
-      return {
+      return fromContext({
         situation: workContext.outcome || '대여 중 사고 후속 정보가 필요합니다.',
         nextAction: '사고 정보, 증빙, 보험처리 상태를 보완하고 저장하세요.',
         completion: '필요한 사고 후속 정보가 저장되면 완료 처리할 수 있습니다.',
-      };
+      });
     case 'accident_claim_intake':
-      return {
+      return fromContext({
         situation: workContext.outcome || '보험청구 기본 정보가 부족합니다.',
         nextAction: '사고접수번호, 보험사, 정비공장 등 기본 정보를 입력하세요.',
         completion: '필수 보험청구 정보가 저장되면 청구 진행이 가능합니다.',
-      };
+      });
     case 'accident_claim_approval':
-      return {
+      return fromContext({
         situation: workContext.outcome || '대차 승인 확인이 필요합니다.',
         nextAction: '승인 상태와 승인 근거를 확인하고 저장하세요.',
         completion: '대차 승인 상태가 승인 완료로 저장되어야 합니다.',
-      };
+      });
     case 'accident_claim_submission':
-      return {
+      return fromContext({
         situation: workContext.outcome || '보험청구 진행 또는 차액 정리가 필요합니다.',
         nextAction: '청구 제출, 보험금 입금 확인, 차액 부담 주체 정리를 진행하세요.',
         completion: '보험청구가 제출/인정되고 관련 차액 항목이 정리되어야 합니다.',
-      };
+      });
     case 'asset_compliance':
-      return {
+      return fromContext({
         situation: workContext.outcome || '차량 의무관리 정보 갱신이 필요합니다.',
         nextAction: '만료일 또는 점검일과 증빙 문서를 갱신하세요.',
         completion: '갱신된 일자와 증빙이 저장되면 완료 처리할 수 있습니다.',
-      };
+      });
     case 'vehicle_ops':
-      return {
+      return fromContext({
         situation: workContext.outcome || '차량 운영 상태 확인이 필요합니다.',
         nextAction: '차량 상태를 확인하고 필요한 운영 조치를 실행하세요.',
         completion: '운영 조치 이력이 남으면 완료 처리할 수 있습니다.',
-      };
+      });
     default:
-      return {
+      return fromContext({
         situation: workContext.outcome || '수동 확인이 필요한 조치 항목입니다.',
         nextAction: '필요한 정보를 확인한 뒤 메모 또는 상태 변경으로 처리하세요.',
         completion: defaultCompletion,
-      };
+      });
   }
 }
 
@@ -582,7 +608,7 @@ export function WorkContextPanel({
   const chargeItems = toWorkChargeItems(workContext);
   const summary = getWorkContextSummary(workContext);
   const visibleChecklist = workContext.checklist.filter(shouldShowChecklistItem);
-  const visibleActions = workContext.actions.filter(shouldRenderWorkAction);
+  const visibleActions = workContext.actions.filter((action) => shouldRenderWorkAction(action, workContext));
 
   return (
     <div className={`rounded-lg border p-4 ${moduleSpec.accentClassName}`}>

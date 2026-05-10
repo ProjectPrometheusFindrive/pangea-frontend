@@ -116,6 +116,7 @@ export interface ReservationAccidentClaim {
   adjusterPhone?: string;
   repairShopName?: string;
   repairShopLocation?: string;
+  repairCompletedAt?: string;
   damagedVehicleNumber?: string;
   damagedVehicleModel?: string;
   deliveryLocation?: string;
@@ -142,6 +143,7 @@ export interface ReservationAccidentReport {
   insuranceClaimNo?: string;
   evidenceStatus?: string;
   insuranceProcessStatus?: string;
+  repairCompletedAt?: string;
   customerChargeAmount?: number;
   customerChargeStatus?: string;
   followupUpdatedAt?: string;
@@ -168,6 +170,7 @@ export interface ReservationParty {
 export interface ReservationParties {
   contractor?: ReservationParty;
   driver?: ReservationParty;
+  additionalDrivers?: ReservationParty[];
   requester?: ReservationParty;
   payer?: ReservationParty;
 }
@@ -178,6 +181,20 @@ export interface ReservationDocumentChecklistItem {
   required: boolean;
   status: 'ready' | 'missing' | 'optional' | 'pickup_blocked' | 'action_required' | 'not_applicable' | string;
   objectName?: string;
+  detail?: {
+    objectName: string;
+    fileName?: string;
+    contentType?: string;
+    url?: string;
+    documentType?: string;
+  };
+  details?: Array<{
+    objectName: string;
+    fileName?: string;
+    contentType?: string;
+    url?: string;
+    documentType?: string;
+  }>;
   reasonType?: string;
 }
 
@@ -194,6 +211,17 @@ export interface Reservation {
   returnedAt?: string;
   lateReturn?: boolean;
   contractStatus?: string;
+  workflowStatus?: string;
+  workflowStatusLabel?: string;
+  closeoutStatus?: string;
+  closeoutStatusLabel?: string;
+  cancellationSettlementStatus?: string;
+  cancellationSettlementStatusLabel?: string;
+  longTermAccountStatus?: string;
+  longTermAccountStatusLabel?: string;
+  accidentReplacementStatus?: string;
+  accidentReplacementStatusLabel?: string;
+  workflowVersion?: number;
   scheduledStartAt?: string;
   scheduledEndAt?: string;
   type: 'reservation' | 'rental' | 'return';
@@ -205,6 +233,11 @@ export interface Reservation {
   licenseDocumentObjectName?: string;
   contractDocumentObjectName?: string;
   contractDocumentType?: string;
+  contractDocuments?: Array<{
+    objectName: string;
+    fileName?: string;
+    documentType?: string;
+  }>;
   documentChecklist?: ReservationDocumentChecklistItem[];
   paymentStatus: '대기' | '완료' | '미납' | '부분납부';
   hasPaymentInfo?: boolean;
