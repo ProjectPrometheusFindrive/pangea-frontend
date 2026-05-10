@@ -125,6 +125,14 @@ export interface PatchPaymentRecordPayload {
   memo?: string;
 }
 
+export interface AllocatePaymentRecordPayload {
+  allocations: Array<{
+    chargeItemId: string;
+    amount: number;
+  }>;
+  memo?: string;
+}
+
 export function createReservationChargeItem(
   reservationId: string,
   payload: ChargeItemPayload,
@@ -172,6 +180,44 @@ export function patchPaymentRecord(
   return apiClient.requestData<unknown>({
     path: `/api/v2/payment-records/${encodeURIComponent(paymentRecordId)}`,
     method: 'PATCH',
+    body: payload,
+    signal: options.signal,
+  });
+}
+
+export function confirmPaymentRecord(
+  paymentRecordId: string,
+  options: BillingRequestOptions = {},
+): Promise<unknown> {
+  return apiClient.requestData<unknown>({
+    path: `/api/v2/payment-records/${encodeURIComponent(paymentRecordId)}/confirm`,
+    method: 'POST',
+    body: {},
+    signal: options.signal,
+  });
+}
+
+export function voidPaymentRecord(
+  paymentRecordId: string,
+  memo?: string,
+  options: BillingRequestOptions = {},
+): Promise<unknown> {
+  return apiClient.requestData<unknown>({
+    path: `/api/v2/payment-records/${encodeURIComponent(paymentRecordId)}/void`,
+    method: 'POST',
+    body: memo ? { memo } : {},
+    signal: options.signal,
+  });
+}
+
+export function allocatePaymentRecord(
+  paymentRecordId: string,
+  payload: AllocatePaymentRecordPayload,
+  options: BillingRequestOptions = {},
+): Promise<unknown> {
+  return apiClient.requestData<unknown>({
+    path: `/api/v2/payment-records/${encodeURIComponent(paymentRecordId)}/allocate`,
+    method: 'POST',
     body: payload,
     signal: options.signal,
   });

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { X, Upload, CheckCircle, Loader2, AlertTriangle } from 'lucide-react';
+import { X, Upload, CheckCircle, Loader2, AlertTriangle, Plus } from 'lucide-react';
 import type { VehicleAsset } from '../types/assets';
 
 interface DragSelection {
@@ -45,6 +45,7 @@ export type NewContractField =
   | 'paymentDepositorName'
   | 'paymentApprovalNo'
   | 'licenseFile'
+  | 'additionalDriverLicenseFiles'
   | 'contractFile';
 
 export interface NewContractFormValues {
@@ -95,12 +96,29 @@ export interface NewContractFormValues {
   paymentDepositorName: string;
   paymentApprovalNo: string;
   licenseFile: File | null;
+  additionalDriverLicenseFiles: (File | null)[];
   contractFile: File | null;
+  contractFiles: File[];
+  additionalDrivers: NewContractDriverValues[];
+}
+
+export interface NewContractDriverValues {
+  name: string;
+  phone: string;
+  licenseNumber: string;
+  address: string;
 }
 
 export interface NewContractSubmitFeedback {
   formError?: string;
   fieldErrors?: Partial<Record<NewContractField, string>>;
+  additionalDriverLicenseFileErrors?: Partial<Record<number, string>>;
+}
+
+export interface NewContractLocationOption {
+  id: string;
+  name: string;
+  address: string;
 }
 
 interface NewContractModalProps {
@@ -108,8 +126,10 @@ interface NewContractModalProps {
   onClose: () => void;
   vehicles: string[];
   vehicleAssets: VehicleAsset[];
-  locationOptions?: string[];
+  locationOptions?: NewContractLocationOption[];
+  onCreateLocationOption?: (payload: { name: string; address: string }) => Promise<NewContractLocationOption>;
   dragSelection?: DragSelection | null;
+  onValidateStepOne?: (formValues: Pick<NewContractFormValues, 'selectedVehicle' | 'startDate' | 'endDate' | 'startTime' | 'endTime'>) => Promise<NewContractSubmitFeedback | null>;
   onSubmit: (formValues: NewContractFormValues) => Promise<NewContractSubmitFeedback | null>;
 }
 
@@ -160,6 +180,7 @@ const FIELD_LABELS: Record<NewContractField, string> = {
   paymentDepositorName: '입금자명',
   paymentApprovalNo: '승인번호',
   licenseFile: '운전면허증 파일',
+  additionalDriverLicenseFiles: '추가 운전자 면허증 파일',
   contractFile: '계약서 파일',
 };
 
@@ -228,7 +249,9 @@ export function NewContractModal({
   onClose,
   vehicleAssets,
   locationOptions,
+  onCreateLocationOption,
   dragSelection,
+  onValidateStepOne,
   onSubmit,
 }: NewContractModalProps) {
   const [step, setStep] = useState<1 | 2 | 3>(1);
@@ -243,17 +266,25 @@ export function NewContractModal({
   const [customerPhone, setCustomerPhone] = useState('');
   const [customerLicense, setCustomerLicense] = useState('');
   const [customerAddress, setCustomerAddress] = useState('');
-  const [contractorType, setContractorType] = useState<'individual' | 'corporate'>('corporate');
+  const [contractorType, setContractorType] = useState<'individual' | 'corporate'>('individual');
   const [contractorName, setContractorName] = useState('');
   const [contractorBusinessNumber, setContractorBusinessNumber] = useState('');
   const [contractorContactName, setContractorContactName] = useState('');
   const [contractorContactPhone, setContractorContactPhone] = useState('');
-  const [payerType, setPayerType] = useState<'customer' | 'corporate'>('corporate');
+  const [payerType, setPayerType] = useState<'customer' | 'corporate'>('customer');
   const [payerName, setPayerName] = useState('');
   const [payerPhone, setPayerPhone] = useState('');
   const [billingAccount, setBillingAccount] = useState('');
   const [pickupLocation, setPickupLocation] = useState('');
   const [returnLocation, setReturnLocation] = useState('');
+  const [pickupLocationMode, setPickupLocationMode] = useState<'garage' | 'custom'>('custom');
+  const [returnLocationMode, setReturnLocationMode] = useState<'garage' | 'custom'>('custom');
+  const [activeLocationRegistrationTarget, setActiveLocationRegistrationTarget] = useState<'pickup' | 'return' | null>(null);
+  const [newGarageName, setNewGarageName] = useState('');
+  const [newGarageAddress, setNewGarageAddress] = useState('');
+  const [newGarageError, setNewGarageError] = useState<string | null>(null);
+  const [newGarageFieldErrors, setNewGarageFieldErrors] = useState<Partial<Record<'name' | 'address', string>>>({});
+  const [isNewGarageSaving, setIsNewGarageSaving] = useState(false);
   const [amount, setAmount] = useState('');
   const [deposit, setDeposit] = useState('');
   const [monthlyAmount, setMonthlyAmount] = useState('');
@@ -280,10 +311,40 @@ export function NewContractModal({
   const [paymentDepositorName, setPaymentDepositorName] = useState('');
   const [paymentApprovalNo, setPaymentApprovalNo] = useState('');
   const [licenseFile, setLicenseFile] = useState<File | null>(null);
+  const [additionalDriverLicenseFiles, setAdditionalDriverLicenseFiles] = useState<(File | null)[]>([]);
   const [contractFile, setContractFile] = useState<File | null>(null);
+  const [contractFiles, setContractFiles] = useState<File[]>([]);
+  const [selectedModelFilters, setSelectedModelFilters] = useState<string[]>(['all']);
+  const [additionalDrivers, setAdditionalDrivers] = useState<NewContractDriverValues[]>([]);
+  const [activeDriverIndex, setActiveDriverIndex] = useState(0);
+  const [pendingDriverRemovalIndex, setPendingDriverRemovalIndex] = useState<number | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isCheckingStepOne, setIsCheckingStepOne] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Partial<Record<NewContractField, string>>>({});
+  const [additionalDriverLicenseFileErrors, setAdditionalDriverLicenseFileErrors] = useState<Partial<Record<number, string>>>({});
+
+  const uniqueVehicleModels = Array.from(new Set(
+    vehicleAssets
+      .map((vehicle) => vehicle.model?.trim())
+      .filter((model): model is string => Boolean(model)),
+  )).sort((a, b) => a.localeCompare(b, 'ko-KR'));
+
+  const filteredVehicleAssets = selectedModelFilters.includes('all') || selectedModelFilters.length === 0
+    ? vehicleAssets
+    : vehicleAssets.filter((vehicle) => selectedModelFilters.includes(vehicle.model));
+
+  const firstDriver = {
+    name: contractorType === 'individual' ? contractorName : customerName,
+    phone: contractorType === 'individual' ? contractorContactPhone : customerPhone,
+    licenseNumber: customerLicense,
+    address: customerAddress,
+  };
+
+  const visibleDrivers = [firstDriver, ...additionalDrivers];
+
+  const derivedPayerType: 'customer' | 'corporate' = contractorType === 'corporate' ? 'corporate' : 'customer';
+  const defaultLocationOption = locationOptions && locationOptions.length > 0 ? locationOptions[0] : null;
 
   useEffect(() => {
     if (!isOpen) {
@@ -291,7 +352,53 @@ export function NewContractModal({
     }
     setSubmitError(null);
     setFieldErrors({});
+    setAdditionalDriverLicenseFileErrors({});
   }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+    if (!defaultLocationOption) {
+      setPickupLocationMode('custom');
+      setReturnLocationMode('custom');
+      return;
+    }
+    setPickupLocationMode('garage');
+    setReturnLocationMode('garage');
+    setPickupLocation((previous) => previous || defaultLocationOption.name);
+    setReturnLocation((previous) => previous || defaultLocationOption.name);
+  }, [defaultLocationOption, isOpen]);
+
+  useEffect(() => {
+    if (rentalType !== 'long_term') {
+      return;
+    }
+    setPayerType(derivedPayerType);
+    if (contractorType === 'individual') {
+      setCustomerName(contractorName);
+      setCustomerPhone(contractorContactPhone);
+      setPayerName('');
+      setPayerPhone('');
+      return;
+    }
+    setPayerName((previous) => previous || contractorContactName);
+    setPayerPhone((previous) => previous || contractorContactPhone);
+  }, [contractorContactName, contractorContactPhone, contractorName, contractorType, derivedPayerType, rentalType]);
+
+  useEffect(() => {
+    if (!selectedVehicle) {
+      return;
+    }
+    if (filteredVehicleAssets.some((vehicle) => vehicle.vehicleNumber === selectedVehicle)) {
+      return;
+    }
+    setSelectedVehicle('');
+  }, [filteredVehicleAssets, selectedVehicle]);
+
+  useEffect(() => {
+    setAdditionalDriverLicenseFiles((previous) => additionalDrivers.map((_, index) => previous[index] ?? null));
+  }, [additionalDrivers]);
 
   useEffect(() => {
     if (dragSelection && isOpen) {
@@ -318,6 +425,92 @@ export function NewContractModal({
     return diffDays;
   };
 
+  const toggleModelFilter = (model: string) => {
+    setSelectedModelFilters((previous) => {
+      if (model === 'all') {
+        return ['all'];
+      }
+      const activeModels = previous.filter((value) => value !== 'all');
+      const nextModels = activeModels.includes(model)
+        ? activeModels.filter((value) => value !== model)
+        : [...activeModels, model];
+      return nextModels.length > 0 ? nextModels : ['all'];
+    });
+    if (selectedVehicle) {
+      const selected = vehicleAssets.find((vehicle) => vehicle.vehicleNumber === selectedVehicle);
+      if (selected && model !== 'all' && selectedModelFilters.includes('all') && selected.model !== model) {
+        setSelectedVehicle('');
+      }
+    }
+  };
+
+  const updateAdditionalDriver = (
+    index: number,
+    field: keyof NewContractDriverValues,
+    value: string,
+  ) => {
+    setAdditionalDrivers((previous) => previous.map((driver, currentIndex) => (
+      currentIndex === index ? { ...driver, [field]: value } : driver
+    )));
+    const errorFieldByDriverField: Record<keyof NewContractDriverValues, NewContractField> = {
+      name: 'customerName',
+      phone: 'customerPhone',
+      licenseNumber: 'customerLicense',
+      address: 'customerAddress',
+    };
+    clearFieldError(errorFieldByDriverField[field]);
+  };
+
+  const addDriver = () => {
+    setAdditionalDrivers((previous) => {
+      if (previous.length >= 2) {
+        return previous;
+      }
+      const nextDrivers = [...previous, { name: '', phone: '', licenseNumber: '', address: '' }];
+      setActiveDriverIndex(nextDrivers.length);
+      return nextDrivers;
+    });
+  };
+
+  const removeDriver = (driverIndex: number) => {
+    if (driverIndex <= 0) {
+      return;
+    }
+    setPendingDriverRemovalIndex(driverIndex);
+  };
+
+  const confirmDriverRemoval = () => {
+    if (pendingDriverRemovalIndex === null || pendingDriverRemovalIndex <= 0) {
+      setPendingDriverRemovalIndex(null);
+      return;
+    }
+    const additionalIndex = pendingDriverRemovalIndex - 1;
+    setAdditionalDrivers((previous) => previous.filter((_, index) => index !== additionalIndex));
+    setAdditionalDriverLicenseFiles((previous) => previous.filter((_, index) => index !== additionalIndex));
+    setActiveDriverIndex((previous) => Math.max(0, Math.min(previous, additionalDrivers.length - 1)));
+    setFieldErrors((previous) => {
+      const next = { ...previous };
+      delete next.customerName;
+      delete next.customerPhone;
+      delete next.customerLicense;
+      delete next.customerAddress;
+      delete next.additionalDriverLicenseFiles;
+      return next;
+    });
+    setAdditionalDriverLicenseFileErrors({});
+    setSubmitError(null);
+    setPendingDriverRemovalIndex(null);
+  };
+
+  const updateAdditionalDriverLicenseFile = (index: number, file: File | null) => {
+    setAdditionalDriverLicenseFiles((previous) => {
+      const next = [...previous];
+      next[index] = file;
+      return next;
+    });
+    clearAdditionalDriverLicenseFileError(index);
+  };
+
   const clearFieldError = (field: NewContractField) => {
     setFieldErrors((prev) => {
       if (!prev[field]) {
@@ -325,6 +518,26 @@ export function NewContractModal({
       }
       const next = { ...prev };
       delete next[field];
+      return next;
+    });
+    setSubmitError(null);
+  };
+
+  const clearAdditionalDriverLicenseFileError = (index: number) => {
+    setAdditionalDriverLicenseFileErrors((previous) => {
+      if (!previous[index]) {
+        return previous;
+      }
+      const next = { ...previous };
+      delete next[index];
+      return next;
+    });
+    setFieldErrors((previous) => {
+      if (!previous.additionalDriverLicenseFiles) {
+        return previous;
+      }
+      const next = { ...previous };
+      delete next.additionalDriverLicenseFiles;
       return next;
     });
     setSubmitError(null);
@@ -342,17 +555,25 @@ export function NewContractModal({
     setCustomerPhone('');
     setCustomerLicense('');
     setCustomerAddress('');
-    setContractorType('corporate');
+    setContractorType('individual');
     setContractorName('');
     setContractorBusinessNumber('');
     setContractorContactName('');
     setContractorContactPhone('');
-    setPayerType('corporate');
+    setPayerType('customer');
     setPayerName('');
     setPayerPhone('');
     setBillingAccount('');
     setPickupLocation('');
     setReturnLocation('');
+    setPickupLocationMode(locationOptions && locationOptions.length > 0 ? 'garage' : 'custom');
+    setReturnLocationMode(locationOptions && locationOptions.length > 0 ? 'garage' : 'custom');
+    setActiveLocationRegistrationTarget(null);
+    setNewGarageName('');
+    setNewGarageAddress('');
+    setNewGarageError(null);
+    setNewGarageFieldErrors({});
+    setIsNewGarageSaving(false);
     setAmount('');
     setDeposit('');
     setMonthlyAmount('');
@@ -379,10 +600,17 @@ export function NewContractModal({
     setPaymentDepositorName('');
     setPaymentApprovalNo('');
     setLicenseFile(null);
+    setAdditionalDriverLicenseFiles([]);
     setContractFile(null);
+    setContractFiles([]);
+    setSelectedModelFilters(['all']);
+    setAdditionalDrivers([]);
+    setActiveDriverIndex(0);
     setSubmitError(null);
     setFieldErrors({});
+    setAdditionalDriverLicenseFileErrors({});
     setIsSubmitting(false);
+    setIsCheckingStepOne(false);
   };
 
   const handleClose = () => {
@@ -390,9 +618,155 @@ export function NewContractModal({
     onClose();
   };
 
+  const closeLocationRegistration = () => {
+    if (isNewGarageSaving) {
+      return;
+    }
+    setActiveLocationRegistrationTarget(null);
+    setNewGarageName('');
+    setNewGarageAddress('');
+    setNewGarageError(null);
+    setNewGarageFieldErrors({});
+  };
+
+  const handleLocationModeChange = (target: 'pickup' | 'return', value: string) => {
+    if (value === '__custom__') {
+      if (target === 'pickup') {
+        setPickupLocationMode('custom');
+        setPickupLocation('');
+        clearFieldError('pickupLocation');
+      } else {
+        setReturnLocationMode('custom');
+        setReturnLocation('');
+        clearFieldError('returnLocation');
+      }
+      return;
+    }
+    if (value === '__new__') {
+      setActiveLocationRegistrationTarget(target);
+      setNewGarageName('');
+      setNewGarageAddress('');
+      setNewGarageError(null);
+      setNewGarageFieldErrors({});
+      return;
+    }
+    if (target === 'pickup') {
+      setPickupLocationMode('garage');
+      setPickupLocation(value);
+      clearFieldError('pickupLocation');
+    } else {
+      setReturnLocationMode('garage');
+      setReturnLocation(value);
+      clearFieldError('returnLocation');
+    }
+  };
+
+  const handleCreateGarageFromModal = async () => {
+    if (!onCreateLocationOption || isNewGarageSaving || !activeLocationRegistrationTarget) {
+      return;
+    }
+    const trimmedName = newGarageName.trim();
+    const trimmedAddress = newGarageAddress.trim();
+    const nextFieldErrors: Partial<Record<'name' | 'address', string>> = {};
+    if (!trimmedName) {
+      nextFieldErrors.name = '차고지 이름을 입력해 주세요.';
+    }
+    if (!trimmedAddress) {
+      nextFieldErrors.address = '주소를 입력해 주세요.';
+    }
+    if (Object.keys(nextFieldErrors).length > 0) {
+      setNewGarageFieldErrors(nextFieldErrors);
+      setNewGarageError('입력값을 확인해 주세요.');
+      return;
+    }
+    setIsNewGarageSaving(true);
+    setNewGarageError(null);
+    try {
+      const createdGarage = await onCreateLocationOption({
+        name: trimmedName,
+        address: trimmedAddress,
+      });
+      if (activeLocationRegistrationTarget === 'pickup') {
+        setPickupLocationMode('garage');
+        setPickupLocation(createdGarage.name);
+        clearFieldError('pickupLocation');
+      } else {
+        setReturnLocationMode('garage');
+        setReturnLocation(createdGarage.name);
+        clearFieldError('returnLocation');
+      }
+      setActiveLocationRegistrationTarget(null);
+      setNewGarageName('');
+      setNewGarageAddress('');
+      setNewGarageFieldErrors({});
+    } catch {
+      setNewGarageError('차고지 등록에 실패했습니다. 다시 시도해 주세요.');
+    } finally {
+      setIsNewGarageSaving(false);
+    }
+  };
+
+  const renderLocationField = (
+    target: 'pickup' | 'return',
+    label: string,
+    value: string,
+    mode: 'garage' | 'custom',
+    field: Extract<NewContractField, 'pickupLocation' | 'returnLocation'>,
+    testId: string,
+    setValue: (nextValue: string) => void,
+  ) => {
+    const selectedLocationOption = mode === 'garage'
+      ? (locationOptions ?? []).find((location) => location.name === value)
+      : null;
+
+    return (
+      <div>
+        <label className="block text-sm font-semibold text-gray-600 mb-2">
+          {label} <span className="text-red-600">*</span>
+        </label>
+        <select
+          data-testid={`${testId}-select`}
+          value={mode === 'custom' ? '__custom__' : value}
+          onChange={(event) => handleLocationModeChange(target, event.target.value)}
+          className={fieldInputClass(field)}
+          disabled={isSubmitting}
+        >
+          <option value="__custom__">직접 입력</option>
+          {(locationOptions ?? []).map((location) => (
+            <option key={location.id} value={location.name}>{location.name}</option>
+          ))}
+          {onCreateLocationOption && <option value="__new__">신규 차고지 등록</option>}
+        </select>
+        {mode === 'custom' && (
+          <input
+            data-testid={testId}
+            type="text"
+            value={value}
+            onChange={(event) => {
+              setValue(event.target.value);
+              clearFieldError(field);
+            }}
+            placeholder="서울특별시 강남구 테헤란로 123"
+            className={`${fieldInputClass(field)} mt-2`}
+            disabled={isSubmitting}
+          />
+        )}
+        {mode === 'garage' && selectedLocationOption?.address && (
+          <p className="mt-1 text-xs text-gray-500">
+            주소: {selectedLocationOption.address}
+          </p>
+        )}
+        {fieldErrors[field] && <p className="mt-1 text-xs text-red-600">{fieldErrors[field]}</p>}
+      </div>
+    );
+  };
+
   const selectedVehicleInfo = vehicleAssets.find((vehicle) => vehicle.vehicleNumber === selectedVehicle);
 
-  const handleStepOneNext = () => {
+  const handleStepOneNext = async () => {
+    if (isCheckingStepOne) {
+      return;
+    }
     const nextErrors: Partial<Record<NewContractField, string>> = {};
     if (!hasTextValue(selectedVehicle)) {
       nextErrors.selectedVehicle = '차량을 선택해 주세요.';
@@ -435,12 +809,37 @@ export function NewContractModal({
       return;
     }
 
+    if (onValidateStepOne) {
+      setIsCheckingStepOne(true);
+      setSubmitError(null);
+      try {
+        const feedback = await onValidateStepOne({
+          selectedVehicle,
+          startDate,
+          endDate,
+          startTime,
+          endTime,
+        });
+        if (feedback) {
+          if (feedback.fieldErrors) {
+            setFieldErrors((prev) => ({ ...prev, ...feedback.fieldErrors }));
+          }
+          if (feedback.formError) {
+            setSubmitError(buildSubmitErrorMessage(feedback.formError, feedback.fieldErrors ?? {}));
+          }
+          return;
+        }
+      } finally {
+        setIsCheckingStepOne(false);
+      }
+    }
+
     setStep(2);
   };
 
   const handleStepTwoNext = () => {
     const nextErrors: Partial<Record<NewContractField, string>> = {};
-    const requiresDriverAtCreation = rentalType !== 'accident_replacement';
+    const requiresDriverAtCreation = rentalType === 'short_term' || (rentalType === 'long_term' && contractorType === 'individual');
     if (rentalType === 'long_term') {
       if (!hasTextValue(contractorName)) {
         nextErrors.contractorName = contractorType === 'corporate' ? '법인명을 입력해 주세요.' : '계약자명을 입력해 주세요.';
@@ -481,6 +880,39 @@ export function NewContractModal({
       nextErrors.customerAddress = '주소를 입력해 주세요.';
     } else if (hasTextValue(customerAddress) && customerAddress.trim().length < 5) {
       nextErrors.customerAddress = '주소는 5자 이상 입력해 주세요.';
+    }
+    if (rentalType === 'long_term' && contractorType === 'individual') {
+      for (const [index, driver] of additionalDrivers.entries()) {
+        const driverLabel = `${index + 2}번째 운전자`;
+        if (!hasTextValue(driver.name)) {
+          nextErrors.customerName = `${driverLabel} 이름을 입력해 주세요.`;
+          break;
+        }
+        if (!hasTextValue(driver.phone)) {
+          nextErrors.customerPhone = `${driverLabel} 연락처를 입력해 주세요.`;
+          break;
+        }
+        if (!PHONE_REGEX.test(driver.phone.trim())) {
+          nextErrors.customerPhone = `${driverLabel} 연락처는 010-0000-0000 형식으로 입력해 주세요.`;
+          break;
+        }
+        if (!hasTextValue(driver.licenseNumber)) {
+          nextErrors.customerLicense = `${driverLabel} 면허번호를 입력해 주세요.`;
+          break;
+        }
+        if (!LICENSE_REGEX.test(driver.licenseNumber.trim())) {
+          nextErrors.customerLicense = `${driverLabel} 면허번호는 XX-XXXXXX-XX 형식으로 입력해 주세요.`;
+          break;
+        }
+        if (!hasTextValue(driver.address)) {
+          nextErrors.customerAddress = `${driverLabel} 주소를 입력해 주세요.`;
+          break;
+        }
+        if (driver.address.trim().length < 5) {
+          nextErrors.customerAddress = `${driverLabel} 주소는 5자 이상 입력해 주세요.`;
+          break;
+        }
+      }
     }
     if (!hasTextValue(pickupLocation)) {
       nextErrors.pickupLocation = '대여 장소를 입력해 주세요.';
@@ -578,6 +1010,32 @@ export function NewContractModal({
       return;
     }
 
+    setFieldErrors((previous) => {
+      const next = { ...previous };
+      ([
+        'contractorName',
+        'contractorBusinessNumber',
+        'contractorContactName',
+        'contractorContactPhone',
+        'customerName',
+        'customerPhone',
+        'customerLicense',
+        'customerAddress',
+        'pickupLocation',
+        'returnLocation',
+        'billingAccount',
+        'payerName',
+        'payerPhone',
+        'monthlyAmount',
+        'billingDay',
+        'amount',
+        'deposit',
+      ] as NewContractField[]).forEach((field) => {
+        delete next[field];
+      });
+      return next;
+    });
+    setSubmitError(null);
     setStep(3);
   };
 
@@ -587,15 +1045,27 @@ export function NewContractModal({
     }
 
     const nextErrors: Partial<Record<NewContractField, string>> = {};
-    if (rentalType !== 'accident_replacement' && !licenseFile) {
+    const nextAdditionalDriverLicenseFileErrors: Partial<Record<number, string>> = {};
+    if ((rentalType === 'short_term' || (rentalType === 'long_term' && contractorType === 'individual')) && !licenseFile) {
       nextErrors.licenseFile = '운전면허증 파일은 필수입니다.';
     }
-    if (rentalType === 'long_term' && !contractFile) {
+    if (rentalType === 'long_term' && contractorType === 'individual') {
+      const missingDriverFileIndex = additionalDrivers.findIndex((_, index) => !additionalDriverLicenseFiles[index]);
+      if (missingDriverFileIndex >= 0) {
+        const message = `${missingDriverFileIndex + 2}번째 운전자 면허증 파일을 업로드해 주세요.`;
+        nextErrors.additionalDriverLicenseFiles = message;
+        nextAdditionalDriverLicenseFileErrors[missingDriverFileIndex] = message;
+      }
+    }
+    if (rentalType === 'long_term' && contractFiles.length === 0) {
       nextErrors.contractFile = '장기렌트 계약서 또는 납부 일정표 파일은 필수입니다.';
     }
 
     if (Object.keys(nextErrors).length > 0) {
       setFieldErrors((prev) => ({ ...prev, ...nextErrors }));
+      if (Object.keys(nextAdditionalDriverLicenseFileErrors).length > 0) {
+        setAdditionalDriverLicenseFileErrors((prev) => ({ ...prev, ...nextAdditionalDriverLicenseFileErrors }));
+      }
       setSubmitError(buildSubmitErrorMessage('필수 입력값을 확인해 주세요.', nextErrors));
       return;
     }
@@ -652,12 +1122,21 @@ export function NewContractModal({
         paymentDepositorName,
         paymentApprovalNo,
         licenseFile,
+        additionalDriverLicenseFiles,
         contractFile,
+        contractFiles,
+        additionalDrivers,
       });
 
       if (feedback) {
         if (feedback.fieldErrors) {
           setFieldErrors((prev) => ({ ...prev, ...feedback.fieldErrors }));
+        }
+        if (feedback.additionalDriverLicenseFileErrors) {
+          setAdditionalDriverLicenseFileErrors((prev) => ({
+            ...prev,
+            ...feedback.additionalDriverLicenseFileErrors,
+          }));
         }
         if (feedback.formError) {
           setSubmitError(buildSubmitErrorMessage(feedback.formError, feedback.fieldErrors ?? {}));
@@ -680,6 +1159,7 @@ export function NewContractModal({
   }`;
 
   return (
+    <>
     <div data-testid="new-contract-modal" className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
       <div className="bg-white rounded-xl w-[600px] max-h-[85vh] flex flex-col">
         <div className="p-6 border-b border-gray-200 shrink-0">
@@ -816,6 +1296,41 @@ export function NewContractModal({
                   <div className="space-y-4">
                     <div>
                       <label className="block text-sm font-semibold text-gray-600 mb-2">
+                        차종
+                      </label>
+                      <details className="rounded-lg border border-gray-300 bg-white">
+                        <summary className="cursor-pointer list-none px-3 py-2 text-sm font-medium text-gray-700">
+                          {selectedModelFilters.includes('all') || selectedModelFilters.length === 0
+                            ? '전체'
+                            : selectedModelFilters.join(', ')}
+                        </summary>
+                        <div className="border-t border-gray-200 p-2">
+                          <label className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-gray-50">
+                            <input
+                              type="checkbox"
+                              checked={selectedModelFilters.includes('all')}
+                              onChange={() => toggleModelFilter('all')}
+                              disabled={isSubmitting}
+                            />
+                            전체
+                          </label>
+                          {uniqueVehicleModels.map((model) => (
+                            <label key={model} className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-gray-50">
+                              <input
+                                type="checkbox"
+                                checked={!selectedModelFilters.includes('all') && selectedModelFilters.includes(model)}
+                                onChange={() => toggleModelFilter(model)}
+                                disabled={isSubmitting}
+                              />
+                              {model}
+                            </label>
+                          ))}
+                        </div>
+                      </details>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-600 mb-2">
                         차량 선택 <span className="text-red-600">*</span>
                       </label>
                       <select
@@ -829,7 +1344,7 @@ export function NewContractModal({
                         disabled={isSubmitting}
                       >
                         <option value="">차량을 선택하세요</option>
-                        {vehicleAssets.map((vehicle) => (
+                        {filteredVehicleAssets.map((vehicle) => (
                           <option key={vehicle.vehicleNumber} value={vehicle.vehicleNumber}>
                             {vehicle.vehicleNumber} - {vehicle.model} ({vehicle.year}년)
                           </option>
@@ -965,10 +1480,10 @@ export function NewContractModal({
                 <button
                   onClick={handleStepOneNext}
                   data-testid="new-contract-step1-next"
-                  className="w-full px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium"
-                  disabled={isSubmitting}
+                  className="w-full px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium disabled:cursor-not-allowed disabled:opacity-70"
+                  disabled={isSubmitting || isCheckingStepOne}
                 >
-                  다음
+                  {isCheckingStepOne ? '예약 중복 확인 중...' : '다음'}
                 </button>
               </div>
             </div>
@@ -977,7 +1492,7 @@ export function NewContractModal({
           {step === 2 && (
             <div className="space-y-4">
               <h3 className="text-sm font-bold text-gray-700">
-                {rentalType === 'long_term' ? '계약 주체/운전자/월 납부 조건' : rentalType === 'accident_replacement' ? '사고/보험 정보' : '고객/결제 조건'}
+                {rentalType === 'long_term' ? '계약 주체/운전자/월 납부 조건' : rentalType === 'accident_replacement' ? '고객 정보' : '고객/결제 조건'}
               </h3>
               {rentalType === 'long_term' && (
                 <div className="border border-gray-200 rounded-lg p-4 space-y-4">
@@ -985,8 +1500,8 @@ export function NewContractModal({
                     <h4 className="text-sm font-bold text-gray-700">계약 주체</h4>
                     <div className="inline-flex rounded-lg border border-gray-300 p-1">
                       {[
-                        { value: 'corporate', label: '법인' },
                         { value: 'individual', label: '개인' },
+                        { value: 'corporate', label: '법인' },
                       ].map((option) => (
                         <button
                           key={option.value}
@@ -995,6 +1510,10 @@ export function NewContractModal({
                             const nextType = option.value as 'individual' | 'corporate';
                             setContractorType(nextType);
                             setPayerType(nextType === 'corporate' ? 'corporate' : 'customer');
+                            setActiveDriverIndex(0);
+                            if (nextType === 'corporate') {
+                              setAdditionalDrivers([]);
+                            }
                             clearFieldError('contractorName');
                             clearFieldError('contractorBusinessNumber');
                             clearFieldError('contractorContactName');
@@ -1029,65 +1548,243 @@ export function NewContractModal({
                       />
                       {fieldErrors.contractorName && <p className="mt-1 text-xs text-red-600">{fieldErrors.contractorName}</p>}
                     </div>
-                    <div>
-                      <label className="block text-sm font-semibold text-gray-600 mb-2">
-                        사업자번호 {contractorType === 'corporate' && <span className="text-red-600">*</span>}
-                      </label>
-                      <input
-                        data-testid="new-contract-contractor-business-number-input"
-                        type="text"
-                        value={contractorBusinessNumber}
-                        onChange={(event) => {
-                          setContractorBusinessNumber(event.target.value);
-                          clearFieldError('contractorBusinessNumber');
-                        }}
-                        placeholder="000-00-00000"
-                        className={fieldInputClass('contractorBusinessNumber')}
-                        disabled={isSubmitting || contractorType !== 'corporate'}
-                      />
-                      {fieldErrors.contractorBusinessNumber && <p className="mt-1 text-xs text-red-600">{fieldErrors.contractorBusinessNumber}</p>}
-                    </div>
+                    {contractorType === 'corporate' && (
+                      <div>
+                        <label className="block text-sm font-semibold text-gray-600 mb-2">
+                          사업자번호 <span className="text-red-600">*</span>
+                        </label>
+                        <input
+                          data-testid="new-contract-contractor-business-number-input"
+                          type="text"
+                          value={contractorBusinessNumber}
+                          onChange={(event) => {
+                            setContractorBusinessNumber(event.target.value);
+                            clearFieldError('contractorBusinessNumber');
+                          }}
+                          placeholder="000-00-00000"
+                          className={fieldInputClass('contractorBusinessNumber')}
+                          disabled={isSubmitting}
+                        />
+                        {fieldErrors.contractorBusinessNumber && <p className="mt-1 text-xs text-red-600">{fieldErrors.contractorBusinessNumber}</p>}
+                      </div>
+                    )}
+                    {contractorType === 'individual' && (
+                      <div>
+                        <label className="block text-sm font-semibold text-gray-600 mb-2">
+                          계약자 연락처 <span className="text-red-600">*</span>
+                        </label>
+                        <input
+                          data-testid="new-contract-contractor-contact-phone-input"
+                          type="tel"
+                          value={contractorContactPhone}
+                          onChange={(event) => {
+                            setContractorContactPhone(event.target.value);
+                            clearFieldError('contractorContactPhone');
+                          }}
+                          placeholder="010-0000-0000"
+                          className={fieldInputClass('contractorContactPhone')}
+                          disabled={isSubmitting}
+                        />
+                        {fieldErrors.contractorContactPhone && <p className="mt-1 text-xs text-red-600">{fieldErrors.contractorContactPhone}</p>}
+                      </div>
+                    )}
                   </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-semibold text-gray-600 mb-2">
-                        {contractorType === 'corporate' ? '계약 담당자명' : '계약자 연락 담당'} {contractorType === 'corporate' && <span className="text-red-600">*</span>}
-                      </label>
-                      <input
-                        data-testid="new-contract-contractor-contact-name-input"
-                        type="text"
-                        value={contractorContactName}
-                        onChange={(event) => {
-                          setContractorContactName(event.target.value);
-                          clearFieldError('contractorContactName');
-                        }}
-                        className={fieldInputClass('contractorContactName')}
-                        disabled={isSubmitting}
-                      />
-                      {fieldErrors.contractorContactName && <p className="mt-1 text-xs text-red-600">{fieldErrors.contractorContactName}</p>}
+                  {contractorType === 'corporate' && (
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-semibold text-gray-600 mb-2">
+                          계약 담당자명 <span className="text-red-600">*</span>
+                        </label>
+                        <input
+                          data-testid="new-contract-contractor-contact-name-input"
+                          type="text"
+                          value={contractorContactName}
+                          onChange={(event) => {
+                            setContractorContactName(event.target.value);
+                            clearFieldError('contractorContactName');
+                          }}
+                          className={fieldInputClass('contractorContactName')}
+                          disabled={isSubmitting}
+                        />
+                        {fieldErrors.contractorContactName && <p className="mt-1 text-xs text-red-600">{fieldErrors.contractorContactName}</p>}
+                      </div>
+                      <div>
+                        <label className="block text-sm font-semibold text-gray-600 mb-2">
+                          계약 담당자 연락처 <span className="text-red-600">*</span>
+                        </label>
+                        <input
+                          data-testid="new-contract-contractor-contact-phone-input"
+                          type="tel"
+                          value={contractorContactPhone}
+                          onChange={(event) => {
+                            setContractorContactPhone(event.target.value);
+                            clearFieldError('contractorContactPhone');
+                          }}
+                          placeholder="010-0000-0000"
+                          className={fieldInputClass('contractorContactPhone')}
+                          disabled={isSubmitting}
+                        />
+                        {fieldErrors.contractorContactPhone && <p className="mt-1 text-xs text-red-600">{fieldErrors.contractorContactPhone}</p>}
+                      </div>
                     </div>
-                    <div>
-                      <label className="block text-sm font-semibold text-gray-600 mb-2">
-                        {contractorType === 'corporate' ? '계약 담당자 연락처' : '계약자 연락처'} <span className="text-red-600">*</span>
-                      </label>
-                      <input
-                        data-testid="new-contract-contractor-contact-phone-input"
-                        type="tel"
-                        value={contractorContactPhone}
-                        onChange={(event) => {
-                          setContractorContactPhone(event.target.value);
-                          clearFieldError('contractorContactPhone');
-                        }}
-                        placeholder="010-0000-0000"
-                        className={fieldInputClass('contractorContactPhone')}
-                        disabled={isSubmitting}
-                      />
-                      {fieldErrors.contractorContactPhone && <p className="mt-1 text-xs text-red-600">{fieldErrors.contractorContactPhone}</p>}
-                    </div>
-                  </div>
+                  )}
                 </div>
               )}
-              {rentalType === 'long_term' && <h4 className="pt-2 text-sm font-bold text-gray-700">실제 운전자</h4>}
+              {rentalType === 'long_term' && contractorType === 'individual' && (
+                <div className="rounded-lg border border-gray-200 p-4">
+                  <div className="mb-4 flex items-center justify-between gap-3">
+                    <h4 className="text-sm font-bold text-gray-700">실제 운전자</h4>
+                    <button
+                      type="button"
+                      onClick={addDriver}
+                      disabled={isSubmitting || additionalDrivers.length >= 2}
+                      className="inline-flex items-center gap-1 rounded-lg border border-blue-200 px-2.5 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                      운전자 추가
+                    </button>
+                  </div>
+                  <div className="mb-4 flex gap-1 overflow-x-auto border-b border-gray-200">
+                    {visibleDrivers.map((_, index) => (
+                      <button
+                        key={index}
+                        type="button"
+                        onClick={() => setActiveDriverIndex(index)}
+                        className={`flex shrink-0 items-center gap-1 rounded-t-lg px-3 py-2 text-sm font-semibold ${
+                          activeDriverIndex === index
+                            ? 'bg-blue-50 text-blue-700'
+                            : 'text-gray-600 hover:bg-gray-50'
+                        }`}
+                      >
+                        운전자 {index + 1}
+                        {index > 0 && (
+                          <span
+                            role="button"
+                            tabIndex={0}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              removeDriver(index);
+                            }}
+                            onKeyDown={(event) => {
+                              if (event.key === 'Enter' || event.key === ' ') {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                removeDriver(index);
+                              }
+                            }}
+                            className="ml-1 rounded-full px-1 text-gray-400 hover:bg-red-50 hover:text-red-600"
+                          >
+                            x
+                          </span>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+
+                  {activeDriverIndex === 0 ? (
+                    <div className="space-y-4">
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-sm font-semibold text-gray-600 mb-2">운전자명</label>
+                          <input type="text" value={firstDriver.name} className={fieldInputClass('customerName')} disabled />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-semibold text-gray-600 mb-2">연락처</label>
+                          <input type="tel" value={firstDriver.phone} className={fieldInputClass('customerPhone')} disabled />
+                        </div>
+                      </div>
+                      <div className="space-y-4">
+                        <div>
+                          <label className="block text-sm font-semibold text-gray-600 mb-2">면허번호 <span className="text-red-600">*</span></label>
+                          <input
+                            data-testid="new-contract-customer-license-input"
+                            type="text"
+                            value={customerLicense}
+                            onChange={(event) => {
+                              setCustomerLicense(event.target.value);
+                              clearFieldError('customerLicense');
+                            }}
+                            placeholder="11-123456-78"
+                            className={fieldInputClass('customerLicense')}
+                            disabled={isSubmitting}
+                          />
+                          {fieldErrors.customerLicense && <p className="mt-1 text-xs text-red-600">{fieldErrors.customerLicense}</p>}
+                        </div>
+                        <div>
+                          <label className="block text-sm font-semibold text-gray-600 mb-2">주소 <span className="text-red-600">*</span></label>
+                          <input
+                            data-testid="new-contract-customer-address-input"
+                            type="text"
+                            value={customerAddress}
+                            onChange={(event) => {
+                              setCustomerAddress(event.target.value);
+                              clearFieldError('customerAddress');
+                            }}
+                            placeholder="서울특별시 강남구 논현동 123-456"
+                            className={fieldInputClass('customerAddress')}
+                            disabled={isSubmitting}
+                          />
+                          {fieldErrors.customerAddress && <p className="mt-1 text-xs text-red-600">{fieldErrors.customerAddress}</p>}
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-sm font-semibold text-gray-600 mb-2">운전자명 <span className="text-red-600">*</span></label>
+                          <input
+                            data-testid="new-contract-additional-driver-name-input"
+                            type="text"
+                            value={additionalDrivers[activeDriverIndex - 1]?.name ?? ''}
+                            onChange={(event) => updateAdditionalDriver(activeDriverIndex - 1, 'name', event.target.value)}
+                            className={fieldInputClass('customerName')}
+                            disabled={isSubmitting}
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-semibold text-gray-600 mb-2">연락처 <span className="text-red-600">*</span></label>
+                          <input
+                            data-testid="new-contract-additional-driver-phone-input"
+                            type="tel"
+                            value={additionalDrivers[activeDriverIndex - 1]?.phone ?? ''}
+                            onChange={(event) => updateAdditionalDriver(activeDriverIndex - 1, 'phone', event.target.value)}
+                            placeholder="010-0000-0000"
+                            className={fieldInputClass('customerPhone')}
+                            disabled={isSubmitting}
+                          />
+                        </div>
+                      </div>
+                      <div className="space-y-4">
+                        <div>
+                          <label className="block text-sm font-semibold text-gray-600 mb-2">면허번호 <span className="text-red-600">*</span></label>
+                          <input
+                            data-testid="new-contract-additional-driver-license-input"
+                            type="text"
+                            value={additionalDrivers[activeDriverIndex - 1]?.licenseNumber ?? ''}
+                            onChange={(event) => updateAdditionalDriver(activeDriverIndex - 1, 'licenseNumber', event.target.value)}
+                            placeholder="11-123456-78"
+                            className={fieldInputClass('customerLicense')}
+                            disabled={isSubmitting}
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-semibold text-gray-600 mb-2">주소 <span className="text-red-600">*</span></label>
+                          <input
+                            data-testid="new-contract-additional-driver-address-input"
+                            type="text"
+                            value={additionalDrivers[activeDriverIndex - 1]?.address ?? ''}
+                            onChange={(event) => updateAdditionalDriver(activeDriverIndex - 1, 'address', event.target.value)}
+                            className={fieldInputClass('customerAddress')}
+                            disabled={isSubmitting}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+              {rentalType !== 'long_term' && (
               <div>
                 <label className="block text-sm font-semibold text-gray-600 mb-2">
                   {rentalType === 'long_term' ? '운전자명' : '고객명'} {rentalType !== 'accident_replacement' && <span className="text-red-600">*</span>}
@@ -1106,7 +1803,9 @@ export function NewContractModal({
                 />
                 {fieldErrors.customerName && <p className="mt-1 text-xs text-red-600">{fieldErrors.customerName}</p>}
               </div>
+              )}
 
+              {rentalType !== 'long_term' && (
               <div>
                 <label className="block text-sm font-semibold text-gray-600 mb-2">
                   연락처 {rentalType !== 'accident_replacement' && <span className="text-red-600">*</span>}
@@ -1125,7 +1824,9 @@ export function NewContractModal({
                 />
                 {fieldErrors.customerPhone && <p className="mt-1 text-xs text-red-600">{fieldErrors.customerPhone}</p>}
               </div>
+              )}
 
+              {rentalType !== 'long_term' && (
               <div>
                 <label className="block text-sm font-semibold text-gray-600 mb-2">
                   면허번호 {rentalType !== 'accident_replacement' && <span className="text-red-600">*</span>}
@@ -1144,7 +1845,9 @@ export function NewContractModal({
                 />
                 {fieldErrors.customerLicense && <p className="mt-1 text-xs text-red-600">{fieldErrors.customerLicense}</p>}
               </div>
+              )}
 
+              {rentalType !== 'long_term' && (
               <div>
                 <label className="block text-sm font-semibold text-gray-600 mb-2">
                   주소 {rentalType !== 'accident_replacement' && <span className="text-red-600">*</span>}
@@ -1163,157 +1866,74 @@ export function NewContractModal({
                 />
                 {fieldErrors.customerAddress && <p className="mt-1 text-xs text-red-600">{fieldErrors.customerAddress}</p>}
               </div>
+              )}
 
               <div className="border-t border-gray-200 pt-4 mt-6">
                 <h3 className="text-sm font-bold text-gray-700 mb-4">🚗 차량 인도/반납 장소</h3>
 
                 <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-600 mb-2">
-                      대여 장소 <span className="text-red-600">*</span>
-                    </label>
-                    {locationOptions && locationOptions.length > 0 ? (
-                      <select
-                        data-testid="new-contract-pickup-location-input"
-                        value={pickupLocation}
-                        onChange={(event) => {
-                          setPickupLocation(event.target.value);
-                          clearFieldError('pickupLocation');
-                        }}
-                        className={fieldInputClass('pickupLocation')}
-                        disabled={isSubmitting}
-                      >
-                        <option value="">장소를 선택하세요</option>
-                        {locationOptions.map((loc) => (
-                          <option key={loc} value={loc}>{loc}</option>
-                        ))}
-                      </select>
-                    ) : (
-                      <input
-                        data-testid="new-contract-pickup-location-input"
-                        type="text"
-                        value={pickupLocation}
-                        onChange={(event) => {
-                          setPickupLocation(event.target.value);
-                          clearFieldError('pickupLocation');
-                        }}
-                        placeholder="서울특별시 강남구 테헤란로 123"
-                        className={fieldInputClass('pickupLocation')}
-                        disabled={isSubmitting}
-                      />
-                    )}
-                    {fieldErrors.pickupLocation && <p className="mt-1 text-xs text-red-600">{fieldErrors.pickupLocation}</p>}
-                  </div>
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-600 mb-2">
-                      반납 장소 <span className="text-red-600">*</span>
-                    </label>
-                    {locationOptions && locationOptions.length > 0 ? (
-                      <select
-                        data-testid="new-contract-return-location-input"
-                        value={returnLocation}
-                        onChange={(event) => {
-                          setReturnLocation(event.target.value);
-                          clearFieldError('returnLocation');
-                        }}
-                        className={fieldInputClass('returnLocation')}
-                        disabled={isSubmitting}
-                      >
-                        <option value="">장소를 선택하세요</option>
-                        {locationOptions.map((loc) => (
-                          <option key={loc} value={loc}>{loc}</option>
-                        ))}
-                      </select>
-                    ) : (
-                      <input
-                        data-testid="new-contract-return-location-input"
-                        type="text"
-                        value={returnLocation}
-                        onChange={(event) => {
-                          setReturnLocation(event.target.value);
-                          clearFieldError('returnLocation');
-                        }}
-                        placeholder="서울특별시 강남구 테헤란로 123"
-                        className={fieldInputClass('returnLocation')}
-                        disabled={isSubmitting}
-                      />
-                    )}
-                    {fieldErrors.returnLocation && <p className="mt-1 text-xs text-red-600">{fieldErrors.returnLocation}</p>}
-                  </div>
+                  {renderLocationField('pickup', '대여 장소', pickupLocation, pickupLocationMode, 'pickupLocation', 'new-contract-pickup-location-input', setPickupLocation)}
+                  {renderLocationField('return', '반납 장소', returnLocation, returnLocationMode, 'returnLocation', 'new-contract-return-location-input', setReturnLocation)}
                 </div>
+                <p className="mt-2 text-xs text-gray-500">
+                  차고지 목록은 설정 페이지의 차고지 탭에서 관리할 수 있습니다.
+                </p>
               </div>
 
               {rentalType === 'long_term' ? (
                 <div className="border-t border-gray-200 pt-4 mt-6 space-y-4">
                   <h3 className="text-sm font-bold text-gray-700">월 납부 조건</h3>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-semibold text-gray-600 mb-2">청구 대상</label>
-                      <select
-                        data-testid="new-contract-payer-type-input"
-                        value={payerType}
-                        onChange={(event) => {
-                          setPayerType(event.target.value as 'customer' | 'corporate');
-                          clearFieldError('payerType');
-                        }}
-                        className={fieldInputClass('payerType')}
-                        disabled={isSubmitting}
-                      >
-                        <option value="corporate">법인</option>
-                        <option value="customer">개인/고객</option>
-                      </select>
-                      {fieldErrors.payerType && <p className="mt-1 text-xs text-red-600">{fieldErrors.payerType}</p>}
-                    </div>
-                    <div>
-                      <label className="block text-sm font-semibold text-gray-600 mb-2">청구 계정</label>
-                      <input
-                        data-testid="new-contract-billing-account-input"
-                        type="text"
-                        value={billingAccount}
-                        onChange={(event) => {
-                          setBillingAccount(event.target.value);
-                          clearFieldError('billingAccount');
-                        }}
-                        placeholder="거래처 코드 또는 계좌 메모"
-                        className={fieldInputClass('billingAccount')}
-                        disabled={isSubmitting}
-                      />
-                      {fieldErrors.billingAccount && <p className="mt-1 text-xs text-red-600">{fieldErrors.billingAccount}</p>}
-                    </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-600 mb-2">청구 계정</label>
+                    <input
+                      data-testid="new-contract-billing-account-input"
+                      type="text"
+                      value={billingAccount}
+                      onChange={(event) => {
+                        setBillingAccount(event.target.value);
+                        clearFieldError('billingAccount');
+                      }}
+                      placeholder="거래처 코드 또는 계좌 메모"
+                      className={fieldInputClass('billingAccount')}
+                      disabled={isSubmitting}
+                    />
+                    {fieldErrors.billingAccount && <p className="mt-1 text-xs text-red-600">{fieldErrors.billingAccount}</p>}
                   </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-semibold text-gray-600 mb-2">청구 담당자</label>
-                      <input
-                        data-testid="new-contract-payer-name-input"
-                        type="text"
-                        value={payerName}
-                        onChange={(event) => {
-                          setPayerName(event.target.value);
-                          clearFieldError('payerName');
-                        }}
-                        className={fieldInputClass('payerName')}
-                        disabled={isSubmitting}
-                      />
-                      {fieldErrors.payerName && <p className="mt-1 text-xs text-red-600">{fieldErrors.payerName}</p>}
+                  {contractorType === 'corporate' && (
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-semibold text-gray-600 mb-2">청구 담당자</label>
+                        <input
+                          data-testid="new-contract-payer-name-input"
+                          type="text"
+                          value={payerName}
+                          onChange={(event) => {
+                            setPayerName(event.target.value);
+                            clearFieldError('payerName');
+                          }}
+                          className={fieldInputClass('payerName')}
+                          disabled={isSubmitting}
+                        />
+                        {fieldErrors.payerName && <p className="mt-1 text-xs text-red-600">{fieldErrors.payerName}</p>}
+                      </div>
+                      <div>
+                        <label className="block text-sm font-semibold text-gray-600 mb-2">청구 담당자 연락처</label>
+                        <input
+                          data-testid="new-contract-payer-phone-input"
+                          type="tel"
+                          value={payerPhone}
+                          onChange={(event) => {
+                            setPayerPhone(event.target.value);
+                            clearFieldError('payerPhone');
+                          }}
+                          placeholder="010-0000-0000"
+                          className={fieldInputClass('payerPhone')}
+                          disabled={isSubmitting}
+                        />
+                        {fieldErrors.payerPhone && <p className="mt-1 text-xs text-red-600">{fieldErrors.payerPhone}</p>}
+                      </div>
                     </div>
-                    <div>
-                      <label className="block text-sm font-semibold text-gray-600 mb-2">청구 담당자 연락처</label>
-                      <input
-                        data-testid="new-contract-payer-phone-input"
-                        type="tel"
-                        value={payerPhone}
-                        onChange={(event) => {
-                          setPayerPhone(event.target.value);
-                          clearFieldError('payerPhone');
-                        }}
-                        placeholder="010-0000-0000"
-                        className={fieldInputClass('payerPhone')}
-                        disabled={isSubmitting}
-                      />
-                      {fieldErrors.payerPhone && <p className="mt-1 text-xs text-red-600">{fieldErrors.payerPhone}</p>}
-                    </div>
-                  </div>
+                  )}
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <label className="block text-sm font-semibold text-gray-600 mb-2">
@@ -1488,15 +2108,16 @@ export function NewContractModal({
                   </div>
                   <div className="grid grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-sm font-semibold text-gray-600 mb-2">보험사 <span className="text-xs font-medium text-gray-400">(번호 없을 때 필수)</span></label>
+                      <label className="block text-sm font-semibold text-gray-600 mb-2">보험사 <span className="text-red-600">*</span> <span className="text-xs font-medium text-gray-400">(사고접수번호 없을 때)</span></label>
                       <input type="text" value={insurerName} onChange={(event) => { setInsurerName(event.target.value); clearFieldError('insurerName'); }} className={fieldInputClass('insurerName')} disabled={isSubmitting} />
                       {fieldErrors.insurerName && <p className="mt-1 text-xs text-red-600">{fieldErrors.insurerName}</p>}
                     </div>
                     <div>
-                      <label className="block text-sm font-semibold text-gray-600 mb-2">사고접수번호 <span className="text-xs font-medium text-gray-400">(보험사 없을 때 필수)</span></label>
+                      <label className="block text-sm font-semibold text-gray-600 mb-2">사고접수번호 <span className="text-red-600">*</span> <span className="text-xs font-medium text-gray-400">(보험사 없을 때)</span></label>
                       <input type="text" value={claimNo} onChange={(event) => { setClaimNo(event.target.value); clearFieldError('claimNo'); }} className={fieldInputClass('claimNo')} disabled={isSubmitting} />
                       {fieldErrors.claimNo && <p className="mt-1 text-xs text-red-600">{fieldErrors.claimNo}</p>}
                     </div>
+                    <p className="col-span-2 text-xs text-gray-500">보험사 또는 사고접수번호 중 하나는 필수입니다.</p>
                   </div>
                   <div className="grid grid-cols-2 gap-4">
                     <div>
@@ -1516,7 +2137,7 @@ export function NewContractModal({
                       {fieldErrors.repairShopName && <p className="mt-1 text-xs text-red-600">{fieldErrors.repairShopName}</p>}
                     </div>
                     <div>
-                      <label className="block text-sm font-semibold text-gray-600 mb-2">정비공장 주소</label>
+                      <label className="block text-sm font-semibold text-gray-600 mb-2">정비공장 주소 {requestSource === 'repair_shop' && <span className="text-red-600">*</span>}</label>
                       <input type="text" value={repairShopLocation} onChange={(event) => { setRepairShopLocation(event.target.value); clearFieldError('repairShopLocation'); }} placeholder="정비공장 주소" className={fieldInputClass('repairShopLocation')} disabled={isSubmitting} />
                       {fieldErrors.repairShopLocation && <p className="mt-1 text-xs text-red-600">{fieldErrors.repairShopLocation}</p>}
                     </div>
@@ -1689,46 +2310,107 @@ export function NewContractModal({
 
           {step === 3 && (
             <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-semibold text-gray-600 mb-2">
-                  운전면허증 {rentalType !== 'accident_replacement' && <span className="text-red-600">*</span>}
-                </label>
-                <label className="cursor-pointer block">
-                  <div className={`flex items-center gap-2 p-3 text-gray-700 rounded-lg border justify-center transition-colors ${
-                    fieldErrors.licenseFile
-                      ? 'bg-red-50 border-red-300'
-                      : 'bg-gray-100 border-gray-300 hover:bg-gray-200'
-                  }`}>
-                    <Upload className="w-4 h-4" />
-                    <span className="text-sm font-medium">
-                      {licenseFile ? licenseFile.name : '파일 선택'}
-                    </span>
+              {rentalType === 'long_term' && contractorType === 'individual' ? (
+                <div className="rounded-lg border border-gray-200 p-4">
+                  <h3 className="mb-3 text-sm font-bold text-gray-700">운전자별 면허증</h3>
+                  <div className="space-y-3">
+                    {visibleDrivers.map((driver, index) => {
+                      const file = index === 0 ? licenseFile : additionalDriverLicenseFiles[index - 1];
+                      const driverFileError = index === 0 ? fieldErrors.licenseFile : additionalDriverLicenseFileErrors[index - 1];
+                      const hasError = index === 0 ? Boolean(fieldErrors.licenseFile) : Boolean(driverFileError);
+                      return (
+                        <div key={index} className="rounded-lg border border-gray-100 bg-gray-50 p-3">
+                          <div className="mb-2 flex items-center justify-between gap-3">
+                            <span className="text-sm font-semibold text-gray-700">
+                              운전자 {index + 1}{driver.name ? ` - ${driver.name}` : ''}
+                            </span>
+                            <span className="text-xs font-medium text-red-600">필수</span>
+                          </div>
+                          <label className="block cursor-pointer">
+                            <div className={`flex items-center justify-center gap-2 rounded-lg border p-3 text-gray-700 transition-colors ${
+                              hasError
+                                ? 'border-red-300 bg-red-50'
+                                : 'border-gray-300 bg-white hover:bg-gray-100'
+                            }`}>
+                              <Upload className="h-4 w-4" />
+                              <span className="text-sm font-medium">
+                                {file ? file.name : '파일 선택'}
+                              </span>
+                            </div>
+                            <input
+                              data-testid={index === 0 ? 'new-contract-license-file-input' : `new-contract-additional-driver-license-file-${index}`}
+                              type="file"
+                              accept="image/*"
+                              className="hidden"
+                              onChange={(event) => {
+                                const nextFile = event.target.files?.[0] ?? null;
+                                if (index === 0) {
+                                  setLicenseFile(nextFile);
+                                  clearFieldError('licenseFile');
+                                } else {
+                                  updateAdditionalDriverLicenseFile(index - 1, nextFile);
+                                }
+                              }}
+                              disabled={isSubmitting}
+                            />
+                          </label>
+                          {file && (
+                            <p className="mt-1 text-xs text-green-600">✓ 파일이 선택되었습니다</p>
+                          )}
+                          {driverFileError && (
+                            <p className="mt-1 text-xs text-red-600">{driverFileError}</p>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
-                  <input
-                    data-testid="new-contract-license-file-input"
-                    type="file"
-                    accept="image/*"
-                    className="hidden"
-                    onChange={(event) => {
-                      const file = event.target.files?.[0];
-                      if (file) {
+                  {fieldErrors.additionalDriverLicenseFiles && Object.keys(additionalDriverLicenseFileErrors).length === 0 && (
+                    <p className="mt-2 text-xs text-red-600">{fieldErrors.additionalDriverLicenseFiles}</p>
+                  )}
+                  <p className="mt-2 text-xs text-gray-500">각 운전자별 면허증 앞면 또는 전체 사진을 업로드하세요.</p>
+                </div>
+              ) : (
+                <div>
+                  <label className="block text-sm font-semibold text-gray-600 mb-2">
+                    운전면허증 {rentalType === 'short_term' && <span className="text-red-600">*</span>}
+                  </label>
+                  <label className="cursor-pointer block">
+                    <div className={`flex items-center gap-2 p-3 text-gray-700 rounded-lg border justify-center transition-colors ${
+                      fieldErrors.licenseFile
+                        ? 'bg-red-50 border-red-300'
+                        : 'bg-gray-100 border-gray-300 hover:bg-gray-200'
+                    }`}>
+                      <Upload className="w-4 h-4" />
+                      <span className="text-sm font-medium">
+                        {licenseFile ? licenseFile.name : '파일 선택'}
+                      </span>
+                    </div>
+                    <input
+                      data-testid="new-contract-license-file-input"
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(event) => {
+                        const file = event.target.files?.[0] ?? null;
                         setLicenseFile(file);
                         clearFieldError('licenseFile');
-                      }
-                    }}
-                    disabled={isSubmitting}
-                  />
-                </label>
-                {licenseFile && (
-                  <p className="text-xs text-green-600 mt-1">✓ 파일이 선택되었습니다</p>
-                )}
-                {fieldErrors.licenseFile && <p className="mt-1 text-xs text-red-600">{fieldErrors.licenseFile}</p>}
-                <p className="text-xs text-gray-500 mt-1">
-                  {rentalType === 'accident_replacement'
-                    ? '정비소 배차 접수 단계에서는 선택 입력입니다. 실제 운전자 인수 전 확보하세요'
-                    : '면허증 앞면 또는 전체 사진을 업로드하세요'}
-                </p>
-              </div>
+                      }}
+                      disabled={isSubmitting}
+                    />
+                  </label>
+                  {licenseFile && (
+                    <p className="text-xs text-green-600 mt-1">✓ 파일이 선택되었습니다</p>
+                  )}
+                  {fieldErrors.licenseFile && <p className="mt-1 text-xs text-red-600">{fieldErrors.licenseFile}</p>}
+                  <p className="text-xs text-gray-500 mt-1">
+                    {rentalType === 'long_term' && contractorType === 'corporate'
+                      ? '법인 장기렌트는 실제 운전자 정보를 등록하지 않으므로 선택 입력입니다'
+                      : rentalType === 'accident_replacement'
+                      ? '정비소 배차 접수 단계에서는 선택 입력입니다. 실제 운전자 인수 전 확보하세요'
+                      : '면허증 앞면 또는 전체 사진을 업로드하세요'}
+                  </p>
+                </div>
+              )}
 
               <div>
                 <label className="block text-sm font-semibold text-gray-600 mb-2">
@@ -1743,17 +2425,24 @@ export function NewContractModal({
                   }`}>
                     <Upload className="w-4 h-4" />
                     <span className="text-sm font-medium">
-                      {contractFile ? contractFile.name : '파일 선택'}
+                      {contractFiles.length > 0
+                        ? `${contractFiles.length}개 파일 선택됨`
+                        : contractFile
+                          ? contractFile.name
+                          : '파일 선택'}
                     </span>
                   </div>
                   <input
+                    data-testid="new-contract-contract-file-input"
                     type="file"
+                    multiple={rentalType === 'long_term'}
                     accept="image/*,application/pdf"
                     className="hidden"
                     onChange={(event) => {
-                      const file = event.target.files?.[0];
-                      if (file) {
-                        setContractFile(file);
+                      const files = Array.from(event.target.files ?? []);
+                      if (files.length > 0) {
+                        setContractFiles(files);
+                        setContractFile(files[0] ?? null);
                         clearFieldError('contractFile');
                         setSubmitError(null);
                       }
@@ -1761,8 +2450,28 @@ export function NewContractModal({
                     disabled={isSubmitting}
                   />
                 </label>
-                {contractFile && (
-                  <p className="text-xs text-green-600 mt-1">✓ 파일이 선택되었습니다</p>
+                {contractFiles.length > 0 ? (
+                  <div className="mt-2 space-y-1">
+                    {contractFiles.map((file, index) => (
+                      <div key={`${file.name}-${file.size}-${index}`} className="flex items-center justify-between gap-2 rounded-md bg-green-50 px-2 py-1 text-xs text-green-700">
+                        <span className="min-w-0 truncate">{file.name}</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const nextFiles = contractFiles.filter((_, fileIndex) => fileIndex !== index);
+                            setContractFiles(nextFiles);
+                            setContractFile(nextFiles[0] ?? null);
+                          }}
+                          className="shrink-0 font-semibold text-green-800 hover:text-green-950"
+                          disabled={isSubmitting}
+                        >
+                          제거
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : contractFile && (
+                  <p className="text-xs text-green-600 mt-1">파일이 선택되었습니다</p>
                 )}
                 {fieldErrors.contractFile && <p className="mt-1 text-xs text-red-600">{fieldErrors.contractFile}</p>}
                 <p className="text-xs text-gray-500 mt-1">
@@ -1797,5 +2506,121 @@ export function NewContractModal({
         </div>
       </div>
     </div>
+    {activeLocationRegistrationTarget !== null && (
+      <div data-testid="new-contract-garage-registration-modal" className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50">
+        <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+          <div className="mb-5">
+            <h2 className="text-lg font-bold text-[#1e2939]">신규 차고지 등록</h2>
+            <p className="mt-2 text-sm leading-6 text-gray-600">
+              등록한 차고지는 설정 페이지의 차고지 탭에도 반영됩니다.
+            </p>
+          </div>
+          <div className="space-y-4">
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">
+                차고지 이름 <span className="text-red-600">*</span>
+              </label>
+              <input
+                data-testid="new-contract-garage-name-input"
+                type="text"
+                value={newGarageName}
+                onChange={(event) => {
+                  setNewGarageName(event.target.value);
+                  setNewGarageFieldErrors((prev) => ({ ...prev, name: undefined }));
+                  setNewGarageError(null);
+                }}
+                placeholder="차고지 이름을 입력하세요"
+                className={`w-full rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                  newGarageFieldErrors.name ? 'border-red-400 bg-red-50' : 'border-gray-300'
+                }`}
+                disabled={isNewGarageSaving}
+              />
+              {newGarageFieldErrors.name && <p className="mt-1 text-xs text-red-600">{newGarageFieldErrors.name}</p>}
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">
+                주소 <span className="text-red-600">*</span>
+              </label>
+              <input
+                data-testid="new-contract-garage-address-input"
+                type="text"
+                value={newGarageAddress}
+                onChange={(event) => {
+                  setNewGarageAddress(event.target.value);
+                  setNewGarageFieldErrors((prev) => ({ ...prev, address: undefined }));
+                  setNewGarageError(null);
+                }}
+                placeholder="주소를 입력하세요"
+                className={`w-full rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                  newGarageFieldErrors.address ? 'border-red-400 bg-red-50' : 'border-gray-300'
+                }`}
+                disabled={isNewGarageSaving}
+              />
+              {newGarageFieldErrors.address && <p className="mt-1 text-xs text-red-600">{newGarageFieldErrors.address}</p>}
+            </div>
+            {newGarageError && (
+              <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                {newGarageError}
+              </p>
+            )}
+          </div>
+          <div className="mt-6 flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={closeLocationRegistration}
+              className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={isNewGarageSaving}
+            >
+              취소
+            </button>
+            <button
+              type="button"
+              onClick={() => { void handleCreateGarageFromModal(); }}
+              className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={isNewGarageSaving}
+            >
+              {isNewGarageSaving && <Loader2 className="h-4 w-4 animate-spin" />}
+              {isNewGarageSaving ? '등록 중...' : '등록'}
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+    {pendingDriverRemovalIndex !== null && (
+      <div data-testid="driver-delete-confirm-modal" className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50">
+        <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl">
+          <div className="mb-5 flex items-start gap-3">
+            <div className="rounded-full bg-red-50 p-2 text-red-600">
+              <AlertTriangle className="h-5 w-5" />
+            </div>
+            <div>
+              <h2 className="text-lg font-bold text-[#1e2939]">운전자 삭제</h2>
+              <p className="mt-2 text-sm leading-6 text-gray-700">
+                운전자 {pendingDriverRemovalIndex + 1} 정보를 삭제하시겠습니까?
+              </p>
+            </div>
+          </div>
+          <div className="flex justify-end gap-3">
+            <button
+              type="button"
+              onClick={() => setPendingDriverRemovalIndex(null)}
+              className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+              disabled={isSubmitting}
+            >
+              닫기
+            </button>
+            <button
+              type="button"
+              onClick={confirmDriverRemoval}
+              className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-70"
+              disabled={isSubmitting}
+            >
+              삭제
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+    </>
   );
 }

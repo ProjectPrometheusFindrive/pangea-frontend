@@ -1,7 +1,7 @@
 import { Layout } from '../components/Layout';
-import { startTransition, useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { startTransition, useState, useEffect, useRef, useCallback, useMemo, type ChangeEvent, type CompositionEvent, type KeyboardEvent } from 'react';
 import { useSearchParams, useNavigate } from 'react-router';
-import { ChevronLeft, ChevronRight, Plus, Car, Calendar, AlertCircle, DollarSign, AlertTriangle, Loader2, RefreshCw, X, Edit2, Save, ArrowLeft } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, Car, Calendar, AlertCircle, DollarSign, AlertTriangle, Loader2, RefreshCw, X, Edit2, Save, ArrowLeft, SlidersHorizontal } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   AccidentReportModal,
@@ -14,6 +14,7 @@ import {
   NewContractModal,
   type NewContractField,
   type NewContractFormValues,
+  type NewContractLocationOption,
   type NewContractSubmitFeedback,
 } from '../components/NewContractModal';
 import { PageStateBoundary } from '../components/PageStateBoundary';
@@ -43,12 +44,13 @@ import {
 import { useAuthorization } from '../context/AuthorizationContext';
 import { ACTION_PERMISSIONS, ROUTE_PERMISSIONS } from '../authorization';
 import { formatDateKst, formatDateTimeKst } from '../utils/dateTimeFormat';
+import { normalizeActionMainCategory, normalizeActionSubCategory } from '../utils/actionItemTaxonomy';
 import type { VehicleAsset } from '../types/assets';
 import type { Reservation, ReservationAccidentClaim, ReservationAccidentReport, ReservationBillingSummary, ReservationChargeItem, ReservationDocumentChecklistItem, ReservationParties, ReservationParty, ReservationPaymentRecord } from '../types/reservations';
 import { ApiError } from '../../services/api';
 import { signAssetUpload, uploadFileToSignedUrl } from '../../services/assetOcr';
 import { getAssetsList } from '../../services/assets';
-import { createReservationChargeItem, getUploadDownloadUrl, patchChargeItem, patchPaymentRecord } from '../../services/billing';
+import { createReservationChargeItem, createReservationPaymentRecord, getUploadDownloadUrl, patchChargeItem, voidPaymentRecord } from '../../services/billing';
 import { patchPaymentStatus } from '../../services/payments';
 import {
   getActionRequiredList,
@@ -67,7 +69,7 @@ import {
   returnReservation,
   transitionReservation,
 } from '../../services/reservations';
-import { listSettingsGarages, listSettingsMembers, type SettingsMember } from '../../services/settings';
+import { createSettingsGarage, listSettingsGarages, listSettingsMembers, type SettingsGarage, type SettingsMember } from '../../services/settings';
 
 // 드래그 선택 타입 정의
 type DragSelection = {
@@ -75,6 +77,17 @@ type DragSelection = {
   startDate: number;
   endDate: number;
 } | null;
+type DragConflictPrompt = {
+  vehicleNumber: string;
+  startDateLabel: string;
+  endDateLabel: string;
+  conflicts: Array<{
+    id: string;
+    customer: string;
+    startDateFull: string;
+    endDateFull: string;
+  }>;
+};
 type ReservationWarningPrompt = {
   message: string;
   confirmLabel?: string;
@@ -85,6 +98,11 @@ type ViewFilter = 'all' | 'reservation' | 'rental' | 'return' | 'unpaid' | 'over
 const PAYMENT_ISSUE_LABELS = new Set(['미납/결제 문제', '정산/수납']);
 type PaymentScope = 'all' | 'delinquent';
 type RentalTypeFilter = 'all' | 'short_term' | 'long_term' | 'accident_replacement';
+type WorkflowStatusFilter = 'all' | 'intake' | 'confirmed' | 'pickup_ready' | 'renting' | 'returned' | 'closeout_required' | 'closed' | 'cancelled';
+type CloseoutStatusFilter = 'all' | 'not_required' | 'required' | 'partial' | 'disputed' | 'closed';
+type CancellationSettlementStatusFilter = 'all' | 'not_required' | 'fee_due' | 'refund_due' | 'mixed_due' | 'disputed' | 'settled';
+type LongTermAccountStatusFilter = 'all' | 'not_applicable' | 'active_normal' | 'due_soon' | 'due' | 'partial' | 'overdue_1' | 'overdue_2_plus' | 'collection_review' | 'early_termination' | 'closeout' | 'closed';
+type AccidentReplacementStatusFilter = 'all' | 'not_applicable' | 'info_missing' | 'approval_pending' | 'delivery_ready' | 'in_use' | 'repair_done_not_returned' | 'returned' | 'ready_to_claim' | 'claiming' | 'insurance_paid' | 'partial_recognized' | 'difference_settlement' | 'disputed' | 'closed';
 type DueFilter = 'pickup' | 'return' | null;
 
 function createTodayBaseDate(): Date {
@@ -95,6 +113,7 @@ function createTodayBaseDate(): Date {
 const CALENDAR_BASE_DATE = createTodayBaseDate();
 const DEFAULT_PAGE = 1;
 const DEFAULT_PAGE_SIZE = 20;
+const DEFAULT_TOTAL_DAYS_TO_SHOW = 42;
 const RESERVATION_FETCH_PAGE_SIZE = 500;
 const RESERVATION_FETCH_BUFFER_BEFORE_DAYS = 14;
 const RESERVATION_FETCH_BUFFER_AFTER_DAYS = 28;
@@ -102,17 +121,80 @@ const RESERVATION_MAX_FETCH_WINDOW_DAYS = 90;
 const ASSET_FALLBACK_PAGE_SIZE = 200;
 const RESERVATION_CALENDAR_CACHE_KEY_PREFIX = 'pangea.reservations.calendar.v1';
 const RESERVATION_CALENDAR_CACHE_TTL_MS = 5 * 60 * 1000;
+const CALENDAR_TODAY_LEFT_OFFSET_DAYS = 3;
 const TOTAL_COUNT_KEYS = ['total', 'totalCount', 'count', 'size', 'itemsCount', 'totalElements'];
 const RETRY_TOAST_MESSAGE = '일시적인 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.';
 const ACTIVE_ACTION_STATUS_QUERY = 'open,in_progress';
 const EXPIRED_INSURANCE_PICKUP_MESSAGE = '현재 보험 만료 상태로 차량 인수가 불가능합니다.\n보험 만료 이후에 운행을 할 경우 행정처분(과태료, 영업정지)과 형사처벌을 받을 수 있으며 사고 발생시 보험처리가 불가합니다.';
 const INSPECTION_PICKUP_FORCE_MESSAGE = '예약 기간내에 정기점검 만료일자가 있습니다.\n수검 가능 기간을 넘기면 과태료(4만원 + 3일당 2만원)가 발생하며, 사고 발생시 보험 처리에 불리합니다.';
 const INSPECTION_PICKUP_NOTICE_MESSAGE = '예약 종료 후 수검 만료기간까지 {days}일입니다. \n반납 지연 및 대여 연장 발생시 주의해주세요.';
+const LEDGER_AUTHORITATIVE_PAYMENT_MESSAGE = '이 계약은 정산 항목의 청구/수납 내역으로 결제 상태를 계산합니다. 각 항목의 수납 버튼에서 처리하세요.';
+const WORKFLOW_STATUS_LABELS: Record<Exclude<WorkflowStatusFilter, 'all'>, string> = {
+  intake: '예약접수',
+  confirmed: '예약확정',
+  pickup_ready: '인수대기',
+  renting: '대여중',
+  returned: '반납완료',
+  closeout_required: '종료정산 필요',
+  closed: '종결',
+  cancelled: '취소',
+};
+const CLOSEOUT_STATUS_LABELS: Record<Exclude<CloseoutStatusFilter, 'all'>, string> = {
+  not_required: '정산 대상 아님',
+  required: '종료정산 필요',
+  partial: '부분 정산',
+  disputed: '분쟁/보류',
+  closed: '정산 완료',
+};
+const CANCELLATION_SETTLEMENT_STATUS_LABELS: Record<Exclude<CancellationSettlementStatusFilter, 'all'>, string> = {
+  not_required: '취소정산 대상 아님',
+  fee_due: '취소수수료 청구',
+  refund_due: '환불대기',
+  mixed_due: '취소수수료/환불 정산',
+  disputed: '분쟁/보류',
+  settled: '취소정산 완료',
+};
+const LONG_TERM_ACCOUNT_STATUS_LABELS: Record<Exclude<LongTermAccountStatusFilter, 'all'>, string> = {
+  not_applicable: '장기렌트 아님',
+  active_normal: '정상',
+  due_soon: '납부예정',
+  due: '납부대기',
+  partial: '부분납부',
+  overdue_1: '1회차 연체',
+  overdue_2_plus: '2회차 이상 연체',
+  collection_review: '회수/중도해지 검토',
+  early_termination: '중도해지',
+  closeout: '종료정산',
+  closed: '종결',
+};
+const ACCIDENT_REPLACEMENT_STATUS_LABELS: Record<Exclude<AccidentReplacementStatusFilter, 'all'>, string> = {
+  not_applicable: '사고대차 아님',
+  info_missing: '사고정보 미완성',
+  approval_pending: '대차 승인 대기',
+  delivery_ready: '인수대기',
+  in_use: '대차 진행중',
+  repair_done_not_returned: '수리완료 후 미반납',
+  returned: '반납완료',
+  ready_to_claim: '청구대기',
+  claiming: '보험청구중',
+  insurance_paid: '보험입금 완료',
+  partial_recognized: '일부인정/차액발생',
+  difference_settlement: '차액정산',
+  disputed: '분쟁/보류',
+  closed: '종결',
+};
 
 type FieldErrorMap<TField extends string> = Partial<Record<TField, string>>;
 type ReservationsHydrationPayload = {
   reservationsPayload: unknown;
   assetPayload?: unknown;
+};
+type ReservationActiveActionItem = {
+  id: string;
+  label: string;
+  mainLabel: string;
+  subLabel?: string;
+  status?: string;
 };
 
 function pad2(value: number): string {
@@ -768,9 +850,15 @@ function toReservationParties(value: unknown): ReservationParties | undefined {
   if (!isRecord(value)) {
     return undefined;
   }
+  const additionalDrivers = Array.isArray(value.additionalDrivers)
+    ? value.additionalDrivers
+      .map(toReservationParty)
+      .filter((party): party is ReservationParty => Boolean(party))
+    : undefined;
   const parties: ReservationParties = {
     contractor: toReservationParty(value.contractor),
     driver: toReservationParty(value.driver),
+    additionalDrivers: additionalDrivers && additionalDrivers.length > 0 ? additionalDrivers : undefined,
     requester: toReservationParty(value.requester),
     payer: toReservationParty(value.payer),
   };
@@ -781,6 +869,22 @@ function toReservationDocumentChecklist(value: unknown): ReservationDocumentChec
   if (!Array.isArray(value)) {
     return undefined;
   }
+  const toDocumentDetail = (detailValue: unknown) => {
+    if (!isRecord(detailValue)) {
+      return undefined;
+    }
+    const objectName = toStringValue(detailValue.objectName);
+    if (!objectName) {
+      return undefined;
+    }
+    return {
+      objectName,
+      fileName: toStringValue(detailValue.fileName) ?? undefined,
+      contentType: toStringValue(detailValue.contentType) ?? undefined,
+      url: toStringValue(detailValue.url) ?? undefined,
+      documentType: toStringValue(detailValue.documentType) ?? undefined,
+    };
+  };
   const items = value
     .filter(isRecord)
     .map((item): ReservationDocumentChecklistItem | null => {
@@ -790,12 +894,18 @@ function toReservationDocumentChecklist(value: unknown): ReservationDocumentChec
       if (!key || !label || !status) {
         return null;
       }
+      const detail = toDocumentDetail(item.detail);
+      const details = Array.isArray(item.details)
+        ? item.details.map(toDocumentDetail).filter((row): row is NonNullable<typeof detail> => Boolean(row))
+        : undefined;
       return {
         key,
         label,
         status,
         required: item.required === true,
         objectName: toStringValue(item.objectName) ?? undefined,
+        detail,
+        details: details && details.length > 0 ? details : undefined,
         reasonType: toStringValue(item.reasonType) ?? undefined,
       };
     })
@@ -947,6 +1057,10 @@ function toDateOffset(value: unknown): number | null {
 
 function toDateLabelFromOffset(offset: number): string {
   return formatDateAsYmd(toDateFromOffset(offset));
+}
+
+function calendarStartOffsetForTarget(targetOffset: number): number {
+  return targetOffset - CALENDAR_TODAY_LEFT_OFFSET_DAYS;
 }
 
 type ReservationFetchWindow = {
@@ -1424,12 +1538,45 @@ export function matchesReservationFilters(
     viewFilter: ViewFilter;
     paymentScope: PaymentScope;
     rentalTypeFilter?: RentalTypeFilter;
+    workflowStatusFilter?: WorkflowStatusFilter;
+    closeoutStatusFilter?: CloseoutStatusFilter;
+    cancellationSettlementStatusFilter?: CancellationSettlementStatusFilter;
+    longTermAccountStatusFilter?: LongTermAccountStatusFilter;
+    accidentReplacementStatusFilter?: AccidentReplacementStatusFilter;
     searchQuery: string;
   },
 ): boolean {
-  const { viewFilter, paymentScope, rentalTypeFilter = 'all', searchQuery } = options;
+  const {
+    viewFilter,
+    paymentScope,
+    rentalTypeFilter = 'all',
+    workflowStatusFilter = 'all',
+    closeoutStatusFilter = 'all',
+    cancellationSettlementStatusFilter = 'all',
+    longTermAccountStatusFilter = 'all',
+    accidentReplacementStatusFilter = 'all',
+    searchQuery,
+  } = options;
 
   if (rentalTypeFilter !== 'all' && (reservation.rentalType ?? 'short_term') !== rentalTypeFilter) {
+    return false;
+  }
+  if (workflowStatusFilter !== 'all' && reservation.workflowStatus !== workflowStatusFilter) {
+    return false;
+  }
+  if (closeoutStatusFilter !== 'all' && reservation.closeoutStatus !== closeoutStatusFilter) {
+    return false;
+  }
+  if (
+    cancellationSettlementStatusFilter !== 'all'
+    && reservation.cancellationSettlementStatus !== cancellationSettlementStatusFilter
+  ) {
+    return false;
+  }
+  if (longTermAccountStatusFilter !== 'all' && reservation.longTermAccountStatus !== longTermAccountStatusFilter) {
+    return false;
+  }
+  if (accidentReplacementStatusFilter !== 'all' && reservation.accidentReplacementStatus !== accidentReplacementStatusFilter) {
     return false;
   }
   if (viewFilter === 'unpaid' && !isDelinquentPaymentScopeActive(viewFilter, paymentScope) && !hasPaymentIssueLabel(reservation.issues)) {
@@ -1482,6 +1629,71 @@ function normalizeRentalTypeFilter(value: string | null): RentalTypeFilter {
     return normalized;
   }
   return 'all';
+}
+
+function normalizeWorkflowStatusFilter(value: string | null): WorkflowStatusFilter {
+  const normalized = (value ?? '').trim().toLowerCase();
+  if (normalized in WORKFLOW_STATUS_LABELS) {
+    return normalized as WorkflowStatusFilter;
+  }
+  return 'all';
+}
+
+function normalizeCloseoutStatusFilter(value: string | null): CloseoutStatusFilter {
+  const normalized = (value ?? '').trim().toLowerCase();
+  if (normalized in CLOSEOUT_STATUS_LABELS) {
+    return normalized as CloseoutStatusFilter;
+  }
+  return 'all';
+}
+
+function normalizeCancellationSettlementStatusFilter(value: string | null): CancellationSettlementStatusFilter {
+  const normalized = (value ?? '').trim().toLowerCase();
+  if (normalized in CANCELLATION_SETTLEMENT_STATUS_LABELS) {
+    return normalized as CancellationSettlementStatusFilter;
+  }
+  return 'all';
+}
+
+function normalizeLongTermAccountStatusFilter(value: string | null): LongTermAccountStatusFilter {
+  const normalized = (value ?? '').trim().toLowerCase();
+  if (normalized in LONG_TERM_ACCOUNT_STATUS_LABELS) {
+    return normalized as LongTermAccountStatusFilter;
+  }
+  return 'all';
+}
+
+function normalizeAccidentReplacementStatusFilter(value: string | null): AccidentReplacementStatusFilter {
+  const normalized = (value ?? '').trim().toLowerCase();
+  if (normalized in ACCIDENT_REPLACEMENT_STATUS_LABELS) {
+    return normalized as AccidentReplacementStatusFilter;
+  }
+  return 'all';
+}
+
+function getWorkflowStatusLabel(value: string | null | undefined, fallback?: string): string {
+  const normalized = normalizeWorkflowStatusFilter(value ?? null);
+  return normalized === 'all' ? (fallback || value || '-') : WORKFLOW_STATUS_LABELS[normalized];
+}
+
+function getCloseoutStatusLabel(value: string | null | undefined, fallback?: string): string {
+  const normalized = normalizeCloseoutStatusFilter(value ?? null);
+  return normalized === 'all' ? (fallback || value || '-') : CLOSEOUT_STATUS_LABELS[normalized];
+}
+
+function getCancellationSettlementStatusLabel(value: string | null | undefined, fallback?: string): string {
+  const normalized = normalizeCancellationSettlementStatusFilter(value ?? null);
+  return normalized === 'all' ? (fallback || value || '-') : CANCELLATION_SETTLEMENT_STATUS_LABELS[normalized];
+}
+
+function getLongTermAccountStatusLabel(value: string | null | undefined, fallback?: string): string {
+  const normalized = normalizeLongTermAccountStatusFilter(value ?? null);
+  return normalized === 'all' ? (fallback || value || '-') : LONG_TERM_ACCOUNT_STATUS_LABELS[normalized];
+}
+
+function getAccidentReplacementStatusLabel(value: string | null | undefined, fallback?: string): string {
+  const normalized = normalizeAccidentReplacementStatusFilter(value ?? null);
+  return normalized === 'all' ? (fallback || value || '-') : ACCIDENT_REPLACEMENT_STATUS_LABELS[normalized];
 }
 
 function getRentalTypeBadgeLabel(value: string | null | undefined): string {
@@ -1704,6 +1916,25 @@ function formatBillingChangeSummary(changes: Record<string, { from?: unknown; to
     .join(' / ');
 }
 
+function getChargeItemPayerChangeLabel(item: ReservationChargeItem, defaultPayerType: string | undefined): string | null {
+  const currentPayerType = item.payerType ?? defaultPayerType;
+  if (!defaultPayerType || !currentPayerType || currentPayerType === defaultPayerType) {
+    return null;
+  }
+  const payerTypeChange = item.changeHistory
+    ?.slice()
+    .reverse()
+    .find((entry) => entry.changes?.payerType);
+  if (payerTypeChange?.changes?.payerType) {
+    const payerTypeDiff = payerTypeChange.changes.payerType;
+    const fromLabel = getPayerTypeLabel(String(payerTypeDiff.from ?? defaultPayerType));
+    const toLabel = getPayerTypeLabel(String(payerTypeDiff.to ?? currentPayerType));
+    const changedAtLabel = payerTypeChange.changedAt ? formatDateKst(payerTypeChange.changedAt, '-') : null;
+    return changedAtLabel ? `${changedAtLabel}부터 ${fromLabel} -> ${toLabel}` : `${fromLabel} -> ${toLabel}`;
+  }
+  return `기본 청구처와 다름: ${getPayerTypeLabel(currentPayerType)}`;
+}
+
 function toReservationChargeItems(value: unknown): ReservationChargeItem[] {
   if (!Array.isArray(value)) {
     return [];
@@ -1785,6 +2016,7 @@ function toReservationBillingSummary(value: unknown): ReservationBillingSummary 
       deposit: normalizeAdditionalPaymentAmount(toCurrencyNumberValue(value.billingPlan.deposit)) ?? undefined,
       advancePayment: normalizeAdditionalPaymentAmount(toCurrencyNumberValue(value.billingPlan.advancePayment)) ?? undefined,
       installmentCount: toNumberValue(value.billingPlan.installmentCount) ?? undefined,
+      payerType: toStringValue(value.billingPlan.payerType) ?? undefined,
     }
     : null;
   return {
@@ -1823,6 +2055,7 @@ function toReservationAccidentClaim(value: unknown): ReservationAccidentClaim | 
     adjusterPhone: toStringValue(value.adjusterPhone) ?? undefined,
     repairShopName: toStringValue(value.repairShopName) ?? undefined,
     repairShopLocation: toStringValue(value.repairShopLocation) ?? undefined,
+    repairCompletedAt: toStringValue(value.repairCompletedAt) ?? undefined,
     damagedVehicleNumber: toStringValue(value.damagedVehicleNumber) ?? undefined,
     damagedVehicleModel: toStringValue(value.damagedVehicleModel) ?? undefined,
     deliveryLocation: toStringValue(value.deliveryLocation) ?? undefined,
@@ -1856,6 +2089,7 @@ function toReservationAccidentReport(value: unknown): ReservationAccidentReport 
     insuranceClaimNo: toStringValue(value.insuranceClaimNo) ?? undefined,
     evidenceStatus: toStringValue(value.evidenceStatus) ?? undefined,
     insuranceProcessStatus: toStringValue(value.insuranceProcessStatus) ?? undefined,
+    repairCompletedAt: toStringValue(value.repairCompletedAt) ?? undefined,
     customerChargeAmount: normalizeAdditionalPaymentAmount(toCurrencyNumberValue(value.customerChargeAmount)) ?? undefined,
     customerChargeStatus: toStringValue(value.customerChargeStatus) ?? undefined,
     followupUpdatedAt: toStringValue(value.followupUpdatedAt) ?? undefined,
@@ -1871,15 +2105,34 @@ function getChargeTypeLabel(value: string | undefined): string {
       return '추가비용';
     case 'monthly_fee':
       return '월 렌트료';
+    case 'late_fee':
+      return '연체료';
+    case 'fuel_fee':
+      return '유류비';
+    case 'toll_fee':
+      return '통행료';
+    case 'damage_fee':
+      return '손상비';
     case 'insurance_claim':
       return '보험청구';
     case 'deductible':
       return '자기부담금';
     case 'refund':
       return '환불';
+    case 'cancellation_fee':
+      return '취소수수료';
+    case 'adjustment':
+      return '정정';
     default:
       return value || '청구항목';
   }
+}
+
+function getChargeItemPeriodLabel(item: ReservationChargeItem): string | null {
+  if (item.billingPeriodStart && item.billingPeriodEnd) {
+    return `${item.billingPeriodStart}~${item.billingPeriodEnd}`;
+  }
+  return item.billingPeriodStart || item.billingPeriodEnd || null;
 }
 
 function getPayerTypeLabel(value: string | undefined): string {
@@ -2068,6 +2321,17 @@ function toReservationRow(row: unknown, index: number): Reservation | null {
     scheduledStartAt: toStringValue(startSource) ?? undefined,
     scheduledEndAt: toStringValue(endSource) ?? undefined,
     contractStatus: contractStatus ?? undefined,
+    workflowStatus: toStringValue(row.workflowStatus) ?? undefined,
+    workflowStatusLabel: toStringValue(row.workflowStatusLabel) ?? undefined,
+    closeoutStatus: toStringValue(row.closeoutStatus) ?? undefined,
+    closeoutStatusLabel: toStringValue(row.closeoutStatusLabel) ?? undefined,
+    cancellationSettlementStatus: toStringValue(row.cancellationSettlementStatus) ?? undefined,
+    cancellationSettlementStatusLabel: toStringValue(row.cancellationSettlementStatusLabel) ?? undefined,
+    longTermAccountStatus: toStringValue(row.longTermAccountStatus) ?? undefined,
+    longTermAccountStatusLabel: toStringValue(row.longTermAccountStatusLabel) ?? undefined,
+    accidentReplacementStatus: toStringValue(row.accidentReplacementStatus) ?? undefined,
+    accidentReplacementStatusLabel: toStringValue(row.accidentReplacementStatusLabel) ?? undefined,
+    workflowVersion: toNumberValue(row.workflowVersion) ?? undefined,
     type: normalizeReservationType(contractStatus ?? toStringValue(row.type) ?? toStringValue(row.status)),
     issues,
     phone: (
@@ -2080,6 +2344,16 @@ function toReservationRow(row: unknown, index: number): Reservation | null {
     licenseDocumentObjectName: parties?.driver?.licenseDocumentObjectName ?? undefined,
     contractDocumentObjectName: toStringValue(row.contractDocumentObjectName) ?? undefined,
     contractDocumentType: toStringValue(row.contractDocumentType) ?? undefined,
+    contractDocuments: Array.isArray(row.contractDocuments)
+      ? row.contractDocuments
+        .filter(isRecord)
+        .map((item) => ({
+          objectName: toStringValue(item.objectName) ?? '',
+          fileName: toStringValue(item.fileName) ?? undefined,
+          documentType: toStringValue(item.documentType) ?? undefined,
+        }))
+        .filter((item) => item.objectName)
+      : undefined,
     documentChecklist,
     paymentStatus: normalizeReservationPaymentStatus(paymentStatusSource),
     hasPaymentInfo: hasPaymentInfo || Boolean(paymentInfo),
@@ -2191,6 +2465,59 @@ function extractActionItemType(row: unknown): string | null {
   );
 }
 
+function extractActionItemField(row: unknown, fieldNames: string[]): string | null {
+  if (!isRecord(row)) {
+    return null;
+  }
+  for (const fieldName of fieldNames) {
+    const value = toStringValue(row[fieldName]);
+    if (value) {
+      return value;
+    }
+  }
+  return null;
+}
+
+function toReservationActiveActionItem(row: unknown, index: number): ReservationActiveActionItem | null {
+  const id = extractActionItemId(row, index);
+  if (!id) {
+    return null;
+  }
+
+  const category = extractActionItemField(row, ['category', 'mainCategory', 'type', 'issueType', 'issue']);
+  const subCategory = extractActionItemField(row, ['subCategory', 'subcategory', 'sub_category']);
+  const reasonType = extractActionItemField(row, ['reasonType', 'reason_type']);
+  const issueCode = extractActionItemField(row, ['issueCode', 'issue_code', 'code']);
+  const title = extractActionItemField(row, ['title', 'label', 'name']);
+  const fallbackLabel = extractActionItemType(row) ?? title ?? issueCode;
+  const mainLabel = normalizeActionMainCategory(category ?? fallbackLabel) ?? category ?? fallbackLabel;
+
+  if (!mainLabel) {
+    return null;
+  }
+
+  const normalizedSubLabel = normalizeActionSubCategory(mainLabel, subCategory, reasonType);
+  const subLabelCandidate = normalizedSubLabel ?? title ?? issueCode ?? undefined;
+  const subLabel = subLabelCandidate && subLabelCandidate !== mainLabel ? subLabelCandidate : undefined;
+  const label = subLabel ? `${mainLabel} / ${subLabel}` : mainLabel;
+  const status = isRecord(row) ? toStringValue(row.status) ?? undefined : undefined;
+
+  return {
+    id,
+    label,
+    mainLabel,
+    subLabel,
+    status,
+  };
+}
+
+function toReservationActiveActionItems(payload: unknown): ReservationActiveActionItem[] {
+  const rows = getCollectionFromPayload(payload, ['items', 'rows', 'list', 'actionRequired', 'actionItems']) ?? [];
+  return rows
+    .map((row, index) => toReservationActiveActionItem(row, index))
+    .filter((item): item is ReservationActiveActionItem => item !== null);
+}
+
 function normalizeVehicleStatus(statusValue: string | null): VehicleAsset['status'] {
   if (statusValue === '대여중' || statusValue === '예약' || statusValue === '가용' || statusValue === '정비중') {
     return statusValue;
@@ -2205,6 +2532,35 @@ function normalizeVehicleStatus(statusValue: string | null): VehicleAsset['statu
     return '정비중';
   }
   return '가용';
+}
+
+function normalizeVehicleOperatingStatus(statusValue: string | null): VehicleAsset['vehicleOperatingStatus'] {
+  const normalized = statusValue?.trim().toLowerCase();
+  if (!normalized) {
+    return undefined;
+  }
+  if (normalized === 'rental' || normalized === 'rented' || normalized === 'in_use' || statusValue === '대여중') {
+    return 'rented';
+  }
+  if (normalized === 'reserved' || statusValue === '예약' || statusValue === '예약됨' || statusValue === '예약중') {
+    return 'reserved';
+  }
+  if (normalized === 'available' || normalized === 'idle' || statusValue === '가용') {
+    return 'available';
+  }
+  if (normalized === 'maintenance' || normalized === 'repair' || statusValue === '정비중') {
+    return 'maintenance';
+  }
+  if (normalized === 'returned' || normalized === 'return' || statusValue === '반납됨' || statusValue === '반납완료') {
+    return 'returned';
+  }
+  if (normalized === 'recovery_required' || normalized === 'recovery' || statusValue === '회수필요') {
+    return 'recovery_required';
+  }
+  if (normalized === 'recovered' || statusValue === '회수완료') {
+    return 'recovered';
+  }
+  return undefined;
 }
 
 function toVehicleStatusFromReservation(reservationType: Reservation['type']): VehicleAsset['status'] {
@@ -2269,6 +2625,13 @@ function toVehicleRows(payload: unknown, reservationRows: Reservation[]): Vehicl
         status: normalizeVehicleStatus(
           toStringValue(row.status) ?? toStringValue(row.contractStatus) ?? toStringValue(row.assetStatus),
         ),
+        vehicleOperatingStatus: normalizeVehicleOperatingStatus(
+          toStringValue(row.vehicleOperatingStatus)
+          ?? toStringValue(row.status)
+          ?? toStringValue(row.contractStatus)
+          ?? toStringValue(row.assetStatus),
+        ),
+        vehicleOperatingStatusLabel: toStringValue(row.vehicleOperatingStatusLabel) ?? undefined,
         issues: normalizeIssues(row.issues),
         insuranceExpiry: toStringValue(row.insuranceExpiry) ?? toStringValue(row.insuranceExpiryDate) ?? '-',
         nextInspection: toStringValue(row.nextInspection) ?? toStringValue(row.nextInspectionDate) ?? '-',
@@ -2308,13 +2671,20 @@ export default function Reservations() {
   );
   const paymentScope = normalizePaymentScope(searchParams.get('paymentScope'));
   const rentalTypeFilter = normalizeRentalTypeFilter(searchParams.get('rentalType'));
+  const workflowStatusFilter = normalizeWorkflowStatusFilter(searchParams.get('workflowStatus'));
+  const closeoutStatusFilter = normalizeCloseoutStatusFilter(searchParams.get('closeoutStatus'));
+  const cancellationSettlementStatusFilter = normalizeCancellationSettlementStatusFilter(searchParams.get('cancellationSettlementStatus'));
+  const longTermAccountStatusFilter = normalizeLongTermAccountStatusFilter(searchParams.get('longTermAccountStatus'));
+  const accidentReplacementStatusFilter = normalizeAccidentReplacementStatusFilter(searchParams.get('accidentReplacementStatus'));
 
-  const [currentWeekStart, setCurrentWeekStart] = useState(0);
+  const [currentWeekStart, setCurrentWeekStart] = useState(() => calendarStartOffsetForTarget(0));
+  const [customerSearchDraft, setCustomerSearchDraft] = useState(searchQuery);
   const [showModal, setShowModal] = useState(false);
   const [selectedReservation, setSelectedReservation] = useState<Reservation | null>(null);
   const [selectedVehicleAsset, setSelectedVehicleAsset] = useState<VehicleAsset | null>(null);
   const [modelFilter, setModelFilter] = useState('all');
   const [vehicleSearchQuery, setVehicleSearchQuery] = useState('');
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   const [activeTab, setActiveTab] = useState<'reservation' | 'payment' | 'vehicle'>('reservation');
   const [showReturnConfirm, setShowReturnConfirm] = useState(false);
   const [showAccidentModal, setShowAccidentModal] = useState(false);
@@ -2323,7 +2693,7 @@ export default function Reservations() {
   const [accidentAssigneeLoadError, setAccidentAssigneeLoadError] = useState<string | null>(null);
   const [reservationsData, setReservationsData] = useState<Reservation[]>([]);
   const [vehicleAssets, setVehicleAssets] = useState<VehicleAsset[]>([]);
-  const [garageLocationOptions, setGarageLocationOptions] = useState<string[]>([]);
+  const [garageLocationOptions, setGarageLocationOptions] = useState<SettingsGarage[]>([]);
   const [targetDate, setTargetDate] = useState(() => toDateLabelFromOffset(0));
   const [totalReservationCount, setTotalReservationCount] = useState(0);
   const [pageErrorStatus, setPageErrorStatus] = useState<number | null>(null);
@@ -2345,6 +2715,7 @@ export default function Reservations() {
   const [isPaymentAmountSaving, setIsPaymentAmountSaving] = useState(false);
   const [activePaymentRecordMutationId, setActivePaymentRecordMutationId] = useState<string | null>(null);
   const [activeReservationAction, setActiveReservationAction] = useState<'start' | 'cancel' | null>(null);
+  const [showCancelReservationConfirm, setShowCancelReservationConfirm] = useState(false);
   const [reservationActionError, setReservationActionError] = useState<string | null>(null);
   const [reservationWarningPrompt, setReservationWarningPrompt] = useState<ReservationWarningPrompt | null>(null);
   const [isEditMode, setIsEditMode] = useState(false);
@@ -2354,13 +2725,18 @@ export default function Reservations() {
   const [editReason, setEditReason] = useState('');
   const [isEditSubmitting, setIsEditSubmitting] = useState(false);
   const [editSubmitError, setEditSubmitError] = useState<string | null>(null);
+  const [activeReservationActionItems, setActiveReservationActionItems] = useState<ReservationActiveActionItem[]>([]);
+  const [isActiveActionItemsLoading, setIsActiveActionItemsLoading] = useState(false);
+  const [activeActionItemsError, setActiveActionItemsError] = useState<string | null>(null);
 
   // 동적 날짜 로딩을 위한 상태
-  const [totalDaysToShow, setTotalDaysToShow] = useState(42); // 초기 6주
+  const [totalDaysToShow, setTotalDaysToShow] = useState(DEFAULT_TOTAL_DAYS_TO_SHOW); // 초기 6주
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const detailRequestSequenceRef = useRef(0);
   const detailControllerRef = useRef<AbortController | null>(null);
   const reservationWarningResolverRef = useRef<((confirmed: boolean) => void) | null>(null);
+  const customerSearchCompositionRef = useRef(false);
+  const latestSearchQueryRef = useRef(searchQuery);
   const reservationCalendarCacheKey = useMemo(() => {
     const fetchWindows = buildReservationFetchWindows({
       currentWeekStart,
@@ -2375,15 +2751,21 @@ export default function Reservations() {
       viewFilter,
       dueFilter ?? 'none',
       paymentScope,
+      workflowStatusFilter,
+      closeoutStatusFilter,
+      cancellationSettlementStatusFilter,
+      longTermAccountStatusFilter,
+      accidentReplacementStatusFilter,
       fetchWindows.map((window) => `${window.from}..${window.to}`).join(','),
     ].join('|');
-  }, [currentWeekStart, dueFilter, fromDate, paymentScope, toDate, totalDaysToShow, user?.companyId, user?.userId, viewFilter]);
+  }, [accidentReplacementStatusFilter, cancellationSettlementStatusFilter, closeoutStatusFilter, currentWeekStart, dueFilter, fromDate, longTermAccountStatusFilter, paymentScope, toDate, totalDaysToShow, user?.companyId, user?.userId, viewFilter, workflowStatusFilter]);
 
   // 드래그 선택 상태
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState<{ vehicle: string; date: number } | null>(null);
   const [dragEnd, setDragEnd] = useState<{ vehicle: string; date: number } | null>(null);
   const [dragSelection, setDragSelection] = useState<DragSelection>(null);
+  const [dragConflictPrompt, setDragConflictPrompt] = useState<DragConflictPrompt | null>(null);
 
   const paymentSyncTargets = useMemo(
     () => buildPaymentSyncTargets(reservationsData, selectedReservation),
@@ -2427,6 +2809,21 @@ export default function Reservations() {
     if (!nextParams.get('rentalType') || nextParams.get('rentalType') === 'all') {
       nextParams.delete('rentalType');
     }
+    if (!nextParams.get('workflowStatus') || nextParams.get('workflowStatus') === 'all') {
+      nextParams.delete('workflowStatus');
+    }
+    if (!nextParams.get('closeoutStatus') || nextParams.get('closeoutStatus') === 'all') {
+      nextParams.delete('closeoutStatus');
+    }
+    if (!nextParams.get('cancellationSettlementStatus') || nextParams.get('cancellationSettlementStatus') === 'all') {
+      nextParams.delete('cancellationSettlementStatus');
+    }
+    if (!nextParams.get('longTermAccountStatus') || nextParams.get('longTermAccountStatus') === 'all') {
+      nextParams.delete('longTermAccountStatus');
+    }
+    if (!nextParams.get('accidentReplacementStatus') || nextParams.get('accidentReplacementStatus') === 'all') {
+      nextParams.delete('accidentReplacementStatus');
+    }
 
     nextParams.delete('filter');
     nextParams.delete('contractStatus');
@@ -2437,6 +2834,63 @@ export default function Reservations() {
 
     setSearchParams(nextParams, { replace });
   }, [searchParams, setSearchParams]);
+
+  const commitCustomerSearchQuery = useCallback((value: string, replace = true) => {
+    updateReservationSearchParams((params) => {
+      const nextQuery = value.trim();
+      if (nextQuery) {
+        params.set('q', nextQuery);
+      } else {
+        params.delete('q');
+      }
+      params.set('page', String(DEFAULT_PAGE));
+    }, replace);
+  }, [updateReservationSearchParams]);
+
+  useEffect(() => {
+    if (searchQuery === latestSearchQueryRef.current) {
+      return;
+    }
+    latestSearchQueryRef.current = searchQuery;
+    if (!customerSearchCompositionRef.current) {
+      setCustomerSearchDraft(searchQuery);
+    }
+  }, [searchQuery]);
+
+  useEffect(() => {
+    if (customerSearchCompositionRef.current || customerSearchDraft === searchQuery) {
+      return undefined;
+    }
+    const timeoutId = window.setTimeout(() => {
+      commitCustomerSearchQuery(customerSearchDraft);
+    }, 300);
+    return () => window.clearTimeout(timeoutId);
+  }, [commitCustomerSearchQuery, customerSearchDraft, searchQuery]);
+
+  const handleCustomerSearchChange = useCallback((event: ChangeEvent<HTMLInputElement>) => {
+    const nextValue = event.target.value;
+    setCustomerSearchDraft(nextValue);
+    if (!customerSearchCompositionRef.current && nextValue.trim() === '') {
+      commitCustomerSearchQuery(nextValue);
+    }
+  }, [commitCustomerSearchQuery]);
+
+  const handleCustomerSearchCompositionStart = useCallback((_event: CompositionEvent<HTMLInputElement>) => {
+    customerSearchCompositionRef.current = true;
+  }, []);
+
+  const handleCustomerSearchCompositionEnd = useCallback((event: CompositionEvent<HTMLInputElement>) => {
+    customerSearchCompositionRef.current = false;
+    const nextValue = event.currentTarget.value;
+    setCustomerSearchDraft(nextValue);
+    commitCustomerSearchQuery(nextValue);
+  }, [commitCustomerSearchQuery]);
+
+  const handleCustomerSearchKeyDown = useCallback((event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'Enter') {
+      commitCustomerSearchQuery(event.currentTarget.value, false);
+    }
+  }, [commitCustomerSearchQuery]);
 
   const closeReturnConfirm = useCallback(() => {
     setShowReturnConfirm(false);
@@ -2536,6 +2990,16 @@ export default function Reservations() {
     const normalizedToDate = normalizeDateParam(searchParams.get('to'));
     const currentFromDate = searchParams.get('from');
     const currentToDate = searchParams.get('to');
+    const currentWorkflowStatus = searchParams.get('workflowStatus');
+    const normalizedWorkflowStatus = normalizeWorkflowStatusFilter(currentWorkflowStatus);
+    const currentCloseoutStatus = searchParams.get('closeoutStatus');
+    const normalizedCloseoutStatus = normalizeCloseoutStatusFilter(currentCloseoutStatus);
+    const currentCancellationSettlementStatus = searchParams.get('cancellationSettlementStatus');
+    const normalizedCancellationSettlementStatus = normalizeCancellationSettlementStatusFilter(currentCancellationSettlementStatus);
+    const currentLongTermAccountStatus = searchParams.get('longTermAccountStatus');
+    const normalizedLongTermAccountStatus = normalizeLongTermAccountStatusFilter(currentLongTermAccountStatus);
+    const currentAccidentReplacementStatus = searchParams.get('accidentReplacementStatus');
+    const normalizedAccidentReplacementStatus = normalizeAccidentReplacementStatusFilter(currentAccidentReplacementStatus);
     const normalizedStatus = normalizeViewFilter(canonicalStatus ?? compatFilter ?? compatContractStatus);
     const shouldNormalizeStatus = normalizedStatus !== 'all';
 
@@ -2553,6 +3017,11 @@ export default function Reservations() {
         normalizedPaymentScope !== currentPaymentScope
         || !isDelinquentPaymentScopeActive(normalizedStatus, normalizedPaymentScope)
       ))
+      || Boolean(currentWorkflowStatus && currentWorkflowStatus !== normalizedWorkflowStatus)
+      || Boolean(currentCloseoutStatus && currentCloseoutStatus !== normalizedCloseoutStatus)
+      || Boolean(currentCancellationSettlementStatus && currentCancellationSettlementStatus !== normalizedCancellationSettlementStatus)
+      || Boolean(currentLongTermAccountStatus && currentLongTermAccountStatus !== normalizedLongTermAccountStatus)
+      || Boolean(currentAccidentReplacementStatus && currentAccidentReplacementStatus !== normalizedAccidentReplacementStatus)
       || Boolean(canonicalStatus && normalizeViewFilter(canonicalStatus) !== canonicalStatus)
       || Boolean(currentPage)
     );
@@ -2597,6 +3066,40 @@ export default function Reservations() {
         params.set('paymentScope', 'delinquent');
       } else {
         params.delete('paymentScope');
+      }
+
+      if (normalizedWorkflowStatus !== 'all') {
+        params.set('workflowStatus', normalizedWorkflowStatus);
+      } else {
+        params.delete('workflowStatus');
+      }
+      if (normalizedCloseoutStatus !== 'all') {
+        params.set('closeoutStatus', normalizedCloseoutStatus);
+      } else {
+        params.delete('closeoutStatus');
+      }
+      if (normalizedCancellationSettlementStatus !== 'all') {
+        params.set('cancellationSettlementStatus', normalizedCancellationSettlementStatus);
+      } else {
+        params.delete('cancellationSettlementStatus');
+      }
+      if (normalizedLongTermAccountStatus !== 'all') {
+        if (normalizeRentalTypeFilter(searchParams.get('rentalType')) === 'long_term') {
+          params.set('longTermAccountStatus', normalizedLongTermAccountStatus);
+        } else {
+          params.delete('longTermAccountStatus');
+        }
+      } else {
+        params.delete('longTermAccountStatus');
+      }
+      if (normalizedAccidentReplacementStatus !== 'all') {
+        if (normalizeRentalTypeFilter(searchParams.get('rentalType')) === 'accident_replacement') {
+          params.set('accidentReplacementStatus', normalizedAccidentReplacementStatus);
+        } else {
+          params.delete('accidentReplacementStatus');
+        }
+      } else {
+        params.delete('accidentReplacementStatus');
       }
     }, true);
   }, [searchParams, updateReservationSearchParams]);
@@ -2675,6 +3178,11 @@ export default function Reservations() {
               size: RESERVATION_FETCH_PAGE_SIZE,
               status: toStatusQueryValue(viewFilter, dueFilter),
               contractStatus: toApiContractStatus(viewFilter, dueFilter),
+              workflowStatus: workflowStatusFilter === 'all' ? undefined : workflowStatusFilter,
+              closeoutStatus: closeoutStatusFilter === 'all' ? undefined : closeoutStatusFilter,
+              cancellationSettlementStatus: cancellationSettlementStatusFilter === 'all' ? undefined : cancellationSettlementStatusFilter,
+              longTermAccountStatus: longTermAccountStatusFilter === 'all' ? undefined : longTermAccountStatusFilter,
+              accidentReplacementStatus: accidentReplacementStatusFilter === 'all' ? undefined : accidentReplacementStatusFilter,
               paymentScope: isDelinquentPaymentScopeActive(viewFilter, paymentScope) ? 'delinquent' : undefined,
               from: fetchWindow.from,
               to: fetchWindow.to,
@@ -2770,7 +3278,7 @@ export default function Reservations() {
       setPageErrorStatus(error instanceof ApiError ? error.status ?? null : null);
       throw error;
     }
-  }, [applyReservationsHydrationPayload, canViewAssets, currentWeekStart, dueFilter, fromDate, paymentScope, toDate, totalDaysToShow, viewFilter]);
+  }, [accidentReplacementStatusFilter, applyReservationsHydrationPayload, cancellationSettlementStatusFilter, canViewAssets, closeoutStatusFilter, currentWeekStart, dueFilter, fromDate, longTermAccountStatusFilter, paymentScope, toDate, totalDaysToShow, viewFilter, workflowStatusFilter]);
 
   const handleReservationsSuccess = useCallback((payload: ReservationsHydrationPayload) => {
     applyReservationsHydrationPayload(payload, { cache: true });
@@ -2813,12 +3321,17 @@ export default function Reservations() {
 
   useEffect(() => {
     listSettingsGarages().then((payload) => {
-      if (Array.isArray(payload.items) && payload.items.length > 0) {
-        setGarageLocationOptions(payload.items.map((g) => g.name));
-      }
+      setGarageLocationOptions(Array.isArray(payload.items) ? payload.items : []);
     }).catch(() => {
       // garage loading is best-effort; fall back to free-text input
     });
+  }, []);
+
+  const handleCreateNewContractGarage = useCallback(async (payload: { name: string; address: string }): Promise<NewContractLocationOption> => {
+    const createdGarage = await createSettingsGarage(payload);
+    setGarageLocationOptions((previous) => [...previous, createdGarage]);
+    toast.success('차고지가 등록되었습니다.');
+    return createdGarage;
   }, []);
 
   useEffect(() => {
@@ -2882,7 +3395,7 @@ export default function Reservations() {
   }, []);
 
   useEffect(() => {
-    setTargetDate(toDateLabelFromOffset(currentWeekStart));
+    setTargetDate(toDateLabelFromOffset(currentWeekStart + CALENDAR_TODAY_LEFT_OFFSET_DAYS));
   }, [currentWeekStart]);
 
   useEffect(() => {
@@ -2915,6 +3428,7 @@ export default function Reservations() {
   const resetReservationFilters = useCallback(() => {
     setModelFilter('all');
     setVehicleSearchQuery('');
+    setCustomerSearchDraft('');
     updateReservationSearchParams((params) => {
       params.delete('status');
       params.delete('from');
@@ -2923,6 +3437,11 @@ export default function Reservations() {
       params.delete('due');
       params.delete('paymentScope');
       params.delete('rentalType');
+      params.delete('workflowStatus');
+      params.delete('closeoutStatus');
+      params.delete('cancellationSettlementStatus');
+      params.delete('longTermAccountStatus');
+      params.delete('accidentReplacementStatus');
       params.set('page', String(DEFAULT_PAGE));
       params.set('size', String(DEFAULT_PAGE_SIZE));
     });
@@ -2961,6 +3480,9 @@ export default function Reservations() {
     setIsEditMode(false);
     setEditSubmitError(null);
     setIsEditSubmitting(false);
+    setActiveReservationActionItems([]);
+    setIsActiveActionItemsLoading(false);
+    setActiveActionItemsError(null);
   }, []);
 
   const hydrateReservationDetail = useCallback(async (reservationId: string, fallbackReservation: Reservation) => {
@@ -2985,6 +3507,34 @@ export default function Reservations() {
       setSelectedReservation(detailedReservation);
       const matchedAsset = vehicleAssets.find((asset) => asset.vehicleNumber === detailedReservation.vehicleNumber);
       setSelectedVehicleAsset(matchedAsset ?? createReservationFallbackVehicleAsset(detailedReservation));
+      if (canViewActionRequired) {
+        setIsActiveActionItemsLoading(true);
+        setActiveActionItemsError(null);
+        try {
+          const actionPayload = await getActionRequiredList({
+            page: 1,
+            pageSize: 100,
+            status: ACTIVE_ACTION_STATUS_QUERY,
+            reservationId,
+            signal: controller.signal,
+          });
+          if (!controller.signal.aborted && detailRequestSequenceRef.current === requestSequence) {
+            setActiveReservationActionItems(toReservationActiveActionItems(actionPayload));
+          }
+        } catch {
+          if (!controller.signal.aborted && detailRequestSequenceRef.current === requestSequence) {
+            setActiveActionItemsError('활성 조치 항목을 불러오지 못했습니다.');
+            setActiveReservationActionItems([]);
+          }
+        } finally {
+          if (!controller.signal.aborted && detailRequestSequenceRef.current === requestSequence) {
+            setIsActiveActionItemsLoading(false);
+          }
+        }
+      } else {
+        setActiveReservationActionItems([]);
+        setActiveActionItemsError(null);
+      }
     } catch (error) {
       if (controller.signal.aborted || detailRequestSequenceRef.current !== requestSequence) {
         return;
@@ -3002,12 +3552,13 @@ export default function Reservations() {
       setSelectedReservation(fallbackReservation);
       const fallbackAsset = vehicleAssets.find((asset) => asset.vehicleNumber === fallbackReservation.vehicleNumber);
       setSelectedVehicleAsset(fallbackAsset ?? createReservationFallbackVehicleAsset(fallbackReservation));
+      setActiveReservationActionItems([]);
     } finally {
       if (!controller.signal.aborted && detailRequestSequenceRef.current === requestSequence) {
         setIsDetailLoading(false);
       }
     }
-  }, [vehicleAssets]);
+  }, [canViewActionRequired, vehicleAssets]);
 
   const handleViewFilterChange = useCallback((nextFilter: ViewFilter) => {
     updateReservationSearchParams((params) => {
@@ -3030,6 +3581,67 @@ export default function Reservations() {
         params.delete('rentalType');
       } else {
         params.set('rentalType', nextFilter);
+      }
+      if (nextFilter !== 'long_term') {
+        params.delete('longTermAccountStatus');
+      }
+      if (nextFilter !== 'accident_replacement') {
+        params.delete('accidentReplacementStatus');
+      }
+      params.set('page', String(DEFAULT_PAGE));
+    });
+  }, [updateReservationSearchParams]);
+
+  const handleWorkflowStatusFilterChange = useCallback((nextFilter: WorkflowStatusFilter) => {
+    updateReservationSearchParams((params) => {
+      if (nextFilter === 'all') {
+        params.delete('workflowStatus');
+      } else {
+        params.set('workflowStatus', nextFilter);
+      }
+      params.set('page', String(DEFAULT_PAGE));
+    });
+  }, [updateReservationSearchParams]);
+
+  const handleCloseoutStatusFilterChange = useCallback((nextFilter: CloseoutStatusFilter) => {
+    updateReservationSearchParams((params) => {
+      if (nextFilter === 'all') {
+        params.delete('closeoutStatus');
+      } else {
+        params.set('closeoutStatus', nextFilter);
+      }
+      params.set('page', String(DEFAULT_PAGE));
+    });
+  }, [updateReservationSearchParams]);
+
+  const handleCancellationSettlementStatusFilterChange = useCallback((nextFilter: CancellationSettlementStatusFilter) => {
+    updateReservationSearchParams((params) => {
+      if (nextFilter === 'all') {
+        params.delete('cancellationSettlementStatus');
+      } else {
+        params.set('cancellationSettlementStatus', nextFilter);
+      }
+      params.set('page', String(DEFAULT_PAGE));
+    });
+  }, [updateReservationSearchParams]);
+
+  const handleLongTermAccountStatusFilterChange = useCallback((nextFilter: LongTermAccountStatusFilter) => {
+    updateReservationSearchParams((params) => {
+      if (nextFilter === 'all') {
+        params.delete('longTermAccountStatus');
+      } else {
+        params.set('longTermAccountStatus', nextFilter);
+      }
+      params.set('page', String(DEFAULT_PAGE));
+    });
+  }, [updateReservationSearchParams]);
+
+  const handleAccidentReplacementStatusFilterChange = useCallback((nextFilter: AccidentReplacementStatusFilter) => {
+    updateReservationSearchParams((params) => {
+      if (nextFilter === 'all') {
+        params.delete('accidentReplacementStatus');
+      } else {
+        params.set('accidentReplacementStatus', nextFilter);
       }
       params.set('page', String(DEFAULT_PAGE));
     });
@@ -3120,9 +3732,14 @@ export default function Reservations() {
       viewFilter,
       paymentScope,
       rentalTypeFilter,
+      workflowStatusFilter,
+      closeoutStatusFilter,
+      cancellationSettlementStatusFilter,
+      longTermAccountStatusFilter,
+      accidentReplacementStatusFilter,
       searchQuery,
     }))
-  ), [paymentScope, rentalTypeFilter, reservations, searchQuery, viewFilter]);
+  ), [accidentReplacementStatusFilter, cancellationSettlementStatusFilter, closeoutStatusFilter, longTermAccountStatusFilter, paymentScope, rentalTypeFilter, reservations, searchQuery, viewFilter, workflowStatusFilter]);
   const reservationsByVehicle = useMemo(() => {
     const groupedReservations = new Map<string, Reservation[]>();
 
@@ -3229,11 +3846,40 @@ export default function Reservations() {
         return 'bg-blue-100 text-blue-700';
       case '정비중':
         return 'bg-red-100 text-red-700';
+      case '반납됨':
+      case '회수완료':
+        return 'bg-gray-100 text-gray-700';
+      case '회수필요':
+        return 'bg-red-100 text-red-700';
       case '예약':
       case '예약됨':
         return 'bg-yellow-100 text-yellow-700';
       default:
         return 'bg-gray-100 text-gray-700';
+    }
+  };
+
+  const formatVehicleOperatingStatus = (asset: VehicleAsset) => {
+    if (asset.vehicleOperatingStatusLabel) {
+      return asset.vehicleOperatingStatusLabel;
+    }
+    switch (asset.vehicleOperatingStatus) {
+      case 'available':
+        return '대여가능';
+      case 'reserved':
+        return '예약배정';
+      case 'rented':
+        return '대여중';
+      case 'returned':
+        return '반납됨';
+      case 'maintenance':
+        return '정비중';
+      case 'recovery_required':
+        return '회수필요';
+      case 'recovered':
+        return '회수완료';
+      default:
+        return asset.status;
     }
   };
 
@@ -3274,6 +3920,8 @@ export default function Reservations() {
     ? resolveReservationPaymentUpdatedAt(selectedReservation, selectedReservationPaymentSync)
     : null;
   const selectedReservationBillingSummary = selectedReservation?.billingSummary ?? null;
+  const selectedReservationBillingPlan = selectedReservationBillingSummary?.billingPlan ?? null;
+  const isSelectedReservationLongTerm = selectedReservation?.rentalType === 'long_term';
   const selectedReservationChargeItems = selectedReservation
     ? selectedReservation.chargeItemsPreview ?? selectedReservationBillingSummary?.chargeItems ?? []
     : [];
@@ -3287,8 +3935,28 @@ export default function Reservations() {
   const selectedReservationBillingRemainingAmount = selectedReservationBillingSummary?.remainingAmount
     ?? (selectedReservationPaymentStatus === '완료' ? 0 : selectedReservationTotalAmount);
   const selectedReservationBillingConfirmationCount = selectedReservationBillingSummary?.confirmationNeededCount ?? 0;
+  const selectedReservationChargeItemCount = selectedReservationBillingSummary?.chargeItemCount ?? selectedReservationChargeItems.length;
+  const selectedReservationPaymentRecordCount = selectedReservationBillingSummary?.paymentRecordCount ?? selectedReservationPaymentRecords.length;
+  const selectedReservationDefaultPayerType = selectedReservationBillingPlan?.payerType
+    ?? selectedReservation?.parties?.payer?.type
+    ?? undefined;
+  const selectedReservationMonthlyAmountText = selectedReservationBillingPlan?.monthlyAmount !== undefined
+    ? toCurrencyValue(selectedReservationBillingPlan.monthlyAmount)
+    : selectedReservation?.amount ?? '-';
+  const selectedReservationDepositText = selectedReservationBillingPlan?.deposit !== undefined
+    ? toCurrencyValue(selectedReservationBillingPlan.deposit)
+    : selectedReservation?.deposit ?? '-';
+  const selectedReservationAdvancePaymentText = selectedReservationBillingPlan?.advancePayment !== undefined
+    ? toCurrencyValue(selectedReservationBillingPlan.advancePayment)
+    : '-';
+  const hasSelectedReservationBillingLedger = (
+    selectedReservationChargeItemCount > 0
+    || selectedReservationPaymentRecordCount > 0
+  );
   const canEditReservationPaymentFields = selectedReservation
-    ? canWritePayments && canManageReservationPaymentIssue(selectedReservation, selectedReservationPaymentSync)
+    ? canWritePayments
+      && !hasSelectedReservationBillingLedger
+      && canManageReservationPaymentIssue(selectedReservation, selectedReservationPaymentSync)
     : false;
   useEffect(() => {
     if (!selectedReservation) {
@@ -3342,6 +4010,55 @@ export default function Reservations() {
   const handleReservationClick = useCallback((reservation: Reservation) => {
     openReservationDetail(reservation);
   }, [openReservationDetail]);
+
+  const validateNewContractStepOne = useCallback(async (
+    formValues: Pick<NewContractFormValues, 'selectedVehicle' | 'startDate' | 'endDate' | 'startTime' | 'endTime'>,
+  ): Promise<NewContractSubmitFeedback | null> => {
+    const startAt = toIsoDateTimeFromDateAndTime(formValues.startDate, formValues.startTime);
+    const endAt = toIsoDateTimeFromDateAndTime(formValues.endDate, formValues.endTime);
+    if (!startAt || !endAt || !formValues.selectedVehicle.trim()) {
+      return null;
+    }
+    const selectedStart = new Date(startAt).getTime();
+    const selectedEnd = new Date(endAt).getTime();
+    if (!Number.isFinite(selectedStart) || !Number.isFinite(selectedEnd) || selectedEnd <= selectedStart) {
+      return null;
+    }
+
+    const payload = await getReservationsList({
+      page: 1,
+      size: RESERVATION_FETCH_PAGE_SIZE,
+      from: formValues.startDate,
+      to: formValues.endDate,
+    });
+    const rows = toReservationRows(payload);
+    const conflicts = rows.filter((reservation) => {
+      if (reservation.vehicleNumber !== formValues.selectedVehicle) {
+        return false;
+      }
+      if (reservation.contractStatus === '완료' || reservation.type === 'return') {
+        return false;
+      }
+      const reservationStart = parseReservationDateTime(reservation.scheduledStartAt ?? reservation.startDateFull);
+      const reservationEnd = parseReservationDateTime(reservation.scheduledEndAt ?? reservation.endDateFull);
+      if (!reservationStart || !reservationEnd) {
+        return false;
+      }
+      return reservationStart.getTime() < selectedEnd && selectedStart < reservationEnd.getTime();
+    });
+
+    if (conflicts.length === 0) {
+      return null;
+    }
+
+    const conflict = conflicts[0];
+    return {
+      formError: `선택한 차량은 ${conflict.startDateFull ?? '-'} ~ ${conflict.endDateFull ?? '-'} 기간에 이미 예약이 있습니다.`,
+      fieldErrors: {
+        selectedVehicle: '다른 차량이나 기간을 선택해 주세요.',
+      },
+    };
+  }, []);
 
   const handleCreateReservation = useCallback(async (
     formValues: NewContractFormValues,
@@ -3461,7 +4178,7 @@ export default function Reservations() {
     const fallbackAdvancePayment = toCurrencyNumberFromInput(formValues.advancePayment);
     const fallbackBilledAmount = toCurrencyNumberFromInput(formValues.billedAmount);
     const usesInitialBilling = formValues.rentalType === 'short_term';
-    const longTermPayerType = formValues.contractorType === 'corporate' ? formValues.payerType : 'customer';
+    const longTermPayerType = formValues.contractorType === 'corporate' ? 'corporate' : 'customer';
     const longTermContractorName = formValues.contractorName.trim();
     const longTermContractorPhone = formValues.contractorContactPhone.trim();
     const longTermPayerName = formValues.payerName.trim()
@@ -3505,14 +4222,18 @@ export default function Reservations() {
       rentalType: formValues.rentalType,
       creationMode: 'ui_confirmed',
       vehicleNumber: formValues.selectedVehicle,
-      customer: formValues.customerName.trim() || '고객 미확인',
+      customer: formValues.rentalType === 'long_term'
+        ? formValues.contractorName.trim() || formValues.customerName.trim() || '고객 미확인'
+        : formValues.customerName.trim() || '고객 미확인',
       startDate: Math.min(startDateOffset, endDateOffset),
       endDate: Math.max(startDateOffset, endDateOffset),
       scheduledStartAt: startAt,
       contractStatus: '예약중',
       type: 'reservation',
       issues: [],
-      phone: formValues.customerPhone.trim(),
+      phone: formValues.rentalType === 'long_term'
+        ? formValues.contractorContactPhone.trim() || formValues.customerPhone.trim()
+        : formValues.customerPhone.trim(),
       paymentMethod: usesInitialBilling ? formValues.paymentMethod : '계좌이체',
       amount: fallbackDisplayAmount,
       deposit: toCurrencyDisplayFromInput(formValues.deposit),
@@ -3525,41 +4246,106 @@ export default function Reservations() {
 
     try {
       let licenseDocumentObjectName: string | undefined;
+      const additionalDriverLicenseDocumentObjectNames: Array<string | undefined> = [];
       let contractDocumentObjectName: string | undefined;
+      const contractDocuments: Array<{ objectName: string; fileName: string; documentType: 'long_term_contract' | 'rental_contract' | 'accident_replacement_request' }> = [];
 
       if (formValues.licenseFile) {
         try {
           licenseDocumentObjectName = await uploadReservationCreationDocument(formValues.licenseFile, reservationId);
         } catch {
+          const isLongTermIndividual = formValues.rentalType === 'long_term' && formValues.contractorType === 'individual';
           return {
-            formError: '운전면허증 파일 업로드에 실패했습니다.',
+            formError: isLongTermIndividual
+              ? '1번째 운전자 면허증 파일 업로드에 실패했습니다.'
+              : '운전면허증 파일 업로드에 실패했습니다.',
             fieldErrors: {
-              licenseFile: '파일 업로드 후 다시 시도해 주세요.',
+              licenseFile: isLongTermIndividual
+                ? '1번째 운전자 면허증 파일을 다시 업로드해 주세요.'
+                : '파일 업로드 후 다시 시도해 주세요.',
             },
           };
         }
       }
 
-      if (formValues.contractFile) {
-        try {
-          contractDocumentObjectName = await uploadReservationCreationDocument(formValues.contractFile, reservationId);
-        } catch {
-          return {
-            formError: '계약서 파일 업로드에 실패했습니다.',
-            fieldErrors: {
-              contractFile: '파일 업로드 후 다시 시도해 주세요.',
-            },
-          };
+      if (formValues.rentalType === 'long_term' && formValues.contractorType === 'individual') {
+        for (let index = 0; index < formValues.additionalDrivers.length; index += 1) {
+          const file = formValues.additionalDriverLicenseFiles[index];
+          if (!file) {
+            additionalDriverLicenseDocumentObjectNames[index] = undefined;
+            continue;
+          }
+          try {
+            additionalDriverLicenseDocumentObjectNames[index] = await uploadReservationCreationDocument(file, reservationId);
+          } catch {
+            const message = `${index + 2}번째 운전자 면허증 파일을 다시 업로드해 주세요.`;
+            return {
+              formError: `${index + 2}번째 운전자 면허증 파일 업로드에 실패했습니다.`,
+              fieldErrors: {
+                additionalDriverLicenseFiles: message,
+              },
+              additionalDriverLicenseFileErrors: {
+                [index]: message,
+              },
+            };
+          }
         }
       }
 
-      const driverParty = {
-        name: formValues.customerName.trim() || undefined,
-        phone: formValues.customerPhone.trim() || undefined,
-        licenseNumber: formValues.customerLicense.trim() || undefined,
-        address: formValues.customerAddress.trim() || undefined,
-        licenseDocumentObjectName,
-      };
+      const contractFiles = formValues.contractFiles.length > 0
+        ? formValues.contractFiles
+        : (formValues.contractFile ? [formValues.contractFile] : []);
+      if (contractFiles.length > 0) {
+        for (const [index, file] of contractFiles.entries()) {
+          try {
+            const objectName = await uploadReservationCreationDocument(file, reservationId);
+            contractDocumentObjectName = contractDocumentObjectName ?? objectName;
+            contractDocuments.push({
+              objectName,
+              fileName: file.name,
+              documentType: formValues.rentalType === 'long_term'
+                ? 'long_term_contract'
+                : formValues.rentalType === 'accident_replacement'
+                  ? 'accident_replacement_request'
+                  : 'rental_contract',
+            });
+          } catch {
+            return {
+              formError: contractFiles.length > 1
+                ? `${index + 1}번째 계약서/납부 일정표 파일 업로드에 실패했습니다.`
+                : '계약서 파일 업로드에 실패했습니다.',
+              fieldErrors: {
+                contractFile: '파일 업로드 후 다시 시도해 주세요.',
+              },
+            };
+          }
+        }
+      }
+
+      const driverParty = formValues.rentalType === 'long_term' && formValues.contractorType === 'corporate'
+        ? {}
+        : {
+          name: formValues.rentalType === 'long_term'
+            ? formValues.contractorName.trim() || undefined
+            : formValues.customerName.trim() || undefined,
+          phone: formValues.rentalType === 'long_term'
+            ? formValues.contractorContactPhone.trim() || undefined
+            : formValues.customerPhone.trim() || undefined,
+          licenseNumber: formValues.customerLicense.trim() || undefined,
+          address: formValues.customerAddress.trim() || undefined,
+          licenseDocumentObjectName,
+        };
+      const additionalDriverParties = formValues.rentalType === 'long_term' && formValues.contractorType === 'individual'
+        ? formValues.additionalDrivers
+          .map((driver, index) => ({
+            name: driver.name.trim() || undefined,
+            phone: driver.phone.trim() || undefined,
+            licenseNumber: driver.licenseNumber.trim() || undefined,
+            address: driver.address.trim() || undefined,
+            licenseDocumentObjectName: additionalDriverLicenseDocumentObjectNames[index],
+          }))
+          .filter((driver) => Object.values(driver).some(Boolean))
+        : [];
       const longTermContractorParty = formValues.rentalType === 'long_term'
         ? {
           type: formValues.contractorType,
@@ -3583,6 +4369,7 @@ export default function Reservations() {
             address: formValues.customerAddress.trim() || undefined,
           },
         driver: Object.values(driverParty).some(Boolean) ? driverParty : undefined,
+        additionalDrivers: additionalDriverParties.length > 0 ? additionalDriverParties : undefined,
         requester: formValues.rentalType === 'accident_replacement'
           ? {
             source: formValues.requestSource,
@@ -3633,6 +4420,7 @@ export default function Reservations() {
               ? 'accident_replacement_request'
               : 'rental_contract')
           : undefined,
+        contractDocuments: contractDocuments.length > 0 ? contractDocuments : undefined,
         initialBilling: usesInitialBilling
           ? {
             amount: fallbackAmount,
@@ -3761,6 +4549,10 @@ export default function Reservations() {
     if (!canManageReservationPaymentIssue(selectedReservation, selectedReservationPaymentSync)) {
       return;
     }
+    if (hasSelectedReservationBillingLedger) {
+      setReservationActionError(LEDGER_AUTHORITATIVE_PAYMENT_MESSAGE);
+      return;
+    }
 
     setIsPaymentCompleting(true);
     setReservationActionError(null);
@@ -3825,6 +4617,7 @@ export default function Reservations() {
     }
   }, [
     canWritePayments,
+    hasSelectedReservationBillingLedger,
     hydrateReservationDetail,
     hydrateReservationsData,
     isPaymentCompleting,
@@ -3842,6 +4635,10 @@ export default function Reservations() {
       return;
     }
     if (!canManageReservationPaymentIssue(selectedReservation, selectedReservationPaymentSync)) {
+      return;
+    }
+    if (hasSelectedReservationBillingLedger) {
+      setReservationActionError(LEDGER_AUTHORITATIVE_PAYMENT_MESSAGE);
       return;
     }
     const amount = Math.max(0, toCurrencyNumberFromInput(paymentAmountDraft));
@@ -3880,6 +4677,7 @@ export default function Reservations() {
     }
   }, [
     canWritePayments,
+    hasSelectedReservationBillingLedger,
     hydrateReservationDetail,
     isPaymentAmountSaving,
     paymentAmountDraft,
@@ -3897,6 +4695,10 @@ export default function Reservations() {
       return;
     }
     if (!canManageReservationPaymentIssue(selectedReservation, selectedReservationPaymentSync)) {
+      return;
+    }
+    if (hasSelectedReservationBillingLedger) {
+      setReservationActionError(LEDGER_AUTHORITATIVE_PAYMENT_MESSAGE);
       return;
     }
 
@@ -3940,6 +4742,7 @@ export default function Reservations() {
     }
   }, [
     canWritePayments,
+    hasSelectedReservationBillingLedger,
     hydrateReservationDetail,
     isPaymentMethodSaving,
     paymentMethodDraft,
@@ -3957,6 +4760,15 @@ export default function Reservations() {
     }
   }, []);
 
+  const handleOpenReservationDocument = useCallback(async (objectName: string) => {
+    try {
+      const payload = await getUploadDownloadUrl(objectName);
+      window.open(payload.downloadUrl, '_blank', 'noopener,noreferrer');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '문서 링크를 열지 못했습니다.');
+    }
+  }, []);
+
   const handleVoidPaymentRecord = useCallback(async (record: ReservationPaymentRecord) => {
     if (!selectedReservation || !canWritePayments || activePaymentRecordMutationId) {
       return;
@@ -3964,10 +4776,7 @@ export default function Reservations() {
     setActivePaymentRecordMutationId(record.id);
     setReservationActionError(null);
     try {
-      await patchPaymentRecord(record.id, {
-        status: 'voided',
-        memo: '예약 상세에서 수납 기록 무효 처리',
-      });
+      await voidPaymentRecord(record.id, '예약 상세에서 수납 기록 무효 처리');
       toast.success('수납 기록을 무효 처리했습니다.');
       void hydrateReservationDetail(selectedReservation.id, selectedReservation);
       refreshReservationsAfterMutation('수납 기록은 변경되었지만 목록을 다시 불러오지 못했습니다. 새로고침 후 확인해 주세요.');
@@ -3977,6 +4786,43 @@ export default function Reservations() {
       setActivePaymentRecordMutationId(null);
     }
   }, [activePaymentRecordMutationId, canWritePayments, hydrateReservationDetail, refreshReservationsAfterMutation, selectedReservation]);
+
+  const handleSettleChargeItem = useCallback(async (item: ReservationChargeItem) => {
+    if (!selectedReservation || !canWritePayments || activePaymentRecordMutationId) {
+      return;
+    }
+    const amount = Math.max(item.remainingAmount || item.amount || 0, 0);
+    if (amount <= 0) {
+      setReservationActionError('수납 처리할 잔액이 없습니다.');
+      return;
+    }
+    setActivePaymentRecordMutationId(item.id);
+    setReservationActionError(null);
+    try {
+      await createReservationPaymentRecord(selectedReservation.id, {
+        amount,
+        method: paymentMethodDraft,
+        payerType: item.payerType ?? 'customer',
+        confirmationStatus: 'confirmed',
+        allocations: [{ chargeItemId: item.id, amount }],
+        memo: '예약 상세에서 수납 완료 처리',
+      });
+      toast.success('수납 기록을 생성했습니다.');
+      void hydrateReservationDetail(selectedReservation.id, selectedReservation);
+      refreshReservationsAfterMutation('수납 기록은 생성되었지만 목록을 다시 불러오지 못했습니다. 새로고침 후 확인해 주세요.');
+    } catch (error) {
+      setReservationActionError(error instanceof Error ? error.message : '수납 처리 중 오류가 발생했습니다.');
+    } finally {
+      setActivePaymentRecordMutationId(null);
+    }
+  }, [
+    activePaymentRecordMutationId,
+    canWritePayments,
+    hydrateReservationDetail,
+    paymentMethodDraft,
+    refreshReservationsAfterMutation,
+    selectedReservation,
+  ]);
 
   const handleCreateRefundChargeItem = useCallback(async (record: ReservationPaymentRecord) => {
     if (!selectedReservation || !canWritePayments || activePaymentRecordMutationId) {
@@ -4200,13 +5046,22 @@ export default function Reservations() {
       return;
     }
 
-    const confirmed = window.confirm(
-      `${selectedReservation.customer}님의 예약을 취소하시겠습니까?\n\n차량번호: ${selectedReservation.vehicleNumber}\n예약 기간: ${selectedReservation.startDateFull} ~ ${selectedReservation.endDateFull}`,
-    );
-    if (!confirmed) {
+    setShowCancelReservationConfirm(true);
+  }, [activeReservationAction, canTransitionReservations, selectedReservation]);
+
+  const handleConfirmCancelReservation = useCallback(async () => {
+    if (!canTransitionReservations) {
+      setReservationActionError('예약 취소 권한이 없습니다. 관리자에게 권한을 요청해 주세요.');
+      setShowCancelReservationConfirm(false);
       return;
     }
 
+    if (!selectedReservation || selectedReservation.type !== 'reservation' || activeReservationAction) {
+      setShowCancelReservationConfirm(false);
+      return;
+    }
+
+    setShowCancelReservationConfirm(false);
     setActiveReservationAction('cancel');
     setReservationActionError(null);
 
@@ -4253,6 +5108,7 @@ export default function Reservations() {
     canTransitionReservations,
     closeReservationDetail,
     hydrateReservationDetail,
+    hydrateReservationsData,
     refreshReservationsAfterMutation,
     selectedReservation,
   ]);
@@ -4776,7 +5632,7 @@ export default function Reservations() {
             </button>
             
             <button
-              onClick={() => setCurrentWeekStart(0)}
+              onClick={() => setCurrentWeekStart(calendarStartOffsetForTarget(0))}
               className="px-3 py-1.5 text-xs font-medium text-blue-600 hover:bg-blue-100 rounded-lg transition-colors"
             >
               오늘
@@ -4792,7 +5648,7 @@ export default function Reservations() {
                     const target = new Date(e.target.value);
                     const targetDayStart = new Date(target.getFullYear(), target.getMonth(), target.getDate());
                     const diffDays = Math.floor((targetDayStart.getTime() - CALENDAR_BASE_DATE.getTime()) / (1000 * 60 * 60 * 24));
-                    setCurrentWeekStart(diffDays);
+                    setCurrentWeekStart(calendarStartOffsetForTarget(diffDays));
                   }
                 }}
                 className="px-3 py-1.5 text-xs border border-blue-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
@@ -4849,62 +5705,177 @@ export default function Reservations() {
           </div>
 
           {/* 차량 필터 영역 */}
-          <div className="flex items-center gap-3 px-3 py-2 bg-gray-50 border-b border-gray-200 shrink-0">
-            <div className="flex items-center gap-2">
-              <label htmlFor="reservations-model-filter" className="text-xs font-semibold text-gray-600">차종:</label>
-              <select
-                id="reservations-model-filter"
-                name="modelFilter"
-                value={modelFilter}
-                onChange={(e) => setModelFilter(e.target.value)}
-                className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+          <div className="bg-gray-50 border-b border-gray-200 shrink-0">
+            <div className="flex flex-wrap items-center gap-3 px-3 py-2">
+              <div className="flex items-center gap-2">
+                <label htmlFor="reservations-model-filter" className="text-xs font-semibold text-gray-600">차종:</label>
+                <select
+                  id="reservations-model-filter"
+                  name="modelFilter"
+                  value={modelFilter}
+                  onChange={(e) => setModelFilter(e.target.value)}
+                  className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                >
+                  <option value="all">전체</option>
+                  {uniqueModels.map(model => (
+                    <option key={model} value={model}>{model}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <label htmlFor="reservations-vehicle-search-query" className="text-xs font-semibold text-gray-600">차량번호:</label>
+                <input
+                  id="reservations-vehicle-search-query"
+                  name="vehicleSearchQuery"
+                  type="text"
+                  placeholder="차량번호 검색"
+                  aria-label="차량번호 검색"
+                  value={vehicleSearchQuery}
+                  onChange={(e) => setVehicleSearchQuery(e.target.value)}
+                  className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 w-32"
+                />
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setShowAdvancedFilters((value) => !value)}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
               >
-                <option value="all">전체</option>
-                {uniqueModels.map(model => (
-                  <option key={model} value={model}>{model}</option>
-                ))}
-              </select>
+                <SlidersHorizontal className="h-4 w-4" />
+                확장 필터
+              </button>
+
+              <div className="flex-1" />
+
+              <span className="text-xs text-blue-600 font-medium bg-blue-50 px-3 py-1.5 rounded-lg border border-blue-200">
+                캘린더에서 드래그하여 예약을 생성하세요
+              </span>
+
+              <span className="text-xs text-gray-500">
+                총 <span className="font-semibold text-blue-600">{filteredVehicles.length}</span>대 표시 중
+              </span>
             </div>
 
-            <div className="flex items-center gap-2">
-              <label htmlFor="reservations-rental-type-filter" className="text-xs font-semibold text-gray-600">계약유형:</label>
-              <select
-                id="reservations-rental-type-filter"
-                name="rentalTypeFilter"
-                value={rentalTypeFilter}
-                onChange={(event) => handleRentalTypeFilterChange(event.target.value as RentalTypeFilter)}
-                className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
-              >
-                <option value="all">전체</option>
-                <option value="short_term">단기렌트</option>
-                <option value="long_term">장기렌트</option>
-                <option value="accident_replacement">사고대차</option>
-              </select>
-            </div>
-            
-            <div className="flex items-center gap-2">
-              <label htmlFor="reservations-vehicle-search-query" className="text-xs font-semibold text-gray-600">차량번호:</label>
-              <input
-                id="reservations-vehicle-search-query"
-                name="vehicleSearchQuery"
-                type="text"
-                placeholder="차량번호 검색"
-                aria-label="차량번호 검색"
-                value={vehicleSearchQuery}
-                onChange={(e) => setVehicleSearchQuery(e.target.value)}
-                className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 w-32"
-              />
-            </div>
+            {showAdvancedFilters && (
+              <div className="flex flex-wrap items-center gap-3 px-3 pb-3">
+                <div className="flex items-center gap-2">
+                  <label htmlFor="reservations-rental-type-filter" className="text-xs font-semibold text-gray-600">계약유형:</label>
+                  <select
+                    id="reservations-rental-type-filter"
+                    name="rentalTypeFilter"
+                    value={rentalTypeFilter}
+                    onChange={(event) => handleRentalTypeFilterChange(event.target.value as RentalTypeFilter)}
+                    className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                  >
+                    <option value="all">전체</option>
+                    <option value="short_term">단기렌트</option>
+                    <option value="long_term">장기렌트</option>
+                    <option value="accident_replacement">사고대차</option>
+                  </select>
+                </div>
 
-            <div className="flex-1" />
-            
-            <span className="text-xs text-blue-600 font-medium bg-blue-50 px-3 py-1.5 rounded-lg border border-blue-200">
-              💡 캘린더에서 드래그하여 예약을 생성하세요
-            </span>
-            
-            <span className="text-xs text-gray-500">
-              총 <span className="font-semibold text-blue-600">{filteredVehicles.length}</span>대 표시 중
-            </span>
+                <div className="flex items-center gap-2">
+                  <label htmlFor="reservations-customer-query" className="text-xs font-semibold text-gray-600">예약자:</label>
+                  <input
+                    id="reservations-customer-query"
+                    type="text"
+                    placeholder="이름/전화번호"
+                    value={customerSearchDraft}
+                    onChange={handleCustomerSearchChange}
+                    onCompositionStart={handleCustomerSearchCompositionStart}
+                    onCompositionEnd={handleCustomerSearchCompositionEnd}
+                    onKeyDown={handleCustomerSearchKeyDown}
+                    onBlur={(event) => commitCustomerSearchQuery(event.currentTarget.value)}
+                    className="w-40 px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                  />
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <label htmlFor="reservations-workflow-status-filter" className="text-xs font-semibold text-gray-600">업무상태:</label>
+                  <select
+                    id="reservations-workflow-status-filter"
+                    name="workflowStatusFilter"
+                    value={workflowStatusFilter}
+                    onChange={(event) => handleWorkflowStatusFilterChange(event.target.value as WorkflowStatusFilter)}
+                    className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                  >
+                    <option value="all">전체</option>
+                    {Object.entries(WORKFLOW_STATUS_LABELS).map(([value, label]) => (
+                      <option key={value} value={value}>{label}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <label htmlFor="reservations-closeout-status-filter" className="text-xs font-semibold text-gray-600">정산:</label>
+                  <select
+                    id="reservations-closeout-status-filter"
+                    name="closeoutStatusFilter"
+                    value={closeoutStatusFilter}
+                    onChange={(event) => handleCloseoutStatusFilterChange(event.target.value as CloseoutStatusFilter)}
+                    className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                  >
+                    <option value="all">전체</option>
+                    {Object.entries(CLOSEOUT_STATUS_LABELS).map(([value, label]) => (
+                      <option key={value} value={value}>{label}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <label htmlFor="reservations-cancel-status-filter" className="text-xs font-semibold text-gray-600">취소정산:</label>
+                  <select
+                    id="reservations-cancel-status-filter"
+                    name="cancellationSettlementStatusFilter"
+                    value={cancellationSettlementStatusFilter}
+                    onChange={(event) => handleCancellationSettlementStatusFilterChange(event.target.value as CancellationSettlementStatusFilter)}
+                    className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                  >
+                    <option value="all">전체</option>
+                    {Object.entries(CANCELLATION_SETTLEMENT_STATUS_LABELS).map(([value, label]) => (
+                      <option key={value} value={value}>{label}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {rentalTypeFilter === 'long_term' && (
+                  <div className="flex items-center gap-2">
+                    <label htmlFor="reservations-long-term-status-filter" className="text-xs font-semibold text-gray-600">장기상태:</label>
+                    <select
+                      id="reservations-long-term-status-filter"
+                      name="longTermAccountStatusFilter"
+                      value={longTermAccountStatusFilter}
+                      onChange={(event) => handleLongTermAccountStatusFilterChange(event.target.value as LongTermAccountStatusFilter)}
+                      className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                    >
+                      <option value="all">전체</option>
+                      {Object.entries(LONG_TERM_ACCOUNT_STATUS_LABELS).map(([value, label]) => (
+                        <option key={value} value={value}>{label}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                {rentalTypeFilter === 'accident_replacement' && (
+                  <div className="flex items-center gap-2">
+                    <label htmlFor="reservations-accident-replacement-status-filter" className="text-xs font-semibold text-gray-600">대차상태:</label>
+                    <select
+                      id="reservations-accident-replacement-status-filter"
+                      name="accidentReplacementStatusFilter"
+                      value={accidentReplacementStatusFilter}
+                      onChange={(event) => handleAccidentReplacementStatusFilterChange(event.target.value as AccidentReplacementStatusFilter)}
+                      className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                    >
+                      <option value="all">전체</option>
+                      {Object.entries(ACCIDENT_REPLACEMENT_STATUS_LABELS).map(([value, label]) => (
+                        <option key={value} value={value}>{label}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
           
           {/* 가로 스크롤 가능한 컨테이너 */}
@@ -5009,7 +5980,17 @@ export default function Reservations() {
                                 });
 
                                 if (conflicts.length > 0) {
-                                  alert(`선택한 기간에 이미 예약이 있습니다.\\n\\n${conflicts.map(c => `${c.customer}: ${c.startDateFull} ~ ${c.endDateFull}`).join('\\n')}`);
+                                  setDragConflictPrompt({
+                                    vehicleNumber: vehicle,
+                                    startDateLabel: toDateLabelFromOffset(startDate),
+                                    endDateLabel: toDateLabelFromOffset(endDate),
+                                    conflicts: conflicts.map((conflict) => ({
+                                      id: conflict.id,
+                                      customer: conflict.customer,
+                                      startDateFull: conflict.startDateFull,
+                                      endDateFull: conflict.endDateFull,
+                                    })),
+                                  });
                                 } else {
                                   if (!canStartReservationMutation) {
                                     toast.error(isPageLoading
@@ -5077,6 +6058,11 @@ export default function Reservations() {
 	                                    <span className="rounded bg-white/25 px-1 text-[10px] font-semibold text-white">
 	                                      {getRentalTypeBadgeLabel(res.rentalType)}
 	                                    </span>
+                                      {res.workflowStatus && (
+                                        <span className="rounded bg-white/25 px-1 text-[10px] font-semibold text-white">
+                                          {getWorkflowStatusLabel(res.workflowStatus, res.workflowStatusLabel)}
+                                        </span>
+                                      )}
 	                                    <span className="min-w-0 truncate font-medium">{res.customer}</span>
 	                                  </div>
 	                                  {segmentIssueLabel && (
@@ -5201,7 +6187,18 @@ export default function Reservations() {
                         <p className="text-lg text-gray-900 mt-1">{selectedReservation.phone}</p>
                       </div>
                       <div>
-                        <label className="text-xs font-semibold text-gray-500 uppercase">예약 유형</label>
+                        <label className="text-xs font-semibold text-gray-500 uppercase">계약 유형</label>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          <span className="inline-block px-3 py-1 text-sm font-medium rounded-full bg-slate-100 text-slate-700">
+                            {getRentalTypeBadgeLabel(selectedReservation.rentalType)}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="text-xs font-semibold text-gray-500 uppercase">진행 상태</label>
                         <span className={`inline-block px-3 py-1 text-sm font-medium rounded-full mt-2 ${
                           selectedReservation.type === 'reservation'
                             ? 'bg-purple-100 text-purple-700'
@@ -5216,6 +6213,56 @@ export default function Reservations() {
                               : '대여'}
                         </span>
                       </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                      <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2">
+                        <label className="text-xs font-semibold text-blue-700 uppercase">업무 상태</label>
+                        <p className="mt-1 text-sm font-bold text-blue-900">
+                          {getWorkflowStatusLabel(selectedReservation.workflowStatus, selectedReservation.workflowStatusLabel)}
+                        </p>
+                      </div>
+                      {selectedReservation.closeoutStatus && selectedReservation.closeoutStatus !== 'not_required' && (
+                        <div className="rounded-lg border border-emerald-100 bg-emerald-50 px-3 py-2">
+                          <label className="text-xs font-semibold text-emerald-700 uppercase">종료정산</label>
+                          <p className="mt-1 text-sm font-bold text-emerald-900">
+                            {getCloseoutStatusLabel(selectedReservation.closeoutStatus, selectedReservation.closeoutStatusLabel)}
+                          </p>
+                        </div>
+                      )}
+                      {selectedReservation.cancellationSettlementStatus && selectedReservation.cancellationSettlementStatus !== 'not_required' && (
+                        <div className="rounded-lg border border-amber-100 bg-amber-50 px-3 py-2">
+                          <label className="text-xs font-semibold text-amber-700 uppercase">취소정산</label>
+                          <p className="mt-1 text-sm font-bold text-amber-900">
+                            {getCancellationSettlementStatusLabel(
+                              selectedReservation.cancellationSettlementStatus,
+                              selectedReservation.cancellationSettlementStatusLabel,
+                            )}
+                          </p>
+                        </div>
+                      )}
+                      {selectedReservation.rentalType === 'long_term' && (
+                        <div className="rounded-lg border border-purple-100 bg-purple-50 px-3 py-2">
+                          <label className="text-xs font-semibold text-purple-700 uppercase">장기 상태</label>
+                          <p className="mt-1 text-sm font-bold text-purple-900">
+                            {getLongTermAccountStatusLabel(
+                              selectedReservation.longTermAccountStatus,
+                              selectedReservation.longTermAccountStatusLabel,
+                            )}
+                          </p>
+                        </div>
+                      )}
+                      {selectedReservation.rentalType === 'accident_replacement' && (
+                        <div className="rounded-lg border border-sky-100 bg-sky-50 px-3 py-2">
+                          <label className="text-xs font-semibold text-sky-700 uppercase">대차 상태</label>
+                          <p className="mt-1 text-sm font-bold text-sky-900">
+                            {getAccidentReplacementStatusLabel(
+                              selectedReservation.accidentReplacementStatus,
+                              selectedReservation.accidentReplacementStatusLabel,
+                            )}
+                          </p>
+                        </div>
+                      )}
                     </div>
 
                     <div>
@@ -5234,18 +6281,36 @@ export default function Reservations() {
                       </div>
                     </div>
 
-                    {selectedReservation.issues && selectedReservation.issues.length > 0 && (
+                    {(activeReservationActionItems.length > 0 || selectedReservation.issues?.length || isActiveActionItemsLoading || activeActionItemsError) && (
                       <div>
                         <label className="text-xs font-semibold text-gray-500 uppercase flex items-center gap-1 mb-2">
                           <AlertCircle className="w-4 h-4 text-red-600" />
                           이슈
                         </label>
                         <div className="flex flex-wrap gap-2">
-                          {selectedReservation.issues.map((issue, idx) => (
+                          {isActiveActionItemsLoading && (
+                            <span className="px-3 py-2 bg-blue-50 text-blue-700 rounded-lg font-medium">활성 이슈 확인 중</span>
+                          )}
+                          {activeReservationActionItems.length > 0
+                            ? activeReservationActionItems.map((item) => (
+                              <span key={item.id} className="inline-flex items-center gap-1 rounded-lg bg-red-100 px-3 py-2 text-sm font-medium text-red-700">
+                                <span>{item.mainLabel}</span>
+                                {item.subLabel && (
+                                  <>
+                                    <span className="text-red-400">/</span>
+                                    <span className="font-semibold">{item.subLabel}</span>
+                                  </>
+                                )}
+                              </span>
+                            ))
+                            : selectedReservation.issues?.map((issue, idx) => (
                             <span key={idx} className="px-3 py-2 bg-red-100 text-red-700 rounded-lg font-medium">
                               {issue}
                             </span>
                           ))}
+                          {activeActionItemsError && (
+                            <span className="px-3 py-2 bg-amber-50 text-amber-700 rounded-lg font-medium">{activeActionItemsError}</span>
+                          )}
                         </div>
                       </div>
                     )}
@@ -5337,27 +6402,56 @@ export default function Reservations() {
                 {/* 결제 정보 탭 */}
                 {activeTab === 'payment' && (
                   <div className="space-y-3">
-                    <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-                      <div>
-                        <label className="text-xs font-semibold text-gray-500 uppercase">대여 요금</label>
-                        <p className="text-xl text-gray-900 mt-1 font-bold">{selectedReservation.amount}</p>
+                    {isSelectedReservationLongTerm ? (
+                      <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+                        <div>
+                          <label className="text-xs font-semibold text-gray-500 uppercase">월 렌트료</label>
+                          <p className="mt-1 text-xl font-bold text-gray-900">{selectedReservationMonthlyAmountText}</p>
+                        </div>
+                        <div>
+                          <label className="text-xs font-semibold text-gray-500 uppercase">보증금</label>
+                          <p className="mt-1 text-xl font-bold text-gray-900">{selectedReservationDepositText}</p>
+                        </div>
+                        <div>
+                          <label className="text-xs font-semibold text-gray-500 uppercase">선납금</label>
+                          <p className="mt-1 text-xl font-bold text-gray-900">{selectedReservationAdvancePaymentText}</p>
+                        </div>
+                        <div>
+                          <label className="text-xs font-semibold text-gray-500 uppercase">미수 잔액</label>
+                          <p className="mt-1 text-xl font-bold text-red-600">{toCurrencyValue(selectedReservationBillingRemainingAmount)}</p>
+                        </div>
                       </div>
-                      <div>
-                        <label className="text-xs font-semibold text-gray-500 uppercase">선금</label>
-                        <p className="text-xl text-gray-900 mt-1 font-bold">{selectedReservation.deposit}</p>
+                    ) : (
+                      <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                        <div>
+                          <label className="text-xs font-semibold text-gray-500 uppercase">대여 요금</label>
+                          <p className="text-xl text-gray-900 mt-1 font-bold">{selectedReservation.amount}</p>
+                        </div>
+                        <div>
+                          <label className="text-xs font-semibold text-gray-500 uppercase">선금</label>
+                          <p className="text-xl text-gray-900 mt-1 font-bold">{selectedReservation.deposit}</p>
+                        </div>
+                        <div>
+                          <label className="text-xs font-semibold text-gray-500 uppercase">기존 미납 금액</label>
+                          <p className="text-xl text-gray-900 mt-1 font-bold">
+                            {toCurrencyValue(selectedReservationPrincipalAmount)}
+                          </p>
+                        </div>
                       </div>
-                      <div>
-                        <label className="text-xs font-semibold text-gray-500 uppercase">기존 미납 금액</label>
-                        <p className="text-xl text-gray-900 mt-1 font-bold">
-                          {toCurrencyValue(selectedReservationPrincipalAmount)}
-                        </p>
-                      </div>
-                    </div>
+                    )}
                     <div className="rounded-lg border border-gray-200 bg-white p-4">
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <div>
                           <p className="text-xs font-semibold uppercase text-gray-500">청구/수납 요약</p>
                           <p className="mt-1 text-lg font-bold text-gray-900">{selectedReservationBillingLabel}</p>
+                          {isSelectedReservationLongTerm && selectedReservationDefaultPayerType && (
+                            <span className="mt-2 inline-flex items-center gap-1.5 text-xs font-medium text-gray-500">
+                              기본 청구처:
+                              <span className="rounded-full border border-blue-100 bg-blue-50 px-2.5 py-1 font-semibold text-blue-800">
+                                {getPayerTypeLabel(selectedReservationDefaultPayerType)}
+                              </span>
+                            </span>
+                          )}
                         </div>
                         {selectedReservationBillingConfirmationCount > 0 && (
                           <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700">
@@ -5379,50 +6473,72 @@ export default function Reservations() {
                           <p className="mt-1 text-sm font-bold text-red-600">{toCurrencyValue(selectedReservationBillingRemainingAmount)}</p>
                         </div>
                         <div>
-                          <span className="text-xs text-gray-500">청구/수납 건수</span>
+                          <span className="text-xs text-gray-500">수납/청구 건수</span>
                           <p className="mt-1 text-sm font-bold text-gray-900">
-                            {(selectedReservationBillingSummary?.chargeItemCount ?? selectedReservationChargeItems.length)} / {(selectedReservationBillingSummary?.paymentRecordCount ?? 0)}
+                            {selectedReservationPaymentRecordCount} / {selectedReservationChargeItemCount}
                           </p>
                         </div>
                       </div>
                       {selectedReservationChargeItems.length > 0 && (
-                        <div className="mt-4 overflow-x-auto rounded-md border border-gray-200">
-                          <div className="min-w-[760px]">
-                            <div className="grid grid-cols-[1.1fr_0.8fr_1fr_1fr_0.8fr_1.2fr] bg-gray-50 px-3 py-2 text-xs font-semibold text-gray-500">
+                        <div className="mt-4 rounded-md border border-gray-200">
+                          <div className="w-full">
+                            <div className="grid grid-cols-[minmax(0,2.4fr)_minmax(104px,0.9fr)_minmax(72px,0.65fr)_minmax(112px,0.9fr)] items-start gap-x-3 bg-gray-50 px-3 py-2 text-xs font-semibold text-gray-500">
                               <span>항목</span>
-                              <span>청구처</span>
-                              <span className="text-right">청구액</span>
-                              <span className="text-right">잔액</span>
+                              <span className="text-right">금액</span>
                               <span className="text-right">상태</span>
-                              <span>정정/이력</span>
+                              <span>처리/이력</span>
                             </div>
                             {selectedReservationChargeItems.map((item) => (
+                              (() => {
+                                const periodLabel = getChargeItemPeriodLabel(item);
+                                const isMonthlyCharge = item.chargeType === 'monthly_fee';
+                                const payerChangeLabel = getChargeItemPayerChangeLabel(item, selectedReservationDefaultPayerType);
+                                return (
                               <div
                                 key={item.id}
-                                className="grid grid-cols-[1.1fr_0.8fr_1fr_1fr_0.8fr_1.2fr] border-t border-gray-100 px-3 py-2 text-sm text-gray-800"
+                                className="grid grid-cols-[minmax(0,2.4fr)_minmax(104px,0.9fr)_minmax(72px,0.65fr)_minmax(112px,0.9fr)] items-start gap-x-3 border-t border-gray-100 px-3 py-3 text-sm text-gray-800"
                               >
                                 <span className="min-w-0">
-                                  <span className="block truncate font-medium">{getChargeTypeLabel(item.chargeType)}</span>
-                                  {(item.billingPeriodStart || item.billingPeriodEnd || item.dueDate) && (
-                                    <span className="block truncate text-xs text-gray-500">
-                                      {[item.billingPeriodStart && item.billingPeriodEnd ? `${item.billingPeriodStart}~${item.billingPeriodEnd}` : null, item.dueDate ? `납부 ${item.dueDate}` : null].filter(Boolean).join(' / ')}
+                                  {isMonthlyCharge && periodLabel ? (
+                                    <>
+                                      <span className="block break-words font-medium leading-5">{periodLabel}</span>
+                                      <span className="block break-keep text-xs leading-5 text-gray-500">
+                                        {[getChargeTypeLabel(item.chargeType), item.dueDate ? `납부 ${item.dueDate}` : null].filter(Boolean).join(' / ')}
+                                      </span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <span className="block break-keep font-medium leading-5">{getChargeTypeLabel(item.chargeType)}</span>
+                                      {(periodLabel || item.dueDate) && (
+                                        <span className="block break-keep text-xs leading-5 text-gray-500">
+                                          {[periodLabel, item.dueDate ? `납부 ${item.dueDate}` : null].filter(Boolean).join(' / ')}
+                                        </span>
+                                      )}
+                                    </>
+                                  )}
+                                  {payerChangeLabel && (
+                                    <span className="mt-1 inline-flex max-w-full items-center rounded-full bg-amber-50 px-2 py-0.5 text-xs font-semibold leading-5 text-amber-700">
+                                      <span className="min-w-0 break-words">{payerChangeLabel}</span>
                                     </span>
                                   )}
                                 </span>
-                                <span className="min-w-0 truncate text-gray-600">{getPayerTypeLabel(item.payerType)}</span>
-                                <span className="text-right font-semibold">{toCurrencyValue(item.amount)}</span>
-                                <span className="text-right font-semibold text-red-600">{toCurrencyValue(item.remainingAmount)}</span>
-                                <span className="text-right text-gray-600">{getChargeStatusLabel(item.status)}</span>
+                                <span className="space-y-1 text-right tabular-nums">
+                                  <span className="block whitespace-nowrap font-semibold text-gray-900">{toCurrencyValue(item.amount)}</span>
+                                  <span className="block whitespace-nowrap text-xs font-semibold text-red-600">
+                                    잔액 {toCurrencyValue(item.remainingAmount)}
+                                  </span>
+                                </span>
+                                <span className="whitespace-nowrap text-right text-gray-600">{getChargeStatusLabel(item.status)}</span>
                                 <span className="min-w-0 space-y-1">
                                   {canWritePayments && item.chargeType === 'refund' && item.status === 'refund_due' && (
-                                    <span className="flex flex-wrap gap-1">
+                                    <span className="flex min-w-0 flex-wrap gap-1">
                                       <button
                                         type="button"
                                         onClick={() => {
                                           void handleCompleteRefundChargeItem(item);
                                         }}
                                         disabled={activePaymentRecordMutationId === item.id}
-                                        className="rounded-md bg-emerald-600 px-2 py-1 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                                        className="whitespace-nowrap rounded-md bg-emerald-600 px-2 py-1 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
                                       >
                                         환불완료
                                       </button>
@@ -5432,18 +6548,30 @@ export default function Reservations() {
                                           void handleWaiveRefundChargeItem(item);
                                         }}
                                         disabled={activePaymentRecordMutationId === item.id}
-                                        className="rounded-md bg-slate-600 px-2 py-1 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                                        className="whitespace-nowrap rounded-md bg-slate-600 px-2 py-1 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
                                       >
                                         환불면제
                                       </button>
                                     </span>
                                   )}
+                                  {canWritePayments && item.chargeType !== 'refund' && item.remainingAmount > 0 && !['paid', 'waived', 'refunded', 'disputed'].includes(item.status) && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        void handleSettleChargeItem(item);
+                                      }}
+                                      disabled={activePaymentRecordMutationId === item.id}
+                                      className="whitespace-nowrap rounded-md bg-emerald-600 px-2 py-1 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                                    >
+                                      수납
+                                    </button>
+                                  )}
                                   {item.changeHistory && item.changeHistory.length > 0 && (
-                                    <details className="text-xs text-gray-500">
-                                      <summary className="cursor-pointer font-semibold text-gray-600">이력 {item.changeHistory.length}건</summary>
+                                    <details className="min-w-0 text-xs text-gray-500">
+                                      <summary className="cursor-pointer whitespace-nowrap font-semibold text-gray-600">이력 {item.changeHistory.length}건</summary>
                                       <div className="mt-1 space-y-1">
                                         {item.changeHistory.slice(-3).reverse().map((entry, index) => (
-                                          <p key={`${item.id}-history-${index}`} className="rounded bg-gray-50 px-2 py-1">
+                                          <p key={`${item.id}-history-${index}`} className="break-words rounded bg-gray-50 px-2 py-1 leading-5">
                                             {entry.changedAt ? formatDateTimeKst(entry.changedAt, '-') : '-'} · {entry.changedByName || entry.changedBy || '사용자'} · {entry.action || 'updated'}
                                             {formatBillingChangeSummary(entry.changes) && (
                                               <span className="block text-gray-400">{formatBillingChangeSummary(entry.changes)}</span>
@@ -5455,6 +6583,8 @@ export default function Reservations() {
                                   )}
                                 </span>
                               </div>
+                                );
+                              })()
                             ))}
                           </div>
                         </div>
@@ -5558,20 +6688,42 @@ export default function Reservations() {
                           </span>
                         </div>
                         <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2">
-                          {selectedReservation.documentChecklist.map((item) => (
-                            <div key={item.key} className="flex min-h-14 items-center justify-between gap-3 rounded-md border border-gray-200 bg-gray-50 px-3 py-2">
-                              <div className="min-w-0">
-                                <p className="truncate text-sm font-semibold text-gray-900">{item.label}</p>
-                                <p className="mt-0.5 truncate text-xs text-gray-500">
-                                  {item.required ? '필수 문서' : '선택 문서'}
-                                  {item.objectName ? ` · ${item.objectName.split('/').pop() ?? item.objectName}` : ''}
-                                </p>
+                          {selectedReservation.documentChecklist.map((item) => {
+                            const documentDetails = item.details && item.details.length > 0
+                              ? item.details
+                              : item.detail
+                                ? [item.detail]
+                                : [];
+                            return (
+                              <div key={item.key} className="flex min-h-14 items-start justify-between gap-3 rounded-md border border-gray-200 bg-gray-50 px-3 py-2">
+                                <div className="min-w-0">
+                                  <p className="truncate text-sm font-semibold text-gray-900">{item.label}</p>
+                                  <p className="mt-0.5 text-xs text-gray-500">
+                                    {item.required ? '필수 문서' : '선택 문서'}
+                                  </p>
+                                  {documentDetails.length > 0 && (
+                                    <div className="mt-1 space-y-1">
+                                      {documentDetails.map((detail, index) => (
+                                        <button
+                                          key={`${detail.objectName}-${index}`}
+                                          type="button"
+                                          onClick={() => {
+                                            void handleOpenReservationDocument(detail.objectName);
+                                          }}
+                                          className="block max-w-full truncate text-left text-xs font-semibold text-blue-700 hover:text-blue-900"
+                                        >
+                                          {detail.fileName || detail.objectName.split('/').pop() || detail.objectName}
+                                        </button>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                                <span className={`shrink-0 rounded-full border px-2 py-1 text-xs font-semibold ${reservationDocumentStatusClass(item.status)}`}>
+                                  {reservationDocumentStatusLabel(item.status)}
+                                </span>
                               </div>
-                              <span className={`shrink-0 rounded-full border px-2 py-1 text-xs font-semibold ${reservationDocumentStatusClass(item.status)}`}>
-                                {reservationDocumentStatusLabel(item.status)}
-                              </span>
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       </div>
                     )}
@@ -5620,13 +6772,20 @@ export default function Reservations() {
                             <p className="mt-1 text-sm font-semibold text-gray-900">{selectedReservation.accidentClaim.documentStatus || '-'}</p>
                           </div>
                           <div>
+                            <span className="text-xs text-indigo-700">수리완료일</span>
+                            <p className="mt-1 text-sm font-semibold text-gray-900">
+                              {formatDateKst(selectedReservation.accidentClaim.repairCompletedAt || selectedReservation.accidentReport?.repairCompletedAt, '-')}
+                            </p>
+                          </div>
+                          <div>
                             <span className="text-xs text-indigo-700">인정액</span>
                             <p className="mt-1 text-sm font-bold text-emerald-700">{toCurrencyValue(selectedReservation.accidentClaim.recognizedAmount ?? 0)}</p>
                           </div>
                         </div>
                       </div>
                     )}
-                    <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 space-y-2">
+                    {!hasSelectedReservationBillingLedger && (
+                      <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 space-y-2">
                       <div className="flex items-center justify-between gap-3">
                         <span className="text-sm text-gray-700">결제 유형</span>
                         {canEditReservationPaymentFields ? (
@@ -5748,6 +6907,7 @@ export default function Reservations() {
                         </div>
                       )}
                     </div>
+                    )}
                   </div>
                 )}
 
@@ -5779,8 +6939,8 @@ export default function Reservations() {
                     <div>
                       <label className="text-xs font-semibold text-gray-500 uppercase">차량 상태</label>
                       <p className="mt-2">
-                        <span className={`inline-block px-4 py-2 rounded-lg font-medium ${getStatusColor(selectedVehicleAsset.status)}`}>
-                          {selectedVehicleAsset.status}
+                        <span className={`inline-block px-4 py-2 rounded-lg font-medium ${getStatusColor(formatVehicleOperatingStatus(selectedVehicleAsset))}`}>
+                          {formatVehicleOperatingStatus(selectedVehicleAsset)}
                         </span>
                       </p>
                     </div>
@@ -5957,7 +7117,9 @@ export default function Reservations() {
           vehicles={vehicles}
           vehicleAssets={vehicleAssets}
           locationOptions={garageLocationOptions}
+          onCreateLocationOption={handleCreateNewContractGarage}
           dragSelection={dragSelection}
+          onValidateStepOne={validateNewContractStepOne}
           onSubmit={handleCreateReservation}
         />
 
@@ -5992,6 +7154,91 @@ export default function Reservations() {
                     {reservationWarningPrompt.confirmLabel}
                   </button>
                 )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {dragConflictPrompt && (
+          <div data-testid="reservation-drag-conflict-modal" className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50">
+            <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl">
+              <div className="mb-4 flex items-start gap-3">
+                <div className="rounded-full bg-amber-50 p-2 text-amber-600">
+                  <AlertTriangle className="h-5 w-5" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-[#1e2939]">중복 예약 구간</h2>
+                  <p className="mt-2 text-sm leading-6 text-gray-700">
+                    선택한 기간에 이미 예약이 있어 새 예약을 만들 수 없습니다.
+                  </p>
+                  <div className="mt-3 rounded-lg bg-gray-50 px-3 py-2 text-sm text-gray-700">
+                    <p>차량번호: {dragConflictPrompt.vehicleNumber}</p>
+                    <p>선택 기간: {dragConflictPrompt.startDateLabel} ~ {dragConflictPrompt.endDateLabel}</p>
+                  </div>
+                </div>
+              </div>
+              <div className="max-h-56 overflow-y-auto rounded-lg border border-gray-200">
+                {dragConflictPrompt.conflicts.map((conflict) => (
+                  <div key={conflict.id} className="border-b border-gray-100 px-4 py-3 last:border-b-0">
+                    <p className="text-sm font-semibold text-gray-900">{conflict.customer}</p>
+                    <p className="mt-1 text-xs text-gray-600">{conflict.startDateFull} ~ {conflict.endDateFull}</p>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-5 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => setDragConflictPrompt(null)}
+                  className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+                >
+                  확인
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showCancelReservationConfirm && selectedReservation && (
+          <div data-testid="reservation-cancel-confirm-modal" className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50">
+            <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+              <div className="mb-4 flex items-start gap-3">
+                <div className="rounded-full bg-red-50 p-2 text-red-600">
+                  <AlertTriangle className="h-5 w-5" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-[#1e2939]">예약 취소</h2>
+                  <p className="mt-2 text-sm leading-6 text-gray-700">
+                    {selectedReservation.customer}님의 예약을 취소하시겠습니까?
+                  </p>
+                  <div className="mt-3 rounded-lg bg-gray-50 px-3 py-2 text-sm text-gray-700">
+                    <p>차량번호: {selectedReservation.vehicleNumber}</p>
+                    <p>예약 기간: {selectedReservation.startDateFull} ~ {selectedReservation.endDateFull}</p>
+                  </div>
+                </div>
+              </div>
+              {reservationActionError && (
+                <p className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                  {reservationActionError}
+                </p>
+              )}
+              <div className="flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setShowCancelReservationConfirm(false)}
+                  className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+                  disabled={activeReservationAction === 'cancel'}
+                >
+                  닫기
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmCancelReservation}
+                  className="inline-flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-70"
+                  disabled={activeReservationAction === 'cancel'}
+                >
+                  {activeReservationAction === 'cancel' && <Loader2 className="h-4 w-4 animate-spin" />}
+                  {activeReservationAction === 'cancel' ? '취소 중...' : '예약 취소'}
+                </button>
               </div>
             </div>
           </div>

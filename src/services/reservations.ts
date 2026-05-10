@@ -9,6 +9,11 @@ export interface GetReservationsListParams extends ReservationsRequestOptions {
   size: number;
   status?: string;
   contractStatus?: string;
+  workflowStatus?: string;
+  closeoutStatus?: string;
+  cancellationSettlementStatus?: string;
+  longTermAccountStatus?: string;
+  accidentReplacementStatus?: string;
   paymentScope?: 'delinquent';
   from?: string;
   to?: string;
@@ -37,6 +42,7 @@ export interface ReservationPartyPayload {
 export interface ReservationPartiesPayload {
   contractor?: ReservationPartyPayload;
   driver?: ReservationPartyPayload;
+  additionalDrivers?: ReservationPartyPayload[];
   requester?: ReservationPartyPayload;
   payer?: ReservationPartyPayload;
 }
@@ -68,6 +74,11 @@ export interface CreateReservationPayload {
   payerType?: 'customer' | 'insurer' | 'corporate' | 'repair_shop';
   contractDocumentObjectName?: string;
   contractDocumentType?: 'rental_contract' | 'long_term_contract' | 'payment_schedule' | 'accident_replacement_request';
+  contractDocuments?: Array<{
+    objectName: string;
+    fileName?: string;
+    documentType?: 'rental_contract' | 'long_term_contract' | 'payment_schedule' | 'accident_replacement_request';
+  }>;
   initialBilling?: {
     amount?: number;
     deposit?: number;
@@ -187,6 +198,7 @@ export interface AccidentFollowupPayload {
   insuranceClaimNo?: string;
   evidenceStatus?: string;
   insuranceProcessStatus?: string;
+  repairCompletedAt?: string;
   customerChargeAmount?: number;
   customerChargeStatus?: string;
   memo?: string;
@@ -223,6 +235,11 @@ export function getReservationsList({
   size,
   status,
   contractStatus,
+  workflowStatus,
+  closeoutStatus,
+  cancellationSettlementStatus,
+  longTermAccountStatus,
+  accidentReplacementStatus,
   paymentScope,
   from,
   to,
@@ -239,6 +256,11 @@ export function getReservationsList({
       size,
       status,
       contractStatus: normalizedContractStatus,
+      workflowStatus,
+      closeoutStatus,
+      cancellationSettlementStatus,
+      longTermAccountStatus,
+      accidentReplacementStatus,
       paymentScope,
       from,
       to,
