@@ -52,6 +52,13 @@ export interface ActionRequiredDomainActionResult {
   domainUpdate?: ActionRequiredDomainUpdateSummary | null;
 }
 
+export interface AccidentApprovalRejectionOptions {
+  approvalMemo?: string;
+  approvalDocumentObjectNames?: string[];
+  cancelReason?: string;
+  signal?: AbortSignal;
+}
+
 export interface ActionRequiredTypeCountOptions {
   pageSize?: number;
   status?: string;
@@ -319,6 +326,19 @@ export function getActionRequiredDetail(
     path: `/api/v2/action-items/${encodeURIComponent(actionId)}`,
     method: 'GET',
     signal: options.signal,
+  });
+}
+
+export function rejectActionRequiredAccidentApproval(
+  actionId: string,
+  options: AccidentApprovalRejectionOptions = {},
+): Promise<unknown> {
+  const { signal, ...body } = options;
+  return apiClient.requestData<unknown>({
+    path: `/api/v2/action-items/${encodeURIComponent(actionId)}/accident-approval-rejection`,
+    method: 'POST',
+    body,
+    signal,
   });
 }
 

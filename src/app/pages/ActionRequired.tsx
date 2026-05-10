@@ -1,7 +1,7 @@
 import { Layout } from '../components/Layout';
 import { useSearchParams, useNavigate } from 'react-router';
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { Search, X, ArrowUp, ArrowDown, Clock, User, CheckCircle2, Loader2, AlertTriangle, ChevronLeft, ChevronRight, Calendar, DollarSign, Car, Info, Activity } from 'lucide-react';
+import { Search, X, ArrowUp, ArrowDown, Clock, User, CheckCircle2, Loader2, AlertTriangle, ChevronLeft, ChevronRight, Calendar, DollarSign, Car, Info, Activity, Upload } from 'lucide-react';
 import { PageStateBoundary } from '../components/PageStateBoundary';
 import {
   getCollectionFromPayload,
@@ -21,6 +21,7 @@ import {
   getActionRequiredListAll,
   patchActionRequiredMemo,
   patchActionRequiredStatus,
+  rejectActionRequiredAccidentApproval,
   runActionRequiredDomainAction,
 } from '../../services/actionRequired';
 import { patchPaymentStatus } from '../../services/payments';
@@ -87,6 +88,12 @@ interface ActionItem {
   subCategory?: string;
   reasonType?: string;
   issueCode?: string;
+  submissionDelayed?: boolean;
+  delayBusinessDays?: number;
+  claimReadyAt?: string;
+  returnFollowupKind?: string;
+  settlementNeedsPaymentCheck?: boolean;
+  settlementNeedsDifference?: boolean;
   resolutionPolicy?: string;
   availableActions?: string[];
   relatedChargeItemId?: string;
@@ -125,6 +132,92 @@ interface ActionDocumentDetail {
   fileName?: string;
   contentType?: string;
   url?: string;
+}
+
+interface FilePickerCardProps {
+  label: string;
+  buttonLabel: string;
+  selectedFileNames?: string[];
+  savedLabel?: string;
+  savedDocuments?: ActionDocumentDetail[];
+  accept?: string;
+  multiple?: boolean;
+  disabled?: boolean;
+  onChange: (files: File[]) => void;
+  onPreview?: (document: ActionDocumentDetail) => void;
+}
+
+function FilePickerCard({
+  label,
+  buttonLabel,
+  selectedFileNames = [],
+  savedLabel = '저장된 문서',
+  savedDocuments = [],
+  accept,
+  multiple = false,
+  disabled = false,
+  onChange,
+  onPreview,
+}: FilePickerCardProps) {
+  const hasFiles = selectedFileNames.length > 0 || savedDocuments.length > 0;
+  return (
+    <div className="space-y-2">
+      <label className="block text-xs font-semibold text-gray-600">{label}</label>
+      <label className={`block rounded-lg border border-dashed px-3 py-3 text-center text-sm font-semibold ${
+        disabled
+          ? 'cursor-not-allowed border-gray-200 bg-gray-100 text-gray-400'
+          : 'cursor-pointer border-gray-300 bg-gray-50 text-gray-700 hover:bg-gray-100'
+      }`}>
+        <span className="inline-flex items-center justify-center gap-2">
+          <Upload className="h-4 w-4" />
+          {selectedFileNames.length > 0
+            ? multiple
+              ? `${selectedFileNames.length}개 파일 선택됨`
+              : selectedFileNames[0]
+            : buttonLabel}
+        </span>
+        <input
+          type="file"
+          accept={accept}
+          multiple={multiple}
+          onChange={(event) => onChange(Array.from(event.target.files ?? []))}
+          disabled={disabled}
+          className="sr-only"
+        />
+      </label>
+      {hasFiles && (
+        <div className="space-y-1 text-xs">
+          {selectedFileNames.map((fileName, index) => (
+            <div key={`${fileName}-${index}`} className="rounded-md bg-green-50 px-2 py-1 font-medium text-green-700">
+              {fileName}
+            </div>
+          ))}
+          {savedDocuments.map((document) => (
+            document.url || onPreview ? (
+              <button
+                key={document.objectName}
+                type="button"
+                onClick={() => {
+                  if (onPreview) {
+                    onPreview(document);
+                  } else if (document.url) {
+                    window.open(document.url, '_blank', 'noopener,noreferrer');
+                  }
+                }}
+                className="block w-full rounded-md bg-gray-50 px-2 py-1 text-left font-semibold text-blue-700 hover:bg-blue-100"
+              >
+                {document.fileName || savedLabel}
+              </button>
+            ) : (
+              <div key={document.objectName} className="rounded-md bg-gray-50 px-2 py-1 text-gray-600">
+                {document.fileName || savedLabel}
+              </div>
+            )
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 type SortField = 'type' | 'vehicleNumber' | 'customerName' | 'date' | 'severity' | 'status' | 'assignee';
@@ -181,15 +274,21 @@ interface AccidentClaimDraft {
   claimNo: string;
   insurerName: string;
   repairShopName: string;
+  repairCompletedAt: string;
   billingAccount: string;
   approvalStatus: string;
   approvalDocumentObjectName: string;
+  approvalDocumentObjectNames: string[];
+  approvalDocumentDetails: ActionDocumentDetail[];
   approvalMemo: string;
   billedAmount: string;
   recognizedAmount: string;
   differencePayerType: string;
   supplementMemo: string;
   documentDetails: ActionDocumentDetail[];
+  documentStatus: string;
+  claimStatus: string;
+  submittedAt: string;
 }
 
 interface RentalAccidentDraft {
@@ -215,7 +314,16 @@ const RENTAL_ACCIDENT_EVIDENCE_SLOTS = [
 type RentalAccidentEvidenceSlotKey = typeof RENTAL_ACCIDENT_EVIDENCE_SLOTS[number]['key'];
 type RentalAccidentEvidenceFiles = Partial<Record<RentalAccidentEvidenceSlotKey, File | null>>;
 
-const OPERATIONAL_DOMAIN_ACTIONS: Record<string, { action: string; label: string }[]> = {
+type OperationalDomainActionTone = 'standard' | 'danger';
+type OperationalDomainActionGroup = '확인 조치' | '위험 조치';
+interface OperationalDomainActionConfig {
+  action: string;
+  label: string;
+  group?: OperationalDomainActionGroup;
+  tone?: OperationalDomainActionTone;
+}
+
+const OPERATIONAL_DOMAIN_ACTIONS: Record<string, OperationalDomainActionConfig[]> = {
   'vehicle.malfunction': [
     { action: 'maintenance_requested', label: '정비 접수' },
     { action: 'maintenance_completed', label: '정비 완료' },
@@ -227,10 +335,10 @@ const OPERATIONAL_DOMAIN_ACTIONS: Record<string, { action: string; label: string
     { action: 'terminal_replaced', label: '단말 교체' },
   ],
   'vehicle.theft_suspected': [
-    { action: 'customer_contacted', label: '고객 연락' },
-    { action: 'false_alarm', label: '오탐 처리' },
-    { action: 'reported_to_authority', label: '신고 처리' },
-    { action: 'vehicle_recovered', label: '차량 회수' },
+    { action: 'customer_contacted', label: '고객 연락', group: '확인 조치' },
+    { action: 'false_alarm', label: '오탐 처리', group: '확인 조치' },
+    { action: 'reported_to_authority', label: '신고 처리', group: '위험 조치', tone: 'danger' },
+    { action: 'vehicle_recovered', label: '차량 회수', group: '위험 조치', tone: 'danger' },
   ],
 };
 
@@ -268,6 +376,25 @@ function toNumberValue(value: unknown): number | null {
     }
   }
   return null;
+}
+
+function canonicalActionIssueCode(value: string | null | undefined): string | undefined {
+  const code = (value ?? '').trim();
+  if (!code) {
+    return undefined;
+  }
+  const aliases: Record<string, string> = {
+    'rental_accident.reported': 'rental_accident.followup',
+    'rental_accident.evidence_required': 'rental_accident.followup',
+    'rental_accident.insurance_processing': 'rental_accident.followup',
+    'accident_claim.documents_required': 'accident_claim.submission_required',
+    'accident_claim.claim_delayed': 'accident_claim.submission_required',
+    'accident_claim.payment_check': 'accident_claim.settlement_required',
+    'accident_claim.difference': 'accident_claim.settlement_required',
+    'return.late': 'return.followup_required',
+    'return.repair_done_not_returned': 'return.followup_required',
+  };
+  return aliases[code] ?? code;
 }
 
 function toPaymentAmountFromInput(value: string): number {
@@ -538,10 +665,187 @@ function isLateReturnActionItem(item: ActionItem | null | undefined): item is Ac
     item
       && (
         item.issueCode === 'return.late'
+        || item.issueCode === 'return.repair_done_not_returned'
+        || item.issueCode === 'return.followup_required'
         || item.reasonType === 'late_return'
+        || item.reasonType === 'return_followup_required'
+        || item.reasonType === 'accident_replacement_repair_done_not_returned'
         || (item.type === '반납/회수' && item.subCategory === '반납 지연')
+        || (item.type === '반납/회수' && item.subCategory === '수리완료 후 미반납')
+        || (item.type === '반납/회수' && item.subCategory === '차량 반납/회수 확인')
       ),
   );
+}
+
+function isRepairDoneNotReturnedActionItem(item: ActionItem | null | undefined): item is ActionItem {
+  return Boolean(
+    item
+      && (
+        item.issueCode === 'return.repair_done_not_returned'
+        || (item.issueCode === 'return.followup_required' && item.returnFollowupKind === 'repair_done_not_returned')
+        || item.reasonType === 'accident_replacement_repair_done_not_returned'
+        || (item.reasonType === 'return_followup_required' && item.returnFollowupKind === 'repair_done_not_returned')
+        || (item.type === '반납/회수' && item.subCategory === '수리완료 후 미반납')
+      ),
+  );
+}
+
+function isReturnFollowupActionItem(item: ActionItem | null | undefined): item is ActionItem {
+  return isLateReturnActionItem(item);
+}
+
+function getRepairDoneNotReturnedSummary(item: ActionItem) {
+  const accidentClaimSource = isRecord(item.workContext?.sourceSnapshot?.accidentClaim)
+    ? item.workContext.sourceSnapshot.accidentClaim
+    : {};
+  const reservationSource = isRecord(item.workContext?.sourceSnapshot?.reservation)
+    ? item.workContext.sourceSnapshot.reservation
+    : {};
+  const repairCompletedAt = pickString(accidentClaimSource, ['repairCompletedAt', 'readyToClaimAt', 'returnedAt'])
+    ?? item.date;
+  const repairShopName = pickString(accidentClaimSource, ['repairShopName'])
+    ?? pickString(reservationSource, ['repairShopName'])
+    ?? '-';
+  const returnStatus = pickString(reservationSource, ['contractStatus', 'status'])
+    ?? (item.statusCode === 'resolved' ? '반납 완료' : '미반납');
+
+  return {
+    repairCompletedAt,
+    repairShopName,
+    returnStatus,
+  };
+}
+
+function getOperationalDomainActionButtonClassName(tone: OperationalDomainActionTone | undefined): string {
+  if (tone === 'danger') {
+    return 'rounded-lg bg-red-600 px-3 py-2 text-xs font-semibold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60';
+  }
+  return 'rounded-lg bg-blue-600 px-3 py-2 text-xs font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60';
+}
+
+function groupOperationalDomainActions(actions: OperationalDomainActionConfig[]): [OperationalDomainActionGroup, OperationalDomainActionConfig[]][] {
+  const groups: [OperationalDomainActionGroup, OperationalDomainActionConfig[]][] = [
+    ['확인 조치', []],
+    ['위험 조치', []],
+  ];
+  const fallbackActions: OperationalDomainActionConfig[] = [];
+
+  actions.forEach((action) => {
+    if (action.group === '확인 조치') {
+      groups[0][1].push(action);
+    } else if (action.group === '위험 조치') {
+      groups[1][1].push(action);
+    } else {
+      fallbackActions.push(action);
+    }
+  });
+
+  if (fallbackActions.length > 0) {
+    return [['확인 조치', fallbackActions]];
+  }
+  return groups.filter(([, groupActions]) => groupActions.length > 0);
+}
+
+type RentalAccidentIssueMode = 'reported' | 'evidence' | 'insurance';
+
+function isRentalAccidentActionItem(item: ActionItem | null | undefined): item is ActionItem {
+  return Boolean(
+    item
+      && (
+        item.type === '대여 중 사고'
+        || String(item.issueCode ?? '').startsWith('rental_accident.')
+      ),
+  );
+}
+
+function getRentalAccidentIssueMode(item: ActionItem | null | undefined): RentalAccidentIssueMode {
+  if (item?.issueCode === 'rental_accident.followup' || item?.reasonType === 'rental_accident_followup') {
+    return 'reported';
+  }
+  switch (item?.issueCode) {
+    case 'rental_accident.evidence_required':
+      return 'evidence';
+    case 'rental_accident.insurance_processing':
+      return 'insurance';
+    case 'rental_accident.reported':
+    default:
+      return 'reported';
+  }
+}
+
+function getRentalAccidentPanelTitle(mode: RentalAccidentIssueMode): string {
+  switch (mode) {
+    case 'evidence':
+      return '사고자료 확인';
+    case 'insurance':
+      return '보험처리 정보';
+    case 'reported':
+    default:
+      return '대여 중 사고 후속 처리';
+  }
+}
+
+function getRentalAccidentSummaryText(mode: RentalAccidentIssueMode): string {
+  switch (mode) {
+    case 'evidence':
+      return '사고 증빙 자료와 자료 상태를 먼저 확인합니다.';
+    case 'insurance':
+      return '보험접수번호와 보험처리 상태를 먼저 확인합니다.';
+    case 'reported':
+    default:
+      return '사고 접수 정보, 사고자료, 보험처리 상태를 한 카드에서 정리합니다.';
+  }
+}
+
+type AccidentClaimIssueMode = 'intake' | 'submission' | 'settlement' | 'payment' | 'difference' | 'other';
+
+function getAccidentClaimIssueMode(item: ActionItem | null | undefined): AccidentClaimIssueMode {
+  if (item?.issueCode === 'accident_claim.submission_required' || item?.reasonType === 'accident_claim_submission_required') {
+    return 'submission';
+  }
+  if (item?.issueCode === 'accident_claim.settlement_required' || item?.reasonType === 'accident_claim_settlement_required') {
+    return 'settlement';
+  }
+  switch (item?.reasonType) {
+    case 'accident_replacement_info_missing':
+      return 'intake';
+    case 'accident_claim_documents_required':
+    case 'accident_claim_delayed':
+      return 'submission';
+    case 'accident_claim_payment_check':
+      return 'payment';
+    case 'accident_claim_difference':
+      return 'difference';
+    default:
+      return 'other';
+  }
+}
+
+function isCompactAccidentClaimActionItem(item: ActionItem | null | undefined): item is ActionItem {
+  return getAccidentClaimIssueMode(item) !== 'other';
+}
+
+function getAccidentClaimSummaryText(mode: AccidentClaimIssueMode): string {
+  switch (mode) {
+    case 'intake':
+      return '사고접수번호, 보험사, 정비소를 먼저 입력합니다.';
+    case 'submission':
+      return '청구 서류와 진행 상태를 확인하고 보험청구 제출을 진행합니다.';
+    case 'settlement':
+      return '보험금 입금 여부와 대차료 차액 정리 상태를 한 카드에서 확인합니다.';
+    case 'payment':
+      return '보험 인정금액을 확인한 뒤 입금 확인을 처리합니다.';
+    case 'difference':
+      return '청구액과 인정금액의 차액 부담 주체를 정리합니다.';
+    default:
+      return '보험청구 단계에 필요한 정보를 확인합니다.';
+  }
+}
+
+function getAccidentClaimDifferenceAmount(draft: AccidentClaimDraft): number {
+  const billedAmount = toPaymentAmountFromInput(draft.billedAmount);
+  const recognizedAmount = toPaymentAmountFromInput(draft.recognizedAmount);
+  return Math.max(billedAmount - recognizedAmount, 0);
 }
 
 function getActionItemCapabilities(item: ActionItem | null, canWritePayments: boolean, canWriteActionRequired: boolean) {
@@ -549,16 +853,137 @@ function getActionItemCapabilities(item: ActionItem | null, canWritePayments: bo
   const isResolved = item?.statusCode === 'resolved';
   const actions = new Set(item?.availableActions ?? []);
   const hasActions = actions.size > 0;
+  const hasLedgerChargeContext = Boolean(item?.relatedChargeItemId) || toWorkChargeItems(item?.workContext).length > 0;
   return {
     canEditPaymentFields: Boolean(isPaymentIssue && canWritePayments && !isResolved),
-    canEditStandalonePaymentType: Boolean(isPaymentIssue && canWritePayments && !isResolved && !item?.relatedChargeItemId),
+    canEditStandalonePaymentType: Boolean(isPaymentIssue && canWritePayments && !isResolved && !hasLedgerChargeContext),
     canUseLateReturnFlow: isLateReturnActionItem(item),
     canEditIssueAsset: Boolean(item && getIssueAssetKind(item) && canWriteActionRequired && (!hasActions || actions.has('asset_update'))),
     canUseAccidentClaimActions: Boolean(item?.type === '대차/보험청구' && item?.reservationId && canWriteActionRequired && (!hasActions || actions.has('accident_claim_update') || actions.has('accident_claim_submit') || actions.has('accident_claim_recognize'))),
-    canUseAccidentReplacementDriverActions: Boolean(item?.type === '대차/보험청구' && item?.reservationId && canWriteActionRequired && (item.reasonType === 'accident_replacement_driver_required' || item.reasonType === 'accident_replacement_license_required')),
+    canUseAccidentReplacementDriverActions: Boolean(item?.type === '대차/보험청구' && item?.reservationId && canWriteActionRequired && (
+      item.reasonType === 'accident_replacement_driver_license_required'
+      || item.reasonType === 'accident_replacement_driver_required'
+      || item.reasonType === 'accident_replacement_license_required'
+    )),
     canUseRentalAccidentActions: Boolean(item?.reservationId && canWriteActionRequired && (item.type === '대여 중 사고' || String(item.issueCode ?? '').startsWith('rental_accident.')) && (!hasActions || actions.has('accident_followup_update'))),
     canUseOperationalDomainActions: Boolean(item?.issueCode && OPERATIONAL_DOMAIN_ACTIONS[item.issueCode] && canWriteActionRequired),
   };
+}
+
+function getAccidentClaimPanelTitle(item: ActionItem, isDriverLicenseCard: boolean): string {
+  if (isDriverLicenseCard) {
+    return '운전자/면허 정보';
+  }
+  if (item.issueCode === 'accident_claim.submission_required' || item.reasonType === 'accident_claim_submission_required') {
+    return '보험청구 제출/보완';
+  }
+  if (item.issueCode === 'accident_claim.settlement_required' || item.reasonType === 'accident_claim_settlement_required') {
+    return '보험금 정산 확인';
+  }
+  switch (item.reasonType) {
+    case 'accident_replacement_approval_required':
+      return '대차 승인 정보';
+    case 'accident_replacement_info_missing':
+      return '사고 기본 정보';
+    case 'accident_claim_documents_required':
+      return '보험청구 제출/보완';
+    case 'accident_claim_payment_check':
+      return '보험금 정산 확인';
+    case 'accident_claim_difference':
+      return '보험금 정산 확인';
+    case 'accident_claim_delayed':
+      return '보험청구 제출/보완';
+    default:
+      return '청구 진행 정보';
+  }
+}
+
+function getPrimarySettlementCharge(item: ActionItem): ActionItemWorkChargeItem | null {
+  const chargeItems = toWorkChargeItems(item.workContext);
+  if (item.workContext?.module === 'payment_deposit_refund') {
+    return chargeItems.find((charge) => isRefundChargeItem(charge) && !isWorkChargeSettled(charge))
+      ?? chargeItems.find((charge) => isRefundChargeItem(charge))
+      ?? chargeItems.find((charge) => !isWorkChargeSettled(charge))
+      ?? chargeItems[0]
+      ?? null;
+  }
+  return chargeItems.find((charge) => !isWorkChargeSettled(charge)) ?? chargeItems[0] ?? null;
+}
+
+function getSettlementStatusLabel(status: string | undefined): string | null {
+  if (!status) {
+    return null;
+  }
+  const labels: Record<string, string> = {
+    pending: '처리 대기',
+    due: '처리 필요',
+    overdue: '연체',
+    paid: '수납 완료',
+    waived: '면제',
+    refunded: '환불 완료',
+    refund_due: '환불 필요',
+    disputed: '분쟁/보류',
+  };
+  return labels[status] ?? status;
+}
+
+function getSettlementChargeLabel(item: ActionItem): string {
+  const charge = getPrimarySettlementCharge(item);
+  if (charge?.description) {
+    return charge.description;
+  }
+  switch (item.issueCode) {
+    case 'payment.long_term_monthly_due':
+    case 'payment.long_term_monthly_overdue':
+      return '월 렌트료';
+    case 'payment.accident_customer_deductible_due':
+      return '고객부담금';
+    case 'payment.deposit_refund_due':
+      return '보증금';
+    case 'payment.additional_fee_unpaid':
+      return '추가요금';
+    default:
+      return charge?.chargeType || '정산 항목';
+  }
+}
+
+function getSettlementAmount(item: ActionItem): number {
+  const charge = getPrimarySettlementCharge(item);
+  const fromCharge = Math.max(charge?.remainingAmount || charge?.amount || 0, 0);
+  if (fromCharge > 0) {
+    return fromCharge;
+  }
+  return Math.max(item.paymentInfo?.totalAmount || item.paymentInfo?.amount || item.paymentInfo?.principalAmount || 0, 0);
+}
+
+function getSettlementSummaryText(item: ActionItem): string {
+  const label = getSettlementChargeLabel(item);
+  const amount = getSettlementAmount(item).toLocaleString();
+  switch (item.issueCode) {
+    case 'payment.deposit_refund_due':
+      return `반환할 ${label} ${amount}원이 남아 있습니다.`;
+    case 'payment.long_term_monthly_due':
+      return `${label} ${amount}원이 납부 예정입니다.`;
+    case 'payment.long_term_monthly_overdue':
+      return `${label} ${amount}원이 ${item.paymentInfo?.overdueDays ?? 0}일 연체되었습니다.`;
+    case 'payment.accident_customer_deductible_due':
+      return `${label} ${amount}원을 정리해야 합니다.`;
+    case 'payment.additional_fee_unpaid':
+      return `${label} ${amount}원이 미수 상태입니다.`;
+    default:
+      return `${label} ${amount}원이 미정리 상태입니다.`;
+  }
+}
+
+function getSettlementMeta(item: ActionItem): string {
+  const charge = getPrimarySettlementCharge(item);
+  const statusLabel = item.paymentInfo?.statusLabel ?? getSettlementStatusLabel(charge?.status);
+  const parts = [
+    charge?.dueDate ? `기한 ${charge.dueDate}` : null,
+    item.paymentInfo?.overdueDays ? `연체 ${item.paymentInfo.overdueDays}일` : null,
+    statusLabel ? `상태 ${statusLabel}` : null,
+  ].filter(Boolean);
+  return parts.join(' · ');
 }
 
 function toIssueAssetRecord(row: unknown): IssueAssetRecord | null {
@@ -635,6 +1060,20 @@ function getRelatedStatusLabel(value: unknown): string {
       return '청구 제출';
     case 'recognized':
       return '보험금 인정';
+    case 'intake':
+      return '접수 단계';
+    case 'intake_required':
+      return '접수 정보 필요';
+    case 'claiming':
+      return '청구 진행';
+    case 'closed':
+      return '종결';
+    case 'completed':
+    case 'done':
+    case 'returned':
+      return '반납 완료';
+    case 'not_returned':
+      return '미반납';
     case 'approved':
       return '승인';
     case 'rejected':
@@ -801,6 +1240,8 @@ function RelatedContextDrawer({
                   <RelatedInfoRow label="고객명" value={pickString(row, ['customerName', 'customer', 'name'])} />
                   <RelatedInfoRow label="연락처" value={pickString(row, ['phone', 'customerPhone'])} />
                   <RelatedInfoRow label="예약 유형" value={getRelatedStatusLabel(row.contractStatus ?? row.status ?? row.type)} />
+                  <RelatedInfoRow label="업무 상태" value={pickString(row, ['workflowStatusLabel', 'workflowStatus'])} />
+                  <RelatedInfoRow label="정산 상태" value={pickString(row, ['closeoutStatusLabel', 'closeoutStatus'])} />
                   <RelatedInfoRow label="차량번호" value={pickString(row, ['vehicleNumber', 'plate'])} />
                   <RelatedInfoRow label="대여 유형" value={pickString(row, ['rentalType'])} />
                   <RelatedInfoRow label="대여 시작일" value={formatRelatedDate(row.startAt ?? row.startDateFull ?? row.startDate ?? row.rentalStartAt)} />
@@ -866,7 +1307,7 @@ function RelatedContextDrawer({
                 )}
                 {reservationAccidentClaim && (
                   <div className="rounded-lg border border-indigo-100 bg-indigo-50 p-4">
-                    <p className="text-xs font-semibold text-indigo-700">사고대차 보험청구</p>
+                    <p className="text-xs font-semibold text-indigo-700">청구 요약</p>
                     <div className="mt-3 grid grid-cols-2 gap-3">
                       <RelatedInfoRow label="접수번호" value={pickString(reservationAccidentClaim, ['claimNo'])} />
                       <RelatedInfoRow label="보험사" value={pickString(reservationAccidentClaim, ['insurerName'])} />
@@ -959,6 +1400,8 @@ function RelatedContextDrawer({
               <RelatedInfoRow label="대여 시작" value={formatRelatedDate(row.startAt ?? row.startDate ?? row.rentalStartAt)} />
               <RelatedInfoRow label="대여 종료" value={formatRelatedDate(row.endAt ?? row.endDate ?? row.rentalEndAt)} />
               <RelatedInfoRow label="예약 상태" value={pickString(row, ['status', 'contractStatus', 'type'])} />
+              <RelatedInfoRow label="업무 상태" value={pickString(row, ['workflowStatusLabel', 'workflowStatus'])} />
+              <RelatedInfoRow label="정산 상태" value={pickString(row, ['closeoutStatusLabel', 'closeoutStatus'])} />
               <RelatedInfoRow label="대여 유형" value={pickString(row, ['rentalType'])} />
             </div>
           )}
@@ -1034,13 +1477,24 @@ function RelatedContextDrawer({
 function toAccidentClaimDraft(payload: unknown): AccidentClaimDraft {
   const row = unwrapApiData(payload);
   const source = isRecord(row) ? row : {};
+  const legacyApprovalDocument = pickString(source, ['approvalDocumentObjectName']);
+  const approvalDocumentObjectNames = Array.isArray(source.approvalDocumentObjectNames)
+    ? source.approvalDocumentObjectNames
+      .map((value) => (typeof value === 'string' ? value.trim() : ''))
+      .filter(Boolean)
+    : (legacyApprovalDocument ? [legacyApprovalDocument] : []);
   return {
     claimNo: pickString(source, ['claimNo', 'claimNumber']) ?? '',
     insurerName: pickString(source, ['insurerName', 'insuranceCompany']) ?? '',
     repairShopName: pickString(source, ['repairShopName', 'garageName']) ?? '',
+    repairCompletedAt: (pickString(source, ['repairCompletedAt']) ?? '').slice(0, 10),
     billingAccount: pickString(source, ['billingAccount']) ?? '',
     approvalStatus: pickString(source, ['approvalStatus']) ?? 'pending',
-    approvalDocumentObjectName: pickString(source, ['approvalDocumentObjectName']) ?? '',
+    approvalDocumentObjectName: legacyApprovalDocument ?? '',
+    approvalDocumentObjectNames,
+    approvalDocumentDetails: Array.isArray(source.approvalDocumentDetails)
+      ? source.approvalDocumentDetails.filter((entry): entry is ActionDocumentDetail => isRecord(entry) && Boolean(pickString(entry, ['objectName'])))
+      : [],
     approvalMemo: pickString(source, ['approvalMemo']) ?? '',
     billedAmount: String(Math.max(0, Math.trunc(toNumberValue(source.billedAmount) ?? 0)) || ''),
     recognizedAmount: String(Math.max(0, Math.trunc(toNumberValue(source.recognizedAmount) ?? 0)) || ''),
@@ -1049,6 +1503,9 @@ function toAccidentClaimDraft(payload: unknown): AccidentClaimDraft {
     documentDetails: Array.isArray(source.documentDetails)
       ? source.documentDetails.filter((entry): entry is ActionDocumentDetail => isRecord(entry) && Boolean(pickString(entry, ['objectName'])))
       : [],
+    documentStatus: pickString(source, ['documentStatus']) ?? '',
+    claimStatus: pickString(source, ['claimStatus']) ?? '',
+    submittedAt: pickString(source, ['submittedAt', 'lastSubmittedAt']) ?? '',
   };
 }
 
@@ -1332,6 +1789,14 @@ function toActionWriteError(kind: ActionWriteKind, error: unknown): ActionWriteE
     }
 
     if (error.status === 409) {
+      if (error.code === 'LEDGER_AUTHORITATIVE') {
+        return {
+          kind,
+          message: error.message || '신규 청구 원장이 기준인 계약입니다. 정산 항목에서 처리하세요.',
+          retryable: false,
+          fields,
+        };
+      }
       if (error.code === 'ACTION_ITEM_RESOLUTION_REQUIRED') {
         return {
           kind,
@@ -1582,7 +2047,13 @@ function toActionItem(row: unknown, index: number, fallbackId?: string): ActionI
     type,
     subCategory: subCategory ?? undefined,
     reasonType: pickString(row, ['reasonType']) ?? undefined,
-    issueCode: pickString(row, ['issueCode']) ?? undefined,
+    issueCode: canonicalActionIssueCode(pickString(row, ['issueCode'])),
+    submissionDelayed: row.submissionDelayed === true,
+    delayBusinessDays: toNumberValue(row.delayBusinessDays) ?? undefined,
+    claimReadyAt: pickString(row, ['claimReadyAt']) ?? undefined,
+    returnFollowupKind: pickString(row, ['returnFollowupKind']) ?? undefined,
+    settlementNeedsPaymentCheck: row.settlementNeedsPaymentCheck === true,
+    settlementNeedsDifference: row.settlementNeedsDifference === true,
     resolutionPolicy: pickString(row, ['resolutionPolicy']) ?? undefined,
     availableActions: Array.isArray(row.availableActions)
       ? row.availableActions.map((value) => toStringValue(value)).filter((value): value is string => Boolean(value))
@@ -1791,21 +2262,30 @@ export default function ActionRequired() {
     claimNo: '',
     insurerName: '',
     repairShopName: '',
+    repairCompletedAt: '',
     billingAccount: '',
     approvalStatus: 'pending',
     approvalDocumentObjectName: '',
+    approvalDocumentObjectNames: [],
+    approvalDocumentDetails: [],
     approvalMemo: '',
     billedAmount: '',
     recognizedAmount: '',
     differencePayerType: 'customer',
     supplementMemo: '',
     documentDetails: [],
+    documentStatus: '',
+    claimStatus: '',
+    submittedAt: '',
   });
   const [isAccidentClaimLoading, setIsAccidentClaimLoading] = useState(false);
   const [isAccidentClaimSaving, setIsAccidentClaimSaving] = useState(false);
   const [accidentClaimError, setAccidentClaimError] = useState<string | null>(null);
   const [accidentClaimNotice, setAccidentClaimNotice] = useState<string | null>(null);
   const [accidentClaimDocumentFile, setAccidentClaimDocumentFile] = useState<File | null>(null);
+  const [accidentApprovalDocumentFiles, setAccidentApprovalDocumentFiles] = useState<File[]>([]);
+  const [accidentApprovalRejectConfirmOpen, setAccidentApprovalRejectConfirmOpen] = useState(false);
+  const [previewDocument, setPreviewDocument] = useState<ActionDocumentDetail | null>(null);
   const [rentalAccidentDraft, setRentalAccidentDraft] = useState<RentalAccidentDraft>({
     accidentLocation: '',
     opponentInfo: '',
@@ -1984,19 +2464,27 @@ export default function ActionRequired() {
         claimNo: '',
         insurerName: '',
         repairShopName: '',
+        repairCompletedAt: '',
         billingAccount: '',
         approvalStatus: 'pending',
         approvalDocumentObjectName: '',
+        approvalDocumentObjectNames: [],
+        approvalDocumentDetails: [],
         approvalMemo: '',
         billedAmount: '',
         recognizedAmount: '',
         differencePayerType: 'customer',
         supplementMemo: '',
         documentDetails: [],
+        documentStatus: '',
+        claimStatus: '',
+        submittedAt: '',
       });
       setAccidentClaimError(null);
       setAccidentClaimNotice(null);
       setAccidentClaimDocumentFile(null);
+      setAccidentApprovalDocumentFiles([]);
+      setAccidentApprovalRejectConfirmOpen(false);
       setIsAccidentClaimLoading(false);
       return;
     }
@@ -2005,6 +2493,8 @@ export default function ActionRequired() {
     setIsAccidentClaimLoading(true);
     setAccidentClaimError(null);
     setAccidentClaimNotice(null);
+    setAccidentApprovalDocumentFiles([]);
+    setAccidentApprovalRejectConfirmOpen(false);
     void getAccidentClaim(selectedItem.reservationId, { signal: controller.signal })
       .then((payload) => {
         if (!controller.signal.aborted) {
@@ -2305,6 +2795,14 @@ export default function ActionRequired() {
   }, [allItems]);
 
   const isSelectedPaymentIssue = isPaymentActionItem(selectedItem);
+  const rentalAccidentIssueMode = getRentalAccidentIssueMode(selectedItem);
+  const shouldShowRentalAccidentCustomerCharge = rentalAccidentDraft.insuranceProcessStatus === 'customer_charge';
+  const accidentClaimIssueMode = getAccidentClaimIssueMode(selectedItem);
+  const accidentClaimDifferenceAmount = getAccidentClaimDifferenceAmount(accidentClaimDraft);
+  const returnFollowupSummary = selectedItem && isReturnFollowupActionItem(selectedItem)
+    ? getRepairDoneNotReturnedSummary(selectedItem)
+    : null;
+  const returnFollowupIsRepairDone = isRepairDoneNotReturnedActionItem(selectedItem);
 
   useEffect(() => {
     if (!isPaymentActionItem(selectedItem)) {
@@ -2669,6 +3167,15 @@ export default function ActionRequired() {
     }
     const paymentId = getActionItemPaymentMutationId(item);
     const reservationId = getActionItemReservationId(item);
+    const hasLedgerChargeContext = toWorkChargeItems(item.workContext).length > 0;
+    if (!paymentId && !item.relatedChargeItemId && hasLedgerChargeContext) {
+      setWriteError({
+        kind: 'resolve',
+        message: '청구 항목 기반 이슈입니다. 연결된 청구 항목을 확인한 뒤 청구 원장에서 처리해 주세요.',
+        retryable: false,
+      });
+      return;
+    }
     if (!paymentId && !item.relatedChargeItemId) {
       setWriteError({
         kind: 'resolve',
@@ -2707,6 +3214,14 @@ export default function ActionRequired() {
         await patchActionRequiredStatus(item.id, {
           status: 'resolved',
         });
+      } else if (hasLedgerChargeContext) {
+        setWriteError({
+          kind: 'resolve',
+          message: '청구 항목 기반 이슈입니다. 연결된 청구 항목을 확인한 뒤 청구 원장에서 처리해 주세요.',
+          retryable: false,
+        });
+        retryActionRef.current = null;
+        return;
       } else if (paymentId) {
         await patchPaymentStatus(paymentId, {
           status: nextStatus,
@@ -2814,6 +3329,14 @@ export default function ActionRequired() {
       setWriteError({
         kind: 'memo',
         message: '청구 항목 기반 이슈는 완료 처리 시 선택한 결제 유형으로 수납 기록을 생성합니다.',
+        retryable: false,
+      });
+      return;
+    }
+    if (toWorkChargeItems(item.workContext).length > 0) {
+      setWriteError({
+        kind: 'memo',
+        message: '청구 항목 기반 이슈입니다. 결제 유형 변경은 수납 처리 시 청구 원장에 반영해 주세요.',
         retryable: false,
       });
       return;
@@ -3565,6 +4088,26 @@ export default function ActionRequired() {
     tryResolveCurrentActionItem,
   ]);
 
+  const uploadAccidentClaimFiles = useCallback(async (
+    reservationId: string,
+    files: File[],
+    folderName: string,
+  ): Promise<string[]> => {
+    const objectNames: string[] = [];
+    for (const file of files) {
+      const contentType = resolveActionRequiredDocumentContentType(file);
+      const signedUpload = await signAssetUpload({
+        fileName: file.name,
+        folder: `accident-claims/${reservationId}/${folderName}`,
+        contentType,
+        fileSize: file.size,
+      });
+      await uploadFileToSignedUrl(signedUpload.uploadUrl, file, signedUpload.contentType || contentType);
+      objectNames.push(signedUpload.objectName);
+    }
+    return objectNames;
+  }, []);
+
   const runAccidentClaimAction = useCallback(async (action: 'save-info' | 'submit' | 'recognize') => {
     if (!selectedItem?.reservationId) {
       setAccidentClaimError('연결된 예약건을 찾을 수 없습니다.');
@@ -3583,16 +4126,40 @@ export default function ActionRequired() {
     setAccidentClaimNotice(null);
     try {
       if (action === 'save-info') {
+        const uploadedApprovalDocuments = selectedItem.reasonType === 'accident_replacement_approval_required'
+          ? await uploadAccidentClaimFiles(reservationId, accidentApprovalDocumentFiles, 'approval-documents')
+          : [];
+        const approvalDocumentObjectNames = [
+          ...accidentClaimDraft.approvalDocumentObjectNames,
+          ...uploadedApprovalDocuments,
+        ].filter((value, index, values) => value && values.indexOf(value) === index);
+        if (
+          selectedItem.reasonType === 'accident_replacement_approval_required'
+          && accidentClaimDraft.approvalStatus === 'rejected'
+        ) {
+          await rejectActionRequiredAccidentApproval(selectedItem.id, {
+            approvalMemo: accidentClaimDraft.approvalMemo.trim(),
+            approvalDocumentObjectNames,
+            cancelReason: '대차 승인 반려',
+          });
+          setAccidentApprovalDocumentFiles([]);
+          setAccidentClaimNotice('대차 승인 반려로 예약을 취소하고 관련 이슈를 정리했습니다.');
+          await hydrateActionItems();
+          void hydrateActionDetail(selectedItem.id, selectedItem);
+          return;
+        }
         await patchAccidentClaim(reservationId, {
           claimNo: accidentClaimDraft.claimNo.trim(),
           insurerName: accidentClaimDraft.insurerName.trim(),
           repairShopName: accidentClaimDraft.repairShopName.trim(),
+          repairCompletedAt: accidentClaimDraft.repairCompletedAt || undefined,
           billingAccount: accidentClaimDraft.billingAccount.trim(),
           ...(selectedItem.reasonType === 'accident_replacement_approval_required'
             ? {
                 approvalRequired: true,
                 approvalStatus: accidentClaimDraft.approvalStatus,
-                approvalDocumentObjectName: accidentClaimDraft.approvalDocumentObjectName.trim(),
+                approvalDocumentObjectName: approvalDocumentObjectNames[0] ?? '',
+                approvalDocumentObjectNames,
                 approvalMemo: accidentClaimDraft.approvalMemo.trim(),
               }
             : {}),
@@ -3600,20 +4167,12 @@ export default function ActionRequired() {
           billedAmount,
           memo: 'Action Required에서 사고대차 접수 정보를 저장',
         });
+        setAccidentApprovalDocumentFiles([]);
         setAccidentClaimNotice('사고대차 접수 정보를 저장했습니다.');
       } else if (action === 'submit') {
-        const documentObjectNames: string[] = [];
-        if (accidentClaimDocumentFile) {
-          const contentType = resolveActionRequiredDocumentContentType(accidentClaimDocumentFile);
-          const signedUpload = await signAssetUpload({
-            fileName: accidentClaimDocumentFile.name,
-            folder: `accident-claims/${reservationId}/documents`,
-            contentType,
-            fileSize: accidentClaimDocumentFile.size,
-          });
-          await uploadFileToSignedUrl(signedUpload.uploadUrl, accidentClaimDocumentFile, signedUpload.contentType || contentType);
-          documentObjectNames.push(signedUpload.objectName);
-        }
+        const documentObjectNames = accidentClaimDocumentFile
+          ? await uploadAccidentClaimFiles(reservationId, [accidentClaimDocumentFile], 'documents')
+          : [];
         await submitAccidentClaim(reservationId, {
           billedAmount,
           billingAccount: accidentClaimDraft.billingAccount.trim(),
@@ -3649,7 +4208,7 @@ export default function ActionRequired() {
     } finally {
       setIsAccidentClaimSaving(false);
     }
-  }, [accidentClaimDocumentFile, accidentClaimDraft, hydrateActionDetail, hydrateActionItems, selectedItem, selectedItemCapabilities.canUseAccidentClaimActions, tryResolveCurrentActionItem]);
+  }, [accidentApprovalDocumentFiles, accidentClaimDocumentFile, accidentClaimDraft, hydrateActionDetail, hydrateActionItems, selectedItem, selectedItemCapabilities.canUseAccidentClaimActions, tryResolveCurrentActionItem, uploadAccidentClaimFiles]);
 
   const handleWorkContextAction = useCallback((actionKey: string, chargeItem?: ActionItemWorkChargeItem) => {
     if (!selectedItem) {
@@ -4202,13 +4761,72 @@ export default function ActionRequired() {
                   </div>
                 )}
 
-                {selectedItem.workContext && (
+                {selectedItem.workContext
+                  && !isPaymentActionItem(selectedItem)
+                  && !isReturnFollowupActionItem(selectedItem)
+                  && !isRentalAccidentActionItem(selectedItem)
+                  && !isCompactAccidentClaimActionItem(selectedItem) && (
                   <div className="border-t border-gray-200 pt-4">
                     <WorkContextPanel
                       workContext={selectedItem.workContext}
                       onAction={handleWorkContextAction}
                       isSaving={isWriteSaving}
                     />
+                  </div>
+                )}
+
+                {returnFollowupSummary && (
+                  <div className="border-t border-gray-200 pt-4">
+                    <label className="mb-3 block text-sm font-semibold text-gray-600">차량 반납/회수 확인</label>
+                    <div className="space-y-3 rounded-lg border border-amber-200 bg-amber-50 p-4">
+                      <div className="rounded-lg bg-white px-4 py-3">
+                        <div className="mb-2 flex flex-wrap gap-2">
+                          <span className="rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-700">
+                            {returnFollowupIsRepairDone ? '수리완료 후 미반납' : '반납 지연'}
+                          </span>
+                        </div>
+                        <p className="text-xs font-semibold text-gray-500">현재 필요한 조치</p>
+                        <p className="mt-1 text-sm font-bold text-gray-900">
+                          {returnFollowupIsRepairDone
+                            ? '수리가 완료된 대차 차량의 실제 반납 여부를 확인합니다.'
+                            : '대여 기간이 지난 차량의 실제 반납 여부를 확인합니다.'}
+                        </p>
+                      </div>
+                      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                        <div className="rounded-lg bg-white px-4 py-3">
+                          <p className="text-xs font-semibold text-gray-500">{returnFollowupIsRepairDone ? '수리완료일' : '반납 예정일'}</p>
+                          <p className="mt-1 text-sm font-bold text-gray-900">
+                            {formatActionDateOnly(returnFollowupSummary.repairCompletedAt)}
+                          </p>
+                        </div>
+                        <div className="rounded-lg bg-white px-4 py-3">
+                          <p className="text-xs font-semibold text-gray-500">정비소</p>
+                          <p className="mt-1 text-sm font-bold text-gray-900">
+                            {returnFollowupSummary.repairShopName}
+                          </p>
+                        </div>
+                        <div className="rounded-lg bg-white px-4 py-3">
+                          <p className="text-xs font-semibold text-gray-500">반납 상태</p>
+                          <p className="mt-1 text-sm font-bold text-gray-900">
+                            {getRelatedStatusLabel(returnFollowupSummary.returnStatus)}
+                          </p>
+                        </div>
+                        <div className="rounded-lg bg-white px-4 py-3">
+                          <p className="text-xs font-semibold text-gray-500">고객/차량</p>
+                          <p className="mt-1 text-sm font-bold text-gray-900">
+                            {selectedItem.customerName} · {selectedItem.vehicleNumber}
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleLateReturnStatusIntent(selectedItem, 'resolved')}
+                        disabled={isResolveSaving || isWriteSaving || !canWriteActionRequired}
+                        className="w-full rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {isResolveSaving ? '처리 중...' : '반납 완료 처리'}
+                      </button>
+                    </div>
                   </div>
                 )}
 
@@ -4224,20 +4842,14 @@ export default function ActionRequired() {
                           차량 자산 정보를 불러오는 중입니다.
                         </div>
                       )}
-                      <div>
-                        <label className="mb-1 block text-xs font-semibold text-gray-600">
-                          {getIssueAssetKind(selectedItem) === 'insurance' ? '보험 가입 증서 업로드' : '자동차종합검사표 업로드'}
-                        </label>
-                        <input
-                          type="file"
-                          onChange={(event) => setIssueAssetFile(event.target.files?.[0] ?? null)}
-                          disabled={isIssueAssetSaving || isIssueAssetLoading}
-                          className="block w-full text-sm text-gray-700"
-                        />
-                        {issueAssetFile && (
-                          <p className="mt-1 text-xs text-green-700">{issueAssetFile.name}</p>
-                        )}
-                      </div>
+                      <FilePickerCard
+                        label={getIssueAssetKind(selectedItem) === 'insurance' ? '보험 가입 증서' : '자동차종합검사표'}
+                        buttonLabel={getIssueAssetKind(selectedItem) === 'insurance' ? '보험 가입 증서 선택' : '자동차종합검사표 선택'}
+                        selectedFileNames={issueAssetFile ? [issueAssetFile.name] : []}
+                        accept="image/*,application/pdf"
+                        disabled={isIssueAssetSaving || isIssueAssetLoading}
+                        onChange={(files) => setIssueAssetFile(files[0] ?? null)}
+                      />
                       <div>
                         <label className="mb-1 block text-xs font-semibold text-gray-600">
                           {getIssueAssetKind(selectedItem) === 'insurance' ? '보험 만료일' : '다음 정기점검일'}
@@ -4278,17 +4890,26 @@ export default function ActionRequired() {
                 {selectedItemCapabilities.canUseOperationalDomainActions && (
                   <div className="border-t border-gray-200 pt-4">
                     <label className="mb-3 block text-sm font-semibold text-gray-600">도메인 조치</label>
-                    <div className="flex flex-wrap gap-2 rounded-lg border border-gray-200 bg-gray-50 p-4">
-                      {(OPERATIONAL_DOMAIN_ACTIONS[selectedItem.issueCode ?? ''] ?? []).map((entry) => (
-                        <button
-                          key={entry.action}
-                          type="button"
-                          onClick={() => void runOperationalDomainAction(selectedItem, entry.action, entry.label)}
-                          disabled={isDomainActionSaving || isWriteSaving}
-                          className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
-                        >
-                          {isDomainActionSaving ? '저장 중...' : entry.label}
-                        </button>
+                    <div className="space-y-3 rounded-lg border border-gray-200 bg-gray-50 p-4">
+                      {groupOperationalDomainActions(OPERATIONAL_DOMAIN_ACTIONS[selectedItem.issueCode ?? ''] ?? []).map(([groupLabel, actions]) => (
+                        <div key={groupLabel} className="space-y-2">
+                          <p className={`text-xs font-semibold ${groupLabel === '위험 조치' ? 'text-red-700' : 'text-gray-600'}`}>
+                            {groupLabel}
+                          </p>
+                          <div className="flex flex-wrap gap-2">
+                            {actions.map((entry) => (
+                              <button
+                                key={entry.action}
+                                type="button"
+                                onClick={() => void runOperationalDomainAction(selectedItem, entry.action, entry.label)}
+                                disabled={isDomainActionSaving || isWriteSaving}
+                                className={getOperationalDomainActionButtonClassName(entry.tone)}
+                              >
+                                {isDomainActionSaving ? '저장 중...' : entry.label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
                       ))}
                     </div>
                   </div>
@@ -4296,7 +4917,9 @@ export default function ActionRequired() {
 
                 {selectedItemCapabilities.canUseRentalAccidentActions && (
                   <div className="border-t border-gray-200 pt-4">
-                    <label className="mb-3 block text-sm font-semibold text-gray-600">대여 중 사고 후속 처리</label>
+                    <label className="mb-3 block text-sm font-semibold text-gray-600">
+                      {getRentalAccidentPanelTitle(rentalAccidentIssueMode)}
+                    </label>
                     <div className="space-y-3 rounded-lg border border-gray-200 bg-gray-50 p-4">
                       {isRentalAccidentLoading && (
                         <div className="flex items-center gap-2 text-sm text-blue-700">
@@ -4304,122 +4927,276 @@ export default function ActionRequired() {
                           사고 후속 정보를 불러오는 중입니다.
                         </div>
                       )}
-                      <input
-                        type="text"
-                        value={rentalAccidentDraft.accidentLocation}
-                        onChange={(event) => setRentalAccidentDraft((prev) => ({ ...prev, accidentLocation: event.target.value }))}
-                        placeholder="사고 장소"
-                        disabled={isRentalAccidentSaving || isRentalAccidentLoading}
-                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
-                      />
-                      <input
-                        type="text"
-                        value={rentalAccidentDraft.opponentInfo}
-                        onChange={(event) => setRentalAccidentDraft((prev) => ({ ...prev, opponentInfo: event.target.value }))}
-                        placeholder="상대방 정보"
-                        disabled={isRentalAccidentSaving || isRentalAccidentLoading}
-                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
-                      />
-                      <input
-                        type="text"
-                        value={rentalAccidentDraft.insuranceClaimNo}
-                        onChange={(event) => setRentalAccidentDraft((prev) => ({ ...prev, insuranceClaimNo: event.target.value }))}
-                        placeholder="보험접수번호"
-                        disabled={isRentalAccidentSaving || isRentalAccidentLoading}
-                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
-                      />
-                      <div className="grid grid-cols-2 gap-2">
-                        <select
-                          value={rentalAccidentDraft.evidenceStatus}
-                          onChange={(event) => setRentalAccidentDraft((prev) => ({ ...prev, evidenceStatus: event.target.value }))}
-                          disabled={isRentalAccidentSaving || isRentalAccidentLoading}
-                          className="rounded-lg border border-gray-300 px-3 py-2 text-sm"
-                        >
-                          <option value="pending">자료 대기</option>
-                          <option value="ready">자료 확보</option>
-                          <option value="completed">확인 완료</option>
-                          <option value="waived">자료 생략</option>
-                        </select>
-                        <select
-                          value={rentalAccidentDraft.insuranceProcessStatus}
-                          onChange={(event) => setRentalAccidentDraft((prev) => ({ ...prev, insuranceProcessStatus: event.target.value }))}
-                          disabled={isRentalAccidentSaving || isRentalAccidentLoading}
-                          className="rounded-lg border border-gray-300 px-3 py-2 text-sm"
-                        >
-                          <option value="reported">접수</option>
-                          <option value="reviewing">심사중</option>
-                          <option value="completed">처리완료</option>
-                          <option value="customer_charge">고객부담 전환</option>
-                        </select>
+                      <div className="rounded-lg bg-white px-4 py-3">
+                        <p className="text-xs font-semibold text-gray-500">현재 필요한 조치</p>
+                        <p className="mt-1 text-sm font-bold text-gray-900">
+                          {getRentalAccidentSummaryText(rentalAccidentIssueMode)}
+                        </p>
                       </div>
-                      <div className="space-y-2 rounded-lg border border-gray-200 bg-white p-3">
-                        {RENTAL_ACCIDENT_EVIDENCE_SLOTS.map((slot) => {
-                          const savedObjectName = rentalAccidentDraft.accidentEvidenceDocuments[slot.key];
-                          const savedDetail = rentalAccidentDraft.accidentEvidenceDocumentDetails[slot.key];
-                          const selectedFile = rentalAccidentEvidenceFiles[slot.key];
-                          return (
-                            <div key={slot.key} className="grid gap-1 sm:grid-cols-[120px_1fr] sm:items-center">
-                              <label className="text-xs font-semibold text-gray-600">{slot.label}</label>
-                              <div>
-                                <input
-                                  type="file"
-                                  onChange={(event) => {
-                                    const file = event.target.files?.[0] ?? null;
+                      <div className="grid grid-cols-2 gap-2 rounded-lg border border-orange-100 bg-orange-50 p-3 text-xs">
+                        <div>
+                          <p className="font-semibold text-orange-700">사고자료 상태</p>
+                          <p className="mt-1 text-sm font-bold text-gray-900">{getRelatedStatusLabel(rentalAccidentDraft.evidenceStatus)}</p>
+                        </div>
+                        <div>
+                          <p className="font-semibold text-orange-700">보험처리 상태</p>
+                          <p className="mt-1 text-sm font-bold text-gray-900">{getRelatedStatusLabel(rentalAccidentDraft.insuranceProcessStatus)}</p>
+                        </div>
+                      </div>
+
+                      {(rentalAccidentIssueMode === 'reported' || rentalAccidentIssueMode === 'insurance') && (
+                        <div className="grid gap-2">
+                          {rentalAccidentIssueMode === 'reported' && (
+                            <>
+                              <input
+                                type="text"
+                                value={rentalAccidentDraft.accidentLocation}
+                                onChange={(event) => setRentalAccidentDraft((prev) => ({ ...prev, accidentLocation: event.target.value }))}
+                                placeholder="사고 장소"
+                                disabled={isRentalAccidentSaving || isRentalAccidentLoading}
+                                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                              />
+                              <input
+                                type="text"
+                                value={rentalAccidentDraft.opponentInfo}
+                                onChange={(event) => setRentalAccidentDraft((prev) => ({ ...prev, opponentInfo: event.target.value }))}
+                                placeholder="상대방 정보"
+                                disabled={isRentalAccidentSaving || isRentalAccidentLoading}
+                                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                              />
+                            </>
+                          )}
+                          <input
+                            type="text"
+                            value={rentalAccidentDraft.insuranceClaimNo}
+                            onChange={(event) => setRentalAccidentDraft((prev) => ({ ...prev, insuranceClaimNo: event.target.value }))}
+                            placeholder="보험접수번호"
+                            disabled={isRentalAccidentSaving || isRentalAccidentLoading}
+                            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                          />
+                          {rentalAccidentIssueMode === 'insurance' && (
+                            <select
+                              value={rentalAccidentDraft.insuranceProcessStatus}
+                              onChange={(event) => setRentalAccidentDraft((prev) => ({ ...prev, insuranceProcessStatus: event.target.value }))}
+                              disabled={isRentalAccidentSaving || isRentalAccidentLoading}
+                              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                            >
+                              <option value="reported">접수</option>
+                              <option value="reviewing">심사중</option>
+                              <option value="completed">처리완료</option>
+                              <option value="customer_charge">고객부담 전환</option>
+                            </select>
+                          )}
+                        </div>
+                      )}
+
+                      {rentalAccidentIssueMode === 'evidence' && (
+                        <div className="space-y-3 rounded-lg border border-gray-200 bg-white p-3">
+                          <select
+                            value={rentalAccidentDraft.evidenceStatus}
+                            onChange={(event) => setRentalAccidentDraft((prev) => ({ ...prev, evidenceStatus: event.target.value }))}
+                            disabled={isRentalAccidentSaving || isRentalAccidentLoading}
+                            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                          >
+                            <option value="pending">자료 대기</option>
+                            <option value="ready">자료 확보</option>
+                            <option value="completed">확인 완료</option>
+                            <option value="waived">자료 생략</option>
+                          </select>
+                          {RENTAL_ACCIDENT_EVIDENCE_SLOTS.map((slot) => {
+                            const savedObjectName = rentalAccidentDraft.accidentEvidenceDocuments[slot.key];
+                            const savedDetail = rentalAccidentDraft.accidentEvidenceDocumentDetails[slot.key];
+                            const selectedFile = rentalAccidentEvidenceFiles[slot.key];
+                            return (
+                              <div key={slot.key}>
+                                <FilePickerCard
+                                  label={slot.label}
+                                  buttonLabel={`${slot.label} 선택`}
+                                  selectedFileNames={selectedFile ? [selectedFile.name] : []}
+                                  savedLabel="업로드 문서 열기"
+                                  savedDocuments={savedObjectName && savedDetail ? [savedDetail] : []}
+                                  accept="image/*,application/pdf"
+                                  disabled={isRentalAccidentSaving || isRentalAccidentLoading}
+                                  onChange={(files) => {
+                                    const file = files[0] ?? null;
                                     setRentalAccidentEvidenceFiles((prev) => ({ ...prev, [slot.key]: file }));
                                   }}
-                                  disabled={isRentalAccidentSaving || isRentalAccidentLoading}
-                                  className="block w-full text-xs text-gray-700"
                                 />
-                                {(selectedFile || savedObjectName) && (
-                                  <p className="mt-1 text-xs text-gray-500">
-                                    {selectedFile ? selectedFile.name : (
-                                      savedDetail?.url ? (
-                                        <a href={savedDetail.url} target="_blank" rel="noreferrer" className="font-semibold text-blue-700 hover:underline">
-                                          {savedDetail.fileName || '업로드 문서 열기'}
-                                        </a>
-                                      ) : (
-                                        savedDetail?.fileName || '업로드 완료'
-                                      )
-                                    )}
-                                  </p>
-                                )}
                               </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                      <div className="grid grid-cols-2 gap-2">
-                        <input
-                          type="text"
-                          value={rentalAccidentDraft.customerChargeAmount}
-                          onChange={(event) => setRentalAccidentDraft((prev) => ({ ...prev, customerChargeAmount: event.target.value.replace(/[^\d]/g, '') }))}
-                          placeholder="고객부담금"
-                          inputMode="numeric"
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      {rentalAccidentIssueMode !== 'evidence' && (
+                        <details className="rounded-lg border border-gray-200 bg-white px-3 py-2">
+                          <summary className="cursor-pointer text-xs font-semibold text-gray-600">사고 증빙 자료</summary>
+                          <div className="mt-3 space-y-2">
+                            <select
+                              value={rentalAccidentDraft.evidenceStatus}
+                              onChange={(event) => setRentalAccidentDraft((prev) => ({ ...prev, evidenceStatus: event.target.value }))}
+                              disabled={isRentalAccidentSaving || isRentalAccidentLoading}
+                              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                            >
+                              <option value="pending">자료 대기</option>
+                              <option value="ready">자료 확보</option>
+                              <option value="completed">확인 완료</option>
+                              <option value="waived">자료 생략</option>
+                            </select>
+                            {RENTAL_ACCIDENT_EVIDENCE_SLOTS.map((slot) => {
+                              const savedObjectName = rentalAccidentDraft.accidentEvidenceDocuments[slot.key];
+                              const savedDetail = rentalAccidentDraft.accidentEvidenceDocumentDetails[slot.key];
+                              const selectedFile = rentalAccidentEvidenceFiles[slot.key];
+                              return (
+                                <div key={slot.key}>
+                                  <FilePickerCard
+                                    label={slot.label}
+                                    buttonLabel={`${slot.label} 선택`}
+                                    selectedFileNames={selectedFile ? [selectedFile.name] : []}
+                                    savedLabel="업로드 문서 열기"
+                                    savedDocuments={savedObjectName && savedDetail ? [savedDetail] : []}
+                                    accept="image/*,application/pdf"
+                                    disabled={isRentalAccidentSaving || isRentalAccidentLoading}
+                                    onChange={(files) => {
+                                      const file = files[0] ?? null;
+                                      setRentalAccidentEvidenceFiles((prev) => ({ ...prev, [slot.key]: file }));
+                                    }}
+                                  />
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </details>
+                      )}
+
+                      {rentalAccidentIssueMode !== 'insurance' && (
+                        <details className="rounded-lg border border-gray-200 bg-white px-3 py-2">
+                          <summary className="cursor-pointer text-xs font-semibold text-gray-600">보험처리 정보</summary>
+                          <div className="mt-3 grid gap-2">
+                            {rentalAccidentIssueMode !== 'reported' && (
+                              <input
+                                type="text"
+                                value={rentalAccidentDraft.insuranceClaimNo}
+                                onChange={(event) => setRentalAccidentDraft((prev) => ({ ...prev, insuranceClaimNo: event.target.value }))}
+                                placeholder="보험접수번호"
+                                disabled={isRentalAccidentSaving || isRentalAccidentLoading}
+                                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                              />
+                            )}
+                            <select
+                              value={rentalAccidentDraft.insuranceProcessStatus}
+                              onChange={(event) => setRentalAccidentDraft((prev) => ({ ...prev, insuranceProcessStatus: event.target.value }))}
+                              disabled={isRentalAccidentSaving || isRentalAccidentLoading}
+                              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                            >
+                              <option value="reported">접수</option>
+                              <option value="reviewing">심사중</option>
+                              <option value="completed">처리완료</option>
+                              <option value="customer_charge">고객부담 전환</option>
+                            </select>
+                          </div>
+                        </details>
+                      )}
+
+                      {rentalAccidentIssueMode !== 'reported' && (
+                        <details className="rounded-lg border border-gray-200 bg-white px-3 py-2">
+                          <summary className="cursor-pointer text-xs font-semibold text-gray-600">사고 기본 정보</summary>
+                          <div className="mt-3 grid gap-2">
+                            <input
+                              type="text"
+                              value={rentalAccidentDraft.accidentLocation}
+                              onChange={(event) => setRentalAccidentDraft((prev) => ({ ...prev, accidentLocation: event.target.value }))}
+                              placeholder="사고 장소"
+                              disabled={isRentalAccidentSaving || isRentalAccidentLoading}
+                              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                            />
+                            <input
+                              type="text"
+                              value={rentalAccidentDraft.opponentInfo}
+                              onChange={(event) => setRentalAccidentDraft((prev) => ({ ...prev, opponentInfo: event.target.value }))}
+                              placeholder="상대방 정보"
+                              disabled={isRentalAccidentSaving || isRentalAccidentLoading}
+                              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                            />
+                          </div>
+                        </details>
+                      )}
+
+                      {shouldShowRentalAccidentCustomerCharge ? (
+                        <div className="grid grid-cols-2 gap-2 rounded-lg border border-amber-200 bg-white p-3">
+                          <input
+                            type="text"
+                            value={rentalAccidentDraft.customerChargeAmount}
+                            onChange={(event) => setRentalAccidentDraft((prev) => ({ ...prev, customerChargeAmount: event.target.value.replace(/[^\d]/g, '') }))}
+                            placeholder="고객부담금"
+                            inputMode="numeric"
+                            disabled={isRentalAccidentSaving || isRentalAccidentLoading}
+                            className="rounded-lg border border-amber-200 px-3 py-2 text-sm"
+                          />
+                          <select
+                            value={rentalAccidentDraft.customerChargeStatus}
+                            onChange={(event) => setRentalAccidentDraft((prev) => ({ ...prev, customerChargeStatus: event.target.value }))}
+                            disabled={isRentalAccidentSaving || isRentalAccidentLoading}
+                            className="rounded-lg border border-amber-200 px-3 py-2 text-sm"
+                          >
+                            <option value="none">없음</option>
+                            <option value="pending">수납 예정</option>
+                            <option value="due">수납 필요</option>
+                            <option value="overdue">연체</option>
+                            <option value="waived">면제</option>
+                            <option value="paid">수납 완료</option>
+                          </select>
+                        </div>
+                      ) : (
+                        <details className="rounded-lg border border-gray-200 bg-white px-3 py-2">
+                          <summary className="cursor-pointer text-xs font-semibold text-gray-600">고객부담금</summary>
+                          <div className="mt-3 grid grid-cols-2 gap-2">
+                            <input
+                              type="text"
+                              value={rentalAccidentDraft.customerChargeAmount}
+                              onChange={(event) => setRentalAccidentDraft((prev) => ({ ...prev, customerChargeAmount: event.target.value.replace(/[^\d]/g, '') }))}
+                              placeholder="고객부담금"
+                              inputMode="numeric"
+                              disabled={isRentalAccidentSaving || isRentalAccidentLoading}
+                              className="rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                            />
+                            <select
+                              value={rentalAccidentDraft.customerChargeStatus}
+                              onChange={(event) => setRentalAccidentDraft((prev) => ({ ...prev, customerChargeStatus: event.target.value }))}
+                              disabled={isRentalAccidentSaving || isRentalAccidentLoading}
+                              className="rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                            >
+                              <option value="none">없음</option>
+                              <option value="pending">수납 예정</option>
+                              <option value="due">수납 필요</option>
+                              <option value="overdue">연체</option>
+                              <option value="waived">면제</option>
+                              <option value="paid">수납 완료</option>
+                            </select>
+                          </div>
+                        </details>
+                      )}
+
+                      {rentalAccidentIssueMode !== 'insurance' && (
+                        <textarea
+                          rows={2}
+                          value={rentalAccidentDraft.memo}
+                          onChange={(event) => setRentalAccidentDraft((prev) => ({ ...prev, memo: event.target.value }))}
+                          placeholder="처리 메모"
                           disabled={isRentalAccidentSaving || isRentalAccidentLoading}
-                          className="rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                          className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
                         />
-                        <select
-                          value={rentalAccidentDraft.customerChargeStatus}
-                          onChange={(event) => setRentalAccidentDraft((prev) => ({ ...prev, customerChargeStatus: event.target.value }))}
+                      )}
+                      {rentalAccidentIssueMode === 'insurance' && (
+                        <textarea
+                          rows={2}
+                          value={rentalAccidentDraft.memo}
+                          onChange={(event) => setRentalAccidentDraft((prev) => ({ ...prev, memo: event.target.value }))}
+                          placeholder="보험처리 메모"
                           disabled={isRentalAccidentSaving || isRentalAccidentLoading}
-                          className="rounded-lg border border-gray-300 px-3 py-2 text-sm"
-                        >
-                          <option value="none">없음</option>
-                          <option value="pending">수납 예정</option>
-                          <option value="due">수납 필요</option>
-                          <option value="overdue">연체</option>
-                          <option value="waived">면제</option>
-                          <option value="paid">수납 완료</option>
-                        </select>
-                      </div>
-                      <textarea
-                        rows={2}
-                        value={rentalAccidentDraft.memo}
-                        onChange={(event) => setRentalAccidentDraft((prev) => ({ ...prev, memo: event.target.value }))}
-                        placeholder="처리 메모"
-                        disabled={isRentalAccidentSaving || isRentalAccidentLoading}
-                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
-                      />
+                          className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                        />
+                      )}
                       {rentalAccidentError && (
                         <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
                           {rentalAccidentError}
@@ -4442,13 +5219,16 @@ export default function ActionRequired() {
                   </div>
                 )}
 
-                {selectedItemCapabilities.canUseAccidentClaimActions && (
+                {(selectedItemCapabilities.canUseAccidentClaimActions || selectedItemCapabilities.canUseAccidentReplacementDriverActions) && (
                   <div className="border-t border-gray-200 pt-4">
-                    <label className="mb-3 block text-sm font-semibold text-gray-600">사고대차 보험청구</label>
-                    <div className="space-y-3 rounded-lg border border-gray-200 bg-gray-50 p-4">
+                    <label className="mb-3 block text-sm font-semibold text-gray-600">
+                      {getAccidentClaimPanelTitle(selectedItem, selectedItemCapabilities.canUseAccidentReplacementDriverActions)}
+                    </label>
+                    <div className="space-y-3 rounded-lg border border-gray-200 bg-white p-4">
                       {selectedItemCapabilities.canUseAccidentReplacementDriverActions && (
                         <div className="space-y-3 rounded-lg border border-blue-100 bg-white p-3">
-                          <label className="block text-sm font-semibold text-gray-600">인수 전 운전자/면허 보완</label>
+                          <label className="block text-sm font-semibold text-gray-600">입력 정보</label>
+                          <p className="text-xs text-gray-500">운전자명, 연락처, 주소, 면허번호와 면허증 파일을 한 번에 보완하세요.</p>
                           {isAccidentReplacementDriverLoading && (
                             <div className="flex items-center gap-2 text-sm text-blue-700">
                               <Loader2 className="h-4 w-4 animate-spin" />
@@ -4489,12 +5269,13 @@ export default function ActionRequired() {
                               className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
                             />
                           </div>
-                          <input
-                            type="file"
-                            accept="image/*,application/pdf"
-                            onChange={(event) => setAccidentReplacementLicenseFile(event.target.files?.[0] ?? null)}
+                          <FilePickerCard
+                            label="운전면허증 파일"
+                            buttonLabel="운전면허증 파일 선택"
+                            selectedFileNames={accidentReplacementLicenseFile ? [accidentReplacementLicenseFile.name] : []}
                             disabled={isAccidentReplacementDriverSaving || isAccidentReplacementDriverLoading}
-                            className="block w-full text-sm text-gray-700"
+                            accept="image/*,application/pdf"
+                            onChange={(files) => setAccidentReplacementLicenseFile(files[0] ?? null)}
                           />
                           {(accidentReplacementLicenseFile || accidentReplacementDriverDraft.licenseDocumentObjectName) && (
                             <p className="text-xs text-green-700">
@@ -4517,7 +5298,7 @@ export default function ActionRequired() {
                             disabled={isAccidentReplacementDriverSaving || isAccidentReplacementDriverLoading}
                             className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
                           >
-                            운전자 정보 저장
+                            운전자/면허 정보 저장
                           </button>
                         </div>
                       )}
@@ -4525,6 +5306,14 @@ export default function ActionRequired() {
                         <div className="flex items-center gap-2 text-sm text-blue-700">
                           <Loader2 className="h-4 w-4 animate-spin" />
                           보험청구 정보를 불러오는 중입니다.
+                        </div>
+                      )}
+                      {isCompactAccidentClaimActionItem(selectedItem) && (
+                        <div className="rounded-lg bg-gray-50 px-4 py-3">
+                          <p className="text-xs font-semibold text-gray-500">현재 필요한 조치</p>
+                          <p className="mt-1 text-sm font-bold text-gray-900">
+                            {getAccidentClaimSummaryText(accidentClaimIssueMode)}
+                          </p>
                         </div>
                       )}
                       {selectedItem.reasonType === 'accident_replacement_info_missing' && (
@@ -4553,18 +5342,31 @@ export default function ActionRequired() {
                             disabled={isAccidentClaimSaving || isAccidentClaimLoading}
                             className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
                           />
-                          <input
-                            type="text"
-                            value={accidentClaimDraft.billingAccount}
-                            onChange={(event) => setAccidentClaimDraft((prev) => ({ ...prev, billingAccount: event.target.value }))}
-                            placeholder="보험사 청구 계정"
-                            disabled={isAccidentClaimSaving || isAccidentClaimLoading}
-                            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
-                          />
+                          <details className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+                            <summary className="cursor-pointer text-xs font-semibold text-gray-600">추가 접수 정보</summary>
+                            <div className="mt-3 grid gap-2">
+                              <input
+                                type="date"
+                                value={accidentClaimDraft.repairCompletedAt}
+                                onChange={(event) => setAccidentClaimDraft((prev) => ({ ...prev, repairCompletedAt: event.target.value }))}
+                                disabled={isAccidentClaimSaving || isAccidentClaimLoading}
+                                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                                aria-label="수리완료일"
+                              />
+                              <input
+                                type="text"
+                                value={accidentClaimDraft.billingAccount}
+                                onChange={(event) => setAccidentClaimDraft((prev) => ({ ...prev, billingAccount: event.target.value }))}
+                                placeholder="보험사 청구 계정"
+                                disabled={isAccidentClaimSaving || isAccidentClaimLoading}
+                                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                              />
+                            </div>
+                          </details>
                         </div>
                       )}
                       {selectedItem.reasonType === 'accident_replacement_approval_required' && (
-                        <div className="space-y-2">
+                        <div className="space-y-3">
                           <select
                             value={accidentClaimDraft.approvalStatus}
                             onChange={(event) => setAccidentClaimDraft((prev) => ({ ...prev, approvalStatus: event.target.value }))}
@@ -4575,13 +5377,20 @@ export default function ActionRequired() {
                             <option value="approved">승인 완료</option>
                             <option value="rejected">승인 반려</option>
                           </select>
-                          <input
-                            type="text"
-                            value={accidentClaimDraft.approvalDocumentObjectName}
-                            onChange={(event) => setAccidentClaimDraft((prev) => ({ ...prev, approvalDocumentObjectName: event.target.value }))}
-                            placeholder="승인 문서 objectName"
+                          <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-3 text-xs leading-5 text-blue-800">
+                            승인 근거는 대차 요청/수락 문서, 문자, 이메일, 카카오톡, 팩스 등을 첨부하세요. 전화 승인만 받은 경우 승인 확인 메모에 통화 일시와 담당자를 남기고 추후 문서를 첨부하는 것이 안전합니다.
+                          </div>
+                          <FilePickerCard
+                            label="승인 근거 문서"
+                            buttonLabel="승인 근거 문서 선택"
+                            selectedFileNames={accidentApprovalDocumentFiles.map((file) => file.name)}
+                            savedLabel="승인 근거 문서 보기"
+                            savedDocuments={accidentClaimDraft.approvalDocumentDetails}
+                            accept="image/*,application/pdf"
+                            multiple
                             disabled={isAccidentClaimSaving || isAccidentClaimLoading}
-                            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                            onChange={setAccidentApprovalDocumentFiles}
+                            onPreview={setPreviewDocument}
                           />
                           <textarea
                             rows={2}
@@ -4593,51 +5402,95 @@ export default function ActionRequired() {
                           />
                         </div>
                       )}
-                      {(selectedItem.reasonType === 'accident_claim_documents_required'
-                        || selectedItem.reasonType === 'accident_claim_delayed'
+                      {(accidentClaimIssueMode === 'submission'
+                        || accidentClaimIssueMode === 'settlement'
                         || selectedItem.reasonType === 'accident_claim_payment_check'
                         || selectedItem.reasonType === 'accident_claim_difference') && (
-                        <div className="space-y-2">
-                          {selectedItem.reasonType === 'accident_claim_documents_required' && (
-                            <div>
-                              <input
-                                type="file"
-                                onChange={(event) => setAccidentClaimDocumentFile(event.target.files?.[0] ?? null)}
-                                disabled={isAccidentClaimSaving || isAccidentClaimLoading}
-                                className="block w-full text-sm text-gray-700"
-                              />
-                              {accidentClaimDocumentFile && (
-                                <p className="mt-1 text-xs text-green-700">{accidentClaimDocumentFile.name}</p>
-                              )}
-                              {accidentClaimDraft.documentDetails.length > 0 && (
-                                <div className="mt-2 space-y-1 text-xs text-gray-600">
-                                  {accidentClaimDraft.documentDetails.map((doc) => (
-                                    <div key={doc.objectName}>
-                                      {doc.url ? (
-                                        <a href={doc.url} target="_blank" rel="noreferrer" className="font-semibold text-blue-700 hover:underline">
-                                          {doc.fileName || '청구 서류 열기'}
-                                        </a>
-                                      ) : (
-                                        <span>{doc.fileName || doc.objectName}</span>
-                                      )}
-                                    </div>
-                                  ))}
+                        <div className="space-y-3">
+                          {accidentClaimIssueMode === 'submission' && (
+                            <div className="space-y-3">
+                              {selectedItem.submissionDelayed && (
+                                <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">
+                                  청구 지연 {selectedItem.delayBusinessDays ? `${selectedItem.delayBusinessDays}영업일` : '상태'}입니다. 담당자 확인 후 제출 또는 보완하세요.
                                 </div>
                               )}
+                              <FilePickerCard
+                                label="청구 서류"
+                                buttonLabel="청구 서류 선택"
+                                selectedFileNames={accidentClaimDocumentFile ? [accidentClaimDocumentFile.name] : []}
+                                savedLabel="청구 서류 열기"
+                                savedDocuments={accidentClaimDraft.documentDetails}
+                                accept="image/*,application/pdf"
+                                disabled={isAccidentClaimSaving || isAccidentClaimLoading}
+                                onChange={(files) => setAccidentClaimDocumentFile(files[0] ?? null)}
+                              />
                             </div>
                           )}
-                          <input
-                            type="text"
-                            value={accidentClaimDraft.billedAmount}
-                            onChange={(event) => setAccidentClaimDraft((prev) => ({ ...prev, billedAmount: event.target.value.replace(/[^\d]/g, '') }))}
-                            placeholder="청구금액"
-                            inputMode="numeric"
-                            disabled={isAccidentClaimSaving || isAccidentClaimLoading}
-                            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
-                          />
-                          {(selectedItem.reasonType === 'accident_claim_payment_check'
-                            || selectedItem.reasonType === 'accident_claim_difference') && (
-                            <>
+                          {accidentClaimIssueMode === 'submission' && (
+                            <div className="grid grid-cols-3 gap-2 rounded-lg border border-blue-100 bg-blue-50 p-3 text-xs">
+                              <div>
+                                <p className="font-semibold text-blue-700">문서 상태</p>
+                                <p className="mt-1 text-sm font-bold text-gray-900">{getRelatedStatusLabel(accidentClaimDraft.documentStatus)}</p>
+                              </div>
+                              <div>
+                                <p className="font-semibold text-blue-700">청구 상태</p>
+                                <p className="mt-1 text-sm font-bold text-gray-900">{getRelatedStatusLabel(accidentClaimDraft.claimStatus)}</p>
+                              </div>
+                              <div>
+                                <p className="font-semibold text-blue-700">최근 제출일</p>
+                                <p className="mt-1 text-sm font-bold text-gray-900">
+                                  {accidentClaimDraft.submittedAt ? formatActionDateOnly(accidentClaimDraft.submittedAt) : '-'}
+                                </p>
+                              </div>
+                            </div>
+                          )}
+                          {accidentClaimIssueMode === 'payment' && (
+                            <div className="space-y-2">
+                              <div className="grid grid-cols-2 gap-2 rounded-lg border border-emerald-100 bg-emerald-50 p-3 text-xs">
+                                <div>
+                                  <p className="font-semibold text-emerald-700">청구액</p>
+                                  <p className="mt-1 text-sm font-bold text-gray-900">{toPaymentAmountFromInput(accidentClaimDraft.billedAmount).toLocaleString()}원</p>
+                                </div>
+                                <div>
+                                  <p className="font-semibold text-emerald-700">인정액</p>
+                                  <p className="mt-1 text-sm font-bold text-gray-900">{toPaymentAmountFromInput(accidentClaimDraft.recognizedAmount).toLocaleString()}원</p>
+                                </div>
+                              </div>
+                              <input
+                                type="text"
+                                value={accidentClaimDraft.recognizedAmount}
+                                onChange={(event) => setAccidentClaimDraft((prev) => ({ ...prev, recognizedAmount: event.target.value.replace(/[^\d]/g, '') }))}
+                                placeholder="보험 인정금액"
+                                inputMode="numeric"
+                                disabled={isAccidentClaimSaving || isAccidentClaimLoading}
+                                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                              />
+                            </div>
+                          )}
+                          {accidentClaimIssueMode === 'settlement' && (
+                            <div className="space-y-3">
+                              <div className="flex flex-wrap gap-2">
+                                <span className={`rounded-full px-2 py-1 text-xs font-semibold ${selectedItem.settlementNeedsPaymentCheck ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-600'}`}>
+                                  {selectedItem.settlementNeedsPaymentCheck ? '보험금 입금 확인 필요' : '보험금 입금 확인 완료/대상 아님'}
+                                </span>
+                                <span className={`rounded-full px-2 py-1 text-xs font-semibold ${selectedItem.settlementNeedsDifference ? 'bg-orange-100 text-orange-700' : 'bg-gray-100 text-gray-600'}`}>
+                                  {selectedItem.settlementNeedsDifference ? '대차료 차액 정리 필요' : '대차료 차액 없음/정리됨'}
+                                </span>
+                              </div>
+                              <div className="grid grid-cols-3 gap-2 rounded-lg border border-emerald-100 bg-emerald-50 p-3 text-xs">
+                                <div>
+                                  <p className="font-semibold text-emerald-700">청구액</p>
+                                  <p className="mt-1 text-sm font-bold text-gray-900">{toPaymentAmountFromInput(accidentClaimDraft.billedAmount).toLocaleString()}원</p>
+                                </div>
+                                <div>
+                                  <p className="font-semibold text-emerald-700">인정액</p>
+                                  <p className="mt-1 text-sm font-bold text-gray-900">{toPaymentAmountFromInput(accidentClaimDraft.recognizedAmount).toLocaleString()}원</p>
+                                </div>
+                                <div>
+                                  <p className="font-semibold text-emerald-700">차액</p>
+                                  <p className="mt-1 text-sm font-bold text-gray-900">{accidentClaimDifferenceAmount.toLocaleString()}원</p>
+                                </div>
+                              </div>
                               <input
                                 type="text"
                                 value={accidentClaimDraft.recognizedAmount}
@@ -4666,7 +5519,105 @@ export default function ActionRequired() {
                                 disabled={isAccidentClaimSaving || isAccidentClaimLoading}
                                 className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
                               />
-                            </>
+                            </div>
+                          )}
+                          {accidentClaimIssueMode === 'difference' && (
+                            <div className="space-y-2">
+                              <div className="rounded-lg border border-orange-100 bg-orange-50 p-3">
+                                <p className="text-xs font-semibold text-orange-700">정리할 차액</p>
+                                <p className="mt-1 text-base font-bold text-gray-900">{accidentClaimDifferenceAmount.toLocaleString()}원</p>
+                              </div>
+                              <select
+                                value={accidentClaimDraft.differencePayerType}
+                                onChange={(event) => setAccidentClaimDraft((prev) => ({ ...prev, differencePayerType: event.target.value }))}
+                                disabled={isAccidentClaimSaving || isAccidentClaimLoading}
+                                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                              >
+                                <option value="customer">고객 부담</option>
+                                <option value="insurer">보험사 재청구</option>
+                                <option value="waived">면제</option>
+                                <option value="disputed">분쟁/보류</option>
+                              </select>
+                              <textarea
+                                rows={2}
+                                value={accidentClaimDraft.supplementMemo}
+                                onChange={(event) => setAccidentClaimDraft((prev) => ({ ...prev, supplementMemo: event.target.value }))}
+                                placeholder="차액/분쟁 메모"
+                                disabled={isAccidentClaimSaving || isAccidentClaimLoading}
+                                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                              />
+                            </div>
+                          )}
+                          {accidentClaimIssueMode !== 'difference' && accidentClaimIssueMode !== 'settlement' && (
+                            <details className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+                              <summary className="cursor-pointer text-xs font-semibold text-gray-600">청구금액 및 차액 정보</summary>
+                              <div className="mt-3 grid gap-2">
+                                <input
+                                  type="text"
+                                  value={accidentClaimDraft.billedAmount}
+                                  onChange={(event) => setAccidentClaimDraft((prev) => ({ ...prev, billedAmount: event.target.value.replace(/[^\d]/g, '') }))}
+                                  placeholder="청구금액"
+                                  inputMode="numeric"
+                                  disabled={isAccidentClaimSaving || isAccidentClaimLoading}
+                                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                                />
+                                {accidentClaimIssueMode !== 'payment' && (
+                                  <input
+                                    type="text"
+                                    value={accidentClaimDraft.recognizedAmount}
+                                    onChange={(event) => setAccidentClaimDraft((prev) => ({ ...prev, recognizedAmount: event.target.value.replace(/[^\d]/g, '') }))}
+                                    placeholder="보험 인정금액"
+                                    inputMode="numeric"
+                                    disabled={isAccidentClaimSaving || isAccidentClaimLoading}
+                                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                                  />
+                                )}
+                                <select
+                                  value={accidentClaimDraft.differencePayerType}
+                                  onChange={(event) => setAccidentClaimDraft((prev) => ({ ...prev, differencePayerType: event.target.value }))}
+                                  disabled={isAccidentClaimSaving || isAccidentClaimLoading}
+                                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                                >
+                                  <option value="customer">고객 부담</option>
+                                  <option value="insurer">보험사 재청구</option>
+                                  <option value="waived">면제</option>
+                                  <option value="disputed">분쟁/보류</option>
+                                </select>
+                                <textarea
+                                  rows={2}
+                                  value={accidentClaimDraft.supplementMemo}
+                                  onChange={(event) => setAccidentClaimDraft((prev) => ({ ...prev, supplementMemo: event.target.value }))}
+                                  placeholder="차액/분쟁 메모"
+                                  disabled={isAccidentClaimSaving || isAccidentClaimLoading}
+                                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                                />
+                              </div>
+                            </details>
+                          )}
+                          {accidentClaimIssueMode === 'difference' && (
+                            <details className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+                              <summary className="cursor-pointer text-xs font-semibold text-gray-600">청구액/인정액 수정</summary>
+                              <div className="mt-3 grid gap-2">
+                                <input
+                                  type="text"
+                                  value={accidentClaimDraft.billedAmount}
+                                  onChange={(event) => setAccidentClaimDraft((prev) => ({ ...prev, billedAmount: event.target.value.replace(/[^\d]/g, '') }))}
+                                  placeholder="청구금액"
+                                  inputMode="numeric"
+                                  disabled={isAccidentClaimSaving || isAccidentClaimLoading}
+                                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                                />
+                                <input
+                                  type="text"
+                                  value={accidentClaimDraft.recognizedAmount}
+                                  onChange={(event) => setAccidentClaimDraft((prev) => ({ ...prev, recognizedAmount: event.target.value.replace(/[^\d]/g, '') }))}
+                                  placeholder="보험 인정금액"
+                                  inputMode="numeric"
+                                  disabled={isAccidentClaimSaving || isAccidentClaimLoading}
+                                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                                />
+                              </div>
+                            </details>
                           )}
                         </div>
                       )}
@@ -4694,15 +5645,20 @@ export default function ActionRequired() {
                         {selectedItem.reasonType === 'accident_replacement_approval_required' && (
                           <button
                             type="button"
-                            onClick={() => void runAccidentClaimAction('save-info')}
+                            onClick={() => {
+                              if (accidentClaimDraft.approvalStatus === 'rejected') {
+                                setAccidentApprovalRejectConfirmOpen(true);
+                                return;
+                              }
+                              void runAccidentClaimAction('save-info');
+                            }}
                             disabled={isAccidentClaimSaving || isAccidentClaimLoading}
                             className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
                           >
                             승인 상태 저장
                           </button>
                         )}
-                        {(selectedItem.reasonType === 'accident_claim_documents_required'
-                          || selectedItem.reasonType === 'accident_claim_delayed') && (
+                        {accidentClaimIssueMode === 'submission' && (
                           <button
                             type="button"
                             onClick={() => void runAccidentClaimAction('submit')}
@@ -4713,7 +5669,8 @@ export default function ActionRequired() {
                           </button>
                         )}
                         {(selectedItem.reasonType === 'accident_claim_payment_check'
-                          || selectedItem.reasonType === 'accident_claim_difference') && (
+                          || selectedItem.reasonType === 'accident_claim_difference'
+                          || accidentClaimIssueMode === 'settlement') && (
                           <button
                             type="button"
                             onClick={() => void runAccidentClaimAction('recognize')}
@@ -4731,7 +5688,9 @@ export default function ActionRequired() {
                 {isPaymentActionItem(selectedItem) && (
                   <div className="border-t border-gray-200 pt-4">
                     <div className="mb-3 flex items-center justify-between gap-2">
-                      <label className="text-sm font-semibold text-gray-600">결제 정보</label>
+                      <label className="text-sm font-semibold text-gray-600">
+                        {selectedItem.workContext?.module === 'payment_deposit_refund' ? '보증금 반환' : '정산 처리'}
+                      </label>
                       <button
                         type="button"
                         onClick={() => {
@@ -4743,87 +5702,20 @@ export default function ActionRequired() {
                         {isPaymentInfoRefreshing ? '새로고침 중...' : '결제정보 새로고침'}
                       </button>
                     </div>
-                    <div className="bg-red-50 rounded-lg p-4 space-y-2">
-                      <div className="flex justify-between items-center">
-                        <span className="text-sm text-gray-700">결제 유형</span>
-                        {selectedItemCapabilities.canEditStandalonePaymentType ? (
-                          <div className="flex items-center gap-2">
-                            <select
-                              value={paymentTypeDraft}
-                              onChange={(event) => setPaymentTypeDraft(normalizePaymentType(event.target.value))}
-                              className="rounded-md border border-red-300 bg-white px-2 py-1 text-sm text-gray-900 focus:border-red-500 focus:outline-none focus:ring-2 focus:ring-red-200"
-                              aria-label="결제 유형"
-                              disabled={isPaymentTypeSaving || isWriteSaving}
-                            >
-                              <option value="카드">카드</option>
-                              <option value="현금">현금</option>
-                              <option value="계좌이체">계좌이체</option>
-                            </select>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                void runPaymentTypeSave(selectedItem);
-                              }}
-                              disabled={isPaymentTypeSaving || isWriteSaving}
-                              className="rounded-md bg-red-600 px-2 py-1 text-xs font-medium text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
-                            >
-                              {isPaymentTypeSaving ? '저장 중...' : '저장'}
-                            </button>
-                          </div>
-                        ) : (
-                          <span className="text-right text-sm font-semibold text-gray-900">
-                            {selectedItem.paymentInfo.paymentType}
-                            {selectedItem.relatedChargeItemId && (
-                              <span className="block text-xs font-normal text-gray-500">
-                                수납 완료 처리 시 결제 유형을 선택합니다.
-                              </span>
-                            )}
-                          </span>
+                    <div className={`rounded-lg p-4 space-y-3 ${
+                      selectedItem.workContext?.module === 'payment_deposit_refund'
+                        ? 'border border-emerald-200 bg-emerald-50'
+                        : 'border border-red-200 bg-red-50'
+                    }`}>
+                      <div className="rounded-lg bg-white px-4 py-3">
+                        <p className="text-xs font-semibold text-gray-500">현재 필요한 조치</p>
+                        <p className="mt-1 text-base font-bold text-gray-900">{getSettlementSummaryText(selectedItem)}</p>
+                        {getSettlementMeta(selectedItem) && (
+                          <p className="mt-1 text-xs text-gray-500">{getSettlementMeta(selectedItem)}</p>
                         )}
-                      </div>
-                      <div className="flex justify-between items-center">
-                        <span className="text-sm text-gray-700">기존 미납 금액</span>
-                        <span className="text-sm font-semibold text-gray-900">{selectedItem.paymentInfo.principalAmount.toLocaleString()}원</span>
-                      </div>
-                      <div className="flex items-center justify-between gap-3">
-                        <span className="text-sm text-gray-700">추가 결제 금액</span>
-                        {canEditPaymentIssueFields ? (
-                          <div className="flex items-center gap-2">
-                            <input
-                              type="text"
-                              value={paymentAmountDraft}
-                              onChange={(event) => setPaymentAmountDraft(event.target.value.replace(/[^\d]/g, ''))}
-                              className="w-32 rounded-lg border border-red-300 bg-white px-2 py-1 text-right text-sm font-semibold text-red-700 focus:border-red-500 focus:outline-none focus:ring-2 focus:ring-red-200"
-                              inputMode="numeric"
-                              aria-label="추가 결제 금액"
-                              disabled={isPaymentAmountSaving || isWriteSaving}
-                            />
-                            <span className="text-xs font-semibold text-red-700">원</span>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                void runPaymentAdditionalAmountSave(selectedItem);
-                              }}
-                              disabled={isPaymentAmountSaving || isWriteSaving}
-                              className="rounded-md bg-red-600 px-2 py-1 text-xs font-medium text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
-                            >
-                              {isPaymentAmountSaving ? '저장 중...' : '저장'}
-                            </button>
-                          </div>
-                        ) : (
-                          <span className="text-sm font-semibold text-gray-900">{selectedItem.paymentInfo.additionalAmount.toLocaleString()}원</span>
-                        )}
-                      </div>
-                      <div className="flex justify-between items-center">
-                        <span className="text-sm text-gray-700">연체 일수</span>
-                        <span className="text-sm font-bold text-red-600">{selectedItem.paymentInfo.overdueDays}일</span>
-                      </div>
-                      <div className="border-t border-red-200 pt-2 mt-2 flex justify-between items-center">
-                        <span className="text-base font-bold text-gray-900">총 청구금액</span>
-                        <span className="text-lg font-bold text-red-600">{selectedItem.paymentInfo.totalAmount.toLocaleString()}원</span>
                       </div>
                       {selectedItem.workContext?.module === 'payment_deposit_refund' && (
-                        <div className="mt-3 space-y-2 rounded-lg border border-emerald-200 bg-white p-3">
+                        <div className="space-y-2 rounded-lg border border-emerald-200 bg-white p-3">
                           <p className="text-xs font-semibold text-emerald-700">보증금 환불 완료 입력</p>
                           <div className="grid gap-2 sm:grid-cols-3">
                             <input
@@ -4870,10 +5762,53 @@ export default function ActionRequired() {
                             />
                             {refundEvidenceFile ? `환불 증빙: ${refundEvidenceFile.name}` : '환불 증빙 선택 첨부'}
                           </label>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const refundCharge = getPrimarySettlementCharge(selectedItem);
+                              if (refundCharge) {
+                                void runWorkChargeSettlement(selectedItem, refundCharge, 'refunded');
+                              }
+                            }}
+                            disabled={isWriteSaving || !canWritePayments || !getPrimarySettlementCharge(selectedItem)}
+                            className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            환불 완료 처리
+                          </button>
                         </div>
                       )}
-                      {canEditPaymentIssueFields && (
-                        <div className="mt-2 flex flex-wrap items-center gap-2 pt-2">
+                      {canEditPaymentIssueFields && selectedItem.workContext?.module !== 'payment_deposit_refund' && (
+                        <div className="space-y-3 rounded-lg border border-red-200 bg-white p-3">
+                          <div className="flex flex-wrap items-center justify-between gap-3">
+                            <span className="text-xs font-semibold text-gray-600">결제 유형</span>
+                            {selectedItemCapabilities.canEditStandalonePaymentType ? (
+                              <div className="flex items-center gap-2">
+                                <select
+                                  value={paymentTypeDraft}
+                                  onChange={(event) => setPaymentTypeDraft(normalizePaymentType(event.target.value))}
+                                  className="rounded-md border border-red-300 bg-white px-2 py-1 text-sm text-gray-900 focus:border-red-500 focus:outline-none focus:ring-2 focus:ring-red-200"
+                                  aria-label="결제 유형"
+                                  disabled={isPaymentTypeSaving || isWriteSaving}
+                                >
+                                  <option value="카드">카드</option>
+                                  <option value="현금">현금</option>
+                                  <option value="계좌이체">계좌이체</option>
+                                </select>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    void runPaymentTypeSave(selectedItem);
+                                  }}
+                                  disabled={isPaymentTypeSaving || isWriteSaving}
+                                  className="rounded-md bg-red-600 px-2 py-1 text-xs font-medium text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+                                >
+                                  {isPaymentTypeSaving ? '저장 중...' : '저장'}
+                                </button>
+                              </div>
+                            ) : (
+                              <span className="text-sm font-semibold text-gray-900">{selectedItem.paymentInfo.paymentType}</span>
+                            )}
+                          </div>
                           <label className="inline-flex cursor-pointer items-center rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs font-medium text-gray-700 hover:bg-gray-50">
                             <input
                               type="file"
@@ -4910,6 +5845,33 @@ export default function ActionRequired() {
                             증빙은 선택 사항이며 없어도 완료할 수 있습니다.
                           </span>
                         </div>
+                      )}
+                      {canEditPaymentIssueFields && selectedItem.workContext?.module !== 'payment_deposit_refund' && !selectedItem.relatedChargeItemId && (
+                        <details className="rounded-lg border border-red-200 bg-white px-3 py-2">
+                          <summary className="cursor-pointer text-xs font-semibold text-gray-600">추가 결제 금액 직접 수정</summary>
+                          <div className="mt-2 flex flex-wrap items-center gap-2">
+                            <input
+                              type="text"
+                              value={paymentAmountDraft}
+                              onChange={(event) => setPaymentAmountDraft(event.target.value.replace(/[^\d]/g, ''))}
+                              className="w-32 rounded-lg border border-red-300 bg-white px-2 py-1 text-right text-sm font-semibold text-red-700 focus:border-red-500 focus:outline-none focus:ring-2 focus:ring-red-200"
+                              inputMode="numeric"
+                              aria-label="추가 결제 금액"
+                              disabled={isPaymentAmountSaving || isWriteSaving}
+                            />
+                            <span className="text-xs font-semibold text-red-700">원</span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                void runPaymentAdditionalAmountSave(selectedItem);
+                              }}
+                              disabled={isPaymentAmountSaving || isWriteSaving}
+                              className="rounded-md bg-red-600 px-2 py-1 text-xs font-medium text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              {isPaymentAmountSaving ? '저장 중...' : '저장'}
+                            </button>
+                          </div>
+                        </details>
                       )}
                     </div>
                   </div>
@@ -5217,7 +6179,9 @@ export default function ActionRequired() {
         {lateReturnResolveDialog === 'confirm-returned' && selectedItem && (
           <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50">
             <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
-              <h2 className="text-lg font-bold text-[#1e2939]">해당 차량이 반납되었습니까?</h2>
+              <h2 className="text-lg font-bold text-[#1e2939]">
+                {isRepairDoneNotReturnedActionItem(selectedItem) ? '수리완료 후 대차 차량이 반납되었습니까?' : '해당 차량이 반납되었습니까?'}
+              </h2>
               <p className="mt-3 text-sm text-gray-600">
                 예를 누르면 이슈카드를 완료 상태로 바꾸고 차량도 함께 반납 처리합니다.
               </p>
@@ -5303,6 +6267,93 @@ export default function ActionRequired() {
                   닫기
                 </button>
               </div>
+            </div>
+          </div>
+        )}
+
+        {accidentApprovalRejectConfirmOpen && (
+          <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4">
+            <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+              <h2 className="text-lg font-bold text-[#1e2939]">승인 반려로 저장하시겠습니까?</h2>
+              <p className="mt-3 text-sm leading-6 text-gray-600">
+                승인 반려로 저장하면 예약이 취소되고 관련 후속 이슈가 정리됩니다.
+              </p>
+              <div className="mt-6 flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAccidentApprovalRejectConfirmOpen(false);
+                    void runAccidentClaimAction('save-info');
+                  }}
+                  disabled={isAccidentClaimSaving}
+                  className="flex-1 rounded-lg bg-red-600 px-4 py-3 font-semibold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {isAccidentClaimSaving ? '처리 중...' : '예약 취소 및 정리'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAccidentApprovalRejectConfirmOpen(false)}
+                  disabled={isAccidentClaimSaving}
+                  className="flex-1 rounded-lg bg-gray-100 px-4 py-3 font-semibold text-gray-700 hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  닫기
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {previewDocument && (
+          <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4">
+            <div className="flex max-h-[90vh] w-full max-w-3xl flex-col rounded-2xl bg-white shadow-2xl">
+              <div className="flex items-start justify-between gap-4 border-b border-gray-200 p-5">
+                <div className="min-w-0">
+                  <h2 className="text-lg font-bold text-[#1e2939]">승인 근거 문서</h2>
+                  <p className="mt-1 break-all text-sm text-gray-500">
+                    {previewDocument.fileName || previewDocument.objectName}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setPreviewDocument(null)}
+                  className="shrink-0 rounded-lg bg-gray-100 px-3 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-200"
+                >
+                  닫기
+                </button>
+              </div>
+              <div className="min-h-[320px] overflow-auto bg-gray-50 p-5">
+                {previewDocument.url ? (
+                  previewDocument.contentType?.startsWith('image/') ? (
+                    <img
+                      src={previewDocument.url}
+                      alt={previewDocument.fileName || previewDocument.objectName}
+                      className="mx-auto max-h-[65vh] max-w-full rounded-lg border border-gray-200 bg-white object-contain"
+                    />
+                  ) : (
+                    <iframe
+                      src={previewDocument.url}
+                      title={previewDocument.fileName || previewDocument.objectName}
+                      className="h-[65vh] w-full rounded-lg border border-gray-200 bg-white"
+                    />
+                  )
+                ) : (
+                  <div className="flex min-h-[280px] items-center justify-center rounded-lg border border-dashed border-gray-300 bg-white p-6 text-center text-sm text-gray-500">
+                    미리보기 URL을 만들 수 없습니다. 문서 저장 상태를 확인해 주세요.
+                  </div>
+                )}
+              </div>
+              {previewDocument.url && (
+                <div className="border-t border-gray-200 p-4 text-right">
+                  <a
+                    href={previewDocument.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+                  >
+                    새 탭에서 열기
+                  </a>
+                </div>
+              )}
             </div>
           </div>
         )}

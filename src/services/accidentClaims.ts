@@ -8,6 +8,7 @@ export interface AccidentClaimPatchPayload {
   claimNo?: string;
   insurerName?: string;
   repairShopName?: string;
+  repairCompletedAt?: string;
   billingAccount?: string;
   contactName?: string;
   contactPhone?: string;
@@ -17,6 +18,7 @@ export interface AccidentClaimPatchPayload {
   approvalRequired?: boolean;
   approvalStatus?: string;
   approvalDocumentObjectName?: string;
+  approvalDocumentObjectNames?: string[];
   approvalMemo?: string;
   documentObjectNames?: string[];
   submittedAt?: string;
