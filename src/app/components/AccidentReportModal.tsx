@@ -10,7 +10,7 @@ export interface AccidentReportFormValues {
   accidentType: 'major' | 'medium' | 'minor';
   description: string;
   assignee: string;
-  blackboxFile: File;
+  blackboxFile?: File | null;
 }
 
 export interface AccidentReportSubmitFeedback {
@@ -55,13 +55,17 @@ export function AccidentReportModal({
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
-    if (!isOpen) {
-      return;
+    if (!isOpen || isSubmitting) {
+      return undefined;
     }
-    if (assigneeOptions.length > 0 && !assigneeId.trim()) {
-      setAssigneeId(assigneeOptions[0].userId);
-    }
-  }, [assigneeId, assigneeOptions, isOpen]);
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        handleResetAndClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, isSubmitting]);
 
   if (!isOpen) {
     return null;
@@ -82,7 +86,7 @@ export function AccidentReportModal({
   const handleResetAndClose = () => {
     setAccidentType('minor');
     setDescription('');
-    setAssigneeId(assigneeOptions[0]?.userId ?? '');
+    setAssigneeId('');
     setBlackboxFile(null);
     setSubmitError(null);
     setFieldErrors({});
@@ -99,12 +103,7 @@ export function AccidentReportModal({
     if (!description.trim()) {
       nextErrors.description = '사고 설명을 입력해 주세요.';
     }
-    if (assigneeOptions.length > 0 && !assigneeId.trim()) {
-      nextErrors.assignee = '담당자를 선택해 주세요.';
-    }
-    if (!blackboxFile) {
-      nextErrors.blackboxFile = '블랙박스 첨부는 필수입니다.';
-    } else if (blackboxFile.size > MAX_BLACKBOX_FILE_BYTES) {
+    if (blackboxFile && blackboxFile.size > MAX_BLACKBOX_FILE_BYTES) {
       nextErrors.blackboxFile = '블랙박스 파일은 50MB 이하만 업로드할 수 있습니다.';
     }
 
@@ -169,9 +168,9 @@ export function AccidentReportModal({
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl mx-4">
-        <div className="flex items-center justify-between p-6 border-b border-gray-200">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
+      <div className="flex max-h-[calc(100dvh-2rem)] w-full max-w-2xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl">
+        <div className="flex shrink-0 items-center justify-between border-b border-gray-200 p-4 sm:p-6">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-red-100 rounded-lg flex items-center justify-center">
               <AlertTriangle className="w-5 h-5 text-red-600" />
@@ -187,12 +186,13 @@ export function AccidentReportModal({
             onClick={handleResetAndClose}
             className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
             disabled={isSubmitting}
+            aria-label="사고 등록 닫기"
           >
             <X className="w-5 h-5 text-gray-500" />
           </button>
         </div>
 
-        <div className="p-6 space-y-6">
+        <div className="flex-1 space-y-4 overflow-y-auto p-4 sm:space-y-6 sm:p-6">
           {submitError && (
             <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 flex items-start gap-2">
               <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
@@ -208,7 +208,7 @@ export function AccidentReportModal({
               {(['major', 'medium', 'minor'] as const).map((type) => (
                 <label
                   key={type}
-                  className={`flex items-start gap-3 p-4 rounded-lg border-2 cursor-pointer transition-colors ${
+                  className={`flex items-start gap-3 rounded-lg border-2 p-3 cursor-pointer transition-colors sm:p-4 ${
                     accidentType === type
                       ? 'border-red-500 bg-red-50'
                       : 'border-gray-200 hover:border-gray-300'
@@ -258,7 +258,7 @@ export function AccidentReportModal({
                 setDescription(event.target.value);
                 clearFieldError('description');
               }}
-              rows={4}
+              rows={3}
               className={`w-full px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 ${
                 fieldErrors.description ? 'border-red-400 bg-red-50' : 'border-gray-300'
               }`}
@@ -266,11 +266,12 @@ export function AccidentReportModal({
               disabled={isSubmitting}
             />
             {fieldErrors.description && <p className="mt-1 text-xs text-red-600">{fieldErrors.description}</p>}
+            <p className="mt-1 text-xs text-gray-500">상세 사고 장소, 상대방 정보, 보험접수번호와 증빙자료는 조치 필요 항목에서 이어서 보완합니다.</p>
           </div>
 
           <div>
             <label className="block text-sm font-semibold text-gray-700 mb-2">
-              블랙박스 첨부 *
+              블랙박스 첨부
             </label>
             <label className="cursor-pointer block">
               <div className={`flex items-center justify-center gap-2 rounded-lg border px-4 py-3 transition-colors ${
@@ -301,7 +302,7 @@ export function AccidentReportModal({
               </p>
             )}
             {fieldErrors.blackboxFile && <p className="mt-1 text-xs text-red-600">{fieldErrors.blackboxFile}</p>}
-            <p className="mt-1 text-xs text-gray-500">최대 50MB, 영상 파일만 업로드할 수 있습니다.</p>
+            <p className="mt-1 text-xs text-gray-500">선택 항목입니다. 최대 50MB, 영상 파일만 업로드할 수 있습니다.</p>
           </div>
 
           <div>
@@ -341,10 +342,11 @@ export function AccidentReportModal({
             )}
             {assigneeLoadError && <p className="mt-1 text-xs text-red-600">{assigneeLoadError}</p>}
             {fieldErrors.assignee && <p className="mt-1 text-xs text-red-600">{fieldErrors.assignee}</p>}
+            <p className="mt-1 text-xs text-gray-500">선택하지 않아도 사고 접수 후 이슈 담당자를 별도로 배정할 수 있습니다.</p>
           </div>
         </div>
 
-        <div className="flex items-center justify-end gap-3 p-6 border-t border-gray-200 bg-gray-50">
+        <div className="flex shrink-0 items-center justify-end gap-3 border-t border-gray-200 bg-gray-50 p-4 sm:p-6">
           <button
             onClick={handleResetAndClose}
             className="px-6 py-2.5 rounded-lg border border-gray-300 text-gray-700 font-medium hover:bg-gray-100 transition-colors"
@@ -355,7 +357,7 @@ export function AccidentReportModal({
           <button
             onClick={handleSubmit}
             className="px-6 py-2.5 rounded-lg bg-red-600 text-white font-medium hover:bg-red-700 transition-colors flex items-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
-            disabled={isSubmitting || isAssigneeLoading || assigneeOptions.length === 0}
+            disabled={isSubmitting}
           >
             {isSubmitting && <Loader2 className="h-4 w-4 animate-spin" />}
             {isSubmitting ? '등록 중...' : '사고 등록'}

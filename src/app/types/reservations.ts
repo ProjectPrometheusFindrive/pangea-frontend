@@ -135,8 +135,17 @@ export interface ReservationAccidentReport {
   accidentDate?: string;
   accidentDateTime?: string;
   accidentDisplayTime?: string;
+  accidentType?: string;
+  description?: string;
   blackboxFileName?: string;
   blackboxGcsObjectName?: string;
+  accidentEvidenceDocuments?: Record<string, string>;
+  accidentEvidenceDocumentDetails?: Record<string, {
+    objectName: string;
+    fileName?: string;
+    contentType?: string;
+    url?: string;
+  }>;
   handlerName?: string;
   accidentLocation?: string;
   opponentInfo?: string;

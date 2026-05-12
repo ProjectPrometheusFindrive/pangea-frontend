@@ -172,7 +172,9 @@ export interface AccidentReportPayload {
   accidentSecond: string;
   accidentDateTime: string;
   accidentDisplayTime: string;
-  blackboxFileName: string;
+  accidentType?: string;
+  description?: string;
+  blackboxFileName?: string;
   blackboxGcsObjectName?: string;
   handlerName?: string;
   recordedAt?: string;
@@ -193,10 +195,12 @@ export interface ReportReservationAccidentPayload {
 }
 
 export interface AccidentFollowupPayload {
+  actionItemId?: string;
   accidentLocation?: string;
   opponentInfo?: string;
   insuranceClaimNo?: string;
   evidenceStatus?: string;
+  accidentEvidenceDocuments?: Record<string, string>;
   insuranceProcessStatus?: string;
   repairCompletedAt?: string;
   customerChargeAmount?: number;

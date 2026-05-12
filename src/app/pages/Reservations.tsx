@@ -1706,6 +1706,76 @@ function getRentalTypeBadgeLabel(value: string | null | undefined): string {
   return '단기';
 }
 
+function getAccidentTypeLabel(value: string | null | undefined): string {
+  switch ((value ?? '').trim()) {
+    case 'major':
+      return '대형 사고';
+    case 'medium':
+      return '중형 사고';
+    case 'minor':
+      return '경미한 사고';
+    default:
+      return value || '-';
+  }
+}
+
+function getAccidentEvidenceStatusLabel(value: string | null | undefined): string {
+  switch ((value ?? '').trim()) {
+    case 'pending':
+      return '자료 대기';
+    case 'ready':
+      return '자료 확보';
+    case 'completed':
+      return '확인 완료';
+    case 'waived':
+      return '자료 생략';
+    default:
+      return value || '-';
+  }
+}
+
+function getAccidentInsuranceStatusLabel(value: string | null | undefined): string {
+  switch ((value ?? '').trim()) {
+    case 'reported':
+      return '접수';
+    case 'reviewing':
+      return '심사중';
+    case 'completed':
+      return '처리완료';
+    case 'customer_charge':
+      return '고객부담 전환';
+    default:
+      return value || '-';
+  }
+}
+
+function getAccidentCustomerChargeStatusLabel(value: string | null | undefined): string {
+  switch ((value ?? '').trim()) {
+    case 'none':
+      return '없음';
+    case 'pending':
+      return '수납 예정';
+    case 'due':
+      return '수납 필요';
+    case 'overdue':
+      return '연체';
+    case 'waived':
+      return '면제';
+    case 'paid':
+      return '수납 완료';
+    default:
+      return value || '-';
+  }
+}
+
+const RESERVATION_ACCIDENT_EVIDENCE_SLOTS = [
+  { key: 'accidentPhotos', label: '사고 사진' },
+  { key: 'blackbox', label: '블랙박스' },
+  { key: 'opponentInfo', label: '상대방 정보' },
+  { key: 'insuranceReceipt', label: '보험 접수증' },
+  { key: 'repairEstimate', label: '수리 견적서' },
+] as const;
+
 function normalizeViewFilter(value: string | null): ViewFilter {
   if (!value) {
     return 'all';
@@ -2077,12 +2147,36 @@ function toReservationAccidentReport(value: unknown): ReservationAccidentReport 
   if (!isRecord(value)) {
     return undefined;
   }
+  const accidentEvidenceDocuments = isRecord(value.accidentEvidenceDocuments)
+    ? Object.fromEntries(
+      Object.entries(value.accidentEvidenceDocuments)
+        .map(([key, entry]) => [key, toStringValue(entry) ?? ''])
+        .filter(([key, entry]) => String(key).trim() && entry),
+    )
+    : undefined;
+  const accidentEvidenceDocumentDetails = isRecord(value.accidentEvidenceDocumentDetails)
+    ? Object.fromEntries(
+      Object.entries(value.accidentEvidenceDocumentDetails)
+        .filter(([key, entry]) => String(key).trim() && isRecord(entry))
+        .map(([key, entry]) => [key, {
+          objectName: toStringValue((entry as Record<string, unknown>).objectName) ?? '',
+          fileName: toStringValue((entry as Record<string, unknown>).fileName) ?? undefined,
+          contentType: toStringValue((entry as Record<string, unknown>).contentType) ?? undefined,
+          url: toStringValue((entry as Record<string, unknown>).url) ?? undefined,
+        }])
+        .filter(([, entry]) => Boolean(entry.objectName)),
+    )
+    : undefined;
   return {
     accidentDate: toStringValue(value.accidentDate) ?? undefined,
     accidentDateTime: toStringValue(value.accidentDateTime) ?? undefined,
     accidentDisplayTime: toStringValue(value.accidentDisplayTime) ?? undefined,
+    accidentType: toStringValue(value.accidentType) ?? undefined,
+    description: toStringValue(value.description) ?? undefined,
     blackboxFileName: toStringValue(value.blackboxFileName) ?? undefined,
     blackboxGcsObjectName: toStringValue(value.blackboxGcsObjectName) ?? undefined,
+    accidentEvidenceDocuments,
+    accidentEvidenceDocumentDetails,
     handlerName: toStringValue(value.handlerName) ?? undefined,
     accidentLocation: toStringValue(value.accidentLocation) ?? undefined,
     opponentInfo: toStringValue(value.opponentInfo) ?? undefined,
@@ -2685,7 +2779,7 @@ export default function Reservations() {
   const [modelFilter, setModelFilter] = useState('all');
   const [vehicleSearchQuery, setVehicleSearchQuery] = useState('');
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
-  const [activeTab, setActiveTab] = useState<'reservation' | 'payment' | 'vehicle'>('reservation');
+  const [activeTab, setActiveTab] = useState<'reservation' | 'payment' | 'vehicle' | 'accident'>('reservation');
   const [showReturnConfirm, setShowReturnConfirm] = useState(false);
   const [showAccidentModal, setShowAccidentModal] = useState(false);
   const [accidentAssigneeOptions, setAccidentAssigneeOptions] = useState<AccidentReportAssigneeOption[]>([]);
@@ -3949,6 +4043,19 @@ export default function Reservations() {
   const selectedReservationAdvancePaymentText = selectedReservationBillingPlan?.advancePayment !== undefined
     ? toCurrencyValue(selectedReservationBillingPlan.advancePayment)
     : '-';
+  const selectedReservationAccidentReport = selectedReservation?.accidentReport ?? null;
+  const hasSelectedReservationAccidentReport = Boolean(selectedReservationAccidentReport);
+  const selectedReservationAccidentDocuments = selectedReservationAccidentReport?.accidentEvidenceDocuments ?? {};
+  const selectedReservationAccidentDocumentDetails = selectedReservationAccidentReport?.accidentEvidenceDocumentDetails ?? {};
+  const selectedReservationAccidentBlackboxObjectName = selectedReservationAccidentDocuments.blackbox
+    ?? selectedReservationAccidentReport?.blackboxGcsObjectName
+    ?? '';
+  const selectedReservationAccidentBlackboxDetail = selectedReservationAccidentBlackboxObjectName
+    ? selectedReservationAccidentDocumentDetails.blackbox ?? {
+      objectName: selectedReservationAccidentBlackboxObjectName,
+      fileName: selectedReservationAccidentReport?.blackboxFileName,
+    }
+    : null;
   const hasSelectedReservationBillingLedger = (
     selectedReservationChargeItemCount > 0
     || selectedReservationPaymentRecordCount > 0
@@ -3973,6 +4080,11 @@ export default function Reservations() {
       resolveReservationPaymentMethod(selectedReservation, selectedReservationPaymentSync),
     );
   }, [selectedReservation, selectedReservationPaymentSync]);
+  useEffect(() => {
+    if (activeTab === 'accident' && !hasSelectedReservationAccidentReport) {
+      setActiveTab('reservation');
+    }
+  }, [activeTab, hasSelectedReservationAccidentReport]);
   const isPaymentSyncStatusVisible = isPaymentSyncing || Boolean(paymentSyncError);
   const paymentSyncStatusMessage = isPaymentSyncing
     ? '결제 상태를 동기화하는 중입니다.'
@@ -5436,17 +5548,21 @@ export default function Reservations() {
     const accidentSecond = pad2(now.getSeconds());
     const accidentDateTime = now.toISOString();
     const accidentDisplayTime = toAccidentDisplayTime(now);
-    const blackboxFileName = sanitizeFileName(report.blackboxFile.name);
+    const blackboxFileName = report.blackboxFile ? sanitizeFileName(report.blackboxFile.name) : undefined;
 
     try {
-      const contentType = resolveReservationAttachmentContentType(report.blackboxFile);
-      const signedUpload = await signAssetUpload({
-        fileName: blackboxFileName,
-        folder: `rentals/${selectedReservation.id}/blackbox`,
-        contentType,
-        fileSize: report.blackboxFile.size,
-      });
-      await uploadFileToSignedUrl(signedUpload.uploadUrl, report.blackboxFile, signedUpload.contentType || contentType);
+      let blackboxGcsObjectName: string | undefined;
+      if (report.blackboxFile && blackboxFileName) {
+        const contentType = resolveReservationAttachmentContentType(report.blackboxFile);
+        const signedUpload = await signAssetUpload({
+          fileName: blackboxFileName,
+          folder: `rentals/${selectedReservation.id}/blackbox`,
+          contentType,
+          fileSize: report.blackboxFile.size,
+        });
+        await uploadFileToSignedUrl(signedUpload.uploadUrl, report.blackboxFile, signedUpload.contentType || contentType);
+        blackboxGcsObjectName = signedUpload.objectName;
+      }
       const payload = await reportReservationAccident(selectedReservation.id, {
         accidentReport: {
           accidentDate,
@@ -5455,9 +5571,11 @@ export default function Reservations() {
           accidentSecond,
           accidentDateTime,
           accidentDisplayTime,
-          blackboxFileName,
-          blackboxGcsObjectName: signedUpload.objectName,
-          handlerName: report.assignee,
+          accidentType: report.accidentType,
+          description: report.description,
+          ...(blackboxFileName ? { blackboxFileName } : {}),
+          ...(blackboxGcsObjectName ? { blackboxGcsObjectName } : {}),
+          ...(report.assignee ? { handlerName: report.assignee } : {}),
           recordedAt: accidentDateTime,
         },
         memo: report.description,
@@ -6144,6 +6262,22 @@ export default function Reservations() {
                       <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />
                     )}
                   </button>
+                  {hasSelectedReservationAccidentReport && (
+                    <button
+                      onClick={() => setActiveTab('accident')}
+                      className={`px-4 py-2 font-medium text-sm transition-colors relative ${
+                        activeTab === 'accident'
+                          ? 'text-blue-600'
+                          : 'text-gray-500 hover:text-gray-700'
+                      }`}
+                    >
+                      <AlertTriangle className="w-4 h-4 inline mr-2" />
+                      사고 처리
+                      {activeTab === 'accident' && (
+                        <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />
+                      )}
+                    </button>
+                  )}
                 </div>
 
                 {isDetailLoading && (
@@ -6908,6 +7042,132 @@ export default function Reservations() {
                       )}
                     </div>
                     )}
+                  </div>
+                )}
+
+                {/* 사고 처리 탭 */}
+                {activeTab === 'accident' && selectedReservationAccidentReport && (
+                  <div className="space-y-4">
+                    <div className="rounded-lg border border-orange-100 bg-orange-50 p-4">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <label className="text-xs font-semibold text-orange-700 uppercase">사고 접수</label>
+                          <p className="mt-1 text-lg font-bold text-gray-900">
+                            {getAccidentTypeLabel(selectedReservationAccidentReport.accidentType)}
+                          </p>
+                          <p className="mt-1 text-sm text-gray-700">
+                            {selectedReservationAccidentReport.accidentDisplayTime
+                              || formatDateKst(selectedReservationAccidentReport.accidentDateTime || selectedReservationAccidentReport.accidentDate, '-')}
+                          </p>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-orange-700">
+                            사고자료 {getAccidentEvidenceStatusLabel(selectedReservationAccidentReport.evidenceStatus)}
+                          </span>
+                          <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-orange-700">
+                            보험처리 {getAccidentInsuranceStatusLabel(selectedReservationAccidentReport.insuranceProcessStatus)}
+                          </span>
+                        </div>
+                      </div>
+                      {selectedReservationAccidentReport.description && (
+                        <div className="mt-3 rounded-lg bg-white px-3 py-2">
+                          <p className="text-xs font-semibold text-gray-500">최초 사고 등록 메모</p>
+                          <p className="mt-1 whitespace-pre-wrap text-sm text-gray-900">{selectedReservationAccidentReport.description}</p>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <div className="rounded-lg border border-gray-200 bg-white p-4">
+                        <p className="text-sm font-bold text-gray-900">사고 접수 정보</p>
+                        <div className="mt-3 grid gap-3 text-sm">
+                          <div>
+                            <span className="text-xs font-semibold text-gray-500">담당자</span>
+                            <p className="mt-1 text-gray-900">{selectedReservationAccidentReport.handlerName || '-'}</p>
+                          </div>
+                          <div>
+                            <span className="text-xs font-semibold text-gray-500">사고 장소</span>
+                            <p className="mt-1 text-gray-900">{selectedReservationAccidentReport.accidentLocation || '-'}</p>
+                          </div>
+                          <div>
+                            <span className="text-xs font-semibold text-gray-500">상대방 정보</span>
+                            <p className="mt-1 whitespace-pre-wrap text-gray-900">{selectedReservationAccidentReport.opponentInfo || '-'}</p>
+                          </div>
+                          <div>
+                            <span className="text-xs font-semibold text-gray-500">보험접수번호</span>
+                            <p className="mt-1 text-gray-900">{selectedReservationAccidentReport.insuranceClaimNo || '-'}</p>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="rounded-lg border border-gray-200 bg-white p-4">
+                        <p className="text-sm font-bold text-gray-900">처리 진행 상태</p>
+                        <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
+                          <div>
+                            <span className="text-xs font-semibold text-gray-500">사고자료</span>
+                            <p className="mt-1 font-semibold text-gray-900">{getAccidentEvidenceStatusLabel(selectedReservationAccidentReport.evidenceStatus)}</p>
+                          </div>
+                          <div>
+                            <span className="text-xs font-semibold text-gray-500">보험처리</span>
+                            <p className="mt-1 font-semibold text-gray-900">{getAccidentInsuranceStatusLabel(selectedReservationAccidentReport.insuranceProcessStatus)}</p>
+                          </div>
+                          <div>
+                            <span className="text-xs font-semibold text-gray-500">수리완료일</span>
+                            <p className="mt-1 font-semibold text-gray-900">{formatDateKst(selectedReservationAccidentReport.repairCompletedAt, '-')}</p>
+                          </div>
+                          <div>
+                            <span className="text-xs font-semibold text-gray-500">고객부담 상태</span>
+                            <p className="mt-1 font-semibold text-gray-900">{getAccidentCustomerChargeStatusLabel(selectedReservationAccidentReport.customerChargeStatus)}</p>
+                          </div>
+                          <div>
+                            <span className="text-xs font-semibold text-gray-500">고객부담금</span>
+                            <p className="mt-1 font-bold text-red-600">{toCurrencyValue(selectedReservationAccidentReport.customerChargeAmount ?? 0)}</p>
+                          </div>
+                          <div>
+                            <span className="text-xs font-semibold text-gray-500">최근 갱신</span>
+                            <p className="mt-1 font-semibold text-gray-900">{formatDateKst(selectedReservationAccidentReport.followupUpdatedAt, '-')}</p>
+                          </div>
+                        </div>
+                        {selectedReservationAccidentReport.memo && (
+                          <div className="mt-3 rounded-lg bg-gray-50 px-3 py-2">
+                            <p className="text-xs font-semibold text-gray-500">후속 처리 메모</p>
+                            <p className="mt-1 whitespace-pre-wrap text-sm text-gray-900">{selectedReservationAccidentReport.memo}</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="rounded-lg border border-gray-200 bg-white p-4">
+                      <p className="text-sm font-bold text-gray-900">사고 증빙 자료</p>
+                      <div className="mt-3 grid gap-2 md:grid-cols-2">
+                        {RESERVATION_ACCIDENT_EVIDENCE_SLOTS.map((slot) => {
+                          const objectName = slot.key === 'blackbox'
+                            ? selectedReservationAccidentBlackboxObjectName
+                            : selectedReservationAccidentDocuments[slot.key];
+                          const detail = slot.key === 'blackbox'
+                            ? selectedReservationAccidentBlackboxDetail
+                            : selectedReservationAccidentDocumentDetails[slot.key];
+                          const fileName = detail?.fileName || objectName?.split('/').pop() || '';
+                          return (
+                            <div key={slot.key} className="flex items-center justify-between gap-3 rounded-lg border border-gray-100 bg-gray-50 px-3 py-2">
+                              <div className="min-w-0">
+                                <p className="text-xs font-semibold text-gray-500">{slot.label}</p>
+                                <p className="mt-1 truncate text-sm font-medium text-gray-900">{fileName || '미첨부'}</p>
+                              </div>
+                              {objectName && (
+                                <button
+                                  type="button"
+                                  onClick={() => void handleOpenReservationDocument(objectName)}
+                                  className="shrink-0 rounded-md border border-gray-300 bg-white px-2 py-1 text-xs font-semibold text-gray-700 hover:bg-gray-100"
+                                >
+                                  열기
+                                </button>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
                   </div>
                 )}
 
