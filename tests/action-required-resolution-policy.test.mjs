@@ -59,6 +59,9 @@ test('accident claim card stores payer account and difference memo fields', () =
   const source = readProjectFile('src/app/pages/ActionRequired.tsx');
   const service = readProjectFile('src/services/accidentClaims.ts');
 
+  assert.match(source, /folder: `accident-claims\/\$\{reservationId\}\/\$\{folderName\}`/u);
+  assert.match(source, /uploadAccidentClaimFiles\(reservationId, accidentApprovalDocumentFiles, 'approval-documents'\)/u);
+  assert.match(source, /uploadAccidentClaimFiles\(reservationId, \[accidentClaimDocumentFile\], 'documents'\)/u);
   assert.match(source, /billingAccount: ''/u);
   assert.match(source, /supplementMemo: ''/u);
   assert.match(source, /placeholder="보험사 청구 계정"/u);
@@ -146,38 +149,105 @@ test('payment issue cards use compact settlement UI instead of repeated work con
 
 test('rental accident issue cards expose detail-type compact panels', () => {
   const source = readProjectFile('src/app/pages/ActionRequired.tsx');
+  const modal = readProjectFile('src/app/components/AccidentReportModal.tsx');
+  const service = readProjectFile('src/services/reservations.ts');
 
-  assert.match(source, /type RentalAccidentIssueMode = 'reported' \| 'evidence' \| 'insurance'/u);
+  assert.match(source, /type RentalAccidentIssueMode = 'intake' \| 'evidence' \| 'insurance'/u);
   assert.match(source, /function getRentalAccidentIssueMode\(item: ActionItem \| null \| undefined\): RentalAccidentIssueMode/u);
   assert.match(source, /function getRentalAccidentPanelTitle\(mode: RentalAccidentIssueMode\): string/u);
   assert.match(source, /function getRentalAccidentSummaryText\(mode: RentalAccidentIssueMode\): string/u);
+  assert.match(source, /function isRentalAccidentIssueCompleteForMode\(mode: RentalAccidentIssueMode, draft: RentalAccidentDraft\): boolean/u);
+  assert.match(source, /function getRentalAccidentSaveButtonLabel\(mode: RentalAccidentIssueMode\): string/u);
   assert.match(source, /!isRentalAccidentActionItem\(selectedItem\)/u);
-  assert.match(source, /대여 중 사고 후속 처리/u);
+  assert.match(source, /사고 접수 정보 입력 필요/u);
+  assert.match(source, /사고자료 준비 필요/u);
+  assert.match(source, /보험처리 결과 확인 필요/u);
   assert.match(source, /사고자료 상태/u);
   assert.match(source, /보험처리 상태/u);
   assert.match(source, /사고 증빙 자료/u);
   assert.match(source, /사고 기본 정보/u);
+  assert.match(source, /registrationDescription/u);
+  assert.match(source, /최초 사고 등록 메모/u);
+  assert.match(source, /buildFallbackDocumentDetail\(initialBlackboxObjectName, initialBlackboxFileName\)/u);
+  assert.match(source, /actionItemId: selectedItem\.id/u);
+  assert.match(source, /현재 단계 이력을 완료 처리/u);
+  assert.doesNotMatch(source, /사고 후속 정보를 저장하고 이슈 완료를 시도했습니다/u);
   assert.match(source, /shouldShowRentalAccidentCustomerCharge/u);
-  assert.doesNotMatch(source, /type RentalAccidentIssueMode = 'reported' \| 'evidence' \| 'insurance' \| 'other'/u);
+  assert.match(modal, /blackboxFile\?: File \| null/u);
+  assert.match(modal, /선택 항목입니다\. 최대 50MB/u);
+  assert.match(modal, /max-h-\[calc\(100dvh-2rem\)\]/u);
+  assert.match(modal, /flex-col overflow-hidden/u);
+  assert.match(modal, /flex-1 space-y-4 overflow-y-auto/u);
+  assert.match(modal, /flex shrink-0 items-center justify-end/u);
+  assert.match(modal, /aria-label="사고 등록 닫기"/u);
+  assert.match(modal, /event\.key === 'Escape'/u);
+  assert.doesNotMatch(modal, /블랙박스 첨부는 필수입니다\./u);
+  assert.doesNotMatch(modal, /담당자를 선택해 주세요\./u);
+  assert.match(service, /blackboxFileName\?: string/u);
+  assert.match(service, /accidentType\?: string/u);
+  assert.match(service, /actionItemId\?: string;/u);
+  assert.doesNotMatch(source, /type RentalAccidentIssueMode = 'reported' \| 'evidence' \| 'insurance'/u);
+});
+
+test('reservation detail exposes accident processing tab only for accident reports', () => {
+  const source = readProjectFile('src/app/pages/Reservations.tsx');
+  const types = readProjectFile('src/app/types/reservations.ts');
+
+  assert.match(source, /'reservation' \| 'payment' \| 'vehicle' \| 'accident'/u);
+  assert.match(source, /hasSelectedReservationAccidentReport && \(/u);
+  assert.match(source, /사고 처리/u);
+  assert.match(source, /activeTab === 'accident' && selectedReservationAccidentReport/u);
+  assert.match(source, /최초 사고 등록 메모/u);
+  assert.match(source, /사고 증빙 자료/u);
+  assert.match(source, /selectedReservationAccidentBlackboxObjectName/u);
+  assert.match(source, /handleOpenReservationDocument\(objectName\)/u);
+  assert.match(types, /accidentEvidenceDocuments\?: Record<string, string>;/u);
+  assert.match(types, /accidentEvidenceDocumentDetails\?: Record<string,/u);
 });
 
 test('accident claim issue cards expose stage-specific compact panels', () => {
   const source = readProjectFile('src/app/pages/ActionRequired.tsx');
 
   assert.match(source, /type AccidentClaimIssueMode = 'intake' \| 'submission' \| 'settlement' \| 'payment' \| 'difference' \| 'other'/u);
+  assert.match(source, /type SettlementPaymentCheckStatus = 'required' \| 'completed' \| 'waiting' \| 'not_applicable'/u);
+  assert.match(source, /type SettlementDifferenceStatus = 'required' \| 'settled' \| 'not_applicable'/u);
   assert.match(source, /function getAccidentClaimIssueMode\(item: ActionItem \| null \| undefined\): AccidentClaimIssueMode/u);
   assert.match(source, /function isCompactAccidentClaimActionItem\(item: ActionItem \| null \| undefined\): item is ActionItem/u);
   assert.match(source, /function getAccidentClaimSummaryText\(mode: AccidentClaimIssueMode\): string/u);
   assert.match(source, /function getAccidentClaimDifferenceAmount\(draft: AccidentClaimDraft\): number/u);
+  assert.match(source, /function normalizeSettlementPaymentCheckStatus\(item: ActionItem\): SettlementPaymentCheckStatus/u);
+  assert.match(source, /function DifferencePayerRadioCards/u);
   assert.match(source, /documentStatus: string;/u);
   assert.match(source, /claimStatus: string;/u);
   assert.match(source, /submittedAt: string;/u);
   assert.match(source, /!isCompactAccidentClaimActionItem\(selectedItem\)/u);
   assert.match(source, /추가 접수 정보/u);
   assert.match(source, /청구금액 및 차액 정보/u);
-  assert.match(source, /청구 지연/u);
+  assert.match(source, /청구 제출 지연/u);
+  assert.match(source, /claim_preparing/u);
+  assert.match(source, /청구 준비 중/u);
+  assert.match(source, /ready_to_claim/u);
+  assert.match(source, /제출 가능/u);
+  assert.match(source, /partial_recognized/u);
+  assert.match(source, /일부 인정/u);
+  assert.match(source, /선택된 파일 없음/u);
+  assert.match(source, /저장된 청구 서류/u);
+  assert.match(source, /미제출/u);
+  assert.match(source, /보험사에 청구 제출 처리/u);
+  assert.match(source, /제출하면 청구 상태가 진행 중으로 변경됩니다\./u);
   assert.match(source, /정리할 차액/u);
+  assert.match(source, /정산 체크리스트/u);
+  assert.match(source, /보험금 입금 상태와 대차료 차액 정산 상태를 확인하세요\./u);
   assert.match(source, /보험 인정금액/u);
+  assert.match(source, /차액 처리 방식/u);
+  assert.match(source, /고객에게 청구/u);
+  assert.match(source, /보험사에 재청구/u);
+  assert.match(source, /차액 면제 처리/u);
+  assert.match(source, /보험 인정금액 입력 후 차액 처리 방식을 선택할 수 있습니다\./u);
+  assert.doesNotMatch(source, /보험금 입금 확인 완료\/대상 아님/u);
+  assert.doesNotMatch(source, /보험금 입금 여부와 대차료 차액 정리 상태를 한 카드에서 확인합니다\./u);
+  assert.doesNotMatch(source, /자산 페이지로 이동/u);
+  assert.doesNotMatch(source, /예약 페이지로 이동/u);
 });
 
 test('remaining review 05 issue cards expose repair-return and theft-risk hierarchy', () => {
