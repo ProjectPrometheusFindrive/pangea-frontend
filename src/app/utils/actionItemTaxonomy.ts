@@ -29,7 +29,7 @@ export const ACTION_SUBCATEGORIES_BY_CATEGORY: Record<ActionMainCategory, string
     '미납 결제 확인',
   ],
   '반납/회수': ['차량 반납/회수 확인', '종료 정산 필요'],
-  '대여 중 사고': ['대여 중 사고 후속 처리'],
+  '대여 중 사고': ['사고 접수 정보 입력 필요', '사고자료 준비 필요', '보험처리 결과 확인 필요'],
   '대차/보험청구': [
     '사고정보 입력 필요',
     '운전자/면허 정보 입력 필요',
@@ -95,9 +95,10 @@ export function normalizeActionSubCategory(
   const explicit = (subCategory ?? '').trim();
   if (explicit) {
     const canonicalSubCategory: Record<string, string> = {
-      '단기/장기 렌트 고객 사고 접수': '대여 중 사고 후속 처리',
-      사고자료확인: '대여 중 사고 후속 처리',
-      보험처리확인: '대여 중 사고 후속 처리',
+      '단기/장기 렌트 고객 사고 접수': '사고 접수 정보 입력 필요',
+      '대여 중 사고 후속 처리': '사고 접수 정보 입력 필요',
+      사고자료확인: '사고자료 준비 필요',
+      보험처리확인: '보험처리 결과 확인 필요',
       '보험청구 서류 준비': '보험청구 제출/보완',
       보험청구지연: '보험청구 제출/보완',
       '보험금 입금 확인': '보험금 정산 확인',
@@ -125,10 +126,12 @@ export function normalizeActionSubCategory(
     accident_replacement_approval_required: '대차 승인 확인',
     accident_claim_delayed: '보험청구 제출/보완',
     accident_customer_deductible_due: '고객부담금 수납',
-    rental_accident_reported: '대여 중 사고 후속 처리',
-    rental_accident_followup: '대여 중 사고 후속 처리',
-    rental_accident_evidence_required: '대여 중 사고 후속 처리',
-    rental_accident_insurance_processing: '대여 중 사고 후속 처리',
+    rental_accident_intake_required: '사고 접수 정보 입력 필요',
+    rental_accident_reported: '사고 접수 정보 입력 필요',
+    rental_accident_followup: '사고 접수 정보 입력 필요',
+    rental_accident_evidence_required: '사고자료 준비 필요',
+    rental_accident_insurance_result_required: '보험처리 결과 확인 필요',
+    rental_accident_insurance_processing: '보험처리 결과 확인 필요',
   };
   const reason = (reasonType ?? '').trim();
   if (reason && reasonMap[reason]) {
@@ -143,7 +146,7 @@ export function normalizeActionSubCategory(
     return '정기점검 만료 임박';
   }
   if (token.includes('사고접수')) {
-    return '대여 중 사고 후속 처리';
+    return '사고 접수 정보 입력 필요';
   }
   if (token.includes('미납') || token.includes('결제')) {
     return '미납 결제 확인';
