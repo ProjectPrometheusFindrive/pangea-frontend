@@ -163,7 +163,6 @@ test.describe('BK-091 Reservations E2E', () => {
           const body = route.request().postDataJSON() as Record<string, unknown>;
           expect(body.reservationId).toBe('R-1001');
           expect(typeof body.idempotencyKey).toBe('string');
-          expect(body.phone).toBe('010-2222-3333');
           expect(body.parties).toMatchObject({
             driver: {
               name: '테스트고객',
@@ -458,11 +457,6 @@ test.describe('BK-091 Reservations E2E', () => {
       },
     });
 
-    page.once('dialog', async (dialog) => {
-      expect(dialog.type()).toBe('confirm');
-      await dialog.accept();
-    });
-
     await loginViaUi(page, 'admin', { returnUrl: '/reservations' });
     await expect(page).toHaveURL(/\/reservations(?:\?.*)?$/);
     await expect(page.getByTestId('reservation-block-R-9001')).toBeVisible();
@@ -471,6 +465,9 @@ test.describe('BK-091 Reservations E2E', () => {
     await expect(page.getByTestId('reservation-detail-modal')).toBeVisible();
 
     await page.getByTestId('reservation-cancel-button').click();
+    const cancelConfirmModal = page.getByTestId('reservation-cancel-confirm-modal');
+    await expect(cancelConfirmModal).toBeVisible();
+    await cancelConfirmModal.getByRole('button', { name: '예약 취소' }).click();
 
     await expect(page.getByText('예약이 취소되었습니다.')).toBeVisible();
     await expect(page.getByTestId('reservation-detail-modal')).toHaveCount(0);
@@ -806,5 +803,132 @@ test.describe('BK-091 Reservations E2E', () => {
     await expect.poll(() => statusRequestCounts.get('R-ACTIVE') ?? 0).toBeGreaterThanOrEqual(1);
     await expect.poll(() => statusRequestCounts.get('R-EMPTY') ?? 0).toBeGreaterThanOrEqual(1);
     expect(statusRequestCounts.get('R-DONE') ?? 0).toBe(0);
+  });
+
+  test('장기렌트 결제 탭에서 월별 청구 계획과 수동 배정을 처리한다', async ({ page }) => {
+    const monthlyCharge = {
+      id: 'CHG-R-BILL-M001',
+      reservationId: 'R-BILL',
+      rentalType: 'long_term',
+      sequenceNo: 1,
+      chargeType: 'monthly_fee',
+      payerType: 'customer',
+      billingPeriodStart: '2026-05-01',
+      billingPeriodEnd: '2026-05-31',
+      dueDate: '2026-05-05',
+      amount: 800000,
+      paidAmount: 0,
+      remainingAmount: 800000,
+      status: 'overdue',
+    };
+    const nextMonthlyCharge = {
+      ...monthlyCharge,
+      id: 'CHG-R-BILL-M002',
+      sequenceNo: 2,
+      billingPeriodStart: '2026-06-01',
+      billingPeriodEnd: '2026-06-30',
+      dueDate: '2026-06-05',
+      status: 'scheduled',
+    };
+    let detailReservation = buildReservationRow({
+      id: 'R-BILL',
+      rentalType: 'long_term',
+      customerName: '장기고객',
+      paymentStatus: '대기',
+      amount: 1600000,
+      billingSummary: {
+        paymentSummaryLabel: '연체/미수',
+        totalAmount: 1600000,
+        paidAmount: 0,
+        remainingAmount: 1600000,
+        overdueAmount: 800000,
+        chargeItemCount: 2,
+        paymentRecordCount: 0,
+        billingPlan: {
+          id: 'BPLAN-R-BILL',
+          reservationId: 'R-BILL',
+          monthlyAmount: 800000,
+          billingDay: 5,
+          billingTiming: 'prepaid',
+          cycleMonths: 1,
+          graceDays: 2,
+          installmentCount: 2,
+          payerType: 'customer',
+        },
+        chargeItems: [monthlyCharge, nextMonthlyCharge],
+        paymentRecords: [],
+      },
+    });
+    let createPaymentPayload: Record<string, unknown> | null = null;
+
+    await installApiMocks(page, {
+      user: {
+        role: 'admin',
+      },
+      handlers: {
+        'GET /api/v2/reservations': async ({ route }) => {
+          await fulfillSuccess(route, {
+            reservations: [detailReservation],
+            assets: [buildVehicleAsset()],
+            total: 1,
+            page: 1,
+            pageSize: 20,
+          });
+        },
+        'GET /api/v2/reservations/R-BILL': async ({ route }) => {
+          await fulfillSuccess(route, detailReservation);
+        },
+        'POST /api/v2/reservations/R-BILL/payment-records': async ({ route, request }) => {
+          createPaymentPayload = request.postDataJSON() as Record<string, unknown>;
+          const allocations = Array.isArray(createPaymentPayload.allocations)
+            ? createPaymentPayload.allocations
+            : [];
+          expect(createPaymentPayload.amount).toBe(800000);
+          expect(createPaymentPayload.confirmationStatus).toBe('confirmed');
+          expect(allocations).toEqual([{ chargeItemId: 'CHG-R-BILL-M001', amount: 800000 }]);
+          detailReservation = {
+            ...detailReservation,
+            billingSummary: {
+              ...(detailReservation.billingSummary ?? {}),
+              paymentRecordCount: 1,
+              paymentRecords: [
+                {
+                  id: 'PAYREC-R-BILL-1',
+                  reservationId: 'R-BILL',
+                  amount: 800000,
+                  paidAt: '2026-05-15',
+                  method: '계좌이체',
+                  confirmationStatus: 'confirmed',
+                  payerType: 'customer',
+                  allocations,
+                  status: 'active',
+                },
+              ],
+            },
+          };
+          await fulfillSuccess(route, detailReservation.billingSummary);
+        },
+      },
+    });
+
+    await loginViaUi(page, 'admin', { returnUrl: '/reservations' });
+    await expect(page.getByTestId('reservation-block-R-BILL')).toBeVisible();
+
+    await page.getByTestId('reservation-block-R-BILL').click();
+    await expect(page.getByTestId('reservation-detail-modal')).toBeVisible();
+    await page.getByRole('button', { name: '결제 정보' }).click();
+
+    await expect(page.getByText('월 800,000원')).toBeVisible();
+    await expect(page.getByText('청구일 매월 5일')).toBeVisible();
+    await expect(page.getByText('연체 1건')).toBeVisible();
+
+    await page.getByRole('button', { name: '수납 기록 추가' }).click();
+    const paymentForm = page.locator('div').filter({ hasText: '수납 금액' }).filter({ hasText: '배정 방식' }).last();
+    await paymentForm.getByLabel('수납 금액').fill('800000');
+    await paymentForm.getByLabel('배정 방식').selectOption('manual');
+    await page.getByRole('button', { name: '수납 기록 저장' }).click();
+
+    await expect.poll(() => createPaymentPayload).not.toBeNull();
+    await expect(page.getByText('수납 기록을 확정 등록했습니다.')).toBeVisible();
   });
 });

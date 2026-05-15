@@ -2771,12 +2771,12 @@ export default function Settings() {
 
   const handleFileUpload = async (file: File) => {
     if (!canEditSettings) {
-      toast.error('??? CSV ???????????????.');
+      toast.error('CSV 파일을 업로드할 권한이 없습니다.');
       return;
     }
 
     if (!file.name.endsWith('.csv')) {
-      alert('CSV ??????????????????');
+      alert('CSV 파일만 업로드할 수 있습니다.');
       return;
     }
 
@@ -2784,7 +2784,7 @@ export default function Settings() {
       const { data, encoding } = await parseCsvFileWithEncodingFallback(file);
 
       if (data.length === 0) {
-        alert('??????????? ??????');
+        alert('업로드할 데이터가 없습니다.');
         return;
       }
 
@@ -2807,11 +2807,11 @@ export default function Settings() {
       });
 
       if (encoding !== 'utf-8') {
-        toast.success('CSV? ' + encoding + ' ????? ?????.');
+        toast.success(`CSV 파일을 ${encoding} 인코딩으로 읽었습니다.`);
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'CSV parsing error';
-      alert('??? ??? ???: ' + message);
+      alert(`파일 처리 중 오류가 발생했습니다: ${message}`);
     }
   };
   const handleDragOver = (event: React.DragEvent) => {

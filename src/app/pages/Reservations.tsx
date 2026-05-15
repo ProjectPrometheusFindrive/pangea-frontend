@@ -50,7 +50,7 @@ import type { Reservation, ReservationAccidentClaim, ReservationAccidentReport, 
 import { ApiError } from '../../services/api';
 import { signAssetUpload, uploadFileToSignedUrl } from '../../services/assetOcr';
 import { getAssetsList } from '../../services/assets';
-import { createReservationChargeItem, createReservationPaymentRecord, getUploadDownloadUrl, patchChargeItem, voidPaymentRecord } from '../../services/billing';
+import { allocatePaymentRecord, confirmPaymentRecord, createReservationChargeItem, createReservationPaymentRecord, getUploadDownloadUrl, patchChargeItem, voidPaymentRecord, type PaymentEvidenceRef } from '../../services/billing';
 import { patchPaymentStatus } from '../../services/payments';
 import {
   getActionRequiredList,
@@ -104,6 +104,37 @@ type CancellationSettlementStatusFilter = 'all' | 'not_required' | 'fee_due' | '
 type LongTermAccountStatusFilter = 'all' | 'not_applicable' | 'active_normal' | 'due_soon' | 'due' | 'partial' | 'overdue_1' | 'overdue_2_plus' | 'collection_review' | 'early_termination' | 'closeout' | 'closed';
 type AccidentReplacementStatusFilter = 'all' | 'not_applicable' | 'info_missing' | 'approval_pending' | 'delivery_ready' | 'in_use' | 'repair_done_not_returned' | 'returned' | 'ready_to_claim' | 'claiming' | 'insurance_paid' | 'partial_recognized' | 'difference_settlement' | 'disputed' | 'closed';
 type DueFilter = 'pickup' | 'return' | null;
+type ChargeItemDraft = {
+  chargeType: string;
+  payerType: string;
+  status: string;
+  amount: string;
+  dueDate: string;
+  memo: string;
+};
+type PaymentRecordDraft = {
+  amount: string;
+  method: string;
+  payerType: string;
+  paidAt: string;
+  confirmationStatus: 'needs_confirmation' | 'confirmed';
+  allocationMode: 'auto' | 'manual';
+  allocations: Array<{
+    chargeItemId: string;
+    amount: string;
+  }>;
+  depositorName: string;
+  approvalNo: string;
+  memo: string;
+};
+type ChargeItemExceptionAction = 'refund_complete' | 'refund_waive' | 'waive' | 'dispute' | 'release_dispute';
+type ChargeItemExceptionDraft = {
+  itemId: string;
+  action: ChargeItemExceptionAction;
+  reason: string;
+  memo: string;
+  evidenceFile: File | null;
+};
 
 function createTodayBaseDate(): Date {
   const now = new Date();
@@ -183,6 +214,34 @@ const ACCIDENT_REPLACEMENT_STATUS_LABELS: Record<Exclude<AccidentReplacementStat
   disputed: '분쟁/보류',
   closed: '종결',
 };
+const MANUAL_CHARGE_TYPE_OPTIONS = [
+  { value: 'rental_fee', label: '대여료' },
+  { value: 'monthly_fee', label: '월 렌트료' },
+  { value: 'additional_fee', label: '추가비용' },
+  { value: 'late_fee', label: '연체료' },
+  { value: 'fuel_fee', label: '유류비' },
+  { value: 'toll_fee', label: '통행료' },
+  { value: 'damage_fee', label: '손상비' },
+  { value: 'deductible', label: '자기부담금' },
+  { value: 'insurance_claim', label: '보험청구' },
+  { value: 'refund', label: '환불' },
+  { value: 'cancellation_fee', label: '취소수수료' },
+  { value: 'adjustment', label: '정정' },
+];
+const MANUAL_PAYER_TYPE_OPTIONS = [
+  { value: 'customer', label: '고객' },
+  { value: 'insurer', label: '보험사' },
+  { value: 'repair_shop', label: '정비소' },
+  { value: 'partner', label: '제휴처' },
+];
+const MANUAL_CHARGE_STATUS_OPTIONS = [
+  { value: 'pending', label: '대기' },
+  { value: 'scheduled', label: '예정' },
+  { value: 'overdue', label: '연체' },
+  { value: 'refund_due', label: '환불필요' },
+  { value: 'disputed', label: '보류' },
+];
+const MANUAL_PAYMENT_METHOD_OPTIONS = ['카드', '현금', '계좌이체'];
 
 type FieldErrorMap<TField extends string> = Partial<Record<TField, string>>;
 type ReservationsHydrationPayload = {
@@ -666,6 +725,23 @@ async function uploadReservationCreationDocument(file: File, reservationId: stri
   });
   await uploadFileToSignedUrl(signedUpload.uploadUrl, file, signedUpload.contentType || contentType);
   return signedUpload.objectName;
+}
+
+async function uploadBillingEvidenceDocument(file: File, reservationId: string): Promise<PaymentEvidenceRef> {
+  const contentType = resolveReservationAttachmentContentType(file);
+  const signedUpload = await signAssetUpload({
+    fileName: file.name,
+    folder: `reservations/${reservationId}/billing`,
+    contentType,
+    fileSize: file.size,
+  });
+  await uploadFileToSignedUrl(signedUpload.uploadUrl, file, signedUpload.contentType || contentType);
+  return {
+    objectName: signedUpload.objectName,
+    fileName: file.name,
+    contentType: signedUpload.contentType || contentType,
+    attachedAt: new Date().toISOString(),
+  };
 }
 
 function applySyncedPaymentStatusToReservation(
@@ -2267,6 +2343,64 @@ function getChargeStatusLabel(value: string | undefined): string {
   }
 }
 
+function getPaymentConfirmationStatusLabel(value: string | undefined): string {
+  switch ((value ?? '').trim()) {
+    case 'confirmed':
+      return '확정';
+    case 'needs_confirmation':
+      return '확인 필요';
+    case 'voided':
+      return '무효';
+    default:
+      return value || '-';
+  }
+}
+
+function formatPaymentAllocations(record: ReservationPaymentRecord, chargeItems: ReservationChargeItem[]): string {
+  const allocations = record.allocations?.filter((allocation) => allocation.chargeItemId && (allocation.amount ?? 0) > 0) ?? [];
+  if (allocations.length === 0) {
+    return '자동 배정 대기';
+  }
+  return allocations
+    .map((allocation) => {
+      const charge = chargeItems.find((item) => item.id === allocation.chargeItemId);
+      const chargeLabel = charge ? getChargeTypeLabel(charge.chargeType) : allocation.chargeItemId;
+      return `${chargeLabel} ${toCurrencyValue(allocation.amount ?? 0)}`;
+    })
+    .join(' / ');
+}
+
+function defaultPaymentAllocationDrafts(chargeItems: ReservationChargeItem[]): PaymentRecordDraft['allocations'] {
+  const firstChargeItem = chargeItems.find((item) => item.chargeType !== 'refund' && item.remainingAmount > 0);
+  return firstChargeItem ? [{ chargeItemId: firstChargeItem.id, amount: String(firstChargeItem.remainingAmount) }] : [];
+}
+
+function paymentAllocationDraftsFromRecord(record: ReservationPaymentRecord): PaymentRecordDraft['allocations'] {
+  return (record.allocations ?? [])
+    .filter((allocation) => allocation.chargeItemId)
+    .map((allocation) => ({
+      chargeItemId: allocation.chargeItemId ?? '',
+      amount: allocation.amount !== undefined ? String(allocation.amount) : '',
+    }));
+}
+
+function getChargeItemExceptionActionLabel(action: ChargeItemExceptionAction): string {
+  switch (action) {
+    case 'refund_complete':
+      return '환불 완료';
+    case 'refund_waive':
+      return '환불 면제';
+    case 'waive':
+      return '면제';
+    case 'dispute':
+      return '보류';
+    case 'release_dispute':
+      return '보류 해제';
+    default:
+      return '예외 처리';
+  }
+}
+
 function toReservationPaymentInfo(
   row: Record<string, unknown>,
   options: {
@@ -2430,6 +2564,8 @@ function toReservationRow(row: unknown, index: number): Reservation | null {
     issues,
     phone: (
       parties?.driver?.phone
+      ?? toStringValue(row.phone)
+      ?? parseReservationMemoValue(row.memo, 'phone')
       ?? '-'
     ),
     paymentMethod: normalizePaymentMethod(paymentMethodSource),
@@ -2808,6 +2944,34 @@ export default function Reservations() {
   const [isPaymentMethodSaving, setIsPaymentMethodSaving] = useState(false);
   const [isPaymentAmountSaving, setIsPaymentAmountSaving] = useState(false);
   const [activePaymentRecordMutationId, setActivePaymentRecordMutationId] = useState<string | null>(null);
+  const [showChargeItemForm, setShowChargeItemForm] = useState(false);
+  const [chargeItemDraft, setChargeItemDraft] = useState<ChargeItemDraft>(() => ({
+    chargeType: 'additional_fee',
+    payerType: 'customer',
+    status: 'pending',
+    amount: '',
+    dueDate: toDateLabelFromOffset(0),
+    memo: '',
+  }));
+  const [isChargeItemCreating, setIsChargeItemCreating] = useState(false);
+  const [showPaymentRecordForm, setShowPaymentRecordForm] = useState(false);
+  const [paymentRecordDraft, setPaymentRecordDraft] = useState<PaymentRecordDraft>(() => ({
+    amount: '',
+    method: '카드',
+    payerType: 'customer',
+    paidAt: toDateLabelFromOffset(0),
+    confirmationStatus: 'confirmed',
+    allocationMode: 'auto',
+    allocations: [],
+    depositorName: '',
+    approvalNo: '',
+    memo: '',
+  }));
+  const [isPaymentRecordCreating, setIsPaymentRecordCreating] = useState(false);
+  const [editingAllocationRecordId, setEditingAllocationRecordId] = useState<string | null>(null);
+  const [allocationEditDraft, setAllocationEditDraft] = useState<PaymentRecordDraft['allocations']>([]);
+  const [activeChargeItemExceptionDraft, setActiveChargeItemExceptionDraft] = useState<ChargeItemExceptionDraft | null>(null);
+  const [isChargeItemExceptionSaving, setIsChargeItemExceptionSaving] = useState(false);
   const [activeReservationAction, setActiveReservationAction] = useState<'start' | 'cancel' | null>(null);
   const [showCancelReservationConfirm, setShowCancelReservationConfirm] = useState(false);
   const [reservationActionError, setReservationActionError] = useState<string | null>(null);
@@ -2831,6 +2995,34 @@ export default function Reservations() {
   const reservationWarningResolverRef = useRef<((confirmed: boolean) => void) | null>(null);
   const customerSearchCompositionRef = useRef(false);
   const latestSearchQueryRef = useRef(searchQuery);
+
+  useEffect(() => {
+    setShowChargeItemForm(false);
+    setChargeItemDraft({
+      chargeType: 'additional_fee',
+      payerType: selectedReservation?.billingSummary?.billingPlan?.payerType ?? selectedReservation?.parties?.payer?.type ?? 'customer',
+      status: 'pending',
+      amount: '',
+      dueDate: toDateLabelFromOffset(0),
+      memo: '',
+    });
+    setShowPaymentRecordForm(false);
+    setPaymentRecordDraft({
+      amount: '',
+      method: normalizePaymentMethod(selectedReservation?.paymentMethod ?? '카드'),
+      payerType: selectedReservation?.billingSummary?.billingPlan?.payerType ?? selectedReservation?.parties?.payer?.type ?? 'customer',
+      paidAt: toDateLabelFromOffset(0),
+      confirmationStatus: 'confirmed',
+      allocationMode: 'auto',
+      allocations: [],
+      depositorName: '',
+      approvalNo: '',
+      memo: '',
+    });
+    setEditingAllocationRecordId(null);
+    setAllocationEditDraft([]);
+    setActiveChargeItemExceptionDraft(null);
+  }, [selectedReservation?.id, selectedReservation?.paymentMethod, selectedReservation?.billingSummary?.billingPlan?.payerType, selectedReservation?.parties?.payer?.type]);
   const reservationCalendarCacheKey = useMemo(() => {
     const fetchWindows = buildReservationFetchWindows({
       currentWeekStart,
@@ -4019,7 +4211,18 @@ export default function Reservations() {
   const selectedReservationChargeItems = selectedReservation
     ? selectedReservation.chargeItemsPreview ?? selectedReservationBillingSummary?.chargeItems ?? []
     : [];
+  const selectedReservationMonthlyChargeItems = selectedReservationChargeItems.filter((item) => item.chargeType === 'monthly_fee');
+  const selectedReservationOtherChargeItems = selectedReservationChargeItems.filter((item) => item.chargeType !== 'monthly_fee');
   const selectedReservationPaymentRecords = selectedReservationBillingSummary?.paymentRecords ?? [];
+  const selectedReservationMonthlyOverdueCount = selectedReservationMonthlyChargeItems.filter((item) => item.status === 'overdue').length;
+  const selectedReservationMonthlyPlanLabels = selectedReservationBillingPlan
+    ? [
+        selectedReservationBillingPlan.monthlyAmount !== undefined ? `월 ${toCurrencyValue(selectedReservationBillingPlan.monthlyAmount)}` : null,
+        selectedReservationBillingPlan.billingDay !== undefined ? `청구일 매월 ${selectedReservationBillingPlan.billingDay}일` : null,
+        selectedReservationBillingPlan.cycleMonths !== undefined ? `${selectedReservationBillingPlan.cycleMonths}개월 주기` : null,
+        selectedReservationBillingPlan.graceDays !== undefined && selectedReservationBillingPlan.graceDays > 0 ? `유예 ${selectedReservationBillingPlan.graceDays}일` : null,
+      ].filter((item): item is string => Boolean(item))
+    : [];
   const selectedReservationBillingLabel = selectedReservationBillingSummary?.paymentSummaryLabel
     ?? selectedReservationPaymentStatus;
   const selectedReservationBillingTotalAmount = selectedReservationBillingSummary?.totalAmount
@@ -4880,6 +5083,279 @@ export default function Reservations() {
       toast.error(error instanceof Error ? error.message : '문서 링크를 열지 못했습니다.');
     }
   }, []);
+
+  const handleCreateManualChargeItem = useCallback(async () => {
+    if (!selectedReservation || !canWritePayments || isChargeItemCreating) {
+      return;
+    }
+    const amount = toCurrencyNumberValue(chargeItemDraft.amount);
+    if (amount === null || amount <= 0) {
+      setReservationActionError('청구 금액을 1원 이상 입력해 주세요.');
+      return;
+    }
+    const memo = chargeItemDraft.memo.trim();
+    if (['waived', 'disputed'].includes(chargeItemDraft.status) && !memo) {
+      setReservationActionError('면제 또는 보류 상태로 등록하려면 사유를 입력해 주세요.');
+      return;
+    }
+    setIsChargeItemCreating(true);
+    setReservationActionError(null);
+    try {
+      await createReservationChargeItem(selectedReservation.id, {
+        amount,
+        chargeType: chargeItemDraft.chargeType,
+        payerType: chargeItemDraft.payerType,
+        status: chargeItemDraft.chargeType === 'refund' ? 'refund_due' : chargeItemDraft.status,
+        dueDate: chargeItemDraft.dueDate || undefined,
+        memo: memo || undefined,
+        adjustmentReason: memo || undefined,
+      });
+      toast.success('청구 항목을 추가했습니다.');
+      setChargeItemDraft({
+        chargeType: 'additional_fee',
+        payerType: selectedReservationDefaultPayerType ?? 'customer',
+        status: 'pending',
+        amount: '',
+        dueDate: toDateLabelFromOffset(0),
+        memo: '',
+      });
+      setShowChargeItemForm(false);
+      void hydrateReservationDetail(selectedReservation.id, selectedReservation);
+      refreshReservationsAfterMutation('청구 항목은 추가되었지만 목록을 다시 불러오지 못했습니다. 새로고침 후 확인해 주세요.');
+    } catch (error) {
+      setReservationActionError(error instanceof Error ? error.message : '청구 항목 추가 중 오류가 발생했습니다.');
+    } finally {
+      setIsChargeItemCreating(false);
+    }
+  }, [
+    canWritePayments,
+    chargeItemDraft,
+    hydrateReservationDetail,
+    isChargeItemCreating,
+    refreshReservationsAfterMutation,
+    selectedReservation,
+    selectedReservationDefaultPayerType,
+  ]);
+
+  const handleCreateManualPaymentRecord = useCallback(async () => {
+    if (!selectedReservation || !canWritePayments || isPaymentRecordCreating) {
+      return;
+    }
+    const amount = toCurrencyNumberValue(paymentRecordDraft.amount);
+    if (amount === null || amount <= 0) {
+      setReservationActionError('수납 금액을 1원 이상 입력해 주세요.');
+      return;
+    }
+    const allocations = paymentRecordDraft.allocationMode === 'manual'
+      ? paymentRecordDraft.allocations
+        .map((allocation) => ({
+          chargeItemId: allocation.chargeItemId,
+          amount: toCurrencyNumberValue(allocation.amount) ?? 0,
+        }))
+        .filter((allocation) => allocation.chargeItemId && allocation.amount > 0)
+      : [];
+    const allocationTotal = allocations.reduce((sum, allocation) => sum + allocation.amount, 0);
+    if (paymentRecordDraft.allocationMode === 'manual' && allocations.length === 0) {
+      setReservationActionError('수동 배정을 선택한 경우 배정 항목과 금액을 입력해 주세요.');
+      return;
+    }
+    if (allocationTotal > amount) {
+      setReservationActionError('배정 총액은 수납 금액을 초과할 수 없습니다.');
+      return;
+    }
+    setIsPaymentRecordCreating(true);
+    setReservationActionError(null);
+    try {
+      await createReservationPaymentRecord(selectedReservation.id, {
+        amount,
+        method: paymentRecordDraft.method,
+        payerType: paymentRecordDraft.payerType,
+        paidAt: paymentRecordDraft.paidAt || undefined,
+        confirmationStatus: paymentRecordDraft.confirmationStatus,
+        depositorName: paymentRecordDraft.depositorName.trim() || undefined,
+        approvalNo: paymentRecordDraft.approvalNo.trim() || undefined,
+        allocations: allocations.length > 0 ? allocations : undefined,
+        memo: paymentRecordDraft.memo.trim() || undefined,
+      });
+      toast.success(paymentRecordDraft.confirmationStatus === 'confirmed' ? '수납 기록을 확정 등록했습니다.' : '확인 필요 수납 기록을 등록했습니다.');
+      setPaymentRecordDraft({
+        amount: '',
+        method: normalizePaymentMethod(selectedReservation.paymentMethod ?? '카드'),
+        payerType: selectedReservationDefaultPayerType ?? 'customer',
+        paidAt: toDateLabelFromOffset(0),
+        confirmationStatus: 'confirmed',
+        allocationMode: 'auto',
+        allocations: [],
+        depositorName: '',
+        approvalNo: '',
+        memo: '',
+      });
+      setShowPaymentRecordForm(false);
+      void hydrateReservationDetail(selectedReservation.id, selectedReservation);
+      refreshReservationsAfterMutation('수납 기록은 추가되었지만 목록을 다시 불러오지 못했습니다. 새로고침 후 확인해 주세요.');
+    } catch (error) {
+      setReservationActionError(error instanceof Error ? error.message : '수납 기록 추가 중 오류가 발생했습니다.');
+    } finally {
+      setIsPaymentRecordCreating(false);
+    }
+  }, [
+    canWritePayments,
+    hydrateReservationDetail,
+    isPaymentRecordCreating,
+    paymentRecordDraft,
+    refreshReservationsAfterMutation,
+    selectedReservation,
+    selectedReservationChargeItems,
+    selectedReservationDefaultPayerType,
+  ]);
+
+  const handleSavePaymentRecordAllocations = useCallback(async (record: ReservationPaymentRecord) => {
+    if (!selectedReservation || !canWritePayments || activePaymentRecordMutationId) {
+      return;
+    }
+    const allocations = allocationEditDraft
+      .map((allocation) => ({
+        chargeItemId: allocation.chargeItemId,
+        amount: toCurrencyNumberValue(allocation.amount) ?? 0,
+      }))
+      .filter((allocation) => allocation.chargeItemId && allocation.amount > 0);
+    const allocationTotal = allocations.reduce((sum, allocation) => sum + allocation.amount, 0);
+    if (allocations.length === 0) {
+      setReservationActionError('배정 항목과 금액을 입력해 주세요.');
+      return;
+    }
+    if (allocationTotal > record.amount) {
+      setReservationActionError('배정 총액은 수납 금액을 초과할 수 없습니다.');
+      return;
+    }
+    setActivePaymentRecordMutationId(record.id);
+    setReservationActionError(null);
+    try {
+      await allocatePaymentRecord(record.id, {
+        allocations,
+        memo: '예약 상세에서 수납 배정 수정',
+      });
+      toast.success('수납 배정을 수정했습니다.');
+      setEditingAllocationRecordId(null);
+      setAllocationEditDraft([]);
+      void hydrateReservationDetail(selectedReservation.id, selectedReservation);
+      refreshReservationsAfterMutation('수납 배정은 수정되었지만 목록을 다시 불러오지 못했습니다. 새로고침 후 확인해 주세요.');
+    } catch (error) {
+      setReservationActionError(error instanceof Error ? error.message : '수납 배정 수정 중 오류가 발생했습니다.');
+    } finally {
+      setActivePaymentRecordMutationId(null);
+    }
+  }, [
+    activePaymentRecordMutationId,
+    allocationEditDraft,
+    canWritePayments,
+    hydrateReservationDetail,
+    refreshReservationsAfterMutation,
+    selectedReservation,
+  ]);
+
+  const handleConfirmManualPaymentRecord = useCallback(async (record: ReservationPaymentRecord) => {
+    if (!selectedReservation || !canWritePayments || activePaymentRecordMutationId) {
+      return;
+    }
+    setActivePaymentRecordMutationId(record.id);
+    setReservationActionError(null);
+    try {
+      await confirmPaymentRecord(record.id);
+      toast.success('수납 기록을 확정했습니다.');
+      void hydrateReservationDetail(selectedReservation.id, selectedReservation);
+      refreshReservationsAfterMutation('수납 기록은 확정되었지만 목록을 다시 불러오지 못했습니다. 새로고침 후 확인해 주세요.');
+    } catch (error) {
+      setReservationActionError(error instanceof Error ? error.message : '수납 기록 확정 중 오류가 발생했습니다.');
+    } finally {
+      setActivePaymentRecordMutationId(null);
+    }
+  }, [activePaymentRecordMutationId, canWritePayments, hydrateReservationDetail, refreshReservationsAfterMutation, selectedReservation]);
+
+  const handleOpenChargeItemException = useCallback((
+    item: ReservationChargeItem,
+    action: ChargeItemExceptionAction,
+  ) => {
+    setReservationActionError(null);
+    setActiveChargeItemExceptionDraft({
+      itemId: item.id,
+      action,
+      reason: item.memo ?? '',
+      memo: '',
+      evidenceFile: null,
+    });
+  }, []);
+
+  const handleSubmitChargeItemException = useCallback(async () => {
+    if (!selectedReservation || !canWritePayments || !activeChargeItemExceptionDraft || isChargeItemExceptionSaving) {
+      return;
+    }
+    const item = selectedReservationChargeItems.find((chargeItem) => chargeItem.id === activeChargeItemExceptionDraft.itemId);
+    if (!item) {
+      setReservationActionError('처리할 청구 항목을 찾을 수 없습니다.');
+      return;
+    }
+    const reason = activeChargeItemExceptionDraft.reason.trim();
+    const memo = activeChargeItemExceptionDraft.memo.trim();
+    if (!reason) {
+      setReservationActionError('처리 사유를 입력해 주세요.');
+      return;
+    }
+    setIsChargeItemExceptionSaving(true);
+    setActivePaymentRecordMutationId(item.id);
+    setReservationActionError(null);
+    try {
+      const evidenceRefs = activeChargeItemExceptionDraft.evidenceFile
+        ? [await uploadBillingEvidenceDocument(activeChargeItemExceptionDraft.evidenceFile, selectedReservation.id)]
+        : undefined;
+      const commonMemo = memo ? `${reason}\n${memo}` : reason;
+      const changes = (() => {
+        switch (activeChargeItemExceptionDraft.action) {
+          case 'refund_complete':
+            return {
+              status: 'paid',
+              paidAmount: item.amount,
+              refundCompletedAt: new Date().toISOString(),
+              refundMethod: 'manual',
+              refundReason: reason,
+            };
+          case 'refund_waive':
+            return { status: 'waived', paidAmount: 0, refundReason: reason };
+          case 'waive':
+            return { status: 'waived', paidAmount: 0 };
+          case 'dispute':
+            return { status: 'disputed' };
+          case 'release_dispute':
+            return { status: 'pending' };
+          default:
+            return { status: item.status };
+        }
+      })();
+      await patchChargeItem(item.id, {
+        ...changes,
+        memo: commonMemo,
+        adjustmentReason: reason,
+        evidenceRefs,
+      });
+      toast.success(`${getChargeItemExceptionActionLabel(activeChargeItemExceptionDraft.action)} 처리했습니다.`);
+      setActiveChargeItemExceptionDraft(null);
+      void hydrateReservationDetail(selectedReservation.id, selectedReservation);
+      refreshReservationsAfterMutation('청구 항목은 변경되었지만 목록을 다시 불러오지 못했습니다. 새로고침 후 확인해 주세요.');
+    } catch (error) {
+      setReservationActionError(error instanceof Error ? error.message : '청구 항목 처리 중 오류가 발생했습니다.');
+    } finally {
+      setActivePaymentRecordMutationId(null);
+      setIsChargeItemExceptionSaving(false);
+    }
+  }, [
+    activeChargeItemExceptionDraft,
+    canWritePayments,
+    hydrateReservationDetail,
+    isChargeItemExceptionSaving,
+    refreshReservationsAfterMutation,
+    selectedReservation,
+    selectedReservationChargeItems,
+  ]);
 
   const handleVoidPaymentRecord = useCallback(async (record: ReservationPaymentRecord) => {
     if (!selectedReservation || !canWritePayments || activePaymentRecordMutationId) {
@@ -6613,7 +7089,494 @@ export default function Reservations() {
                           </p>
                         </div>
                       </div>
-                      {selectedReservationChargeItems.length > 0 && (
+                      {canWritePayments && (
+                        <div className="mt-4 space-y-3 border-t border-gray-100 pt-4">
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setShowChargeItemForm((value) => !value)}
+                              className="rounded-md border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-100"
+                            >
+                              청구 항목 추가
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setShowPaymentRecordForm((value) => !value)}
+                              className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-100"
+                            >
+                              수납 기록 추가
+                            </button>
+                          </div>
+                          {showChargeItemForm && (
+                            <div className="rounded-md border border-blue-100 bg-blue-50/60 p-3">
+                              <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                                <label className="text-xs font-semibold text-gray-600">
+                                  청구 유형
+                                  <select
+                                    value={chargeItemDraft.chargeType}
+                                    onChange={(event) => {
+                                      const nextChargeType = event.target.value;
+                                      setChargeItemDraft((draft) => ({
+                                        ...draft,
+                                        chargeType: nextChargeType,
+                                        status: nextChargeType === 'refund' ? 'refund_due' : draft.status === 'refund_due' ? 'pending' : draft.status,
+                                      }));
+                                    }}
+                                    className="mt-1 w-full rounded-md border border-gray-300 bg-white px-2 py-2 text-sm font-normal text-gray-900"
+                                  >
+                                    {MANUAL_CHARGE_TYPE_OPTIONS.map((option) => (
+                                      <option key={option.value} value={option.value}>{option.label}</option>
+                                    ))}
+                                  </select>
+                                </label>
+                                <label className="text-xs font-semibold text-gray-600">
+                                  청구처
+                                  <select
+                                    value={chargeItemDraft.payerType}
+                                    onChange={(event) => setChargeItemDraft((draft) => ({ ...draft, payerType: event.target.value }))}
+                                    className="mt-1 w-full rounded-md border border-gray-300 bg-white px-2 py-2 text-sm font-normal text-gray-900"
+                                  >
+                                    {MANUAL_PAYER_TYPE_OPTIONS.map((option) => (
+                                      <option key={option.value} value={option.value}>{option.label}</option>
+                                    ))}
+                                  </select>
+                                </label>
+                                <label className="text-xs font-semibold text-gray-600">
+                                  상태
+                                  <select
+                                    value={chargeItemDraft.chargeType === 'refund' ? 'refund_due' : chargeItemDraft.status}
+                                    onChange={(event) => setChargeItemDraft((draft) => ({ ...draft, status: event.target.value }))}
+                                    disabled={chargeItemDraft.chargeType === 'refund'}
+                                    className="mt-1 w-full rounded-md border border-gray-300 bg-white px-2 py-2 text-sm font-normal text-gray-900 disabled:bg-gray-100"
+                                  >
+                                    {MANUAL_CHARGE_STATUS_OPTIONS
+                                      .filter((option) => chargeItemDraft.chargeType === 'refund' || option.value !== 'refund_due')
+                                      .map((option) => (
+                                      <option key={option.value} value={option.value}>{option.label}</option>
+                                    ))}
+                                  </select>
+                                </label>
+                                <label className="text-xs font-semibold text-gray-600">
+                                  금액
+                                  <input
+                                    type="text"
+                                    inputMode="numeric"
+                                    value={chargeItemDraft.amount}
+                                    onChange={(event) => setChargeItemDraft((draft) => ({ ...draft, amount: event.target.value }))}
+                                    placeholder="예: 50000"
+                                    className="mt-1 w-full rounded-md border border-gray-300 bg-white px-2 py-2 text-sm font-normal text-gray-900"
+                                  />
+                                </label>
+                                <label className="text-xs font-semibold text-gray-600">
+                                  납부기한
+                                  <input
+                                    type="date"
+                                    value={chargeItemDraft.dueDate}
+                                    onChange={(event) => setChargeItemDraft((draft) => ({ ...draft, dueDate: event.target.value }))}
+                                    className="mt-1 w-full rounded-md border border-gray-300 bg-white px-2 py-2 text-sm font-normal text-gray-900"
+                                  />
+                                </label>
+                                <label className="text-xs font-semibold text-gray-600 md:col-span-3">
+                                  메모/사유
+                                  <input
+                                    type="text"
+                                    value={chargeItemDraft.memo}
+                                    onChange={(event) => setChargeItemDraft((draft) => ({ ...draft, memo: event.target.value }))}
+                                    placeholder="청구 또는 예외 처리 사유"
+                                    className="mt-1 w-full rounded-md border border-gray-300 bg-white px-2 py-2 text-sm font-normal text-gray-900"
+                                  />
+                                </label>
+                              </div>
+                              <div className="mt-3 flex justify-end gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => setShowChargeItemForm(false)}
+                                  className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700"
+                                >
+                                  취소
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    void handleCreateManualChargeItem();
+                                  }}
+                                  disabled={isChargeItemCreating}
+                                  className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                                >
+                                  {isChargeItemCreating ? '저장 중...' : '청구 항목 저장'}
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                          {showPaymentRecordForm && (
+                            <div className="rounded-md border border-emerald-100 bg-emerald-50/60 p-3">
+                              <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                                <label className="text-xs font-semibold text-gray-600">
+                                  수납 금액
+                                  <input
+                                    type="text"
+                                    inputMode="numeric"
+                                    value={paymentRecordDraft.amount}
+                                    onChange={(event) => setPaymentRecordDraft((draft) => ({ ...draft, amount: event.target.value }))}
+                                    placeholder="예: 50000"
+                                    className="mt-1 w-full rounded-md border border-gray-300 bg-white px-2 py-2 text-sm font-normal text-gray-900"
+                                  />
+                                </label>
+                                <label className="text-xs font-semibold text-gray-600">
+                                  결제수단
+                                  <select
+                                    value={paymentRecordDraft.method}
+                                    onChange={(event) => setPaymentRecordDraft((draft) => ({ ...draft, method: event.target.value }))}
+                                    className="mt-1 w-full rounded-md border border-gray-300 bg-white px-2 py-2 text-sm font-normal text-gray-900"
+                                  >
+                                    {MANUAL_PAYMENT_METHOD_OPTIONS.map((option) => (
+                                      <option key={option} value={option}>{option}</option>
+                                    ))}
+                                  </select>
+                                </label>
+                                <label className="text-xs font-semibold text-gray-600">
+                                  확인 상태
+                                  <select
+                                    value={paymentRecordDraft.confirmationStatus}
+                                    onChange={(event) => setPaymentRecordDraft((draft) => ({
+                                      ...draft,
+                                      confirmationStatus: event.target.value === 'needs_confirmation' ? 'needs_confirmation' : 'confirmed',
+                                    }))}
+                                    className="mt-1 w-full rounded-md border border-gray-300 bg-white px-2 py-2 text-sm font-normal text-gray-900"
+                                  >
+                                    <option value="confirmed">확정</option>
+                                    <option value="needs_confirmation">확인 필요</option>
+                                  </select>
+                                </label>
+                                <label className="text-xs font-semibold text-gray-600">
+                                  청구처
+                                  <select
+                                    value={paymentRecordDraft.payerType}
+                                    onChange={(event) => setPaymentRecordDraft((draft) => ({ ...draft, payerType: event.target.value }))}
+                                    className="mt-1 w-full rounded-md border border-gray-300 bg-white px-2 py-2 text-sm font-normal text-gray-900"
+                                  >
+                                    {MANUAL_PAYER_TYPE_OPTIONS.map((option) => (
+                                      <option key={option.value} value={option.value}>{option.label}</option>
+                                    ))}
+                                  </select>
+                                </label>
+                                <label className="text-xs font-semibold text-gray-600">
+                                  수납일
+                                  <input
+                                    type="date"
+                                    value={paymentRecordDraft.paidAt}
+                                    onChange={(event) => setPaymentRecordDraft((draft) => ({ ...draft, paidAt: event.target.value }))}
+                                    className="mt-1 w-full rounded-md border border-gray-300 bg-white px-2 py-2 text-sm font-normal text-gray-900"
+                                  />
+                                </label>
+                                <label className="text-xs font-semibold text-gray-600">
+                                  배정 방식
+                                  <select
+                                    value={paymentRecordDraft.allocationMode}
+                                    onChange={(event) => {
+                                      const allocationMode = event.target.value === 'manual' ? 'manual' : 'auto';
+                                      setPaymentRecordDraft((draft) => ({
+                                        ...draft,
+                                        allocationMode,
+                                        allocations: allocationMode === 'manual' && draft.allocations.length === 0
+                                          ? defaultPaymentAllocationDrafts(selectedReservationChargeItems)
+                                          : draft.allocations,
+                                      }));
+                                    }}
+                                    className="mt-1 w-full rounded-md border border-gray-300 bg-white px-2 py-2 text-sm font-normal text-gray-900"
+                                  >
+                                    <option value="auto">자동 배정</option>
+                                    <option value="manual">수동 복수 배정</option>
+                                  </select>
+                                </label>
+                                <label className="text-xs font-semibold text-gray-600">
+                                  입금자명
+                                  <input
+                                    type="text"
+                                    value={paymentRecordDraft.depositorName}
+                                    onChange={(event) => setPaymentRecordDraft((draft) => ({ ...draft, depositorName: event.target.value }))}
+                                    className="mt-1 w-full rounded-md border border-gray-300 bg-white px-2 py-2 text-sm font-normal text-gray-900"
+                                  />
+                                </label>
+                                <label className="text-xs font-semibold text-gray-600">
+                                  승인번호
+                                  <input
+                                    type="text"
+                                    value={paymentRecordDraft.approvalNo}
+                                    onChange={(event) => setPaymentRecordDraft((draft) => ({ ...draft, approvalNo: event.target.value }))}
+                                    className="mt-1 w-full rounded-md border border-gray-300 bg-white px-2 py-2 text-sm font-normal text-gray-900"
+                                  />
+                                </label>
+                                <label className="text-xs font-semibold text-gray-600 md:col-span-3">
+                                  메모
+                                  <input
+                                    type="text"
+                                    value={paymentRecordDraft.memo}
+                                    onChange={(event) => setPaymentRecordDraft((draft) => ({ ...draft, memo: event.target.value }))}
+                                    placeholder="수납 확인 또는 배정 메모"
+                                    className="mt-1 w-full rounded-md border border-gray-300 bg-white px-2 py-2 text-sm font-normal text-gray-900"
+                                  />
+                                </label>
+                                {paymentRecordDraft.allocationMode === 'manual' && (
+                                  <div className="md:col-span-3">
+                                    <div className="mb-2 flex items-center justify-between gap-2">
+                                      <span className="text-xs font-semibold text-gray-600">수동 배정</span>
+                                      <button
+                                        type="button"
+                                        onClick={() => setPaymentRecordDraft((draft) => ({
+                                          ...draft,
+                                          allocations: [...draft.allocations, { chargeItemId: '', amount: '' }],
+                                        }))}
+                                        className="rounded-md border border-emerald-200 bg-white px-2 py-1 text-xs font-semibold text-emerald-700"
+                                      >
+                                        배정 행 추가
+                                      </button>
+                                    </div>
+                                    <div className="space-y-2">
+                                      {paymentRecordDraft.allocations.map((allocation, index) => (
+                                        <div key={`payment-allocation-${index}`} className="grid grid-cols-[minmax(0,1fr)_120px_40px] gap-2">
+                                          <select
+                                            value={allocation.chargeItemId}
+                                            onChange={(event) => setPaymentRecordDraft((draft) => ({
+                                              ...draft,
+                                              allocations: draft.allocations.map((row, rowIndex) => (
+                                                rowIndex === index ? { ...row, chargeItemId: event.target.value } : row
+                                              )),
+                                            }))}
+                                            className="rounded-md border border-gray-300 bg-white px-2 py-2 text-sm text-gray-900"
+                                          >
+                                            <option value="">청구 항목 선택</option>
+                                            {selectedReservationChargeItems
+                                              .filter((item) => item.chargeType !== 'refund' && item.remainingAmount > 0)
+                                              .map((item) => (
+                                                <option key={item.id} value={item.id}>
+                                                  {getChargeTypeLabel(item.chargeType)} · 잔액 {toCurrencyValue(item.remainingAmount)}
+                                                </option>
+                                              ))}
+                                          </select>
+                                          <input
+                                            type="text"
+                                            inputMode="numeric"
+                                            value={allocation.amount}
+                                            onChange={(event) => setPaymentRecordDraft((draft) => ({
+                                              ...draft,
+                                              allocations: draft.allocations.map((row, rowIndex) => (
+                                                rowIndex === index ? { ...row, amount: event.target.value } : row
+                                              )),
+                                            }))}
+                                            placeholder="금액"
+                                            className="rounded-md border border-gray-300 bg-white px-2 py-2 text-sm text-gray-900"
+                                          />
+                                          <button
+                                            type="button"
+                                            onClick={() => setPaymentRecordDraft((draft) => ({
+                                              ...draft,
+                                              allocations: draft.allocations.filter((_, rowIndex) => rowIndex !== index),
+                                            }))}
+                                            className="rounded-md border border-gray-300 bg-white px-2 py-2 text-xs font-semibold text-gray-600"
+                                          >
+                                            삭제
+                                          </button>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                              <div className="mt-3 flex justify-end gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => setShowPaymentRecordForm(false)}
+                                  className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700"
+                                >
+                                  취소
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    void handleCreateManualPaymentRecord();
+                                  }}
+                                  disabled={isPaymentRecordCreating}
+                                  className="rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                                >
+                                  {isPaymentRecordCreating ? '저장 중...' : '수납 기록 저장'}
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                          {activeChargeItemExceptionDraft && (
+                            (() => {
+                              const exceptionItem = selectedReservationChargeItems.find((item) => item.id === activeChargeItemExceptionDraft.itemId);
+                              return exceptionItem ? (
+                                <div className="rounded-md border border-amber-100 bg-amber-50/70 p-3">
+                                  <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                                    <div>
+                                      <p className="text-xs font-semibold uppercase text-amber-700">예외정산 처리</p>
+                                      <p className="mt-1 text-sm font-bold text-gray-900">
+                                        {getChargeTypeLabel(exceptionItem.chargeType)} · {getChargeItemExceptionActionLabel(activeChargeItemExceptionDraft.action)}
+                                      </p>
+                                    </div>
+                                    <button
+                                      type="button"
+                                      onClick={() => setActiveChargeItemExceptionDraft(null)}
+                                      className="rounded-md border border-amber-200 bg-white px-2 py-1 text-xs font-semibold text-amber-700"
+                                    >
+                                      닫기
+                                    </button>
+                                  </div>
+                                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                                    <label className="text-xs font-semibold text-gray-600">
+                                      처리 사유
+                                      <input
+                                        type="text"
+                                        value={activeChargeItemExceptionDraft.reason}
+                                        onChange={(event) => setActiveChargeItemExceptionDraft((draft) => draft ? { ...draft, reason: event.target.value } : draft)}
+                                        className="mt-1 w-full rounded-md border border-gray-300 bg-white px-2 py-2 text-sm font-normal text-gray-900"
+                                      />
+                                    </label>
+                                    <label className="text-xs font-semibold text-gray-600">
+                                      증빙 파일
+                                      <input
+                                        type="file"
+                                        onChange={(event) => setActiveChargeItemExceptionDraft((draft) => draft ? { ...draft, evidenceFile: event.target.files?.[0] ?? null } : draft)}
+                                        className="mt-1 w-full rounded-md border border-gray-300 bg-white px-2 py-2 text-sm font-normal text-gray-900"
+                                      />
+                                    </label>
+                                    <label className="text-xs font-semibold text-gray-600 md:col-span-2">
+                                      담당자 메모
+                                      <textarea
+                                        value={activeChargeItemExceptionDraft.memo}
+                                        onChange={(event) => setActiveChargeItemExceptionDraft((draft) => draft ? { ...draft, memo: event.target.value } : draft)}
+                                        rows={3}
+                                        className="mt-1 w-full rounded-md border border-gray-300 bg-white px-2 py-2 text-sm font-normal text-gray-900"
+                                      />
+                                    </label>
+                                  </div>
+                                  <div className="mt-3 flex justify-end gap-2">
+                                    <button
+                                      type="button"
+                                      onClick={() => setActiveChargeItemExceptionDraft(null)}
+                                      className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700"
+                                    >
+                                      취소
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        void handleSubmitChargeItemException();
+                                      }}
+                                      disabled={isChargeItemExceptionSaving}
+                                      className="rounded-md bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                                    >
+                                      {isChargeItemExceptionSaving ? '처리 중...' : '예외정산 저장'}
+                                    </button>
+                                  </div>
+                                </div>
+                              ) : null;
+                            })()
+                          )}
+                        </div>
+                      )}
+                      {(selectedReservationMonthlyChargeItems.length > 0 || (isSelectedReservationLongTerm && selectedReservationBillingPlan)) && (
+                        <div className="mt-4 rounded-md border border-indigo-100 bg-indigo-50/40">
+                          <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-3">
+                            <div>
+                              <p className="text-xs font-semibold uppercase text-indigo-700">월별 렌트료</p>
+                              <p className="mt-1 text-sm text-gray-600">
+                                {selectedReservationMonthlyPlanLabels.length > 0
+                                  ? selectedReservationMonthlyPlanLabels.join(' · ')
+                                  : '장기렌트 회차별 청구, 수납, 보류 상태를 확인합니다.'}
+                              </p>
+                            </div>
+                            <div className="flex flex-wrap gap-1">
+                              <span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-indigo-700">
+                                {selectedReservationMonthlyChargeItems.length}회차
+                              </span>
+                              {selectedReservationMonthlyOverdueCount > 0 && (
+                                <span className="rounded-full bg-red-50 px-2.5 py-1 text-xs font-semibold text-red-700">
+                                  연체 {selectedReservationMonthlyOverdueCount}건
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          <div className="border-t border-indigo-100">
+                            {selectedReservationMonthlyChargeItems.length === 0 ? (
+                              <div className="bg-white px-3 py-4 text-sm text-gray-600">
+                                월별 청구 항목이 아직 생성되지 않았습니다. 월별 청구 reconcile 실행 후 회차별 수납 상태가 표시됩니다.
+                              </div>
+                            ) : (
+                              <>
+                                <div className="grid grid-cols-[minmax(0,1.3fr)_minmax(92px,0.7fr)_minmax(92px,0.7fr)_minmax(76px,0.5fr)_minmax(128px,0.8fr)] gap-x-3 bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-700">
+                                  <span>회차/기간</span>
+                                  <span className="text-right">청구액</span>
+                                  <span className="text-right">잔액</span>
+                                  <span className="text-right">상태</span>
+                                  <span>처리</span>
+                                </div>
+                                {selectedReservationMonthlyChargeItems.map((item) => (
+                              <div
+                                key={`monthly-${item.id}`}
+                                className="grid grid-cols-[minmax(0,1.3fr)_minmax(92px,0.7fr)_minmax(92px,0.7fr)_minmax(76px,0.5fr)_minmax(128px,0.8fr)] gap-x-3 border-t border-indigo-100 bg-white px-3 py-3 text-sm text-gray-800"
+                              >
+                                <span className="min-w-0">
+                                  <span className="block break-words font-semibold text-gray-900">{getChargeItemPeriodLabel(item) || '월 렌트료'}</span>
+                                  {item.dueDate && <span className="block text-xs text-gray-500">납부 {item.dueDate}</span>}
+                                </span>
+                                <span className="text-right font-semibold tabular-nums">{toCurrencyValue(item.amount)}</span>
+                                <span className="text-right font-semibold text-red-600 tabular-nums">{toCurrencyValue(item.remainingAmount)}</span>
+                                <span className="text-right text-gray-600">{getChargeStatusLabel(item.status)}</span>
+                                <span className="flex flex-wrap gap-1">
+                                  {canWritePayments && item.remainingAmount > 0 && !['paid', 'waived', 'refunded', 'disputed'].includes(item.status) && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        void handleSettleChargeItem(item);
+                                      }}
+                                      disabled={activePaymentRecordMutationId === item.id}
+                                      className="rounded-md bg-emerald-600 px-2 py-1 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                                    >
+                                      수납
+                                    </button>
+                                  )}
+                                  {canWritePayments && !['paid', 'waived', 'refunded', 'disputed'].includes(item.status) && (
+                                    <>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleOpenChargeItemException(item, 'waive')}
+                                        disabled={activePaymentRecordMutationId === item.id}
+                                        className="rounded-md bg-slate-600 px-2 py-1 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                                      >
+                                        면제
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleOpenChargeItemException(item, 'dispute')}
+                                        disabled={activePaymentRecordMutationId === item.id}
+                                        className="rounded-md bg-amber-600 px-2 py-1 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                                      >
+                                        보류
+                                      </button>
+                                    </>
+                                  )}
+                                  {canWritePayments && item.status === 'disputed' && (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleOpenChargeItemException(item, 'release_dispute')}
+                                      disabled={activePaymentRecordMutationId === item.id}
+                                      className="rounded-md bg-blue-600 px-2 py-1 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                                    >
+                                      보류해제
+                                    </button>
+                                  )}
+                                </span>
+                              </div>
+                                ))}
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                      {selectedReservationOtherChargeItems.length > 0 && (
                         <div className="mt-4 rounded-md border border-gray-200">
                           <div className="w-full">
                             <div className="grid grid-cols-[minmax(0,2.4fr)_minmax(104px,0.9fr)_minmax(72px,0.65fr)_minmax(112px,0.9fr)] items-start gap-x-3 bg-gray-50 px-3 py-2 text-xs font-semibold text-gray-500">
@@ -6622,7 +7585,7 @@ export default function Reservations() {
                               <span className="text-right">상태</span>
                               <span>처리/이력</span>
                             </div>
-                            {selectedReservationChargeItems.map((item) => (
+                            {selectedReservationOtherChargeItems.map((item) => (
                               (() => {
                                 const periodLabel = getChargeItemPeriodLabel(item);
                                 const isMonthlyCharge = item.chargeType === 'monthly_fee';
@@ -6669,7 +7632,7 @@ export default function Reservations() {
                                       <button
                                         type="button"
                                         onClick={() => {
-                                          void handleCompleteRefundChargeItem(item);
+                                          handleOpenChargeItemException(item, 'refund_complete');
                                         }}
                                         disabled={activePaymentRecordMutationId === item.id}
                                         className="whitespace-nowrap rounded-md bg-emerald-600 px-2 py-1 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
@@ -6679,7 +7642,7 @@ export default function Reservations() {
                                       <button
                                         type="button"
                                         onClick={() => {
-                                          void handleWaiveRefundChargeItem(item);
+                                          handleOpenChargeItemException(item, 'refund_waive');
                                         }}
                                         disabled={activePaymentRecordMutationId === item.id}
                                         className="whitespace-nowrap rounded-md bg-slate-600 px-2 py-1 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
@@ -6698,6 +7661,42 @@ export default function Reservations() {
                                       className="whitespace-nowrap rounded-md bg-emerald-600 px-2 py-1 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
                                     >
                                       수납
+                                    </button>
+                                  )}
+                                  {canWritePayments && item.chargeType !== 'refund' && !['paid', 'waived', 'refunded', 'disputed'].includes(item.status) && (
+                                    <span className="flex min-w-0 flex-wrap gap-1">
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          handleOpenChargeItemException(item, 'waive');
+                                        }}
+                                        disabled={activePaymentRecordMutationId === item.id}
+                                        className="whitespace-nowrap rounded-md bg-slate-600 px-2 py-1 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                                      >
+                                        면제
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          handleOpenChargeItemException(item, 'dispute');
+                                        }}
+                                        disabled={activePaymentRecordMutationId === item.id}
+                                        className="whitespace-nowrap rounded-md bg-amber-600 px-2 py-1 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                                      >
+                                        보류
+                                      </button>
+                                    </span>
+                                  )}
+                                  {canWritePayments && item.status === 'disputed' && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        handleOpenChargeItemException(item, 'release_dispute');
+                                      }}
+                                      disabled={activePaymentRecordMutationId === item.id}
+                                      className="whitespace-nowrap rounded-md bg-blue-600 px-2 py-1 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                                    >
+                                      보류해제
                                     </button>
                                   )}
                                   {item.changeHistory && item.changeHistory.length > 0 && (
@@ -6725,24 +7724,26 @@ export default function Reservations() {
                       )}
                       {selectedReservationPaymentRecords.length > 0 && (
                         <div className="mt-4 overflow-x-auto rounded-md border border-gray-200">
-                          <div className="min-w-[820px]">
-                            <div className="grid grid-cols-[0.9fr_0.9fr_0.8fr_1fr_1.2fr_1.1fr] bg-gray-50 px-3 py-2 text-xs font-semibold text-gray-500">
+                          <div className="min-w-[960px]">
+                            <div className="grid grid-cols-[0.85fr_0.85fr_0.75fr_0.9fr_1.15fr_1.1fr_1.1fr] bg-gray-50 px-3 py-2 text-xs font-semibold text-gray-500">
                               <span>수납일</span>
                               <span className="text-right">수납액</span>
                               <span>수단</span>
                               <span>확인 상태</span>
+                              <span>배정</span>
                               <span>선택 증빙</span>
                               <span>정정/이력</span>
                             </div>
                             {selectedReservationPaymentRecords.map((record) => (
                               <div
                                 key={record.id}
-                                className="grid grid-cols-[0.9fr_0.9fr_0.8fr_1fr_1.2fr_1.1fr] border-t border-gray-100 px-3 py-2 text-sm text-gray-800"
+                                className="grid grid-cols-[0.85fr_0.85fr_0.75fr_0.9fr_1.15fr_1.1fr_1.1fr] border-t border-gray-100 px-3 py-2 text-sm text-gray-800"
                               >
                                 <span className="min-w-0 truncate">{record.paidAt ? formatDateKst(record.paidAt, '-') : '-'}</span>
                                 <span className="text-right font-semibold">{toCurrencyValue(record.amount)}</span>
                                 <span className="min-w-0 truncate text-gray-600">{record.method || '-'}</span>
-                                <span className="min-w-0 truncate text-gray-600">{record.status === 'voided' ? 'voided' : record.confirmationStatus}</span>
+                                <span className="min-w-0 truncate text-gray-600">{record.status === 'voided' ? '무효' : getPaymentConfirmationStatusLabel(record.confirmationStatus)}</span>
+                                <span className="min-w-0 break-words text-xs leading-5 text-gray-600">{formatPaymentAllocations(record, selectedReservationChargeItems)}</span>
                                 <span className="min-w-0 space-y-1">
                                   {record.evidenceRefs && record.evidenceRefs.length > 0 ? (
                                     record.evidenceRefs.map((evidence) => (
@@ -6764,6 +7765,29 @@ export default function Reservations() {
                                 <span className="min-w-0 space-y-1">
                                   {canWritePayments && record.status !== 'voided' && (
                                     <span className="flex flex-wrap gap-1">
+                                      {record.confirmationStatus === 'needs_confirmation' && (
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            void handleConfirmManualPaymentRecord(record);
+                                          }}
+                                          disabled={activePaymentRecordMutationId === record.id}
+                                          className="rounded-md bg-emerald-600 px-2 py-1 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                                        >
+                                          확정
+                                        </button>
+                                      )}
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setEditingAllocationRecordId(record.id);
+                                          setAllocationEditDraft(paymentAllocationDraftsFromRecord(record));
+                                        }}
+                                        disabled={activePaymentRecordMutationId === record.id}
+                                        className="rounded-md bg-blue-600 px-2 py-1 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                                      >
+                                        배정수정
+                                      </button>
                                       <button
                                         type="button"
                                         onClick={() => {
@@ -6806,6 +7830,89 @@ export default function Reservations() {
                             ))}
                           </div>
                         </div>
+                      )}
+                      {editingAllocationRecordId && (
+                        (() => {
+                          const editingRecord = selectedReservationPaymentRecords.find((record) => record.id === editingAllocationRecordId);
+                          return editingRecord ? (
+                            <div className="mt-4 rounded-md border border-blue-100 bg-blue-50/60 p-3">
+                              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                                <div>
+                                  <p className="text-xs font-semibold uppercase text-blue-700">수납 배정 수정</p>
+                                  <p className="mt-1 text-sm font-semibold text-gray-900">{toCurrencyValue(editingRecord.amount)} 수납 기록</p>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setEditingAllocationRecordId(null);
+                                    setAllocationEditDraft([]);
+                                  }}
+                                  className="rounded-md border border-blue-200 bg-white px-2 py-1 text-xs font-semibold text-blue-700"
+                                >
+                                  닫기
+                                </button>
+                              </div>
+                              <div className="space-y-2">
+                                {allocationEditDraft.map((allocation, index) => (
+                                  <div key={`allocation-edit-${index}`} className="grid grid-cols-[minmax(0,1fr)_120px_40px] gap-2">
+                                    <select
+                                      value={allocation.chargeItemId}
+                                      onChange={(event) => setAllocationEditDraft((draft) => draft.map((row, rowIndex) => (
+                                        rowIndex === index ? { ...row, chargeItemId: event.target.value } : row
+                                      )))}
+                                      className="rounded-md border border-gray-300 bg-white px-2 py-2 text-sm text-gray-900"
+                                    >
+                                      <option value="">청구 항목 선택</option>
+                                      {selectedReservationChargeItems
+                                        .filter((item) => item.chargeType !== 'refund')
+                                        .map((item) => (
+                                          <option key={item.id} value={item.id}>
+                                            {getChargeTypeLabel(item.chargeType)} · 잔액 {toCurrencyValue(item.remainingAmount)}
+                                          </option>
+                                        ))}
+                                    </select>
+                                    <input
+                                      type="text"
+                                      inputMode="numeric"
+                                      value={allocation.amount}
+                                      onChange={(event) => setAllocationEditDraft((draft) => draft.map((row, rowIndex) => (
+                                        rowIndex === index ? { ...row, amount: event.target.value } : row
+                                      )))}
+                                      placeholder="금액"
+                                      className="rounded-md border border-gray-300 bg-white px-2 py-2 text-sm text-gray-900"
+                                    />
+                                    <button
+                                      type="button"
+                                      onClick={() => setAllocationEditDraft((draft) => draft.filter((_, rowIndex) => rowIndex !== index))}
+                                      className="rounded-md border border-gray-300 bg-white px-2 py-2 text-xs font-semibold text-gray-600"
+                                    >
+                                      삭제
+                                    </button>
+                                  </div>
+                                ))}
+                              </div>
+                              <div className="mt-3 flex flex-wrap justify-end gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => setAllocationEditDraft((draft) => [...draft, { chargeItemId: '', amount: '' }])}
+                                  className="rounded-md border border-blue-200 bg-white px-3 py-1.5 text-xs font-semibold text-blue-700"
+                                >
+                                  배정 행 추가
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    void handleSavePaymentRecordAllocations(editingRecord);
+                                  }}
+                                  disabled={activePaymentRecordMutationId === editingRecord.id}
+                                  className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                                >
+                                  배정 저장
+                                </button>
+                              </div>
+                            </div>
+                          ) : null;
+                        })()
                       )}
                     </div>
                     {selectedReservation.documentChecklist && selectedReservation.documentChecklist.length > 0 && (
