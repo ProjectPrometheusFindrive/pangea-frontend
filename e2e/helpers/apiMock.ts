@@ -59,7 +59,7 @@ const DEFAULT_COMPANY: MockCompany = {
   currency: 'KRW',
 };
 
-const MEMBER_ROUTE_PERMISSIONS = [
+export const E2E_ROUTE_PERMISSIONS = [
   'route.home',
   'route.action-required',
   'route.assets',
@@ -69,20 +69,20 @@ const MEMBER_ROUTE_PERMISSIONS = [
   'route.settings',
 ] as const;
 
-const MEMBER_ACTION_PERMISSIONS = [
+export const E2E_MEMBER_ACTION_PERMISSIONS = [
   'action.assets.write',
   'action.reservations.write',
   'action.action-required.write',
 ] as const;
 
-const ROLE_DEFAULT_PERMISSIONS: Record<MockUser['role'], readonly string[]> = {
+export const E2E_ROLE_DEFAULT_PERMISSIONS: Record<MockUser['role'], readonly string[]> = {
   member: [
-    ...MEMBER_ROUTE_PERMISSIONS,
-    ...MEMBER_ACTION_PERMISSIONS,
+    ...E2E_ROUTE_PERMISSIONS,
+    ...E2E_MEMBER_ACTION_PERMISSIONS,
   ],
   admin: [
-    ...MEMBER_ROUTE_PERMISSIONS,
-    ...MEMBER_ACTION_PERMISSIONS,
+    ...E2E_ROUTE_PERMISSIONS,
+    ...E2E_MEMBER_ACTION_PERMISSIONS,
     'action.revenue.write',
     'action.payments.write',
     'action.support.manage',
@@ -90,13 +90,15 @@ const ROLE_DEFAULT_PERMISSIONS: Record<MockUser['role'], readonly string[]> = {
     'action.settings.members.write',
   ],
   super_admin: [
-    ...MEMBER_ROUTE_PERMISSIONS,
-    ...MEMBER_ACTION_PERMISSIONS,
+    ...E2E_ROUTE_PERMISSIONS,
+    'route.demo-simulation',
+    ...E2E_MEMBER_ACTION_PERMISSIONS,
     'action.revenue.write',
     'action.payments.write',
     'action.support.manage',
     'action.settings.write',
     'action.settings.members.write',
+    'action.demo-simulation.write',
   ],
   installer: [
     'route.device-installation',
@@ -104,9 +106,9 @@ const ROLE_DEFAULT_PERMISSIONS: Record<MockUser['role'], readonly string[]> = {
   ],
 };
 
-function buildPermissionPayload(role: MockUser['role']): { permissions: string[] } {
+export function buildPermissionPayload(role: MockUser['role']): { permissions: string[] } {
   return {
-    permissions: [...(ROLE_DEFAULT_PERMISSIONS[role] ?? ROLE_DEFAULT_PERMISSIONS.member)],
+    permissions: [...(E2E_ROLE_DEFAULT_PERMISSIONS[role] ?? E2E_ROLE_DEFAULT_PERMISSIONS.member)],
   };
 }
 
@@ -178,9 +180,9 @@ export function buildMockUser(role: MockUser['role'] = 'member'): MockUser {
   };
 }
 
-export function successEnvelope<TData>(data: TData): { success: true; data: TData; meta: ApiMeta } {
+export function successEnvelope<TData>(data: TData): { status: 'success'; data: TData; meta: ApiMeta } {
   return {
-    success: true,
+    status: 'success',
     data,
     meta: buildMeta(),
   };
@@ -191,13 +193,14 @@ export function errorEnvelope(
   message: string,
   fields?: Array<{ name: string; reason: string }>,
 ): {
-  success: false;
-  error: { code: string; message: string; fields?: Array<{ name: string; reason: string }> };
+  status: 'error';
+  error: { type: string; code: string; message: string; fields?: Array<{ name: string; reason: string }> };
   meta: ApiMeta;
 } {
   return {
-    success: false,
+    status: 'error',
     error: {
+      type: code,
       code,
       message,
       ...(fields ? { fields } : {}),
@@ -238,7 +241,7 @@ export function delay(ms: number): Promise<void> {
 
 export async function installApiMocks(page: Page, options: ApiMockOptions = {}): Promise<void> {
   const user = {
-    ...DEFAULT_USER,
+    ...buildMockUser(options.user?.role ?? DEFAULT_USER.role),
     ...options.user,
   } satisfies MockUser;
 
@@ -261,14 +264,15 @@ export async function installApiMocks(page: Page, options: ApiMockOptions = {}):
       let remainingUnauthorizedMeResponses = mockAuth.me === 'unauthorized-once' ? 1 : 0;
 
       const successEnvelope = (data: unknown) => ({
-        success: true,
+        status: 'success',
         data,
         meta: buildMeta(),
       });
 
       const errorEnvelope = (code: string, message: string) => ({
-        success: false,
+        status: 'error',
         error: {
+          type: code,
           code,
           message,
         },
