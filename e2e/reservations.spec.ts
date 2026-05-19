@@ -43,7 +43,7 @@ function formatStartableDateTimeToday(): string {
   return formatDateTimeOffset(0, '00:00:00');
 }
 
-function buildVehicleAsset() {
+function buildVehicleAsset(overrides: Record<string, unknown> = {}) {
   return {
     vehicleNumber: '12가3456',
     model: '아반떼',
@@ -54,6 +54,7 @@ function buildVehicleAsset() {
     vin: 'KMH12A34560000001',
     year: '2024',
     owner: '홍길동',
+    ...overrides,
   };
 }
 
@@ -80,11 +81,12 @@ async function openNewContractModal(page: Page): Promise<void> {
 }
 
 async function fillContractStep1(page: Page): Promise<void> {
-  await page.getByTestId('new-contract-vehicle-select').selectOption('12가3456');
   await page.getByTestId('new-contract-start-date-input').fill(formatDateOffset(1));
   await page.getByTestId('new-contract-end-date-input').fill(formatDateOffset(3));
   await page.getByTestId('new-contract-start-time-input').fill('09:00');
   await page.getByTestId('new-contract-end-time-input').fill('18:00');
+  await expect(page.getByTestId('new-contract-vehicle-select')).toBeEnabled();
+  await page.getByTestId('new-contract-vehicle-select').selectOption('12가3456');
   await page.getByTestId('new-contract-step1-next').click();
 }
 
@@ -114,6 +116,105 @@ async function installSignedUploadMock(page: Page): Promise<void> {
 }
 
 test.describe('BK-091 Reservations E2E', () => {
+  test('새 계약 등록은 기간 기준으로 가용 차량만 선택하게 한다', async ({ page }) => {
+    const vehicleAssets = [
+      buildVehicleAsset(),
+      buildVehicleAsset({
+        vehicleNumber: '34나7890',
+        model: 'K5',
+        vin: 'KN34B789000000002',
+      }),
+    ];
+    const reservations = [
+      buildReservationRow({
+        vehicleNumber: '12가3456',
+        startAt: formatDateTimeOffset(1, '09:00:00'),
+        endAt: formatDateTimeOffset(3, '18:00:00'),
+      }),
+    ];
+
+    await installApiMocks(page, {
+      user: { role: 'admin' },
+      handlers: {
+        'GET /api/v2/reservations': async ({ route }) => {
+          await fulfillSuccess(route, {
+            reservations,
+            assets: vehicleAssets,
+            total: reservations.length,
+            page: 1,
+            pageSize: 20,
+          });
+        },
+        'GET /api/v2/assets': async ({ route }) => {
+          await fulfillSuccess(route, {
+            items: vehicleAssets,
+            total: vehicleAssets.length,
+            page: 1,
+            size: 500,
+          });
+        },
+      },
+    });
+
+    await loginViaUi(page, 'admin', { returnUrl: '/reservations' });
+    await openNewContractModal(page);
+    await page.getByTestId('new-contract-start-date-input').fill(formatDateOffset(1));
+    await page.getByTestId('new-contract-end-date-input').fill(formatDateOffset(3));
+    await page.getByTestId('new-contract-start-time-input').fill('09:00');
+    await page.getByTestId('new-contract-end-time-input').fill('18:00');
+
+    const vehicleSelect = page.getByTestId('new-contract-vehicle-select');
+    await expect(vehicleSelect).toBeEnabled();
+    await expect(vehicleSelect).not.toContainText('12가3456');
+    await expect(vehicleSelect).toContainText('34나7890');
+    await vehicleSelect.selectOption('34나7890');
+  });
+
+  test('관리자 사후입력은 계약 상태 선택을 요구하고 장기렌트 30일 미만을 막는다', async ({ page }) => {
+    const vehicleAssets = [buildVehicleAsset()];
+
+    await installApiMocks(page, {
+      user: { role: 'admin' },
+      handlers: {
+        'GET /api/v2/reservations': async ({ route }) => {
+          await fulfillSuccess(route, {
+            reservations: [],
+            assets: vehicleAssets,
+            total: 0,
+            page: 1,
+            pageSize: 20,
+          });
+        },
+        'GET /api/v2/assets': async ({ route }) => {
+          await fulfillSuccess(route, {
+            items: vehicleAssets,
+            total: vehicleAssets.length,
+            page: 1,
+            size: 500,
+          });
+        },
+      },
+    });
+
+    await loginViaUi(page, 'admin', { returnUrl: '/reservations' });
+    await openNewContractModal(page);
+    await page.getByRole('button', { name: '장기렌트' }).click();
+    await page.getByTestId('new-contract-start-date-input').fill(formatDateOffset(-10));
+    await page.getByTestId('new-contract-end-date-input').fill(formatDateOffset(-7));
+    await page.getByTestId('new-contract-start-time-input').fill('09:00');
+    await page.getByTestId('new-contract-end-time-input').fill('18:00');
+    await expect(page.getByTestId('new-contract-contract-status-select')).toBeVisible();
+    await expect(page.getByTestId('new-contract-vehicle-select')).toBeEnabled();
+    await page.getByTestId('new-contract-vehicle-select').selectOption('12가3456');
+
+    await page.getByTestId('new-contract-step1-next').click();
+    await expect(page.getByTestId('new-contract-submit-error')).toContainText('계약 상태');
+
+    await page.getByTestId('new-contract-contract-status-select').selectOption('완료');
+    await page.getByTestId('new-contract-step1-next').click();
+    await expect(page.getByTestId('new-contract-submit-error')).toContainText('장기렌트는 최소 30일 이상');
+  });
+
   test('예약 생성 후 대여 시작과 반납 전이가 성공한다', async ({ page }) => {
     const reservations: ReservationListRow[] = [];
     await installSignedUploadMock(page);
@@ -930,5 +1031,111 @@ test.describe('BK-091 Reservations E2E', () => {
 
     await expect.poll(() => createPaymentPayload).not.toBeNull();
     await expect(page.getByText('수납 기록을 확정 등록했습니다.')).toBeVisible();
+  });
+
+  test('예약 상세 빠른 수납은 확인 모달에서 승인한 뒤 처리한다', async ({ page }) => {
+    const monthlyCharge = {
+      id: 'CHG-R-CONFIRM-M001',
+      reservationId: 'R-CONFIRM',
+      rentalType: 'long_term',
+      sequenceNo: 1,
+      chargeType: 'monthly_fee',
+      payerType: 'customer',
+      billingPeriodStart: '2026-05-01',
+      billingPeriodEnd: '2026-05-31',
+      dueDate: '2026-05-05',
+      amount: 800000,
+      paidAmount: 0,
+      remainingAmount: 800000,
+      status: 'overdue',
+    };
+    const detailReservation = buildReservationRow({
+      id: 'R-CONFIRM',
+      rentalType: 'long_term',
+      customerName: '확인고객',
+      paymentStatus: '대기',
+      amount: 800000,
+      billingSummary: {
+        paymentSummaryLabel: '연체/미수',
+        totalAmount: 800000,
+        paidAmount: 0,
+        remainingAmount: 800000,
+        overdueAmount: 800000,
+        chargeItemCount: 1,
+        paymentRecordCount: 0,
+        billingPlan: {
+          id: 'BPLAN-R-CONFIRM',
+          reservationId: 'R-CONFIRM',
+          monthlyAmount: 800000,
+          billingDay: 5,
+          billingTiming: 'prepaid',
+          cycleMonths: 1,
+          installmentCount: 1,
+          payerType: 'customer',
+        },
+        chargeItems: [monthlyCharge],
+        paymentRecords: [],
+      },
+    });
+    let createPaymentCount = 0;
+
+    await installApiMocks(page, {
+      user: {
+        role: 'admin',
+      },
+      handlers: {
+        'GET /api/v2/reservations': async ({ route }) => {
+          await fulfillSuccess(route, {
+            reservations: [detailReservation],
+            assets: [buildVehicleAsset()],
+            total: 1,
+            page: 1,
+            pageSize: 20,
+          });
+        },
+        'GET /api/v2/reservations/R-CONFIRM': async ({ route }) => {
+          await fulfillSuccess(route, detailReservation);
+        },
+        'POST /api/v2/reservations/R-CONFIRM/payment-records': async ({ route, request }) => {
+          createPaymentCount += 1;
+          const payload = request.postDataJSON() as Record<string, unknown>;
+          expect(payload.amount).toBe(800000);
+          expect(payload.confirmationStatus).toBe('confirmed');
+          expect(payload.allocations).toEqual([{ chargeItemId: 'CHG-R-CONFIRM-M001', amount: 800000 }]);
+          await fulfillSuccess(route, {
+            ...detailReservation.billingSummary,
+            paymentRecordCount: 1,
+          });
+        },
+      },
+    });
+
+    await loginViaUi(page, 'admin', { returnUrl: '/reservations' });
+    await expect(page.getByTestId('reservation-block-R-CONFIRM')).toBeVisible();
+
+    await page.getByTestId('reservation-block-R-CONFIRM').click();
+    await expect(page.getByTestId('reservation-detail-modal')).toBeVisible();
+    await page.getByRole('button', { name: '결제 정보' }).click();
+
+    await page.getByRole('button', { name: '수납', exact: true }).first().click();
+    expect(createPaymentCount).toBe(0);
+
+    const firstDialog = page.getByRole('dialog', { name: '청구 항목을 수납 처리하시겠습니까?' });
+    await expect(firstDialog).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(firstDialog).toBeHidden();
+    expect(createPaymentCount).toBe(0);
+
+    await page.getByRole('button', { name: '수납', exact: true }).first().click();
+    const secondDialog = page.getByRole('dialog', { name: '청구 항목을 수납 처리하시겠습니까?' });
+    await expect(secondDialog).toBeVisible();
+    await page.mouse.click(10, 10);
+    await expect(secondDialog).toBeHidden();
+    expect(createPaymentCount).toBe(0);
+
+    await page.getByRole('button', { name: '수납', exact: true }).first().click();
+    const confirmDialog = page.getByRole('dialog', { name: '청구 항목을 수납 처리하시겠습니까?' });
+    await confirmDialog.getByRole('button', { name: '수납 처리' }).click();
+    await expect.poll(() => createPaymentCount).toBe(1);
   });
 });

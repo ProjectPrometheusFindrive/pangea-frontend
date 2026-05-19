@@ -42,6 +42,7 @@ import {
   isPayloadEmpty,
   usePageEndpointState,
 } from '../hooks/usePageEndpointState';
+import { useModalDismiss } from '../hooks/useModalDismiss';
 import { useAuth } from '../context/AuthContext';
 import { useAuthorization } from '../context/AuthorizationContext';
 import { useCompany } from '../context/CompanyContext';
@@ -1866,6 +1867,11 @@ export default function Assets() {
     closeDetailModalState();
     return true;
   }, [closeDetailModalState, isDetailDirty, isDetailSaving, showDetailModal]);
+  const { handleBackdropMouseDown: handleCreateModalBackdropMouseDown } = useModalDismiss({
+    isOpen: showModal,
+    onDismiss: closeCreateModal,
+    disabled: isCreateSaving,
+  });
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -3076,7 +3082,7 @@ export default function Assets() {
 
         {/* OCR 업로드 모달 */}
         {showModal && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onMouseDown={handleCreateModalBackdropMouseDown}>
             <div className="bg-white rounded-xl w-[600px] max-h-[80vh] overflow-y-auto">
               <div className="p-6">
                 <div className="flex items-center justify-between mb-6">

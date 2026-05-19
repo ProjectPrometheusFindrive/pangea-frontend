@@ -10,6 +10,7 @@ import {
   isPayloadEmpty,
   usePageEndpointState,
 } from '../hooks/usePageEndpointState';
+import { useModalDismiss } from '../hooks/useModalDismiss';
 import { useAuth } from '../context/AuthContext';
 import { useAuthorization } from '../context/AuthorizationContext';
 import { ACTION_PERMISSIONS, ROUTE_PERMISSIONS } from '../authorization';
@@ -382,6 +383,25 @@ interface AssigneeOption {
 type LateReturnResolveDialogState = 'confirm-returned' | 'return-required' | null;
 type PaymentIssueResolveDialogState = 'choose-payment-resolution' | null;
 type RelatedContextPanelKind = 'reservation' | 'asset' | 'billing' | 'claim';
+
+type PendingPaymentConfirmation =
+  | {
+      kind: 'payment-issue';
+      item: ActionItem;
+      nextStatus: 'paid' | 'canceled';
+      title: string;
+      description: string;
+      confirmLabel: string;
+    }
+  | {
+      kind: 'work-charge';
+      item: ActionItem;
+      charge: ActionItemWorkChargeItem;
+      mode: 'paid' | 'waived' | 'refunded';
+      title: string;
+      description: string;
+      confirmLabel: string;
+    };
 
 type IssueAssetKind = 'insurance' | 'inspection';
 
@@ -1468,11 +1488,15 @@ function RelatedContextDrawer({
     ? reservationBillingSummary.paymentRecords.filter(isRecord)
     : [];
   const reservationAccidentClaim = isRecord(row.accidentClaim) ? row.accidentClaim : null;
+  const { handleBackdropMouseDown } = useModalDismiss({
+    isOpen: true,
+    onDismiss: onClose,
+  });
 
   if (kind === 'reservation' || kind === 'asset') {
     const modalTitle = kind === 'reservation' ? '예약 상세 정보' : '차량 상세 정보';
     return (
-      <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50">
+      <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50" onMouseDown={handleBackdropMouseDown}>
         <div className="flex max-h-[85vh] w-[900px] max-w-[92vw] flex-col rounded-xl bg-white shadow-2xl">
           <div className="border-b border-gray-200 p-6">
             <div className="flex items-center justify-between">
@@ -1686,7 +1710,7 @@ function RelatedContextDrawer({
   }
 
   return (
-    <div className="fixed inset-0 z-[70] flex justify-end bg-black/30">
+    <div className="fixed inset-0 z-[70] flex justify-end bg-black/30" onMouseDown={handleBackdropMouseDown}>
       <div className="h-full w-[460px] max-w-[92vw] overflow-y-auto bg-white shadow-2xl">
         <div className="sticky top-0 z-10 flex items-center justify-between border-b border-gray-200 bg-white px-5 py-4">
           <h3 className="text-lg font-bold text-[#1e2939]">{title}</h3>
@@ -2551,6 +2575,7 @@ export default function ActionRequired() {
   const [assigneeOptions, setAssigneeOptions] = useState<AssigneeOption[]>([]);
   const [lateReturnResolveDialog, setLateReturnResolveDialog] = useState<LateReturnResolveDialogState>(null);
   const [paymentIssueResolveDialog, setPaymentIssueResolveDialog] = useState<PaymentIssueResolveDialogState>(null);
+  const [pendingPaymentConfirmation, setPendingPaymentConfirmation] = useState<PendingPaymentConfirmation | null>(null);
   const [paymentAmountDraft, setPaymentAmountDraft] = useState('');
   const [paymentTypeDraft, setPaymentTypeDraft] = useState<'카드' | '현금' | '계좌이체'>('카드');
   const [paymentEvidenceFile, setPaymentEvidenceFile] = useState<File | null>(null);
@@ -3481,6 +3506,54 @@ export default function ActionRequired() {
       attachedAt: new Date().toISOString(),
     };
   }
+
+  const openPaymentIssueConfirmation = useCallback((item: ActionItem, nextStatus: 'paid' | 'canceled') => {
+    const amount = getActionItemPaymentAmount(item);
+    setPaymentIssueResolveDialog(null);
+    setPendingPaymentConfirmation({
+      kind: 'payment-issue',
+      item,
+      nextStatus,
+      title: nextStatus === 'paid' ? '결제 완료 처리하시겠습니까?' : '결제 면제 처리하시겠습니까?',
+      description: nextStatus === 'paid'
+        ? `${formatCurrencyValue(amount)}을 수납 완료로 기록합니다. 처리 후 이슈 완료를 함께 시도합니다.`
+        : `${formatCurrencyValue(amount)}을 면제 처리합니다. 처리 후 이슈 완료를 함께 시도합니다.`,
+      confirmLabel: nextStatus === 'paid' ? '결제 완료 처리' : '결제 면제 처리',
+    });
+  }, []);
+
+  const openWorkChargeSettlementConfirmation = useCallback((
+    item: ActionItem,
+    charge: ActionItemWorkChargeItem,
+    mode: 'paid' | 'waived' | 'refunded',
+  ) => {
+    const fallbackAmount = Math.max(charge.remainingAmount || charge.amount || 0, 0);
+    const refundAmount = toPaymentAmountFromInput(refundAmountDraft) || fallbackAmount;
+    const amount = mode === 'refunded' ? refundAmount : fallbackAmount;
+    const title = mode === 'refunded'
+      ? '환불 완료 처리하시겠습니까?'
+      : mode === 'waived'
+        ? '청구 항목을 면제 처리하시겠습니까?'
+        : '청구 항목을 수납 완료 처리하시겠습니까?';
+    const confirmLabel = mode === 'refunded'
+      ? '환불 완료 처리'
+      : mode === 'waived'
+        ? '면제 처리'
+        : '수납 완료 처리';
+    const description = mode === 'waived'
+      ? `${charge.description || getSettlementChargeLabel(item)} 항목을 면제 처리합니다. 처리 후 이슈 완료를 함께 시도합니다.`
+      : `${charge.description || getSettlementChargeLabel(item)} ${formatCurrencyValue(amount)}을 ${mode === 'refunded' ? '환불 완료' : '수납 완료'}로 기록합니다. 처리 후 이슈 완료를 함께 시도합니다.`;
+
+    setPendingPaymentConfirmation({
+      kind: 'work-charge',
+      item,
+      charge,
+      mode,
+      title,
+      description,
+      confirmLabel,
+    });
+  }, [refundAmountDraft]);
 
   async function runPaymentIssueResolution(
     item: ActionItem,
@@ -4417,6 +4490,19 @@ export default function ActionRequired() {
     tryResolveCurrentActionItem,
   ]);
 
+  const confirmPendingPaymentAction = useCallback(() => {
+    const pending = pendingPaymentConfirmation;
+    if (!pending) {
+      return;
+    }
+    setPendingPaymentConfirmation(null);
+    if (pending.kind === 'payment-issue') {
+      void runPaymentIssueResolution(pending.item, pending.nextStatus);
+      return;
+    }
+    void runWorkChargeSettlement(pending.item, pending.charge, pending.mode);
+  }, [pendingPaymentConfirmation, runPaymentIssueResolution, runWorkChargeSettlement]);
+
   const uploadAccidentClaimFiles = useCallback(async (
     reservationId: string,
     files: File[],
@@ -4545,38 +4631,38 @@ export default function ActionRequired() {
     }
     if (chargeItem) {
       if (actionKey === 'refund_complete') {
-        void runWorkChargeSettlement(selectedItem, chargeItem, 'refunded');
+        openWorkChargeSettlementConfirmation(selectedItem, chargeItem, 'refunded');
         return;
       }
       if (actionKey === 'charge_paid') {
-        void runWorkChargeSettlement(selectedItem, chargeItem, 'paid');
+        openWorkChargeSettlementConfirmation(selectedItem, chargeItem, 'paid');
         return;
       }
       if (actionKey === 'charge_waive') {
-        void runWorkChargeSettlement(selectedItem, chargeItem, 'waived');
+        openWorkChargeSettlementConfirmation(selectedItem, chargeItem, 'waived');
         return;
       }
     }
 
     if (actionKey === 'payment_record_create') {
-      void runPaymentIssueResolution(selectedItem, 'paid');
+      openPaymentIssueConfirmation(selectedItem, 'paid');
       return;
     }
     if (actionKey === 'payment_waive') {
-      void runPaymentIssueResolution(selectedItem, 'canceled');
+      openPaymentIssueConfirmation(selectedItem, 'canceled');
       return;
     }
     if (actionKey === 'refund_complete') {
       const refundCharge = toWorkChargeItems(selectedItem.workContext).find((charge) => isRefundChargeItem(charge) && !isWorkChargeSettled(charge));
       if (refundCharge) {
-        void runWorkChargeSettlement(selectedItem, refundCharge, 'refunded');
+        openWorkChargeSettlementConfirmation(selectedItem, refundCharge, 'refunded');
       }
       return;
     }
     if (actionKey === 'closeout_settle') {
       const nextCharge = toWorkChargeItems(selectedItem.workContext).find((charge) => !isWorkChargeSettled(charge));
       if (nextCharge) {
-        void runWorkChargeSettlement(selectedItem, nextCharge, isRefundChargeItem(nextCharge) ? 'refunded' : 'paid');
+        openWorkChargeSettlementConfirmation(selectedItem, nextCharge, isRefundChargeItem(nextCharge) ? 'refunded' : 'paid');
       }
       return;
     }
@@ -4601,10 +4687,10 @@ export default function ActionRequired() {
       void runOperationalDomainAction(selectedItem, domainEntry.action, domainEntry.label);
     }
   }, [
+    openPaymentIssueConfirmation,
+    openWorkChargeSettlementConfirmation,
     runAccidentClaimAction,
     runOperationalDomainAction,
-    runPaymentIssueResolution,
-    runWorkChargeSettlement,
     selectedItem,
   ]);
 
@@ -4726,6 +4812,49 @@ export default function ActionRequired() {
     selectedItem,
     selectedItemCapabilities.canUseAccidentReplacementDriverActions,
   ]);
+  const isActionDetailDismissBlocked = (
+    isWriteSaving
+    || relatedContextKind !== null
+    || Boolean(issueAssetPrompt)
+    || lateReturnResolveDialog !== null
+    || Boolean(pendingPaymentConfirmation)
+    || paymentIssueResolveDialog !== null
+    || accidentApprovalRejectConfirmOpen
+    || Boolean(previewDocument)
+  );
+  const { handleBackdropMouseDown: handleActionDetailBackdropMouseDown } = useModalDismiss({
+    isOpen: Boolean(selectedItem),
+    onDismiss: handleCloseDetail,
+    disabled: isActionDetailDismissBlocked,
+  });
+  const { handleBackdropMouseDown: handleIssueAssetPromptBackdropMouseDown } = useModalDismiss({
+    isOpen: Boolean(issueAssetPrompt),
+    onDismiss: () => setIssueAssetPrompt(null),
+  });
+  const { handleBackdropMouseDown: handleLateReturnResolveBackdropMouseDown } = useModalDismiss({
+    isOpen: lateReturnResolveDialog !== null,
+    onDismiss: () => setLateReturnResolveDialog(null),
+    disabled: isResolveSaving,
+  });
+  const { handleBackdropMouseDown: handlePendingPaymentConfirmationBackdropMouseDown } = useModalDismiss({
+    isOpen: Boolean(pendingPaymentConfirmation),
+    onDismiss: () => setPendingPaymentConfirmation(null),
+    disabled: isWriteSaving,
+  });
+  const { handleBackdropMouseDown: handlePaymentResolutionBackdropMouseDown } = useModalDismiss({
+    isOpen: paymentIssueResolveDialog === 'choose-payment-resolution',
+    onDismiss: () => setPaymentIssueResolveDialog(null),
+    disabled: isResolveSaving,
+  });
+  const { handleBackdropMouseDown: handleAccidentRejectBackdropMouseDown } = useModalDismiss({
+    isOpen: accidentApprovalRejectConfirmOpen,
+    onDismiss: () => setAccidentApprovalRejectConfirmOpen(false),
+    disabled: isAccidentClaimSaving,
+  });
+  const { handleBackdropMouseDown: handlePreviewDocumentBackdropMouseDown } = useModalDismiss({
+    isOpen: Boolean(previewDocument),
+    onDismiss: () => setPreviewDocument(null),
+  });
 
   return (
     <Layout title="조치 필요 항목">
@@ -4968,8 +5097,9 @@ export default function ActionRequired() {
         </PageStateBoundary>
 
         {selectedItem && (
-          <div className="fixed inset-y-0 right-0 w-96 bg-white shadow-2xl z-50 overflow-y-auto">
-            <div className="p-6">
+          <div className="fixed inset-0 z-50 flex justify-end bg-black/20" onMouseDown={handleActionDetailBackdropMouseDown}>
+            <div className="h-full w-96 overflow-y-auto bg-white shadow-2xl">
+              <div className="p-6">
               <div className="flex items-center justify-between mb-6">
                 <h2 className="text-lg font-bold text-[#1e2939]">상세 정보</h2>
                 <button
@@ -6081,7 +6211,7 @@ export default function ActionRequired() {
                             onClick={() => {
                               const refundCharge = getPrimarySettlementCharge(selectedItem);
                               if (refundCharge) {
-                                void runWorkChargeSettlement(selectedItem, refundCharge, 'refunded');
+                                openWorkChargeSettlementConfirmation(selectedItem, refundCharge, 'refunded');
                               }
                             }}
                             disabled={isWriteSaving || !canWritePayments || !getPrimarySettlementCharge(selectedItem)}
@@ -6138,7 +6268,7 @@ export default function ActionRequired() {
                           <button
                             type="button"
                             onClick={() => {
-                              void runPaymentIssueResolution(selectedItem, 'paid');
+                              openPaymentIssueConfirmation(selectedItem, 'paid');
                             }}
                             disabled={isWriteSaving}
                             className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
@@ -6148,7 +6278,7 @@ export default function ActionRequired() {
                           <button
                             type="button"
                             onClick={() => {
-                              void runPaymentIssueResolution(selectedItem, 'canceled');
+                              openPaymentIssueConfirmation(selectedItem, 'canceled');
                             }}
                             disabled={isWriteSaving}
                             className="rounded-lg bg-slate-600 px-3 py-2 text-xs font-medium text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
@@ -6395,6 +6525,7 @@ export default function ActionRequired() {
               </div>
             </div>
           </div>
+          </div>
         )}
 
         {relatedContextKind && (
@@ -6409,7 +6540,7 @@ export default function ActionRequired() {
         )}
 
         {issueAssetPrompt && (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50">
+          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50" onMouseDown={handleIssueAssetPromptBackdropMouseDown}>
             <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
               <p className="text-base font-semibold text-[#1e2939]">{issueAssetPrompt.message}</p>
               <div className="mt-6 flex justify-end gap-3">
@@ -6460,7 +6591,7 @@ export default function ActionRequired() {
         )}
 
         {lateReturnResolveDialog === 'confirm-returned' && selectedItem && (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50">
+          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50" onMouseDown={handleLateReturnResolveBackdropMouseDown}>
             <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
               <h2 className="text-lg font-bold text-[#1e2939]">
                 {isRepairDoneNotReturnedActionItem(selectedItem) ? '수리완료 후 대차 차량이 반납되었습니까?' : '해당 차량이 반납되었습니까?'}
@@ -6491,7 +6622,7 @@ export default function ActionRequired() {
         )}
 
         {lateReturnResolveDialog === 'return-required' && (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50">
+          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50" onMouseDown={handleLateReturnResolveBackdropMouseDown}>
             <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
               <h2 className="text-lg font-bold text-[#1e2939]">차량이 반납된 다음 완료 처리해주세요</h2>
               <div className="mt-6">
@@ -6507,8 +6638,43 @@ export default function ActionRequired() {
           </div>
         )}
 
+        {pendingPaymentConfirmation && (
+          <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4" onMouseDown={handlePendingPaymentConfirmationBackdropMouseDown}>
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="payment-action-confirmation-title"
+              className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl"
+            >
+              <h2 id="payment-action-confirmation-title" className="text-lg font-bold text-[#1e2939]">{pendingPaymentConfirmation.title}</h2>
+              <p className="mt-3 text-sm leading-6 text-gray-600">{pendingPaymentConfirmation.description}</p>
+              <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">
+                이 작업은 결제/청구 상태를 변경합니다.
+              </p>
+              <div className="mt-6 flex gap-3">
+                <button
+                  type="button"
+                  onClick={confirmPendingPaymentAction}
+                  disabled={isWriteSaving}
+                  className="flex-1 rounded-lg bg-blue-600 px-4 py-3 font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {isWriteSaving ? '처리 중...' : pendingPaymentConfirmation.confirmLabel}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPendingPaymentConfirmation(null)}
+                  disabled={isWriteSaving}
+                  className="flex-1 rounded-lg bg-gray-100 px-4 py-3 font-semibold text-gray-700 hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  닫기
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {paymentIssueResolveDialog === 'choose-payment-resolution' && isPaymentActionItem(selectedItem) && (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50">
+          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50" onMouseDown={handlePaymentResolutionBackdropMouseDown}>
             <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
               <h2 className="text-lg font-bold text-[#1e2939]">정산/수납 항목 완료 처리 방법 선택</h2>
               <p className="mt-3 text-sm text-gray-600">
@@ -6521,7 +6687,7 @@ export default function ActionRequired() {
                     if (!selectedItem) {
                       return;
                     }
-                    void runPaymentIssueResolution(selectedItem, 'paid');
+                    openPaymentIssueConfirmation(selectedItem, 'paid');
                   }}
                   disabled={isResolveSaving}
                   className="w-full rounded-lg bg-emerald-600 px-4 py-3 font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
@@ -6534,7 +6700,7 @@ export default function ActionRequired() {
                     if (!selectedItem) {
                       return;
                     }
-                    void runPaymentIssueResolution(selectedItem, 'canceled');
+                    openPaymentIssueConfirmation(selectedItem, 'canceled');
                   }}
                   disabled={isResolveSaving}
                   className="w-full rounded-lg bg-slate-600 px-4 py-3 font-medium text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
@@ -6555,7 +6721,7 @@ export default function ActionRequired() {
         )}
 
         {accidentApprovalRejectConfirmOpen && (
-          <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4">
+          <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4" onMouseDown={handleAccidentRejectBackdropMouseDown}>
             <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
               <h2 className="text-lg font-bold text-[#1e2939]">승인 반려로 저장하시겠습니까?</h2>
               <p className="mt-3 text-sm leading-6 text-gray-600">
@@ -6587,7 +6753,7 @@ export default function ActionRequired() {
         )}
 
         {previewDocument && (
-          <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4">
+          <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4" onMouseDown={handlePreviewDocumentBackdropMouseDown}>
             <div className="flex max-h-[90vh] w-full max-w-3xl flex-col rounded-2xl bg-white shadow-2xl">
               <div className="flex items-start justify-between gap-4 border-b border-gray-200 p-5">
                 <div className="min-w-0">

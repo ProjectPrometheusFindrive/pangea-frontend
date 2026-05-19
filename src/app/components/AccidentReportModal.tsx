@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { X, AlertTriangle, Loader2, Upload } from 'lucide-react';
 import { getAccidentSeverity } from '../utils/issueUtils';
+import { useModalDismiss } from '../hooks/useModalDismiss';
 
 const MAX_BLACKBOX_FILE_BYTES = 50 * 1024 * 1024;
 
@@ -54,22 +55,10 @@ export function AccidentReportModal({
   const [fieldErrors, setFieldErrors] = useState<Partial<Record<AccidentReportField, string>>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  useEffect(() => {
-    if (!isOpen || isSubmitting) {
-      return undefined;
-    }
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        handleResetAndClose();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, isSubmitting]);
-
-  if (!isOpen) {
-    return null;
-  }
+  const isDirty = accidentType !== 'minor'
+    || description.trim().length > 0
+    || assigneeId.trim().length > 0
+    || blackboxFile !== null;
 
   const clearFieldError = (field: AccidentReportField) => {
     setFieldErrors((prev) => {
@@ -83,7 +72,16 @@ export function AccidentReportModal({
     setSubmitError(null);
   };
 
-  const handleResetAndClose = () => {
+  const handleResetAndClose = (force = false) => {
+    if (!force && isSubmitting) {
+      return;
+    }
+    if (!force && isDirty && typeof window !== 'undefined') {
+      const shouldDiscard = window.confirm('입력 중인 사고 접수 정보가 있습니다. 닫으시겠습니까?');
+      if (!shouldDiscard) {
+        return;
+      }
+    }
     setAccidentType('minor');
     setDescription('');
     setAssigneeId('');
@@ -93,6 +91,16 @@ export function AccidentReportModal({
     setIsSubmitting(false);
     onClose();
   };
+
+  const { handleBackdropMouseDown } = useModalDismiss({
+    isOpen,
+    onDismiss: handleResetAndClose,
+    disabled: isSubmitting,
+  });
+
+  if (!isOpen) {
+    return null;
+  }
 
   const handleSubmit = async () => {
     if (isSubmitting) {
@@ -137,7 +145,7 @@ export function AccidentReportModal({
         return;
       }
 
-      handleResetAndClose();
+      handleResetAndClose(true);
     } finally {
       setIsSubmitting(false);
     }
@@ -168,7 +176,7 @@ export function AccidentReportModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4" onMouseDown={handleBackdropMouseDown}>
       <div className="flex max-h-[calc(100dvh-2rem)] w-full max-w-2xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl">
         <div className="flex shrink-0 items-center justify-between border-b border-gray-200 p-4 sm:p-6">
           <div className="flex items-center gap-3">

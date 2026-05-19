@@ -20,6 +20,7 @@ import {
   type RevenueRentalType,
   type RevenueSummaryBucket,
   type RevenueSummaryResponse,
+  type RevenueTrendItem,
   type RevenueTrendResponse,
   type RevenueVehicle,
 } from '../../services/revenue';
@@ -45,6 +46,7 @@ import { formatDateKst } from '../utils/dateTimeFormat';
 
 type PeriodPreset = 'last7Days' | 'last30Days' | 'last365Days';
 type RevenueTab = 'summary' | 'ledger';
+type RevenueTrendMetricKey = 'grossRevenue' | 'netRevenue' | 'unpaidAmount' | 'refundAmount';
 
 interface RevenueFilters {
   preset: PeriodPreset;
@@ -132,6 +134,15 @@ const PAYER_TYPE_OPTIONS: Array<{ value: RevenuePayerType | 'all'; label: string
   { value: 'repair_shop', label: '정비공장' },
 ];
 
+const TREND_METRICS: Array<{ key: RevenueTrendMetricKey; label: string; color: string }> = [
+  { key: 'grossRevenue', label: '총매출', color: '#475569' },
+  { key: 'netRevenue', label: '순매출', color: '#2563eb' },
+  { key: 'unpaidAmount', label: '미납', color: '#dc2626' },
+  { key: 'refundAmount', label: '환불', color: '#f97316' },
+];
+
+const DEFAULT_VISIBLE_TREND_METRICS = TREND_METRICS.map((metric) => metric.key);
+
 const LEDGER_STATUS_OPTIONS = [
   { value: 'all', label: '전체 상태' },
   { value: 'pending', label: '수납 예정' },
@@ -207,6 +218,12 @@ function normalizeCurrencyCode(currency: string): string {
 
 function formatCurrency(value: number, currency: string): string {
   const normalizedCurrency = normalizeCurrencyCode(currency);
+  if (normalizedCurrency === 'KRW') {
+    return `${new Intl.NumberFormat('ko-KR', {
+      maximumFractionDigits: 0,
+    }).format(value)}원`;
+  }
+
   try {
     return new Intl.NumberFormat('ko-KR', {
       style: 'currency',
@@ -239,14 +256,6 @@ function formatAxisCurrency(value: number): string {
 
 function formatTrendDateLabel(value: string): string {
   return formatDateKst(value, value);
-}
-
-function formatWanCurrency(value: number): string {
-  if (!Number.isFinite(value) || value === 0) {
-    return '0만원';
-  }
-
-  return `${Math.round(value / 10_000).toLocaleString('ko-KR')}만원`;
 }
 
 function formatPlainNumber(value: number): string {
@@ -406,7 +415,7 @@ export function buildRevenueParityCards(
     {
       key: 'unpaidAmount',
       title: '미납금',
-      value: formatWanCurrency(totals.unpaidAmount),
+      value: formatCurrency(totals.unpaidAmount, totals.currency),
       detail: totals.unpaidCount > 0 ? `${totals.unpaidCount.toLocaleString('ko-KR')}건 미납` : '미납 건 없음',
     },
     {
@@ -521,6 +530,7 @@ export default function Revenue() {
   const [trendError, setTrendError] = useState<string | null>(null);
   const [isEmpty, setIsEmpty] = useState(false);
   const [activeTab, setActiveTab] = useState<RevenueTab>('summary');
+  const [visibleTrendMetrics, setVisibleTrendMetrics] = useState<RevenueTrendMetricKey[]>(DEFAULT_VISIBLE_TREND_METRICS);
   const [ledgerReservationId, setLedgerReservationId] = useState('');
   const [ledgerVehicleNumber, setLedgerVehicleNumber] = useState('');
   const [ledgerStatus, setLedgerStatus] = useState('all');
@@ -834,12 +844,23 @@ export default function Revenue() {
     handlePageErrorAction(refreshErrorKind, navigate);
   }, [navigate, refreshErrorKind]);
 
+  const handleTrendMetricToggle = useCallback((metricKey: RevenueTrendMetricKey) => {
+    setVisibleTrendMetrics((current) => {
+      if (current.includes(metricKey)) {
+        return current.length > 1 ? current.filter((key) => key !== metricKey) : current;
+      }
+
+      return [...current, metricKey];
+    });
+  }, []);
+
   const summaryTotals = snapshot?.summary.totals ?? EMPTY_TOTALS;
   const summaryBuckets = snapshot?.summary.buckets ?? [];
   const summaryPaymentMethods = snapshot?.summary.paymentMethods ?? [];
   const summaryRentalTypes = snapshot?.summary.rentalTypes ?? [];
   const summaryPayerTypes = snapshot?.summary.payerTypes ?? [];
   const summaryVehicles = snapshot?.summary.vehicles ?? [];
+  const trendItems = snapshot?.trend.items ?? [];
   const growthRate = useMemo(() => calculateGrowthRate(summaryBuckets), [summaryBuckets]);
   const parityCards = useMemo(
     () => buildRevenueParityCards(summaryTotals, growthRate),
@@ -847,13 +868,14 @@ export default function Revenue() {
   );
 
   const summaryChartData = useMemo(
-    () => summaryBuckets.map((bucket) => ({
-      label: bucket.label,
-      grossRevenue: bucket.grossRevenue,
-      refundAmount: bucket.refundAmount,
-      netRevenue: bucket.netRevenue,
+    () => trendItems.map((item: RevenueTrendItem) => ({
+      label: formatTrendDateLabel(item.date),
+      grossRevenue: item.grossRevenue,
+      refundAmount: item.refundAmount,
+      netRevenue: item.netRevenue,
+      unpaidAmount: item.unpaidAmount,
     })),
-    [summaryBuckets],
+    [trendItems],
   );
 
   const paymentMethodSlices = useMemo(
@@ -1219,7 +1241,29 @@ export default function Revenue() {
 
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
             <div className="rounded-xl bg-white p-5 shadow-sm xl:col-span-2">
-              <h3 className="mb-4 text-base font-bold text-gray-900">월간 매출 추이</h3>
+              <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <h3 className="text-base font-bold text-gray-900">월간 매출 추이</h3>
+                <div className="flex flex-wrap gap-2">
+                  {TREND_METRICS.map((metric) => {
+                    const isVisible = visibleTrendMetrics.includes(metric.key);
+                    return (
+                      <button
+                        key={metric.key}
+                        type="button"
+                        onClick={() => handleTrendMetricToggle(metric.key)}
+                        className={`rounded-md border px-2.5 py-1 text-xs font-semibold transition ${
+                          isVisible
+                            ? 'border-gray-900 bg-gray-900 text-white'
+                            : 'border-gray-200 bg-white text-gray-500 hover:border-gray-300'
+                        }`}
+                        aria-pressed={isVisible}
+                      >
+                        {metric.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
               <ResponsiveContainer width="100%" height={280}>
                 <BarChart data={summaryChartData}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
@@ -1238,8 +1282,15 @@ export default function Revenue() {
                     }}
                   />
                   <Legend />
-                  <Bar name="순매출" dataKey="netRevenue" fill="#3b82f6" radius={[6, 6, 0, 0]} />
-                  <Bar name="환불액" dataKey="refundAmount" fill="#f97316" radius={[6, 6, 0, 0]} />
+                  {TREND_METRICS.filter((metric) => visibleTrendMetrics.includes(metric.key)).map((metric) => (
+                    <Bar
+                      key={metric.key}
+                      name={metric.label}
+                      dataKey={metric.key}
+                      fill={metric.color}
+                      radius={[6, 6, 0, 0]}
+                    />
+                  ))}
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -1267,7 +1318,7 @@ export default function Revenue() {
                           />
                         </div>
                         <p className="text-sm text-gray-500">
-                          {formatWanCurrency(slice.amount)} · {slice.count.toLocaleString('ko-KR')}건
+                          {formatCurrency(slice.amount, summaryTotals.currency)} · {slice.count.toLocaleString('ko-KR')}건
                         </p>
                       </div>
                     ))
@@ -1295,7 +1346,7 @@ export default function Revenue() {
                       <div className="h-2 rounded-full bg-gray-100">
                         <div className="h-2 rounded-full bg-indigo-500" style={{ width: `${row.percentage}%` }} />
                       </div>
-                      <p className="text-sm text-gray-500">{formatWanCurrency(row.amount)} · {row.count.toLocaleString('ko-KR')}건</p>
+                      <p className="text-sm text-gray-500">{formatCurrency(row.amount, summaryTotals.currency)} · {row.count.toLocaleString('ko-KR')}건</p>
                     </div>
                   ))
                 ) : (
@@ -1317,7 +1368,7 @@ export default function Revenue() {
                       <div className="h-2 rounded-full bg-gray-100">
                         <div className="h-2 rounded-full bg-emerald-500" style={{ width: `${row.percentage}%` }} />
                       </div>
-                      <p className="text-sm text-gray-500">{formatWanCurrency(row.amount)} · {row.count.toLocaleString('ko-KR')}건</p>
+                      <p className="text-sm text-gray-500">{formatCurrency(row.amount, summaryTotals.currency)} · {row.count.toLocaleString('ko-KR')}건</p>
                     </div>
                   ))
                 ) : (
@@ -1347,7 +1398,7 @@ export default function Revenue() {
                       <tr key={`${row.model}-${row.rank}`} className="border-b border-gray-50 last:border-b-0">
                         <td className="px-3 py-3 text-gray-700">{row.rank}</td>
                         <td className="px-3 py-3 font-medium text-gray-900">{row.model}</td>
-                        <td className="px-3 py-3 text-gray-700">{formatWanCurrency(row.revenue)}</td>
+                        <td className="px-3 py-3 text-gray-700">{formatCurrency(row.revenue, summaryTotals.currency)}</td>
                         <td className="px-3 py-3 text-gray-700">{row.reservationCount.toLocaleString('ko-KR')}건</td>
                         <td className="px-3 py-3 text-gray-700">{formatPercent(row.utilizationRate)}</td>
                         <td className="px-3 py-3 text-gray-700">{formatPercent(row.shareRate)}</td>
