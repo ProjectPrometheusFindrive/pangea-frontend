@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { X, Upload, CheckCircle, Loader2, AlertTriangle, Plus } from 'lucide-react';
 import type { VehicleAsset } from '../types/assets';
+import { useModalDismiss } from '../hooks/useModalDismiss';
 
 interface DragSelection {
   vehicleNumber: string;
@@ -15,6 +16,7 @@ export type NewContractField =
   | 'endDate'
   | 'startTime'
   | 'endTime'
+  | 'contractStatus'
   | 'customerName'
   | 'customerPhone'
   | 'customerLicense'
@@ -55,6 +57,7 @@ export interface NewContractFormValues {
   endDate: string;
   startTime: string;
   endTime: string;
+  contractStatus?: '예약중' | '대여중' | '완료';
   customerName: string;
   customerPhone: string;
   customerLicense: string;
@@ -129,6 +132,8 @@ interface NewContractModalProps {
   locationOptions?: NewContractLocationOption[];
   onCreateLocationOption?: (payload: { name: string; address: string }) => Promise<NewContractLocationOption>;
   dragSelection?: DragSelection | null;
+  allowBackdatedStart?: boolean;
+  onResolveUnavailableVehicles?: (formValues: Pick<NewContractFormValues, 'startDate' | 'endDate' | 'startTime' | 'endTime'>) => Promise<string[]>;
   onValidateStepOne?: (formValues: Pick<NewContractFormValues, 'selectedVehicle' | 'startDate' | 'endDate' | 'startTime' | 'endTime'>) => Promise<NewContractSubmitFeedback | null>;
   onSubmit: (formValues: NewContractFormValues) => Promise<NewContractSubmitFeedback | null>;
 }
@@ -150,6 +155,7 @@ const FIELD_LABELS: Record<NewContractField, string> = {
   endDate: '대여 종료일',
   startTime: '픽업 시간',
   endTime: '반납 시간',
+  contractStatus: '계약 상태',
   customerName: '고객명',
   customerPhone: '연락처',
   customerLicense: '면허번호',
@@ -220,6 +226,28 @@ function parseLocalDate(value: string): Date | null {
   return parsed;
 }
 
+function addDays(dateValue: string, days: number): string {
+  const base = parseLocalDate(dateValue);
+  if (!base) {
+    return '';
+  }
+  const next = new Date(base);
+  next.setDate(next.getDate() + days);
+  return formatDateAsYmd(next);
+}
+
+function getDurationDays(startDate: string, endDate: string, startTime: string, endTime: string): number | null {
+  if (!startDate || !endDate || !startTime || !endTime) {
+    return null;
+  }
+  const startAt = new Date(`${startDate}T${startTime}`);
+  const endAt = new Date(`${endDate}T${endTime}`);
+  if (Number.isNaN(startAt.getTime()) || Number.isNaN(endAt.getTime()) || endAt <= startAt) {
+    return null;
+  }
+  return (endAt.getTime() - startAt.getTime()) / (1000 * 60 * 60 * 24);
+}
+
 function buildValidationSummary(fieldErrors: Partial<Record<NewContractField, string>>): string {
   const messages = Object.entries(fieldErrors)
     .flatMap(([field, message]) => {
@@ -251,6 +279,8 @@ export function NewContractModal({
   locationOptions,
   onCreateLocationOption,
   dragSelection,
+  allowBackdatedStart = false,
+  onResolveUnavailableVehicles,
   onValidateStepOne,
   onSubmit,
 }: NewContractModalProps) {
@@ -262,6 +292,7 @@ export function NewContractModal({
   const [endDate, setEndDate] = useState('');
   const [startTime, setStartTime] = useState('09:00');
   const [endTime, setEndTime] = useState('18:00');
+  const [contractStatus, setContractStatus] = useState<'' | '예약중' | '대여중' | '완료'>('');
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
   const [customerLicense, setCustomerLicense] = useState('');
@@ -323,6 +354,9 @@ export function NewContractModal({
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Partial<Record<NewContractField, string>>>({});
   const [additionalDriverLicenseFileErrors, setAdditionalDriverLicenseFileErrors] = useState<Partial<Record<number, string>>>({});
+  const [unavailableVehicleNumbers, setUnavailableVehicleNumbers] = useState<string[]>([]);
+  const [isAvailabilityLoading, setIsAvailabilityLoading] = useState(false);
+  const [availabilityError, setAvailabilityError] = useState<string | null>(null);
 
   const uniqueVehicleModels = Array.from(new Set(
     vehicleAssets
@@ -333,6 +367,14 @@ export function NewContractModal({
   const filteredVehicleAssets = selectedModelFilters.includes('all') || selectedModelFilters.length === 0
     ? vehicleAssets
     : vehicleAssets.filter((vehicle) => selectedModelFilters.includes(vehicle.model));
+  const hasCompletePeriod = Boolean(startDate && endDate && startTime && endTime && getDurationDays(startDate, endDate, startTime, endTime));
+  const unavailableVehicleSet = new Set(unavailableVehicleNumbers);
+  const selectableVehicleAssets = hasCompletePeriod
+    ? filteredVehicleAssets.filter((vehicle) => !unavailableVehicleSet.has(vehicle.vehicleNumber))
+    : [];
+  const selectedStartDay = parseLocalDate(startDate);
+  const isBackdatedSelection = Boolean(selectedStartDay && selectedStartDay < createTodayBaseDate());
+  const longTermDurationDays = getDurationDays(startDate, endDate, startTime, endTime);
 
   const firstDriver = {
     name: contractorType === 'individual' ? contractorName : customerName,
@@ -390,11 +432,48 @@ export function NewContractModal({
     if (!selectedVehicle) {
       return;
     }
-    if (filteredVehicleAssets.some((vehicle) => vehicle.vehicleNumber === selectedVehicle)) {
+    if (selectableVehicleAssets.some((vehicle) => vehicle.vehicleNumber === selectedVehicle)) {
       return;
     }
     setSelectedVehicle('');
-  }, [filteredVehicleAssets, selectedVehicle]);
+  }, [selectableVehicleAssets, selectedVehicle]);
+
+  useEffect(() => {
+    if (!isOpen || !hasCompletePeriod || !onResolveUnavailableVehicles) {
+      setUnavailableVehicleNumbers([]);
+      setAvailabilityError(null);
+      return;
+    }
+    let cancelled = false;
+    setIsAvailabilityLoading(true);
+    setAvailabilityError(null);
+    onResolveUnavailableVehicles({ startDate, endDate, startTime, endTime })
+      .then((vehicleNumbers) => {
+        if (!cancelled) {
+          setUnavailableVehicleNumbers(vehicleNumbers);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setUnavailableVehicleNumbers([]);
+          setAvailabilityError('차량 가능 여부를 확인하지 못했습니다. 기간을 다시 확인해 주세요.');
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsAvailabilityLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [endDate, endTime, hasCompletePeriod, isOpen, onResolveUnavailableVehicles, startDate, startTime]);
+
+  useEffect(() => {
+    if (!isBackdatedSelection) {
+      setContractStatus('');
+    }
+  }, [isBackdatedSelection]);
 
   useEffect(() => {
     setAdditionalDriverLicenseFiles((previous) => additionalDrivers.map((_, index) => previous[index] ?? null));
@@ -613,7 +692,111 @@ export function NewContractModal({
     setIsCheckingStepOne(false);
   };
 
-  const handleClose = () => {
+  const isMainModalDirty = useMemo(() => (
+    step > 1
+    || rentalType !== 'short_term'
+    || selectedModelFilters.some((value) => value !== 'all')
+    || hasTextValue(contractStatus)
+    || hasTextValue(customerName)
+    || hasTextValue(customerPhone)
+    || hasTextValue(customerLicense)
+    || hasTextValue(customerAddress)
+    || hasTextValue(contractorName)
+    || hasTextValue(contractorBusinessNumber)
+    || hasTextValue(contractorContactName)
+    || hasTextValue(contractorContactPhone)
+    || hasTextValue(payerName)
+    || hasTextValue(payerPhone)
+    || hasTextValue(billingAccount)
+    || hasTextValue(amount)
+    || hasTextValue(deposit)
+    || hasTextValue(monthlyAmount)
+    || billingDay !== '5'
+    || billingTiming !== 'prepaid'
+    || graceDays !== '0'
+    || hasTextValue(advancePayment)
+    || requestSource !== 'repair_shop'
+    || hasTextValue(requesterOrganizationName)
+    || hasTextValue(requesterName)
+    || hasTextValue(requesterPhone)
+    || hasTextValue(insurerName)
+    || hasTextValue(claimNo)
+    || hasTextValue(adjusterName)
+    || hasTextValue(adjusterPhone)
+    || hasTextValue(repairShopName)
+    || hasTextValue(repairShopLocation)
+    || hasTextValue(damagedVehicleNumber)
+    || hasTextValue(damagedVehicleModel)
+    || hasTextValue(deliveryLocation)
+    || hasTextValue(billedAmount)
+    || paymentMethod !== '카드'
+    || paymentStatus !== '대기'
+    || hasTextValue(paymentDepositorName)
+    || hasTextValue(paymentApprovalNo)
+    || licenseFile !== null
+    || additionalDriverLicenseFiles.some(Boolean)
+    || contractFile !== null
+    || contractFiles.length > 0
+    || additionalDrivers.length > 0
+  ), [
+    additionalDriverLicenseFiles,
+    additionalDrivers.length,
+    adjusterName,
+    adjusterPhone,
+    amount,
+    advancePayment,
+    billedAmount,
+    billingAccount,
+    billingDay,
+    billingTiming,
+    claimNo,
+    contractFile,
+    contractFiles.length,
+    contractStatus,
+    contractorBusinessNumber,
+    contractorContactName,
+    contractorContactPhone,
+    contractorName,
+    customerAddress,
+    customerLicense,
+    customerName,
+    customerPhone,
+    damagedVehicleModel,
+    damagedVehicleNumber,
+    deliveryLocation,
+    deposit,
+    graceDays,
+    insurerName,
+    licenseFile,
+    monthlyAmount,
+    payerName,
+    payerPhone,
+    paymentApprovalNo,
+    paymentDepositorName,
+    paymentMethod,
+    paymentStatus,
+    rentalType,
+    repairShopLocation,
+    repairShopName,
+    requestSource,
+    requesterName,
+    requesterOrganizationName,
+    requesterPhone,
+    selectedModelFilters,
+    step,
+  ]);
+
+  const handleClose = (force?: unknown) => {
+    const shouldForce = force === true;
+    if (!shouldForce && isSubmitting) {
+      return;
+    }
+    if (!shouldForce && isMainModalDirty && typeof window !== 'undefined') {
+      const shouldDiscard = window.confirm('입력 중인 계약 정보가 있습니다. 닫으시겠습니까?');
+      if (!shouldDiscard) {
+        return;
+      }
+    }
     resetState();
     onClose();
   };
@@ -622,12 +805,34 @@ export function NewContractModal({
     if (isNewGarageSaving) {
       return;
     }
+    if ((hasTextValue(newGarageName) || hasTextValue(newGarageAddress)) && typeof window !== 'undefined') {
+      const shouldDiscard = window.confirm('입력 중인 차고지 정보가 있습니다. 닫으시겠습니까?');
+      if (!shouldDiscard) {
+        return;
+      }
+    }
     setActiveLocationRegistrationTarget(null);
     setNewGarageName('');
     setNewGarageAddress('');
     setNewGarageError(null);
     setNewGarageFieldErrors({});
   };
+
+  const { handleBackdropMouseDown: handleMainBackdropMouseDown } = useModalDismiss({
+    isOpen,
+    onDismiss: handleClose,
+    disabled: isSubmitting || activeLocationRegistrationTarget !== null || pendingDriverRemovalIndex !== null,
+  });
+  const { handleBackdropMouseDown: handleGarageBackdropMouseDown } = useModalDismiss({
+    isOpen: activeLocationRegistrationTarget !== null,
+    onDismiss: closeLocationRegistration,
+    disabled: isNewGarageSaving,
+  });
+  const { handleBackdropMouseDown: handleDriverRemovalBackdropMouseDown } = useModalDismiss({
+    isOpen: pendingDriverRemovalIndex !== null,
+    onDismiss: () => setPendingDriverRemovalIndex(null),
+    disabled: isSubmitting,
+  });
 
   const handleLocationModeChange = (target: 'pickup' | 'return', value: string) => {
     if (value === '__custom__') {
@@ -768,9 +973,6 @@ export function NewContractModal({
       return;
     }
     const nextErrors: Partial<Record<NewContractField, string>> = {};
-    if (!hasTextValue(selectedVehicle)) {
-      nextErrors.selectedVehicle = '차량을 선택해 주세요.';
-    }
     if (!hasTextValue(startDate)) {
       nextErrors.startDate = '대여 시작일을 입력해 주세요.';
     }
@@ -798,9 +1000,19 @@ export function NewContractModal({
         nextErrors.startDate = '유효한 날짜를 입력해 주세요.';
       } else if (endAt <= startAt) {
         nextErrors.endDate = '반납 일시는 픽업 일시보다 이후여야 합니다.';
-      } else if (startDay < today) {
+      } else if (startDay < today && !allowBackdatedStart) {
         nextErrors.startDate = '대여 시작일은 오늘 이후로 입력해 주세요.';
+      } else if (startDay < today && allowBackdatedStart && !contractStatus) {
+        nextErrors.contractStatus = '사후입력 계약 상태를 선택해 주세요.';
+      } else if (rentalType === 'long_term' && getDurationDays(startDate, endDate, startTime, endTime)! < 30) {
+        nextErrors.endDate = '장기렌트는 최소 30일 이상이어야 합니다.';
       }
+    }
+    if (!hasTextValue(selectedVehicle)) {
+      nextErrors.selectedVehicle = hasCompletePeriod ? '차량을 선택해 주세요.' : '기간을 먼저 입력한 뒤 차량을 선택해 주세요.';
+    }
+    if (availabilityError) {
+      nextErrors.selectedVehicle = availabilityError;
     }
 
     if (Object.keys(nextErrors).length > 0) {
@@ -1081,6 +1293,7 @@ export function NewContractModal({
         endDate,
         startTime,
         endTime,
+        contractStatus: contractStatus || undefined,
         customerName,
         customerPhone,
         customerLicense,
@@ -1144,7 +1357,7 @@ export function NewContractModal({
         return;
       }
 
-      handleClose();
+      handleClose(true);
     } finally {
       setIsSubmitting(false);
     }
@@ -1160,7 +1373,7 @@ export function NewContractModal({
 
   return (
     <>
-    <div data-testid="new-contract-modal" className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+    <div data-testid="new-contract-modal" className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onMouseDown={handleMainBackdropMouseDown}>
       <div className="bg-white rounded-xl w-[600px] max-h-[85vh] flex flex-col">
         <div className="p-6 border-b border-gray-200 shrink-0">
           <div className="flex items-center justify-between mb-4">
@@ -1290,10 +1503,137 @@ export function NewContractModal({
               {!dragSelection && (
                 <div className="border-t border-gray-200 pt-4">
                   <p className="text-sm text-gray-600 mb-4">
-                    💡 캘린더에서 드래그하지 않았나요? 수동으로 입력할 수 있습니다.
+                    기간과 시간을 먼저 입력하면 해당 기간에 가능한 차량만 선택할 수 있습니다.
                   </p>
 
                   <div className="space-y-4">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-semibold text-gray-600 mb-2">
+                          대여 시작일 <span className="text-red-600">*</span>
+                        </label>
+                        <input
+                          data-testid="new-contract-start-date-input"
+                          type="date"
+                          value={startDate}
+                          min={allowBackdatedStart ? undefined : formatDateAsYmd(new Date())}
+                          onChange={(event) => {
+                            setStartDate(event.target.value);
+                            clearFieldError('startDate');
+                          }}
+                          className={fieldInputClass('startDate')}
+                          disabled={isSubmitting}
+                        />
+                        {fieldErrors.startDate && <p className="mt-1 text-xs text-red-600">{fieldErrors.startDate}</p>}
+                      </div>
+                      <div>
+                        <label className="block text-sm font-semibold text-gray-600 mb-2">
+                          대여 종료일 <span className="text-red-600">*</span>
+                        </label>
+                        <input
+                          data-testid="new-contract-end-date-input"
+                          type="date"
+                          value={endDate}
+                          onChange={(event) => {
+                            setEndDate(event.target.value);
+                            clearFieldError('endDate');
+                          }}
+                          className={fieldInputClass('endDate')}
+                          disabled={isSubmitting}
+                        />
+                        {fieldErrors.endDate && <p className="mt-1 text-xs text-red-600">{fieldErrors.endDate}</p>}
+                      </div>
+                    </div>
+                    {rentalType === 'long_term' && startDate && (
+                      <div className="flex flex-wrap gap-2">
+                        {[
+                          { label: '30일', days: 30 },
+                          { label: '6개월', days: 180 },
+                          { label: '12개월', days: 365 },
+                          { label: '24개월', days: 730 },
+                          { label: '36개월', days: 1095 },
+                        ].map((option) => (
+                          <button
+                            key={option.label}
+                            type="button"
+                            onClick={() => {
+                              setEndDate(addDays(startDate, option.days));
+                              clearFieldError('endDate');
+                            }}
+                            disabled={isSubmitting}
+                            className="rounded-md border border-purple-200 px-2.5 py-1.5 text-xs font-semibold text-purple-700 hover:bg-purple-50 disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            {option.label}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {rentalType === 'long_term' && longTermDurationDays !== null && longTermDurationDays < 30 && (
+                      <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">
+                        장기렌트는 최소 30일 이상이어야 합니다.
+                      </p>
+                    )}
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-semibold text-gray-600 mb-2">
+                          픽업 시간 <span className="text-red-600">*</span>
+                        </label>
+                        <input
+                          data-testid="new-contract-start-time-input"
+                          type="time"
+                          value={startTime}
+                          onChange={(event) => {
+                            setStartTime(event.target.value);
+                            clearFieldError('startTime');
+                          }}
+                          className={fieldInputClass('startTime')}
+                          disabled={isSubmitting}
+                        />
+                        {fieldErrors.startTime && <p className="mt-1 text-xs text-red-600">{fieldErrors.startTime}</p>}
+                      </div>
+                      <div>
+                        <label className="block text-sm font-semibold text-gray-600 mb-2">
+                          반납 시간 <span className="text-red-600">*</span>
+                        </label>
+                        <input
+                          data-testid="new-contract-end-time-input"
+                          type="time"
+                          value={endTime}
+                          onChange={(event) => {
+                            setEndTime(event.target.value);
+                            clearFieldError('endTime');
+                          }}
+                          className={fieldInputClass('endTime')}
+                          disabled={isSubmitting}
+                        />
+                        {fieldErrors.endTime && <p className="mt-1 text-xs text-red-600">{fieldErrors.endTime}</p>}
+                      </div>
+                    </div>
+                    {isBackdatedSelection && allowBackdatedStart && (
+                      <div>
+                        <label className="block text-sm font-semibold text-gray-600 mb-2">
+                          사후입력 계약 상태 <span className="text-red-600">*</span>
+                        </label>
+                        <select
+                          data-testid="new-contract-contract-status-select"
+                          value={contractStatus}
+                          onChange={(event) => {
+                            setContractStatus(event.target.value as typeof contractStatus);
+                            clearFieldError('contractStatus');
+                          }}
+                          className={fieldInputClass('contractStatus')}
+                          disabled={isSubmitting}
+                        >
+                          <option value="">상태를 선택하세요</option>
+                          <option value="예약중">예약중</option>
+                          <option value="대여중">대여중</option>
+                          <option value="완료">완료</option>
+                        </select>
+                        {fieldErrors.contractStatus && <p className="mt-1 text-xs text-red-600">{fieldErrors.contractStatus}</p>}
+                      </div>
+                    )}
+
                     <div>
                       <label className="block text-sm font-semibold text-gray-600 mb-2">
                         차종
@@ -1341,91 +1681,30 @@ export function NewContractModal({
                           clearFieldError('selectedVehicle');
                         }}
                         className={fieldInputClass('selectedVehicle')}
-                        disabled={isSubmitting}
+                        disabled={isSubmitting || !hasCompletePeriod || isAvailabilityLoading}
                       >
-                        <option value="">차량을 선택하세요</option>
-                        {filteredVehicleAssets.map((vehicle) => (
+                        <option value="">
+                          {!hasCompletePeriod
+                            ? '기간을 먼저 입력하세요'
+                            : isAvailabilityLoading
+                              ? '차량 가능 여부 확인 중...'
+                              : selectableVehicleAssets.length > 0
+                                ? '차량을 선택하세요'
+                                : '선택 가능한 차량이 없습니다'}
+                        </option>
+                        {selectableVehicleAssets.map((vehicle) => (
                           <option key={vehicle.vehicleNumber} value={vehicle.vehicleNumber}>
                             {vehicle.vehicleNumber} - {vehicle.model} ({vehicle.year}년)
                           </option>
                         ))}
                       </select>
+                      {availabilityError && <p className="mt-1 text-xs text-red-600">{availabilityError}</p>}
+                      {hasCompletePeriod && !isAvailabilityLoading && !availabilityError && (
+                        <p className="mt-1 text-xs text-gray-500">
+                          가능 차량 {selectableVehicleAssets.length}대 · 예약 중복 제외 {unavailableVehicleNumbers.length}대
+                        </p>
+                      )}
                       {fieldErrors.selectedVehicle && <p className="mt-1 text-xs text-red-600">{fieldErrors.selectedVehicle}</p>}
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-sm font-semibold text-gray-600 mb-2">
-                          대여 시작일 <span className="text-red-600">*</span>
-                        </label>
-                        <input
-                          data-testid="new-contract-start-date-input"
-                          type="date"
-                          value={startDate}
-                          min={formatDateAsYmd(new Date())}
-                          onChange={(event) => {
-                            setStartDate(event.target.value);
-                            clearFieldError('startDate');
-                          }}
-                          className={fieldInputClass('startDate')}
-                          disabled={isSubmitting}
-                        />
-                        {fieldErrors.startDate && <p className="mt-1 text-xs text-red-600">{fieldErrors.startDate}</p>}
-                      </div>
-                      <div>
-                        <label className="block text-sm font-semibold text-gray-600 mb-2">
-                          대여 종료일 <span className="text-red-600">*</span>
-                        </label>
-                        <input
-                          data-testid="new-contract-end-date-input"
-                          type="date"
-                          value={endDate}
-                          onChange={(event) => {
-                            setEndDate(event.target.value);
-                            clearFieldError('endDate');
-                          }}
-                          className={fieldInputClass('endDate')}
-                          disabled={isSubmitting}
-                        />
-                        {fieldErrors.endDate && <p className="mt-1 text-xs text-red-600">{fieldErrors.endDate}</p>}
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-sm font-semibold text-gray-600 mb-2">
-                          픽업 시간 <span className="text-red-600">*</span>
-                        </label>
-                        <input
-                          data-testid="new-contract-start-time-input"
-                          type="time"
-                          value={startTime}
-                          onChange={(event) => {
-                            setStartTime(event.target.value);
-                            clearFieldError('startTime');
-                          }}
-                          className={fieldInputClass('startTime')}
-                          disabled={isSubmitting}
-                        />
-                        {fieldErrors.startTime && <p className="mt-1 text-xs text-red-600">{fieldErrors.startTime}</p>}
-                      </div>
-                      <div>
-                        <label className="block text-sm font-semibold text-gray-600 mb-2">
-                          반납 시간 <span className="text-red-600">*</span>
-                        </label>
-                        <input
-                          data-testid="new-contract-end-time-input"
-                          type="time"
-                          value={endTime}
-                          onChange={(event) => {
-                            setEndTime(event.target.value);
-                            clearFieldError('endTime');
-                          }}
-                          className={fieldInputClass('endTime')}
-                          disabled={isSubmitting}
-                        />
-                        {fieldErrors.endTime && <p className="mt-1 text-xs text-red-600">{fieldErrors.endTime}</p>}
-                      </div>
                     </div>
                   </div>
                 </div>
@@ -2507,7 +2786,7 @@ export function NewContractModal({
       </div>
     </div>
     {activeLocationRegistrationTarget !== null && (
-      <div data-testid="new-contract-garage-registration-modal" className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50">
+      <div data-testid="new-contract-garage-registration-modal" className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50" onMouseDown={handleGarageBackdropMouseDown}>
         <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
           <div className="mb-5">
             <h2 className="text-lg font-bold text-[#1e2939]">신규 차고지 등록</h2>
@@ -2587,7 +2866,7 @@ export function NewContractModal({
       </div>
     )}
     {pendingDriverRemovalIndex !== null && (
-      <div data-testid="driver-delete-confirm-modal" className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50">
+      <div data-testid="driver-delete-confirm-modal" className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50" onMouseDown={handleDriverRemovalBackdropMouseDown}>
         <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl">
           <div className="mb-5 flex items-start gap-3">
             <div className="rounded-full bg-red-50 p-2 text-red-600">

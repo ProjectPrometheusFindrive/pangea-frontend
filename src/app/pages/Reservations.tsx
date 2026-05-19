@@ -25,6 +25,7 @@ import {
   isPayloadEmpty,
   usePageEndpointState,
 } from '../hooks/usePageEndpointState';
+import { useModalDismiss } from '../hooks/useModalDismiss';
 import { usePaymentStatusSync } from '../hooks/usePaymentStatusSync';
 import { useAuth } from '../context/AuthContext';
 import {
@@ -135,6 +136,57 @@ type ChargeItemExceptionDraft = {
   memo: string;
   evidenceFile: File | null;
 };
+type ReservationPaymentConfirmation =
+  | {
+      kind: 'reservation-payment-status';
+      nextStatus: 'paid' | 'canceled';
+      title: string;
+      description: string;
+      confirmLabel: string;
+      amountLabel: string;
+      targetLabel: string;
+      tone: 'success' | 'warning' | 'danger';
+    }
+  | {
+      kind: 'settle-charge-item';
+      item: ReservationChargeItem;
+      title: string;
+      description: string;
+      confirmLabel: string;
+      amountLabel: string;
+      targetLabel: string;
+      tone: 'success' | 'warning' | 'danger';
+    }
+  | {
+      kind: 'payment-record-confirm';
+      record: ReservationPaymentRecord;
+      title: string;
+      description: string;
+      confirmLabel: string;
+      amountLabel: string;
+      targetLabel: string;
+      tone: 'success' | 'warning' | 'danger';
+    }
+  | {
+      kind: 'payment-record-void';
+      record: ReservationPaymentRecord;
+      title: string;
+      description: string;
+      confirmLabel: string;
+      amountLabel: string;
+      targetLabel: string;
+      tone: 'success' | 'warning' | 'danger';
+    }
+  | {
+      kind: 'refund-charge-create';
+      record: ReservationPaymentRecord;
+      title: string;
+      description: string;
+      confirmLabel: string;
+      amountLabel: string;
+      targetLabel: string;
+      tone: 'success' | 'warning' | 'danger';
+    };
 
 function createTodayBaseDate(): Date {
   const now = new Date();
@@ -2401,6 +2453,15 @@ function getChargeItemExceptionActionLabel(action: ChargeItemExceptionAction): s
   }
 }
 
+function buildChargeItemTargetLabel(item: ReservationChargeItem): string {
+  return getChargeItemPeriodLabel(item) || getChargeTypeLabel(item.chargeType);
+}
+
+function buildPaymentRecordTargetLabel(record: ReservationPaymentRecord): string {
+  const paidAt = record.paidAt ? formatDateKst(record.paidAt, '-') : '수납일 미입력';
+  return `${paidAt} 수납 기록`;
+}
+
 function toReservationPaymentInfo(
   row: Record<string, unknown>,
   options: {
@@ -2972,6 +3033,7 @@ export default function Reservations() {
   const [allocationEditDraft, setAllocationEditDraft] = useState<PaymentRecordDraft['allocations']>([]);
   const [activeChargeItemExceptionDraft, setActiveChargeItemExceptionDraft] = useState<ChargeItemExceptionDraft | null>(null);
   const [isChargeItemExceptionSaving, setIsChargeItemExceptionSaving] = useState(false);
+  const [pendingReservationPaymentConfirmation, setPendingReservationPaymentConfirmation] = useState<ReservationPaymentConfirmation | null>(null);
   const [activeReservationAction, setActiveReservationAction] = useState<'start' | 'cancel' | null>(null);
   const [showCancelReservationConfirm, setShowCancelReservationConfirm] = useState(false);
   const [reservationActionError, setReservationActionError] = useState<string | null>(null);
@@ -3761,6 +3823,7 @@ export default function Reservations() {
     setIsReturnSubmitting(false);
     setReturnSubmitError(null);
     setIsPaymentCompleting(false);
+    setPendingReservationPaymentConfirmation(null);
     setReservationActionError(null);
     setActiveReservationAction(null);
     setIsEditMode(false);
@@ -4306,6 +4369,7 @@ export default function Reservations() {
     setIsReturnSubmitting(false);
     setReturnSubmitError(null);
     setIsPaymentCompleting(false);
+    setPendingReservationPaymentConfirmation(null);
     setReservationActionError(null);
     setActiveReservationAction(null);
     void hydrateReservationDetail(reservation.id, reservation);
@@ -4325,6 +4389,43 @@ export default function Reservations() {
   const handleReservationClick = useCallback((reservation: Reservation) => {
     openReservationDetail(reservation);
   }, [openReservationDetail]);
+
+  const resolveUnavailableVehiclesForNewContract = useCallback(async (
+    formValues: Pick<NewContractFormValues, 'startDate' | 'endDate' | 'startTime' | 'endTime'>,
+  ): Promise<string[]> => {
+    const startAt = toIsoDateTimeFromDateAndTime(formValues.startDate, formValues.startTime);
+    const endAt = toIsoDateTimeFromDateAndTime(formValues.endDate, formValues.endTime);
+    if (!startAt || !endAt) {
+      return [];
+    }
+    const selectedStart = new Date(startAt).getTime();
+    const selectedEnd = new Date(endAt).getTime();
+    if (!Number.isFinite(selectedStart) || !Number.isFinite(selectedEnd) || selectedEnd <= selectedStart) {
+      return [];
+    }
+
+    const payload = await getReservationsList({
+      page: 1,
+      size: RESERVATION_FETCH_PAGE_SIZE,
+      from: formValues.startDate,
+      to: formValues.endDate,
+    });
+    const rows = toReservationRows(payload);
+    return Array.from(new Set(rows.flatMap((reservation) => {
+      if (reservation.contractStatus === '완료' || reservation.type === 'return') {
+        return [];
+      }
+      const reservationStart = parseReservationDateTime(reservation.scheduledStartAt ?? reservation.startDateFull);
+      const reservationEnd = parseReservationDateTime(reservation.scheduledEndAt ?? reservation.endDateFull);
+      if (!reservationStart || !reservationEnd) {
+        return [];
+      }
+      if (reservationStart.getTime() < selectedEnd && selectedStart < reservationEnd.getTime()) {
+        return [reservation.vehicleNumber];
+      }
+      return [];
+    })));
+  }, []);
 
   const validateNewContractStepOne = useCallback(async (
     formValues: Pick<NewContractFormValues, 'selectedVehicle' | 'startDate' | 'endDate' | 'startTime' | 'endTime'>,
@@ -4532,6 +4633,7 @@ export default function Reservations() {
       }
       return 0;
     })();
+    const nextContractStatus = formValues.contractStatus || '예약중';
     const fallbackReservation: Reservation = {
       id: reservationId,
       rentalType: formValues.rentalType,
@@ -4543,7 +4645,7 @@ export default function Reservations() {
       startDate: Math.min(startDateOffset, endDateOffset),
       endDate: Math.max(startDateOffset, endDateOffset),
       scheduledStartAt: startAt,
-      contractStatus: '예약중',
+      contractStatus: nextContractStatus,
       type: 'reservation',
       issues: [],
       phone: formValues.rentalType === 'long_term'
@@ -4722,7 +4824,7 @@ export default function Reservations() {
         creationMode: 'ui_confirmed',
         startAt,
         endAt,
-        contractStatus: '예약중',
+        contractStatus: nextContractStatus,
         vehicleNumber: formValues.selectedVehicle,
         plate: formValues.selectedVehicle,
         parties,
@@ -5286,6 +5388,84 @@ export default function Reservations() {
     });
   }, []);
 
+  const openReservationPaymentStatusConfirmation = useCallback((nextStatus: 'paid' | 'canceled') => {
+    if (!selectedReservation) {
+      return;
+    }
+    const amount = Math.max(selectedReservationTotalAmount || selectedReservationCalculatedTotalAmount || 0, 0);
+    const isPaid = nextStatus === 'paid';
+    setReservationActionError(null);
+    setPendingReservationPaymentConfirmation({
+      kind: 'reservation-payment-status',
+      nextStatus,
+      title: isPaid ? '결제 완료 처리하시겠습니까?' : '결제 면제 처리하시겠습니까?',
+      description: isPaid
+        ? '예약 결제 상태를 완료로 변경합니다. 확인 전에는 결제 상태가 바뀌지 않습니다.'
+        : '예약 결제 상태를 면제로 변경합니다. 확인 전에는 결제 상태가 바뀌지 않습니다.',
+      confirmLabel: isPaid ? '결제 완료 처리' : '결제 면제 처리',
+      amountLabel: toCurrencyValue(amount),
+      targetLabel: selectedReservation.customer || selectedReservation.id,
+      tone: isPaid ? 'success' : 'warning',
+    });
+  }, [selectedReservation, selectedReservationCalculatedTotalAmount, selectedReservationTotalAmount]);
+
+  const openSettleChargeItemConfirmation = useCallback((item: ReservationChargeItem) => {
+    const amount = Math.max(item.remainingAmount || item.amount || 0, 0);
+    setReservationActionError(null);
+    setPendingReservationPaymentConfirmation({
+      kind: 'settle-charge-item',
+      item,
+      title: '청구 항목을 수납 처리하시겠습니까?',
+      description: '선택한 청구 항목의 잔액만큼 수납 기록을 생성합니다. 확인 전에는 수납 기록이 생성되지 않습니다.',
+      confirmLabel: '수납 처리',
+      amountLabel: toCurrencyValue(amount),
+      targetLabel: buildChargeItemTargetLabel(item),
+      tone: 'success',
+    });
+  }, []);
+
+  const openPaymentRecordConfirmConfirmation = useCallback((record: ReservationPaymentRecord) => {
+    setReservationActionError(null);
+    setPendingReservationPaymentConfirmation({
+      kind: 'payment-record-confirm',
+      record,
+      title: '수납 기록을 확정하시겠습니까?',
+      description: '확인 필요 상태의 수납 기록을 확정 상태로 변경합니다. 확인 전에는 상태가 바뀌지 않습니다.',
+      confirmLabel: '수납 확정',
+      amountLabel: toCurrencyValue(record.amount),
+      targetLabel: buildPaymentRecordTargetLabel(record),
+      tone: 'success',
+    });
+  }, []);
+
+  const openPaymentRecordVoidConfirmation = useCallback((record: ReservationPaymentRecord) => {
+    setReservationActionError(null);
+    setPendingReservationPaymentConfirmation({
+      kind: 'payment-record-void',
+      record,
+      title: '수납 기록을 무효 처리하시겠습니까?',
+      description: '선택한 수납 기록을 무효 처리합니다. 확인 전에는 상태가 바뀌지 않습니다.',
+      confirmLabel: '무효 처리',
+      amountLabel: toCurrencyValue(record.amount),
+      targetLabel: buildPaymentRecordTargetLabel(record),
+      tone: 'danger',
+    });
+  }, []);
+
+  const openRefundChargeCreateConfirmation = useCallback((record: ReservationPaymentRecord) => {
+    setReservationActionError(null);
+    setPendingReservationPaymentConfirmation({
+      kind: 'refund-charge-create',
+      record,
+      title: '환불 예정 항목을 등록하시겠습니까?',
+      description: '선택한 수납 기록 금액으로 환불 예정 청구 항목을 등록합니다. 확인 전에는 항목이 생성되지 않습니다.',
+      confirmLabel: '환불 예정 등록',
+      amountLabel: toCurrencyValue(record.amount),
+      targetLabel: buildPaymentRecordTargetLabel(record),
+      tone: 'warning',
+    });
+  }, []);
+
   const handleSubmitChargeItemException = useCallback(async () => {
     if (!selectedReservation || !canWritePayments || !activeChargeItemExceptionDraft || isChargeItemExceptionSaving) {
       return;
@@ -5435,6 +5615,41 @@ export default function Reservations() {
       setActivePaymentRecordMutationId(null);
     }
   }, [activePaymentRecordMutationId, canWritePayments, hydrateReservationDetail, refreshReservationsAfterMutation, selectedReservation]);
+
+  const handleConfirmReservationPaymentConfirmation = useCallback(async () => {
+    if (!pendingReservationPaymentConfirmation) {
+      return;
+    }
+
+    const confirmation = pendingReservationPaymentConfirmation;
+    switch (confirmation.kind) {
+      case 'reservation-payment-status':
+        await handleUpdateReservationPaymentStatus(confirmation.nextStatus);
+        break;
+      case 'settle-charge-item':
+        await handleSettleChargeItem(confirmation.item);
+        break;
+      case 'payment-record-confirm':
+        await handleConfirmManualPaymentRecord(confirmation.record);
+        break;
+      case 'payment-record-void':
+        await handleVoidPaymentRecord(confirmation.record);
+        break;
+      case 'refund-charge-create':
+        await handleCreateRefundChargeItem(confirmation.record);
+        break;
+      default:
+        break;
+    }
+    setPendingReservationPaymentConfirmation(null);
+  }, [
+    handleConfirmManualPaymentRecord,
+    handleCreateRefundChargeItem,
+    handleSettleChargeItem,
+    handleUpdateReservationPaymentStatus,
+    handleVoidPaymentRecord,
+    pendingReservationPaymentConfirmation,
+  ]);
 
   const handleCompleteRefundChargeItem = useCallback(async (item: ReservationChargeItem) => {
     if (!selectedReservation || !canWritePayments || activePaymentRecordMutationId) {
@@ -5723,6 +5938,31 @@ export default function Reservations() {
     setEditSubmitError(null);
     setIsEditSubmitting(false);
   }, []);
+  const { handleBackdropMouseDown: handleReservationDetailBackdropMouseDown } = useModalDismiss({
+    isOpen: Boolean(selectedReservation),
+    onDismiss: isEditMode ? handleCancelEditMode : closeReservationDetail,
+    disabled: isEditSubmitting || showReturnConfirm || Boolean(pendingReservationPaymentConfirmation),
+  });
+  const { handleBackdropMouseDown: handleDragConflictBackdropMouseDown } = useModalDismiss({
+    isOpen: Boolean(dragConflictPrompt),
+    onDismiss: () => setDragConflictPrompt(null),
+  });
+  const { handleBackdropMouseDown: handleCancelReservationBackdropMouseDown } = useModalDismiss({
+    isOpen: showCancelReservationConfirm,
+    onDismiss: () => setShowCancelReservationConfirm(false),
+    disabled: activeReservationAction === 'cancel',
+  });
+  const { handleBackdropMouseDown: handleReturnConfirmBackdropMouseDown } = useModalDismiss({
+    isOpen: showReturnConfirm,
+    onDismiss: closeReturnConfirm,
+    disabled: isReturnSubmitting || isLateReturnMemoSaving,
+  });
+  const isReservationPaymentConfirmationSaving = isPaymentCompleting || activePaymentRecordMutationId !== null;
+  const { handleBackdropMouseDown: handleReservationPaymentConfirmationBackdropMouseDown } = useModalDismiss({
+    isOpen: Boolean(pendingReservationPaymentConfirmation),
+    onDismiss: () => setPendingReservationPaymentConfirmation(null),
+    disabled: isReservationPaymentConfirmationSaving,
+  });
 
   const handleSubmitEdit = useCallback(async () => {
     if (!selectedReservation || isEditSubmitting) {
@@ -6679,7 +6919,7 @@ export default function Reservations() {
 
         {/* 예약 상세 팝업 */}
         {selectedReservation && (
-          <div data-testid="reservation-detail-modal" className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div data-testid="reservation-detail-modal" className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onMouseDown={handleReservationDetailBackdropMouseDown}>
             <div className="bg-white rounded-xl w-[700px] max-h-[80vh] flex flex-col">
               <div className="p-6 border-b border-gray-200">
                 <div className="flex items-center justify-between">
@@ -7526,17 +7766,17 @@ export default function Reservations() {
                                 <span className="text-right font-semibold text-red-600 tabular-nums">{toCurrencyValue(item.remainingAmount)}</span>
                                 <span className="text-right text-gray-600">{getChargeStatusLabel(item.status)}</span>
                                 <span className="flex flex-wrap gap-1">
-                                  {canWritePayments && item.remainingAmount > 0 && !['paid', 'waived', 'refunded', 'disputed'].includes(item.status) && (
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        void handleSettleChargeItem(item);
-                                      }}
-                                      disabled={activePaymentRecordMutationId === item.id}
-                                      className="rounded-md bg-emerald-600 px-2 py-1 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
-                                    >
-                                      수납
-                                    </button>
+	                                  {canWritePayments && item.remainingAmount > 0 && !['paid', 'waived', 'refunded', 'disputed'].includes(item.status) && (
+	                                    <button
+	                                      type="button"
+	                                      onClick={() => {
+	                                        openSettleChargeItemConfirmation(item);
+	                                      }}
+	                                      disabled={activePaymentRecordMutationId === item.id}
+	                                      className="rounded-md bg-emerald-600 px-2 py-1 text-xs font-semibold text-white shadow-sm ring-1 ring-emerald-700/20 disabled:cursor-not-allowed disabled:opacity-60"
+	                                    >
+	                                      수납
+	                                    </button>
                                   )}
                                   {canWritePayments && !['paid', 'waived', 'refunded', 'disputed'].includes(item.status) && (
                                     <>
@@ -7651,17 +7891,17 @@ export default function Reservations() {
                                       </button>
                                     </span>
                                   )}
-                                  {canWritePayments && item.chargeType !== 'refund' && item.remainingAmount > 0 && !['paid', 'waived', 'refunded', 'disputed'].includes(item.status) && (
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        void handleSettleChargeItem(item);
-                                      }}
-                                      disabled={activePaymentRecordMutationId === item.id}
-                                      className="whitespace-nowrap rounded-md bg-emerald-600 px-2 py-1 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
-                                    >
-                                      수납
-                                    </button>
+	                                  {canWritePayments && item.chargeType !== 'refund' && item.remainingAmount > 0 && !['paid', 'waived', 'refunded', 'disputed'].includes(item.status) && (
+	                                    <button
+	                                      type="button"
+	                                      onClick={() => {
+	                                        openSettleChargeItemConfirmation(item);
+	                                      }}
+	                                      disabled={activePaymentRecordMutationId === item.id}
+	                                      className="whitespace-nowrap rounded-md bg-emerald-600 px-2 py-1 text-xs font-semibold text-white shadow-sm ring-1 ring-emerald-700/20 disabled:cursor-not-allowed disabled:opacity-60"
+	                                    >
+	                                      수납
+	                                    </button>
                                   )}
                                   {canWritePayments && item.chargeType !== 'refund' && !['paid', 'waived', 'refunded', 'disputed'].includes(item.status) && (
                                     <span className="flex min-w-0 flex-wrap gap-1">
@@ -7766,16 +8006,16 @@ export default function Reservations() {
                                   {canWritePayments && record.status !== 'voided' && (
                                     <span className="flex flex-wrap gap-1">
                                       {record.confirmationStatus === 'needs_confirmation' && (
-                                        <button
-                                          type="button"
-                                          onClick={() => {
-                                            void handleConfirmManualPaymentRecord(record);
-                                          }}
-                                          disabled={activePaymentRecordMutationId === record.id}
-                                          className="rounded-md bg-emerald-600 px-2 py-1 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
-                                        >
-                                          확정
-                                        </button>
+	                                        <button
+	                                          type="button"
+	                                          onClick={() => {
+	                                            openPaymentRecordConfirmConfirmation(record);
+	                                          }}
+	                                          disabled={activePaymentRecordMutationId === record.id}
+	                                          className="rounded-md bg-emerald-600 px-2 py-1 text-xs font-semibold text-white shadow-sm ring-1 ring-emerald-700/20 disabled:cursor-not-allowed disabled:opacity-60"
+	                                        >
+	                                          확정
+	                                        </button>
                                       )}
                                       <button
                                         type="button"
@@ -7788,26 +8028,26 @@ export default function Reservations() {
                                       >
                                         배정수정
                                       </button>
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          void handleVoidPaymentRecord(record);
-                                        }}
-                                        disabled={activePaymentRecordMutationId === record.id}
-                                        className="rounded-md bg-slate-700 px-2 py-1 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
-                                      >
-                                        무효
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          void handleCreateRefundChargeItem(record);
-                                        }}
-                                        disabled={activePaymentRecordMutationId === record.id}
-                                        className="rounded-md bg-orange-600 px-2 py-1 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
-                                      >
-                                        환불예정
-                                      </button>
+	                                      <button
+	                                        type="button"
+	                                        onClick={() => {
+	                                          openPaymentRecordVoidConfirmation(record);
+	                                        }}
+	                                        disabled={activePaymentRecordMutationId === record.id}
+	                                        className="rounded-md bg-slate-700 px-2 py-1 text-xs font-semibold text-white shadow-sm ring-1 ring-slate-800/20 disabled:cursor-not-allowed disabled:opacity-60"
+	                                      >
+	                                        무효
+	                                      </button>
+	                                      <button
+	                                        type="button"
+	                                        onClick={() => {
+	                                          openRefundChargeCreateConfirmation(record);
+	                                        }}
+	                                        disabled={activePaymentRecordMutationId === record.id}
+	                                        className="rounded-md bg-orange-600 px-2 py-1 text-xs font-semibold text-white shadow-sm ring-1 ring-orange-700/20 disabled:cursor-not-allowed disabled:opacity-60"
+	                                      >
+	                                        환불예정
+	                                      </button>
                                     </span>
                                   )}
                                   {record.changeHistory && record.changeHistory.length > 0 && (
@@ -8124,27 +8364,27 @@ export default function Reservations() {
                       )}
                       {canEditReservationPaymentFields && (
                         <div className="mt-2 flex flex-wrap items-center gap-2 pt-2 border-t border-gray-200">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              void handleUpdateReservationPaymentStatus('paid');
-                            }}
-                            data-testid="reservation-payment-complete-button"
-                            disabled={isPaymentCompleting}
-                            className="inline-flex items-center rounded-lg bg-emerald-600 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
-                          >
-                            {isPaymentCompleting ? '처리 중...' : '결제 완료 처리'}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              void handleUpdateReservationPaymentStatus('canceled');
-                            }}
-                            disabled={isPaymentCompleting}
-                            className="inline-flex items-center rounded-lg bg-slate-600 px-3 py-2 text-xs font-medium text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
-                          >
-                            {isPaymentCompleting ? '처리 중...' : '결제 면제 처리'}
-                          </button>
+	                          <button
+	                            type="button"
+	                            onClick={() => {
+	                              openReservationPaymentStatusConfirmation('paid');
+	                            }}
+	                            data-testid="reservation-payment-complete-button"
+	                            disabled={isPaymentCompleting}
+	                            className="inline-flex items-center rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white shadow-sm ring-1 ring-emerald-700/20 hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+	                          >
+	                            {isPaymentCompleting ? '처리 중...' : '결제 완료 처리'}
+	                          </button>
+	                          <button
+	                            type="button"
+	                            onClick={() => {
+	                              openReservationPaymentStatusConfirmation('canceled');
+	                            }}
+	                            disabled={isPaymentCompleting}
+	                            className="inline-flex items-center rounded-lg bg-slate-600 px-3 py-2 text-xs font-semibold text-white shadow-sm ring-1 ring-slate-700/20 hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
+	                          >
+	                            {isPaymentCompleting ? '처리 중...' : '결제 면제 처리'}
+	                          </button>
                         </div>
                       )}
                     </div>
@@ -8486,6 +8726,8 @@ export default function Reservations() {
           locationOptions={garageLocationOptions}
           onCreateLocationOption={handleCreateNewContractGarage}
           dragSelection={dragSelection}
+          allowBackdatedStart={canTransitionReservations}
+          onResolveUnavailableVehicles={resolveUnavailableVehiclesForNewContract}
           onValidateStepOne={validateNewContractStepOne}
           onSubmit={handleCreateReservation}
         />
@@ -8527,7 +8769,7 @@ export default function Reservations() {
         )}
 
         {dragConflictPrompt && (
-          <div data-testid="reservation-drag-conflict-modal" className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50">
+          <div data-testid="reservation-drag-conflict-modal" className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50" onMouseDown={handleDragConflictBackdropMouseDown}>
             <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl">
               <div className="mb-4 flex items-start gap-3">
                 <div className="rounded-full bg-amber-50 p-2 text-amber-600">
@@ -8563,10 +8805,80 @@ export default function Reservations() {
               </div>
             </div>
           </div>
-        )}
+	        )}
 
-        {showCancelReservationConfirm && selectedReservation && (
-          <div data-testid="reservation-cancel-confirm-modal" className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50">
+	        {pendingReservationPaymentConfirmation && selectedReservation && (
+	          <div
+	            data-testid="reservation-payment-confirmation-modal"
+	            className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 px-4"
+	            onMouseDown={handleReservationPaymentConfirmationBackdropMouseDown}
+	            role="dialog"
+	            aria-modal="true"
+	            aria-labelledby="reservation-payment-confirmation-title"
+	          >
+	            <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-2xl">
+	              <div className="mb-4 flex items-start gap-3">
+	                <div className={`rounded-full p-2 ${
+	                  pendingReservationPaymentConfirmation.tone === 'success'
+	                    ? 'bg-emerald-50 text-emerald-700'
+	                    : pendingReservationPaymentConfirmation.tone === 'danger'
+	                      ? 'bg-red-50 text-red-700'
+	                      : 'bg-amber-50 text-amber-700'
+	                }`}>
+	                  <AlertTriangle className="h-5 w-5" />
+	                </div>
+	                <div className="min-w-0">
+	                  <h2 id="reservation-payment-confirmation-title" className="text-lg font-bold text-[#1e2939]">
+	                    {pendingReservationPaymentConfirmation.title}
+	                  </h2>
+	                  <p className="mt-2 text-sm leading-6 text-gray-700">
+	                    {pendingReservationPaymentConfirmation.description}
+	                  </p>
+	                  <div className="mt-3 space-y-1 rounded-lg bg-gray-50 px-3 py-2 text-sm text-gray-700">
+	                    <p>대상: {pendingReservationPaymentConfirmation.targetLabel}</p>
+	                    <p>금액: {pendingReservationPaymentConfirmation.amountLabel}</p>
+	                    <p>예약: {selectedReservation.customer || selectedReservation.id}</p>
+	                  </div>
+	                </div>
+	              </div>
+	              {reservationActionError && (
+	                <p className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+	                  {reservationActionError}
+	                </p>
+	              )}
+	              <div className="flex justify-end gap-3">
+	                <button
+	                  type="button"
+	                  onClick={() => setPendingReservationPaymentConfirmation(null)}
+	                  className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+	                  disabled={isReservationPaymentConfirmationSaving}
+	                >
+	                  닫기
+	                </button>
+	                <button
+	                  type="button"
+	                  onClick={() => {
+	                    void handleConfirmReservationPaymentConfirmation();
+	                  }}
+	                  className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-70 ${
+	                    pendingReservationPaymentConfirmation.tone === 'success'
+	                      ? 'bg-emerald-600 hover:bg-emerald-700'
+	                      : pendingReservationPaymentConfirmation.tone === 'danger'
+	                        ? 'bg-red-600 hover:bg-red-700'
+	                        : 'bg-amber-600 hover:bg-amber-700'
+	                  }`}
+	                  disabled={isReservationPaymentConfirmationSaving}
+	                >
+	                  {isReservationPaymentConfirmationSaving && <Loader2 className="h-4 w-4 animate-spin" />}
+	                  {isReservationPaymentConfirmationSaving ? '처리 중...' : pendingReservationPaymentConfirmation.confirmLabel}
+	                </button>
+	              </div>
+	            </div>
+	          </div>
+	        )}
+
+	        {showCancelReservationConfirm && selectedReservation && (
+	          <div data-testid="reservation-cancel-confirm-modal" className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50" onMouseDown={handleCancelReservationBackdropMouseDown}>
             <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
               <div className="mb-4 flex items-start gap-3">
                 <div className="rounded-full bg-red-50 p-2 text-red-600">
@@ -8613,7 +8925,7 @@ export default function Reservations() {
 
         {/* 반납 확인 모달 */}
         {showReturnConfirm && (
-          <div data-testid="reservation-return-confirm-modal" className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div data-testid="reservation-return-confirm-modal" className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onMouseDown={handleReturnConfirmBackdropMouseDown}>
             <div className="bg-white rounded-xl w-[400px] max-h-[80vh] overflow-y-auto">
               <div className="p-6">
                 <div className="flex items-center justify-between mb-6">

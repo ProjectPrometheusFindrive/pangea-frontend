@@ -31,8 +31,10 @@ export interface RevenueSummaryBucket {
   grossRevenue: number;
   refundAmount: number;
   netRevenue: number;
+  unpaidAmount: number;
   paidCount: number;
   refundCount: number;
+  unpaidCount: number;
 }
 
 export interface RevenueSummaryResponse {
@@ -82,8 +84,10 @@ export interface RevenueTrendItem {
   grossRevenue: number;
   refundAmount: number;
   netRevenue: number;
+  unpaidAmount: number;
   paidCount: number;
   refundCount: number;
+  unpaidCount: number;
 }
 
 export interface RevenueTrendResponse {
@@ -213,8 +217,10 @@ function normalizeSummaryBucket(value: unknown): RevenueSummaryBucket {
       grossRevenue: 0,
       refundAmount: 0,
       netRevenue: 0,
+      unpaidAmount: 0,
       paidCount: 0,
       refundCount: 0,
+      unpaidCount: 0,
     };
   }
 
@@ -225,8 +231,10 @@ function normalizeSummaryBucket(value: unknown): RevenueSummaryBucket {
     grossRevenue: toNumber(value.grossRevenue),
     refundAmount: toNumber(value.refundAmount),
     netRevenue: toNumber(value.netRevenue),
+    unpaidAmount: toNumber(value.unpaidAmount),
     paidCount: toInteger(value.paidCount),
     refundCount: toInteger(value.refundCount),
+    unpaidCount: toInteger(value.unpaidCount),
   };
 }
 
@@ -301,8 +309,10 @@ function normalizeTrendItem(value: unknown): RevenueTrendItem {
       grossRevenue: 0,
       refundAmount: 0,
       netRevenue: 0,
+      unpaidAmount: 0,
       paidCount: 0,
       refundCount: 0,
+      unpaidCount: 0,
     };
   }
 
@@ -311,8 +321,10 @@ function normalizeTrendItem(value: unknown): RevenueTrendItem {
     grossRevenue: toNumber(value.grossRevenue),
     refundAmount: toNumber(value.refundAmount),
     netRevenue: toNumber(value.netRevenue),
+    unpaidAmount: toNumber(value.unpaidAmount),
     paidCount: toInteger(value.paidCount),
     refundCount: toInteger(value.refundCount),
+    unpaidCount: toInteger(value.unpaidCount),
   };
 }
 

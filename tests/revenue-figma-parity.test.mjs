@@ -25,9 +25,16 @@ test('revenue page defines a GT-compatible top KPI taxonomy backed by revenue AP
   assert.match(source, /title:\s*'활성 차량'/u);
   assert.match(source, /paidCount > 0 \? Math\.round\(totals\.grossRevenue \/ totals\.paidCount\) : 0/u);
   assert.match(source, /totals\.unpaidAmount/u);
+  assert.match(source, /formatCurrency\(totals\.unpaidAmount,\s*totals\.currency\)/u);
+  assert.match(source, /const TREND_METRICS/u);
+  assert.match(source, /key:\s*'unpaidAmount',\s*label:\s*'미납'/u);
+  assert.match(source, /handleTrendMetricToggle/u);
+  assert.doesNotMatch(source, /formatWanCurrency/u);
   assert.match(source, /totals\.activeVehicleCount/u);
   assert.match(source, /buildRevenuePaymentMethodSlices\(summaryPaymentMethods\)/u);
   assert.match(source, /buildRevenueModelRows\(summaryVehicles\)/u);
+  assert.match(serviceSource, /unpaidAmount:\s*number/u);
+  assert.match(serviceSource, /unpaidCount:\s*number/u);
   assert.match(serviceSource, /paymentMethods:\s*RevenuePaymentMethod\[\]/u);
   assert.match(serviceSource, /vehicles:\s*RevenueVehicle\[\]/u);
   assert.doesNotMatch(source, /grossRevenue \* 0\.08/u);
