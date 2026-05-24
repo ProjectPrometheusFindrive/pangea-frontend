@@ -6739,19 +6739,25 @@ export default function Reservations() {
                     const dayOfWeek = daysOfWeek[date.getDay() === 0 ? 6 : date.getDay() - 1];
                     const prevDate = index > 0 ? toDateFromOffset(dates[index - 1]) : null;
                     const showMonth = !prevDate || prevDate.getMonth() !== date.getMonth();
+                    const isTodayColumn = dayOffset === 0;
 
                     return (
                       <div
                         key={index}
-                        className="px-2 py-2 bg-gray-50 text-center border-r border-gray-200"
+                        data-testid={isTodayColumn ? 'reservation-calendar-today-header' : undefined}
+                        className={`px-2 py-2 text-center border-r ${
+                          isTodayColumn
+                            ? 'border-blue-200 bg-blue-100/70'
+                            : 'border-gray-200 bg-gray-50'
+                        }`}
                       >
                         {showMonth && (
-                          <div className="text-xs font-semibold text-blue-600 mb-0.5">
+                          <div className={`text-xs font-semibold mb-0.5 ${isTodayColumn ? 'text-blue-700' : 'text-blue-600'}`}>
                             {date.getMonth() + 1}월
                           </div>
                         )}
-                        <div className="text-xs text-gray-500">{dayOfWeek}</div>
-                        <div className="text-sm font-medium text-gray-900 mt-0.5">
+                        <div className={`text-xs ${isTodayColumn ? 'font-semibold text-blue-700' : 'text-gray-500'}`}>{dayOfWeek}</div>
+                        <div className={`text-sm font-medium mt-0.5 ${isTodayColumn ? 'text-blue-900' : 'text-gray-900'}`}>
                           {date.getDate()}
                         </div>
                       </div>
@@ -6775,6 +6781,7 @@ export default function Reservations() {
                       {/* 날짜 셀들 */}
                       {dates.map((dayOffset, dateIndex) => {
                         const cellDate = currentWeekStart + dateIndex;
+                        const isTodayColumn = dayOffset === 0;
                         const isInDragSelection = dragStart && dragEnd &&
                           dragStart.vehicle === vehicle &&
                           cellDate >= Math.min(dragStart.date, dragEnd.date) &&
@@ -6788,8 +6795,13 @@ export default function Reservations() {
                         return (
                           <div
                             key={dateIndex}
-                            className={`h-14 border-r border-gray-100 relative cursor-crosshair ${
-                              isInDragSelection ? (hasConflict ? 'bg-red-200/50' : 'bg-blue-200/50') : 'hover:bg-blue-50/30'
+                            data-today-column={isTodayColumn ? 'true' : undefined}
+                            className={`h-14 border-r relative cursor-crosshair ${
+                              isTodayColumn ? 'border-blue-100' : 'border-gray-100'
+                            } ${
+                              isInDragSelection
+                                ? (hasConflict ? 'bg-red-200/50' : 'bg-blue-200/50')
+                                : (isTodayColumn ? 'bg-blue-50/60 hover:bg-blue-100/60' : 'hover:bg-blue-50/30')
                             }`}
                             onMouseDown={() => {
                               setIsDragging(true);
