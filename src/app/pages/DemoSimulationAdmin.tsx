@@ -186,7 +186,7 @@ export default function DemoSimulationAdmin() {
     try {
       const payload = await getDefaultDemoSimulationProfile(companyId);
       setProfileDraft(formatJson(payload.profile));
-      toast.info('기본 파라미터를 편집창에 불러왔습니다. 저장해야 반영됩니다.');
+      toast.info('v2.1 기본 파라미터를 편집창에 불러왔습니다. 저장해야 반영됩니다.');
     } catch (loadError) {
       setError(toErrorMessage(loadError));
     } finally {
@@ -244,7 +244,7 @@ export default function DemoSimulationAdmin() {
                 <p className="text-sm font-semibold text-blue-600">Super Admin Only</p>
                 <h2 className="mt-1 text-2xl font-bold text-slate-900">데모 테넌트 데이터 생성</h2>
                 <p className="mt-2 text-sm text-slate-600">
-                  저장된 파라미터를 기준으로 v2 시뮬레이터가 데이터를 bulk 생성하고 생성 결과를 검증합니다.
+                  저장된 파라미터를 기준으로 v2.1 시뮬레이터가 데이터를 bulk 생성하고 생성 결과를 검증합니다.
                 </p>
               </div>
               <button
@@ -333,7 +333,7 @@ export default function DemoSimulationAdmin() {
                     disabled={isSaving}
                     className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    기본값 불러오기
+                    v2.1 기본값
                   </button>
                   <button
                     type="button"

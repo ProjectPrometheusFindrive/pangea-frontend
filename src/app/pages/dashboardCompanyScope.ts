@@ -45,6 +45,8 @@ export function updateDashboardSearchParams(
     preset?: string | null;
     granularity?: string | null;
     companyId?: string | null;
+    rentalType?: string | null;
+    payerType?: string | null;
   },
 ): URLSearchParams {
   const nextParams = new URLSearchParams(params);
@@ -73,6 +75,24 @@ export function updateDashboardSearchParams(
       nextParams.set('companyId', companyId);
     } else {
       nextParams.delete('companyId');
+    }
+  }
+
+  if ('rentalType' in updates) {
+    const rentalType = toNonEmptyString(updates.rentalType);
+    if (rentalType) {
+      nextParams.set('rentalType', rentalType);
+    } else {
+      nextParams.delete('rentalType');
+    }
+  }
+
+  if ('payerType' in updates) {
+    const payerType = toNonEmptyString(updates.payerType);
+    if (payerType) {
+      nextParams.set('payerType', payerType);
+    } else {
+      nextParams.delete('payerType');
     }
   }
 

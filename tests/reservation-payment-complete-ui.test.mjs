@@ -25,7 +25,7 @@ test('reservation payment tab only renders the complete action for authorized un
   const source = readProjectFile('src/app/pages/Reservations.tsx');
 
   assert.match(source, /const canWritePayments = canPerformAction\(ACTION_PERMISSIONS\.paymentsWrite\);/u);
-  assert.match(source, /const canEditReservationPaymentFields = selectedReservation[\s\S]*canWritePayments && canManageReservationPaymentIssue\(selectedReservation, selectedReservationPaymentSync\)/u);
+  assert.match(source, /const canEditReservationPaymentFields = selectedReservation[\s\S]*canWritePayments[\s\S]*!hasSelectedReservationBillingLedger[\s\S]*canManageReservationPaymentIssue\(selectedReservation, selectedReservationPaymentSync\)/u);
   assert.match(source, /function resolveReservationAdditionalPaymentAmount\(/u);
   assert.doesNotMatch(source, /if \(paymentSnapshot\?\.status === 'paid' \|\| paymentSnapshot\?\.status === 'canceled'\) \{\s*return 0;\s*\}/u);
   assert.match(source, /export function canMarkReservationPaymentAsPaid\(/u);
@@ -71,4 +71,20 @@ test('reservation payment completion falls back to AUTO-PAY ids and refreshes li
   assert.match(source, /force:\s*true/u);
   assert.match(source, /refreshReservationsAfterMutation\(/u);
   assert.match(source, /void hydrateReservationDetail\(updatedReservation\.id,\s*updatedReservation\);/u);
+});
+
+test('reservation detail payment mutations are gated by confirmation modal', () => {
+  const source = readProjectFile('src/app/pages/Reservations.tsx');
+
+  assert.match(source, /type ReservationPaymentConfirmation/u);
+  assert.match(source, /pendingReservationPaymentConfirmation/u);
+  assert.match(source, /data-testid="reservation-payment-confirmation-modal"/u);
+  assert.match(source, /openReservationPaymentStatusConfirmation\('paid'\)/u);
+  assert.match(source, /openReservationPaymentStatusConfirmation\('canceled'\)/u);
+  assert.match(source, /openSettleChargeItemConfirmation\(item\)/u);
+  assert.match(source, /openPaymentRecordConfirmConfirmation\(record\)/u);
+  assert.match(source, /openPaymentRecordVoidConfirmation\(record\)/u);
+  assert.match(source, /openRefundChargeCreateConfirmation\(record\)/u);
+  assert.match(source, /const handleConfirmReservationPaymentConfirmation = useCallback/u);
+  assert.match(source, /await handleSettleChargeItem\(confirmation\.item\)/u);
 });

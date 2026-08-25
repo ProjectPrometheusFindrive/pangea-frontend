@@ -106,7 +106,7 @@ function toMetadata(payload: Record<string, unknown>): Record<string, unknown> {
   return isRecord(payload.metadata) ? payload.metadata : {};
 }
 
-const LEGACY_NOTIFICATION_CODE_BY_EVENT_TYPE = {
+const NOTIFICATION_CODE_BY_EVENT_TYPE = {
   reservation_created: 'RESERVATION_START',
   reservation_status_changed: 'RESERVATION_STATUS_CHANGED',
   reservation_returned: 'RESERVATION_RETURNED',
@@ -204,7 +204,7 @@ function normalizeActionItemTypeLabel(value: string): string {
   return value;
 }
 
-function toLegacyActionItemTitle(value: string): string {
+function toActionItemNotificationTitle(value: string): string {
   switch (value) {
     case '정기점검 만료 임박':
       return '정기점검 예정';
@@ -230,8 +230,8 @@ function resolveNotificationCode(payload: Record<string, unknown>, title: string
   }
 
   const eventType = firstNonEmptyText(payload.eventType, metadata.eventType, title);
-  return LEGACY_NOTIFICATION_CODE_BY_EVENT_TYPE[
-    eventType as keyof typeof LEGACY_NOTIFICATION_CODE_BY_EVENT_TYPE
+  return NOTIFICATION_CODE_BY_EVENT_TYPE[
+    eventType as keyof typeof NOTIFICATION_CODE_BY_EVENT_TYPE
   ] ?? '';
 }
 
@@ -395,14 +395,14 @@ function formatNotificationTitle(
 ): string {
   if (title) {
     const normalizedTitle = title.replace(/\s+/g, '').toLowerCase();
-    const isLegacyOrGenericTitle = (
+    const isGenericOrDerivedTitle = (
       normalizedTitle === '알림'
       || normalizedTitle === '조치필요항목'
       || normalizedTitle === '예약상태변경'
       || normalizedTitle === '문의상태변경'
       || normalizedTitle === '도메인이벤트'
     );
-    if (!isLegacyOrGenericTitle) {
+    if (!isGenericOrDerivedTitle) {
       return title;
     }
   }
@@ -413,7 +413,7 @@ function formatNotificationTitle(
     && (notificationCode === 'ACTION_ITEM_STATUS_CHANGED' || notificationCode === 'ACTION_ITEM_MEMO_ADDED')
   ) {
     const [actionItemType] = actionItemDisplayName.split('-');
-    return toLegacyActionItemTitle(actionItemType ?? title);
+    return toActionItemNotificationTitle(actionItemType ?? title);
   }
 
   if (notificationCode === 'RESERVATION_STATUS_CHANGED') {
