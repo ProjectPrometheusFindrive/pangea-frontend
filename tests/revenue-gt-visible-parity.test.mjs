@@ -24,6 +24,11 @@ test('Revenue matches the GT-visible section contract without company/granularit
   assert.match(source, /title:\s*'활성 차량'/u);
 
   assert.match(source, />월간 매출 추이</u);
+  assert.match(source, /aria-pressed=\{isVisible\}/u);
+  assert.match(source, /label:\s*'총매출'/u);
+  assert.match(source, /label:\s*'순매출'/u);
+  assert.match(source, /label:\s*'미납'/u);
+  assert.match(source, /label:\s*'환불'/u);
   assert.match(source, />결제 방법별 분포</u);
   assert.match(source, />차종별 매출 현황</u);
 

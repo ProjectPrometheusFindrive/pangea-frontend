@@ -75,6 +75,7 @@ test('matchesReservationFilters keeps delinquent-scope rows without legacy issue
 test('getReservationCalendarSegments appends a red overdue segment until the actual returned day', async () => {
   const module = await viteServer.ssrLoadModule('/src/app/pages/Reservations.tsx');
   const now = new Date();
+  const scheduledEndAt = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 4, 18, 0, 0).toISOString();
   const returnedAt = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 2, 10, 0, 0).toISOString();
 
   const segments = module.getReservationCalendarSegments({
@@ -83,6 +84,7 @@ test('getReservationCalendarSegments appends a red overdue segment until the act
     customer: '연체고객',
     startDate: -6,
     endDate: -4,
+    scheduledEndAt,
     returnedAt,
     type: 'return',
     phone: '010-1111-2222',

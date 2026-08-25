@@ -30,6 +30,7 @@ import { PageStateBoundary } from '../components/PageStateBoundary';
 import { useAuthorization } from '../context/AuthorizationContext';
 import { useAuth } from '../context/AuthContext';
 import { formatDateKst } from '../utils/dateTimeFormat';
+import { normalizeActionMainCategory } from '../utils/actionItemTaxonomy';
 import { navigateToPremiumInquiry } from '../utils/premiumInquiry';
 import {
   getPageErrorActionLabel,
@@ -110,6 +111,11 @@ const DEFAULT_ACTION_ITEM_COUNTS = {
   '보험 만료 임박': 0,
   '정기점검 만료 임박': 0,
   '사고 접수': 0,
+  '정산/수납': 0,
+  '반납/회수': 0,
+  '대여 중 사고': 0,
+  '대차/보험청구': 0,
+  '차량 의무관리': 0,
   '차량이상': 0,
   '도난 의심': 0,
   '단말 OFF': 0,
@@ -217,6 +223,27 @@ function toContractFilter(statusLabel: string): string {
   return 'all';
 }
 
+function toRentalTypeFilter(typeKey: string): string {
+  const normalized = typeKey.trim();
+  if (normalized === 'short_term' || normalized === 'long_term' || normalized === 'accident_replacement') {
+    return normalized;
+  }
+  return '';
+}
+
+function getRentalTypeDashboardLabel(typeKey: string): string {
+  if (typeKey === 'short_term') {
+    return '단기렌트';
+  }
+  if (typeKey === 'long_term') {
+    return '장기렌트';
+  }
+  if (typeKey === 'accident_replacement') {
+    return '사고대차';
+  }
+  return '유형 미확인';
+}
+
 function toAssetStatusFilter(stageLabel: string): string {
   const normalized = stageLabel.trim().toLowerCase();
   if (!normalized) {
@@ -271,6 +298,19 @@ function normalizeAssetBucketCounts(stageCounts: Record<string, number>): Record
   return normalizedCounts;
 }
 
+function actionCategoryCount(counts: Record<string, number>, category: string): number {
+  let total = Math.max(0, Math.trunc(counts[category] ?? 0));
+  for (const [key, value] of Object.entries(counts)) {
+    if (key === category) {
+      continue;
+    }
+    if (normalizeActionMainCategory(key) === category) {
+      total += Math.max(0, Math.trunc(value));
+    }
+  }
+  return total;
+}
+
 function buildReservationsFilterPath(filterValue: string): string {
   const params = new URLSearchParams();
 
@@ -282,6 +322,15 @@ function buildReservationsFilterPath(filterValue: string): string {
   }
 
   return `/reservations?${params.toString()}`;
+}
+
+function buildReservationsRentalTypePath(rentalType: string): string {
+  const params = new URLSearchParams();
+  const normalized = toRentalTypeFilter(rentalType);
+  if (normalized) {
+    params.set('rentalType', normalized);
+  }
+  return params.size > 0 ? `/reservations?${params.toString()}` : '/reservations';
 }
 
 function isSnapshotEmpty(snapshot: HomeSnapshot): boolean {
@@ -301,10 +350,11 @@ function isSnapshotEmpty(snapshot: HomeSnapshot): boolean {
   }
 
   const hasContractStatus = Object.values(statusCounts.contractStatus).some((count) => count > 0);
+  const hasRentalType = Object.values(statusCounts.rentalType).some((count) => count > 0);
   const hasManagementStage = Object.values(statusCounts.managementStage).some((count) => count > 0);
   const hasAlerts = statusCounts.alerts.overdue > 0 || statusCounts.alerts.stolen > 0;
 
-  return !hasContractStatus && !hasManagementStage && !hasAlerts && recentChanges.length === 0;
+  return !hasContractStatus && !hasRentalType && !hasManagementStage && !hasAlerts && recentChanges.length === 0;
 }
 
 function toRelativeTimeLabel(value: string): string {
@@ -516,6 +566,7 @@ export default function Home() {
     [snapshot?.actionItemCountsByType],
   );
   const contractStatusCounts = summary?.statusCounts.contractStatus ?? {};
+  const rentalTypeCounts = summary?.statusCounts.rentalType ?? {};
   const managementStageCounts = summary?.statusCounts.managementStage ?? {};
   const alerts = summary?.statusCounts.alerts ?? DEFAULT_ALERTS;
   const kpis = summary?.kpis ?? DEFAULT_KPIS;
@@ -596,6 +647,13 @@ export default function Home() {
     );
   }, [navigateWithRoutePermission]);
 
+  const handleContractRentalTypeClick = useCallback((rentalType: string) => {
+    navigateWithRoutePermission(
+      buildReservationsRentalTypePath(rentalType),
+      ROUTE_PERMISSIONS.reservations,
+    );
+  }, [navigateWithRoutePermission]);
+
   const todayStats = useMemo<HomeTodayTaskCard[]>(() => {
     return [
       {
@@ -625,53 +683,53 @@ export default function Home() {
   const actionItemsForHome = useMemo<HomeStatCard[]>(() => {
     return [
       {
-        label: '반납 지연',
-        count: actionItemCountsByType['반납 지연'],
+        label: '반납/회수',
+        count: actionCategoryCount(actionItemCountsByType, '반납/회수'),
         bg: 'bg-red-50',
         color: 'text-red-600',
         icon: 'AlertCircle',
-        onClick: () => handleIssueClick('반납 지연'),
+        onClick: () => handleIssueClick('반납/회수'),
         testId: 'home-issue-card-overdue',
       },
       {
-        label: '미납/결제 문제',
-        count: actionItemCountsByType['미납/결제 문제'],
+        label: '정산/수납',
+        count: actionCategoryCount(actionItemCountsByType, '정산/수납'),
         bg: 'bg-yellow-50',
         color: 'text-yellow-600',
         icon: 'DollarSign',
-        onClick: () => handleIssueClick('미납/결제 문제'),
+        onClick: () => handleIssueClick('정산/수납'),
         testId: 'home-issue-card-unpaid',
       },
       {
-        label: '보험 만료 임박',
-        count: actionItemCountsByType['보험 만료 임박'],
+        label: '차량 의무관리',
+        count: actionCategoryCount(actionItemCountsByType, '차량 의무관리'),
         bg: 'bg-sky-50',
         color: 'text-blue-600',
         icon: 'Shield',
-        onClick: () => handleIssueClick('보험 만료 임박'),
+        onClick: () => handleIssueClick('차량 의무관리'),
         testId: 'home-issue-card-insurance',
       },
       {
-        label: '점검 만료 임박',
-        count: actionItemCountsByType['정기점검 만료 임박'],
-        bg: 'bg-blue-50',
-        color: 'text-blue-600',
-        icon: 'ClipboardCheck',
-        onClick: () => handleIssueClick('정기점검 만료 임박'),
-        testId: 'home-issue-card-maintenance',
-      },
-      {
-        label: '사고 접수',
-        count: actionItemCountsByType['사고 접수'],
+        label: '대여 중 사고',
+        count: actionCategoryCount(actionItemCountsByType, '대여 중 사고'),
         bg: 'bg-red-50',
         color: 'text-red-600',
         icon: 'AlertTriangle',
-        onClick: () => handleIssueClick('사고 접수'),
+        onClick: () => handleIssueClick('대여 중 사고'),
         testId: 'home-issue-card-accident',
       },
       {
+        label: '대차/보험청구',
+        count: actionCategoryCount(actionItemCountsByType, '대차/보험청구'),
+        bg: 'bg-indigo-50',
+        color: 'text-indigo-600',
+        icon: 'ClipboardCheck',
+        onClick: () => handleIssueClick('대차/보험청구'),
+        testId: 'home-issue-card-claim',
+      },
+      {
         label: '차량이상',
-        count: actionItemCountsByType['차량이상'],
+        count: actionCategoryCount(actionItemCountsByType, '차량이상'),
         bg: 'bg-orange-50',
         color: 'text-orange-600',
         icon: 'Wrench',
@@ -681,7 +739,7 @@ export default function Home() {
       },
       {
         label: '단말 OFF',
-        count: actionItemCountsByType['단말 OFF'],
+        count: actionCategoryCount(actionItemCountsByType, '단말 OFF'),
         bg: 'bg-orange-50',
         color: 'text-orange-600',
         icon: 'Signal',
@@ -691,7 +749,7 @@ export default function Home() {
       },
       {
         label: '도난 의심',
-        count: actionItemCountsByType['도난 의심'],
+        count: actionCategoryCount(actionItemCountsByType, '도난 의심'),
         bg: 'bg-purple-50',
         color: 'text-purple-600',
         icon: 'AlertOctagon',
@@ -745,6 +803,30 @@ export default function Home() {
       unit: '건' as const,
     }));
   }, [contractStatusCounts, kpis.activeContracts, kpis.completedContracts, kpis.unpaidContracts]);
+
+  const contractRentalTypeData = useMemo<DashboardDistributionItem[]>(() => {
+    const palette = ['#0f766e', '#7c3aed', '#ea580c', '#64748b'];
+    const typeOrder = ['short_term', 'long_term', 'accident_replacement', 'unknown'];
+    const entries = Object.entries(rentalTypeCounts)
+      .filter(([name]) => name.trim().length > 0)
+      .sort((left, right) => typeOrder.indexOf(left[0]) - typeOrder.indexOf(right[0]));
+
+    if (entries.length === 0) {
+      return [
+        { name: '단기렌트', value: 0, color: palette[0], status: 'short_term', unit: '건' },
+        { name: '장기렌트', value: 0, color: palette[1], status: 'long_term', unit: '건' },
+        { name: '사고대차', value: 0, color: palette[2], status: 'accident_replacement', unit: '건' },
+      ];
+    }
+
+    return entries.map(([name, value], index) => ({
+      name: getRentalTypeDashboardLabel(name),
+      value: Math.max(0, Math.trunc(value)),
+      color: palette[index % palette.length],
+      status: name,
+      unit: '건' as const,
+    }));
+  }, [rentalTypeCounts]);
 
 const operationScores = useMemo(() => ([
     { label: '안전운전', score: 87, color: 'bg-green-500' },
@@ -899,7 +981,7 @@ const operationScores = useMemo(() => ([
           <div>
             <h2 className="mb-3 text-xl font-bold text-[#1e2939]">운영 대시보드</h2>
 
-            <div className="grid grid-cols-3 gap-4">
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
               <div className="rounded-xl bg-white p-5 shadow-sm">
                 <h3 className="mb-3 text-sm font-semibold text-[#1e2939]">자산 현황</h3>
                 <div className="flex flex-col items-center">
@@ -980,6 +1062,53 @@ const operationScores = useMemo(() => ([
                       <button
                         key={index}
                         onClick={() => handleContractClick(item.status)}
+                        className="flex items-center gap-2 rounded-lg px-3 py-2 transition-colors hover:bg-gray-100"
+                      >
+                        <div
+                          className="h-3 w-3 rounded-full"
+                          style={{ backgroundColor: item.color }}
+                        />
+                        <span className="text-xs font-medium text-gray-700">{item.name}</span>
+                        <span className="ml-auto text-xs text-gray-500">{item.value.toLocaleString()}건</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-xl bg-white p-5 shadow-sm">
+                <h3 className="mb-3 text-sm font-semibold text-[#1e2939]">계약 유형</h3>
+                <div className="flex flex-col items-center">
+                  <ResponsiveContainer width="100%" height={170}>
+                    <PieChart>
+                      <Pie
+                        data={contractRentalTypeData}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={45}
+                        outerRadius={70}
+                        paddingAngle={2}
+                        dataKey="value"
+                        onClick={(data) => handleContractRentalTypeClick(data.status)}
+                        className="cursor-pointer"
+                      >
+                        {contractRentalTypeData.map((entry, index) => (
+                          <Cell
+                            key={`contract-rental-type-cell-${index}`}
+                            fill={entry.color}
+                            style={{ cursor: 'pointer' }}
+                          />
+                        ))}
+                      </Pie>
+                      <Tooltip content={<CustomTooltip />} />
+                    </PieChart>
+                  </ResponsiveContainer>
+
+                  <div className="mt-3 grid w-full grid-cols-2 gap-2">
+                    {contractRentalTypeData.map((item, index) => (
+                      <button
+                        key={index}
+                        onClick={() => handleContractRentalTypeClick(item.status)}
                         className="flex items-center gap-2 rounded-lg px-3 py-2 transition-colors hover:bg-gray-100"
                       >
                         <div

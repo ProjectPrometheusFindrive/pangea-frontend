@@ -15,14 +15,33 @@ test('payment issue done transitions are guided through paid/canceled popup', ()
   const source = readProjectFile('src/app/pages/ActionRequired.tsx');
 
   assert.match(source, /type PaymentIssueResolveDialogState = 'choose-payment-resolution' \| null;/u);
-  assert.match(source, /if \(selectedItem\.type === '미납\/결제 문제'\) \{\s*setPaymentIssueResolveDialog\('choose-payment-resolution'\);/u);
-  assert.match(source, /if \(nextStatusCode === 'resolved' && item\.type === '미납\/결제 문제'\) \{\s*setPaymentIssueResolveDialog\('choose-payment-resolution'\);/u);
+  assert.match(source, /if \(isPaymentActionItem\(selectedItem\) && nextStatusCode === 'resolved'\) \{\s*setPaymentIssueResolveDialog\('choose-payment-resolution'\);/u);
+  assert.match(source, /if \(nextStatusCode === 'resolved' && isPaymentActionItem\(item\)\) \{\s*setPaymentIssueResolveDialog\('choose-payment-resolution'\);/u);
   assert.match(source, /paymentIssueResolveDialog === 'choose-payment-resolution'/u);
-  assert.match(source, /const isPaymentIssueResolved = selectedItem\?\.type === '미납\/결제 문제'[\s\S]*selectedItem\.statusCode === 'resolved';/u);
+  assert.match(source, /const isPaymentIssueResolved = isSelectedPaymentIssue\s*&& selectedItem\?\.statusCode === 'resolved';/u);
   assert.match(source, /const canEditPaymentIssueFields = canWritePayments && !isPaymentIssueResolved;/u);
   assert.match(source, /결제 완료 처리/u);
   assert.match(source, /결제 면제 처리/u);
   assert.match(source, /setPaymentIssueResolveDialog\(null\)/u);
+});
+
+test('payment issue card treats payment evidence as optional convenience attachment', () => {
+  const source = readProjectFile('src/app/pages/ActionRequired.tsx');
+  const billingSource = readProjectFile('src/services/billing.ts');
+
+  assert.match(source, /const \[paymentEvidenceFile,\s*setPaymentEvidenceFile\] = useState<File \| null>\(null\);/u);
+  assert.match(source, /folder: `rentals\/\$\{reservationId\}\/payments`/u);
+  assert.match(source, /evidenceRefs,\s*memo: 'Action Required에서 수납 완료 처리'/u);
+  assert.match(source, /증빙은 선택 사항이며 없어도 완료할 수 있습니다\./u);
+  assert.match(billingSource, /evidenceRefs\?: PaymentEvidenceRef\[\];/u);
+});
+
+test('action required reservation navigation prefers reservation id when available', () => {
+  const source = readProjectFile('src/app/pages/ActionRequired.tsx');
+
+  assert.match(source, /const reservationSearch = selectedItem\.reservationId \|\| selectedItem\.customerName;/u);
+  assert.match(source, /reservationParam \|\| searchParam/u);
+  assert.match(source, /\|\| \(item\.reservationId \?\? ''\)\.includes\(searchQuery\)/u);
 });
 
 test('payment issue card supports manual additional amount save via payments API', () => {
