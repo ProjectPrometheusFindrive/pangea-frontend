@@ -1,6 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
 
-const E2E_BASE_URL = 'http://localhost:5173';
+const E2E_BASE_URL = process.env.E2E_BASE_URL ?? 'http://localhost:5173';
+const E2E_WEB_SERVER_COMMAND = process.env.E2E_WEB_SERVER_COMMAND ?? 'npm run dev -- --port 5173';
 const IS_CI = Boolean(process.env.CI);
 
 export default defineConfig({
@@ -37,7 +38,7 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: 'npm run dev -- --port 5173',
+    command: E2E_WEB_SERVER_COMMAND,
     url: E2E_BASE_URL,
     reuseExistingServer: !IS_CI,
     timeout: 120_000,

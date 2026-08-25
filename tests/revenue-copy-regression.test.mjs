@@ -27,6 +27,10 @@ test('Revenue page keeps expected Korean UI copy without mojibake placeholders',
     '차종별 매출 현황',
     '월간 매출 추이',
     '결제 수단',
+    '총매출',
+    '순매출',
+    '미납',
+    '환불',
   ]) {
     assert.match(source, new RegExp(phrase, 'u'));
   }

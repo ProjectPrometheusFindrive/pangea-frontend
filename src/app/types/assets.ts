@@ -1,4 +1,12 @@
 export type VehicleAssetStatus = '대여중' | '예약' | '가용' | '정비중';
+export type VehicleOperatingStatus =
+  | 'available'
+  | 'reserved'
+  | 'rented'
+  | 'returned'
+  | 'maintenance'
+  | 'recovery_required'
+  | 'recovered';
 
 export interface VehicleDeviceStatus {
   engineWarning: boolean;
@@ -39,6 +47,8 @@ export interface VehicleAsset {
   vehicleNumber: string;
   model: string;
   status: VehicleAssetStatus;
+  vehicleOperatingStatus?: VehicleOperatingStatus;
+  vehicleOperatingStatusLabel?: string;
   issues: string[];
   insuranceExpiry: string;
   nextInspection: string;

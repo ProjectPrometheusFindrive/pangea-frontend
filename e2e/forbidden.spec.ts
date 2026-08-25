@@ -4,6 +4,67 @@ import { buildMockUser, fulfillSuccess, installApiMocks } from './helpers/apiMoc
 import { seedAuthSession } from './helpers/session';
 
 test.describe('SCRUM-300 Forbidden E2E', () => {
+  test('member and admin can access reservations with the E2E permission harness', async ({ page }) => {
+    await installApiMocks(page, {
+      user: buildMockUser('member'),
+      handlers: {
+        'GET /api/v2/reservations': async ({ route }) => {
+          await fulfillSuccess(route, {
+            items: [],
+            total: 0,
+            page: 1,
+            pageSize: 20,
+          });
+        },
+      },
+    });
+
+    await seedAuthSession(page, 'member');
+    await page.goto('/reservations');
+    await expect(page).toHaveURL(/\/reservations(?:\?.*)?$/);
+    await expect(page.getByRole('heading', { name: '대여 예약' })).toBeVisible();
+
+    await installApiMocks(page, {
+      user: buildMockUser('admin'),
+      handlers: {
+        'GET /api/v2/reservations': async ({ route }) => {
+          await fulfillSuccess(route, {
+            items: [],
+            total: 0,
+            page: 1,
+            pageSize: 20,
+          });
+        },
+      },
+    });
+
+    await seedAuthSession(page, 'admin');
+    await page.goto('/reservations');
+    await expect(page).toHaveURL(/\/reservations(?:\?.*)?$/);
+    await expect(page.getByRole('heading', { name: '대여 예약' })).toBeVisible();
+  });
+
+  test('installer cannot access reservations and is redirected to forbidden', async ({ page }) => {
+    await installApiMocks(page, {
+      user: buildMockUser('installer'),
+      handlers: {
+        'GET /api/v2/reservations': async ({ route }) => {
+          await fulfillSuccess(route, {
+            items: [],
+            total: 0,
+            page: 1,
+            pageSize: 20,
+          });
+        },
+      },
+    });
+
+    await seedAuthSession(page, 'installer');
+    await page.goto('/reservations');
+    await expect(page).toHaveURL(/\/forbidden(?:\?.*)?$/);
+    await expect(page.getByRole('heading', { name: '접근 권한이 없습니다' })).toBeVisible();
+  });
+
   test('auto-redirects members to home after 3 seconds without leaving a back-button loop', async ({ page }) => {
     await installApiMocks(page, {
       user: buildMockUser('member'),

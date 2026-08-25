@@ -42,11 +42,12 @@ import {
   isPayloadEmpty,
   usePageEndpointState,
 } from '../hooks/usePageEndpointState';
+import { useModalDismiss } from '../hooks/useModalDismiss';
 import { useAuth } from '../context/AuthContext';
 import { useAuthorization } from '../context/AuthorizationContext';
 import { useCompany } from '../context/CompanyContext';
 import { ACTION_PERMISSIONS } from '../authorization';
-import type { AssetStoredDocument, VehicleAsset } from '../types/assets';
+import type { AssetStoredDocument, VehicleAsset, VehicleOperatingStatus } from '../types/assets';
 import { ApiError } from '../../services/api';
 import {
   getAssetActivities,
@@ -151,7 +152,7 @@ interface AssetsHydrationPayload {
   premiumInstallableAssets: PremiumInstallableAsset[];
 }
 
-type StatusFilterCode = 'all' | 'rental' | 'reserved' | 'available' | 'maintenance';
+type StatusFilterCode = 'all' | VehicleOperatingStatus;
 type CreateField = keyof Pick<CreateFormState, 'vehicleNumber' | 'vin' | 'model' | 'year'>;
 type FieldErrorMap<TField extends string> = Partial<Record<TField, string>>;
 type UploadedFileKey = keyof UploadedFiles;
@@ -179,9 +180,10 @@ const DEFAULT_CREATE_FORM_STATE: CreateFormState = {
   nextInspection: '',
 };
 const STATUS_TO_QUERY_MAP: Record<string, Exclude<StatusFilterCode, 'all'>> = {
-  rental: 'rental',
-  in_use: 'rental',
-  대여중: 'rental',
+  rental: 'rented',
+  rented: 'rented',
+  in_use: 'rented',
+  대여중: 'rented',
   reserved: 'reserved',
   예약: 'reserved',
   예약됨: 'reserved',
@@ -191,6 +193,16 @@ const STATUS_TO_QUERY_MAP: Record<string, Exclude<StatusFilterCode, 'all'>> = {
   maintenance: 'maintenance',
   repair: 'maintenance',
   정비중: 'maintenance',
+  returned: 'returned',
+  return: 'returned',
+  반납: 'returned',
+  반납됨: 'returned',
+  반납완료: 'returned',
+  recovery_required: 'recovery_required',
+  recovery: 'recovery_required',
+  회수필요: 'recovery_required',
+  recovered: 'recovered',
+  회수완료: 'recovered',
 };
 const OCR_DOC_CONFIGS: OcrDocConfig[] = [
   {
@@ -612,6 +624,47 @@ function normalizeAssetStatus(statusValue: string | null): VehicleAsset['status'
   return '가용';
 }
 
+function normalizeVehicleOperatingStatus(statusValue: string | null): VehicleOperatingStatus | undefined {
+  if (!statusValue) {
+    return undefined;
+  }
+
+  const normalized = statusValue.trim();
+  if (!normalized) {
+    return undefined;
+  }
+
+  return STATUS_TO_QUERY_MAP[normalized] ?? STATUS_TO_QUERY_MAP[normalized.toLowerCase()];
+}
+
+function formatVehicleOperatingStatus(asset: Pick<VehicleAsset, 'vehicleOperatingStatus' | 'vehicleOperatingStatusLabel' | 'status'>): string {
+  if (asset.vehicleOperatingStatusLabel) {
+    return asset.vehicleOperatingStatusLabel;
+  }
+  switch (asset.vehicleOperatingStatus) {
+    case 'available':
+      return '대여가능';
+    case 'reserved':
+      return '예약배정';
+    case 'rented':
+      return '대여중';
+    case 'returned':
+      return '반납됨';
+    case 'maintenance':
+      return '정비중';
+    case 'recovery_required':
+      return '회수필요';
+    case 'recovered':
+      return '회수완료';
+    default:
+      return asset.status;
+  }
+}
+
+function getVehicleOperatingStatus(asset: Pick<VehicleAsset, 'vehicleOperatingStatus' | 'status'>): VehicleOperatingStatus | undefined {
+  return asset.vehicleOperatingStatus ?? normalizeVehicleOperatingStatus(asset.status);
+}
+
 function normalizeAssetIssues(issueValue: unknown): string[] {
   if (!Array.isArray(issueValue)) {
     return [];
@@ -720,6 +773,8 @@ function toAssetRecord(row: unknown, index: number): Asset | null {
     plate: plateValue,
     model: toStringValue(row.model) ?? toStringValue(row.vehicleModel) ?? '차종 미확인',
     status: normalizeAssetStatus(statusValue),
+    vehicleOperatingStatus: normalizeVehicleOperatingStatus(toStringValue(row.vehicleOperatingStatus) ?? statusValue),
+    vehicleOperatingStatusLabel: toStringValue(row.vehicleOperatingStatusLabel) ?? undefined,
     issues: normalizeAssetIssues(row.issues),
     insuranceExpiry: toStringValue(row.insuranceExpiry) ?? toStringValue(row.insuranceExpiryDate) ?? '-',
     nextInspection: toStringValue(row.nextInspection) ?? toStringValue(row.nextInspectionDate) ?? '-',
@@ -1238,14 +1293,14 @@ export default function Assets() {
   }, [searchParams, setSearchParams]);
 
   useEffect(() => {
-    const legacySearch = searchParams.get('search');
+    const compatSearch = searchParams.get('search');
     const canonicalQuery = searchParams.get('q');
-    if (!legacySearch || canonicalQuery) {
+    if (!compatSearch || canonicalQuery) {
       return;
     }
 
     updateAssetsSearchParams((params) => {
-      params.set('q', legacySearch);
+      params.set('q', compatSearch);
       params.delete('search');
     }, true);
   }, [searchParams, updateAssetsSearchParams]);
@@ -1812,6 +1867,11 @@ export default function Assets() {
     closeDetailModalState();
     return true;
   }, [closeDetailModalState, isDetailDirty, isDetailSaving, showDetailModal]);
+  const { handleBackdropMouseDown: handleCreateModalBackdropMouseDown } = useModalDismiss({
+    isOpen: showModal,
+    onDismiss: closeCreateModal,
+    disabled: isCreateSaving,
+  });
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -1825,6 +1885,11 @@ export default function Assets() {
         return 'bg-purple-100 text-purple-700';
       case '정비중':
         return 'bg-orange-100 text-orange-700';
+      case '반납됨':
+      case '회수완료':
+        return 'bg-gray-100 text-gray-700';
+      case '회수필요':
+        return 'bg-red-100 text-red-700';
       default:
         return 'bg-gray-100 text-gray-700';
     }
@@ -1835,10 +1900,13 @@ export default function Assets() {
   ), [assets, modelFilter, page, pageSize]);
 
   const statusCountMap = useMemo(() => ({
-    rental: catalogAssets.filter((asset) => asset.status === '대여중').length,
-    reserved: catalogAssets.filter((asset) => asset.status === '예약').length,
-    available: catalogAssets.filter((asset) => asset.status === '가용').length,
-    maintenance: catalogAssets.filter((asset) => asset.status === '정비중').length,
+    rented: catalogAssets.filter((asset) => getVehicleOperatingStatus(asset) === 'rented').length,
+    reserved: catalogAssets.filter((asset) => getVehicleOperatingStatus(asset) === 'reserved').length,
+    available: catalogAssets.filter((asset) => getVehicleOperatingStatus(asset) === 'available').length,
+    maintenance: catalogAssets.filter((asset) => getVehicleOperatingStatus(asset) === 'maintenance').length,
+    returned: catalogAssets.filter((asset) => getVehicleOperatingStatus(asset) === 'returned').length,
+    recoveryRequired: catalogAssets.filter((asset) => getVehicleOperatingStatus(asset) === 'recovery_required').length,
+    recovered: catalogAssets.filter((asset) => getVehicleOperatingStatus(asset) === 'recovered').length,
   }), [catalogAssets]);
 
   const totalPages = useMemo(() => {
@@ -2783,7 +2851,7 @@ export default function Assets() {
           </div>
 
           {/* 상태 필터 버튼 */}
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             <span className="text-sm font-semibold text-gray-700">차량 상태:</span>
             <button
               onClick={() => handleStatusChange('all')}
@@ -2796,14 +2864,14 @@ export default function Assets() {
               전체 ({catalogAssets.length})
             </button>
             <button
-              onClick={() => handleStatusChange('rental')}
+              onClick={() => handleStatusChange('rented')}
               className={`px-4 py-2 rounded-lg font-medium text-sm transition-colors ${
-                statusFilterCode === 'rental'
+                statusFilterCode === 'rented'
                   ? 'bg-blue-600 text-white'
                   : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
               }`}
             >
-              대여중 ({statusCountMap.rental})
+              대여중 ({statusCountMap.rented})
             </button>
             <button
               onClick={() => handleStatusChange('reserved')}
@@ -2834,6 +2902,36 @@ export default function Assets() {
               }`}
             >
               정비중 ({statusCountMap.maintenance})
+            </button>
+            <button
+              onClick={() => handleStatusChange('returned')}
+              className={`px-4 py-2 rounded-lg font-medium text-sm transition-colors ${
+                statusFilterCode === 'returned'
+                  ? 'bg-gray-700 text-white'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              }`}
+            >
+              반납됨 ({statusCountMap.returned})
+            </button>
+            <button
+              onClick={() => handleStatusChange('recovery_required')}
+              className={`px-4 py-2 rounded-lg font-medium text-sm transition-colors ${
+                statusFilterCode === 'recovery_required'
+                  ? 'bg-red-600 text-white'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              }`}
+            >
+              회수필요 ({statusCountMap.recoveryRequired})
+            </button>
+            <button
+              onClick={() => handleStatusChange('recovered')}
+              className={`px-4 py-2 rounded-lg font-medium text-sm transition-colors ${
+                statusFilterCode === 'recovered'
+                  ? 'bg-emerald-700 text-white'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              }`}
+            >
+              회수완료 ({statusCountMap.recovered})
             </button>
           </div>
 
@@ -2920,8 +3018,8 @@ export default function Assets() {
                         {asset.model}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <span className={`px-2 py-1 text-xs font-medium rounded-full ${getStatusColor(asset.status)}`}>
-                          {asset.status}
+                        <span className={`px-2 py-1 text-xs font-medium rounded-full ${getStatusColor(formatVehicleOperatingStatus(asset))}`}>
+                          {formatVehicleOperatingStatus(asset)}
                         </span>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
@@ -2984,7 +3082,7 @@ export default function Assets() {
 
         {/* OCR 업로드 모달 */}
         {showModal && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onMouseDown={handleCreateModalBackdropMouseDown}>
             <div className="bg-white rounded-xl w-[600px] max-h-[80vh] overflow-y-auto">
               <div className="p-6">
                 <div className="flex items-center justify-between mb-6">
