@@ -14,6 +14,7 @@ export interface HomeSummaryKpis {
 
 export interface HomeSummaryStatusCounts {
   contractStatus: Record<string, number>;
+  rentalType: Record<string, number>;
   managementStage: Record<string, number>;
   alerts: {
     overdue: number;
@@ -101,6 +102,22 @@ function normalizeStatusMap(value: unknown): Record<string, number> {
   return normalized;
 }
 
+function normalizeRentalTypeMap(value: unknown): Record<string, number> {
+  const raw = normalizeStatusMap(value);
+  const normalized: Record<string, number> = {};
+  const keyMap: Record<string, string> = {
+    shortTerm: 'short_term',
+    longTerm: 'long_term',
+    accidentReplacement: 'accident_replacement',
+  };
+
+  for (const [key, count] of Object.entries(raw)) {
+    const normalizedKey = keyMap[key] ?? key;
+    normalized[normalizedKey] = (normalized[normalizedKey] ?? 0) + count;
+  }
+  return normalized;
+}
+
 function normalizeKpis(value: unknown): HomeSummaryKpis {
   if (!isRecord(value)) {
     return {
@@ -130,6 +147,7 @@ function normalizeStatusCounts(value: unknown): HomeSummaryStatusCounts {
   if (!isRecord(value)) {
     return {
       contractStatus: {},
+      rentalType: {},
       managementStage: {},
       alerts: {
         overdue: 0,
@@ -142,6 +160,7 @@ function normalizeStatusCounts(value: unknown): HomeSummaryStatusCounts {
 
   return {
     contractStatus: normalizeStatusMap(value.contractStatus),
+    rentalType: normalizeRentalTypeMap(value.rentalType),
     managementStage: normalizeStatusMap(value.managementStage),
     alerts: {
       overdue: toInteger(alertsValue.overdue),

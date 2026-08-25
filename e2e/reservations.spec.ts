@@ -10,12 +10,18 @@ interface ReservationListRow {
   startAt: string;
   endAt: string;
   contractStatus: string;
+  rentalType?: string;
   paymentMethod: string;
   paymentStatus: string;
   amount: number;
   deposit: number;
   phone?: string;
   memo?: string;
+  billingSummary?: Record<string, unknown>;
+  accidentClaim?: Record<string, unknown>;
+  parties?: Record<string, unknown>;
+  licenseDocumentObjectName?: string;
+  contractDocumentObjectName?: string;
 }
 
 function formatDateOffset(offsetDays: number): string {
@@ -37,7 +43,7 @@ function formatStartableDateTimeToday(): string {
   return formatDateTimeOffset(0, '00:00:00');
 }
 
-function buildVehicleAsset() {
+function buildVehicleAsset(overrides: Record<string, unknown> = {}) {
   return {
     vehicleNumber: '12가3456',
     model: '아반떼',
@@ -48,6 +54,7 @@ function buildVehicleAsset() {
     vin: 'KMH12A34560000001',
     year: '2024',
     owner: '홍길동',
+    ...overrides,
   };
 }
 
@@ -74,11 +81,12 @@ async function openNewContractModal(page: Page): Promise<void> {
 }
 
 async function fillContractStep1(page: Page): Promise<void> {
-  await page.getByTestId('new-contract-vehicle-select').selectOption('12가3456');
   await page.getByTestId('new-contract-start-date-input').fill(formatDateOffset(1));
   await page.getByTestId('new-contract-end-date-input').fill(formatDateOffset(3));
   await page.getByTestId('new-contract-start-time-input').fill('09:00');
   await page.getByTestId('new-contract-end-time-input').fill('18:00');
+  await expect(page.getByTestId('new-contract-vehicle-select')).toBeEnabled();
+  await page.getByTestId('new-contract-vehicle-select').selectOption('12가3456');
   await page.getByTestId('new-contract-step1-next').click();
 }
 
@@ -101,9 +109,115 @@ async function submitContract(page: Page): Promise<void> {
   await page.getByTestId('new-contract-submit').click();
 }
 
+async function installSignedUploadMock(page: Page): Promise<void> {
+  await page.route('https://signed.example/**', async (route) => {
+    await route.fulfill({ status: 200, body: '' });
+  });
+}
+
 test.describe('BK-091 Reservations E2E', () => {
+  test('새 계약 등록은 기간 기준으로 가용 차량만 선택하게 한다', async ({ page }) => {
+    const vehicleAssets = [
+      buildVehicleAsset(),
+      buildVehicleAsset({
+        vehicleNumber: '34나7890',
+        model: 'K5',
+        vin: 'KN34B789000000002',
+      }),
+    ];
+    const reservations = [
+      buildReservationRow({
+        vehicleNumber: '12가3456',
+        startAt: formatDateTimeOffset(1, '09:00:00'),
+        endAt: formatDateTimeOffset(3, '18:00:00'),
+      }),
+    ];
+
+    await installApiMocks(page, {
+      user: { role: 'admin' },
+      handlers: {
+        'GET /api/v2/reservations': async ({ route }) => {
+          await fulfillSuccess(route, {
+            reservations,
+            assets: vehicleAssets,
+            total: reservations.length,
+            page: 1,
+            pageSize: 20,
+          });
+        },
+        'GET /api/v2/assets': async ({ route }) => {
+          await fulfillSuccess(route, {
+            items: vehicleAssets,
+            total: vehicleAssets.length,
+            page: 1,
+            size: 500,
+          });
+        },
+      },
+    });
+
+    await loginViaUi(page, 'admin', { returnUrl: '/reservations' });
+    await openNewContractModal(page);
+    await page.getByTestId('new-contract-start-date-input').fill(formatDateOffset(1));
+    await page.getByTestId('new-contract-end-date-input').fill(formatDateOffset(3));
+    await page.getByTestId('new-contract-start-time-input').fill('09:00');
+    await page.getByTestId('new-contract-end-time-input').fill('18:00');
+
+    const vehicleSelect = page.getByTestId('new-contract-vehicle-select');
+    await expect(vehicleSelect).toBeEnabled();
+    await expect(vehicleSelect).not.toContainText('12가3456');
+    await expect(vehicleSelect).toContainText('34나7890');
+    await vehicleSelect.selectOption('34나7890');
+  });
+
+  test('관리자 사후입력은 계약 상태 선택을 요구하고 장기렌트 30일 미만을 막는다', async ({ page }) => {
+    const vehicleAssets = [buildVehicleAsset()];
+
+    await installApiMocks(page, {
+      user: { role: 'admin' },
+      handlers: {
+        'GET /api/v2/reservations': async ({ route }) => {
+          await fulfillSuccess(route, {
+            reservations: [],
+            assets: vehicleAssets,
+            total: 0,
+            page: 1,
+            pageSize: 20,
+          });
+        },
+        'GET /api/v2/assets': async ({ route }) => {
+          await fulfillSuccess(route, {
+            items: vehicleAssets,
+            total: vehicleAssets.length,
+            page: 1,
+            size: 500,
+          });
+        },
+      },
+    });
+
+    await loginViaUi(page, 'admin', { returnUrl: '/reservations' });
+    await openNewContractModal(page);
+    await page.getByRole('button', { name: '장기렌트' }).click();
+    await page.getByTestId('new-contract-start-date-input').fill(formatDateOffset(-10));
+    await page.getByTestId('new-contract-end-date-input').fill(formatDateOffset(-7));
+    await page.getByTestId('new-contract-start-time-input').fill('09:00');
+    await page.getByTestId('new-contract-end-time-input').fill('18:00');
+    await expect(page.getByTestId('new-contract-contract-status-select')).toBeVisible();
+    await expect(page.getByTestId('new-contract-vehicle-select')).toBeEnabled();
+    await page.getByTestId('new-contract-vehicle-select').selectOption('12가3456');
+
+    await page.getByTestId('new-contract-step1-next').click();
+    await expect(page.getByTestId('new-contract-submit-error')).toContainText('계약 상태');
+
+    await page.getByTestId('new-contract-contract-status-select').selectOption('완료');
+    await page.getByTestId('new-contract-step1-next').click();
+    await expect(page.getByTestId('new-contract-submit-error')).toContainText('장기렌트는 최소 30일 이상');
+  });
+
   test('예약 생성 후 대여 시작과 반납 전이가 성공한다', async ({ page }) => {
     const reservations: ReservationListRow[] = [];
+    await installSignedUploadMock(page);
 
     await installApiMocks(page, {
       user: {
@@ -120,15 +234,48 @@ test.describe('BK-091 Reservations E2E', () => {
             pageSize: 20,
           });
         },
+        'GET /api/v2/assets': async ({ route }) => {
+          await fulfillSuccess(route, {
+            items: [buildVehicleAsset()],
+            total: 1,
+            page: 1,
+            size: 500,
+          });
+        },
+        'POST /api/v2/reservations/prepare': async ({ route, request }) => {
+          const body = request.postDataJSON() as Record<string, unknown>;
+          expect(typeof body.idempotencyKey).toBe('string');
+          await fulfillSuccess(route, {
+            reservationId: 'R-1001',
+            idempotencyKey: body.idempotencyKey,
+          });
+        },
+        'POST /api/v2/assets/upload': async ({ route, request }) => {
+          const body = request.postDataJSON() as Record<string, unknown>;
+          const folder = String(body.folder ?? 'reservations/R-1001/documents');
+          await fulfillSuccess(route, {
+            uploadUrl: 'https://signed.example/reservation-license',
+            objectName: `${folder}/license.png`,
+            contentType: body.contentType ?? 'image/png',
+          });
+        },
         'POST /api/v2/reservations': async ({ route }) => {
           await delay(250);
           const body = route.request().postDataJSON() as Record<string, unknown>;
-          expect(body.phone).toBe('010-2222-3333');
+          expect(body.reservationId).toBe('R-1001');
+          expect(typeof body.idempotencyKey).toBe('string');
+          expect(body.parties).toMatchObject({
+            driver: {
+              name: '테스트고객',
+              phone: '010-2222-3333',
+            },
+          });
           const created = buildReservationRow({
             id: 'R-1001',
             customerName: '테스트고객',
             phone: '010-2222-3333',
             startAt: formatStartableDateTimeToday(),
+            parties: body.parties as Record<string, unknown>,
           });
           reservations.splice(0, reservations.length, created);
           await fulfillSuccess(route, created, 201);
@@ -231,7 +378,64 @@ test.describe('BK-091 Reservations E2E', () => {
     await expect(page.getByText('010-9999-8888')).toBeVisible();
   });
 
+  test('사고대차 상세가 생성 응답과 재조회 응답의 claim 정보를 유지한다', async ({ page }) => {
+    const listReservation = buildReservationRow({
+      id: 'R-ACC-PARITY',
+      rentalType: 'accident_replacement',
+      customerName: '사고대차고객',
+      accidentClaim: {
+        claimNo: 'CLAIM-PARITY',
+        insurerName: '패리티손보',
+        repairShopName: '패리티정비',
+        requesterName: '정비 담당자',
+        documentStatus: 'intake_required',
+        claimStatus: 'intake',
+        billedAmount: 770000,
+        recognizedAmount: 0,
+        differenceAmount: 0,
+      },
+      contractDocumentObjectName: 'reservations/R-ACC-PARITY/documents/request.pdf',
+    });
+    const detailReservation = {
+      ...listReservation,
+      accidentClaim: {
+        ...listReservation.accidentClaim,
+        repairShopName: '패리티정비',
+      },
+    };
+
+    await installApiMocks(page, {
+      handlers: {
+        'GET /api/v2/reservations': async ({ route }) => {
+          await fulfillSuccess(route, {
+            reservations: [listReservation],
+            assets: [buildVehicleAsset()],
+            total: 1,
+            page: 1,
+            pageSize: 20,
+          });
+        },
+        'GET /api/v2/reservations/R-ACC-PARITY': async ({ route }) => {
+          await fulfillSuccess(route, detailReservation);
+        },
+      },
+    });
+
+    await loginViaUi(page, 'admin', { returnUrl: '/reservations' });
+    await expect(page).toHaveURL(/\/reservations(?:\?.*)?$/);
+    await expect(page.getByTestId('reservation-block-R-ACC-PARITY')).toBeVisible();
+
+    await page.getByTestId('reservation-block-R-ACC-PARITY').click();
+    await expect(page.getByTestId('reservation-detail-modal')).toBeVisible();
+    await page.getByRole('button', { name: '결제 정보' }).click();
+    await expect(page.getByText('보험/청구')).toBeVisible();
+    await expect(page.getByText('CLAIM-PARITY')).toBeVisible();
+    await expect(page.getByText('패리티손보')).toBeVisible();
+    await expect(page.getByText('패리티정비')).toBeVisible();
+  });
+
   test('예약 생성 403 오류 시 권한 오류를 노출한다', async ({ page }) => {
+    await installSignedUploadMock(page);
     await installApiMocks(page, {
       handlers: {
         'GET /api/v2/reservations': async ({ route }) => {
@@ -241,6 +445,29 @@ test.describe('BK-091 Reservations E2E', () => {
             total: 0,
             page: 1,
             pageSize: 20,
+          });
+        },
+        'GET /api/v2/assets': async ({ route }) => {
+          await fulfillSuccess(route, {
+            items: [buildVehicleAsset()],
+            total: 1,
+            page: 1,
+            size: 500,
+          });
+        },
+        'POST /api/v2/reservations/prepare': async ({ route }) => {
+          await fulfillSuccess(route, {
+            reservationId: 'R-FORBIDDEN',
+            idempotencyKey: 'idem-forbidden',
+          });
+        },
+        'POST /api/v2/assets/upload': async ({ route, request }) => {
+          const body = request.postDataJSON() as Record<string, unknown>;
+          const folder = String(body.folder ?? 'reservations/R-FORBIDDEN/documents');
+          await fulfillSuccess(route, {
+            uploadUrl: 'https://signed.example/forbidden-license',
+            objectName: `${folder}/license.png`,
+            contentType: body.contentType ?? 'image/png',
           });
         },
         'POST /api/v2/reservations': async ({ route }) => {
@@ -331,11 +558,6 @@ test.describe('BK-091 Reservations E2E', () => {
       },
     });
 
-    page.once('dialog', async (dialog) => {
-      expect(dialog.type()).toBe('confirm');
-      await dialog.accept();
-    });
-
     await loginViaUi(page, 'admin', { returnUrl: '/reservations' });
     await expect(page).toHaveURL(/\/reservations(?:\?.*)?$/);
     await expect(page.getByTestId('reservation-block-R-9001')).toBeVisible();
@@ -344,6 +566,9 @@ test.describe('BK-091 Reservations E2E', () => {
     await expect(page.getByTestId('reservation-detail-modal')).toBeVisible();
 
     await page.getByTestId('reservation-cancel-button').click();
+    const cancelConfirmModal = page.getByTestId('reservation-cancel-confirm-modal');
+    await expect(cancelConfirmModal).toBeVisible();
+    await cancelConfirmModal.getByRole('button', { name: '예약 취소' }).click();
 
     await expect(page.getByText('예약이 취소되었습니다.')).toBeVisible();
     await expect(page.getByTestId('reservation-detail-modal')).toHaveCount(0);
@@ -578,7 +803,7 @@ test.describe('BK-091 Reservations E2E', () => {
     expect(modelOptions).toContain('쏘나타');
 
     expect(reservationQueries).toHaveLength(1);
-    expect(reservationQueries[0]).toContain('size=20');
+    expect(reservationQueries[0]).toContain('size=500');
     expect(reservationQueries[0]).not.toContain('pageSize=');
   });
 
@@ -644,39 +869,28 @@ test.describe('BK-091 Reservations E2E', () => {
             size: 500,
           });
         },
-        'GET /api/v2/payments/status': async ({ route, request }) => {
-          const reservationId = new URL(request.url()).searchParams.get('reservationId') ?? '';
-          statusRequestCounts.set(
-            reservationId,
-            (statusRequestCounts.get(reservationId) ?? 0) + 1,
-          );
-
-          if (reservationId === 'R-ACTIVE') {
-            await fulfillSuccess(route, {
+        'POST /api/v2/payments/status/batch': async ({ route, request }) => {
+          const body = request.postDataJSON() as Record<string, unknown>;
+          const reservationIds = Array.isArray(body.reservationIds)
+            ? body.reservationIds.map(String)
+            : [];
+          for (const reservationId of reservationIds) {
+            statusRequestCounts.set(
               reservationId,
-              items: [
-                {
-                  id: 'PAY-1001',
-                  reservationId,
-                  status: 'pending',
-                  updatedAt: '2026-03-07T00:00:00Z',
-                },
-              ],
-              total: 1,
-            });
-            return;
+              (statusRequestCounts.get(reservationId) ?? 0) + 1,
+            );
           }
 
-          if (reservationId === 'R-EMPTY') {
-            await fulfillSuccess(route, {
-              reservationId,
-              items: [],
-              total: 0,
-            });
-            return;
-          }
-
-          await fulfillError(route, 500, 'UNEXPECTED_TARGET', `unexpected polling target: ${reservationId}`);
+          await fulfillSuccess(route, {
+            items: reservationIds
+              .filter((reservationId) => reservationId === 'R-ACTIVE')
+              .map((reservationId) => ({
+                id: 'PAY-1001',
+                reservationId,
+                status: 'pending',
+                updatedAt: '2026-03-07T00:00:00Z',
+              })),
+          });
         },
       },
     });
@@ -687,8 +901,241 @@ test.describe('BK-091 Reservations E2E', () => {
     await expect(page.getByText('34나5678')).toBeVisible();
     await expect(page.getByText('56다7890')).toBeVisible();
 
-    await expect.poll(() => statusRequestCounts.get('R-ACTIVE') ?? 0).toBe(1);
-    await expect.poll(() => statusRequestCounts.get('R-EMPTY') ?? 0).toBe(1);
+    await expect.poll(() => statusRequestCounts.get('R-ACTIVE') ?? 0).toBeGreaterThanOrEqual(1);
+    await expect.poll(() => statusRequestCounts.get('R-EMPTY') ?? 0).toBeGreaterThanOrEqual(1);
     expect(statusRequestCounts.get('R-DONE') ?? 0).toBe(0);
+  });
+
+  test('장기렌트 결제 탭에서 월별 청구 계획과 수동 배정을 처리한다', async ({ page }) => {
+    const monthlyCharge = {
+      id: 'CHG-R-BILL-M001',
+      reservationId: 'R-BILL',
+      rentalType: 'long_term',
+      sequenceNo: 1,
+      chargeType: 'monthly_fee',
+      payerType: 'customer',
+      billingPeriodStart: '2026-05-01',
+      billingPeriodEnd: '2026-05-31',
+      dueDate: '2026-05-05',
+      amount: 800000,
+      paidAmount: 0,
+      remainingAmount: 800000,
+      status: 'overdue',
+    };
+    const nextMonthlyCharge = {
+      ...monthlyCharge,
+      id: 'CHG-R-BILL-M002',
+      sequenceNo: 2,
+      billingPeriodStart: '2026-06-01',
+      billingPeriodEnd: '2026-06-30',
+      dueDate: '2026-06-05',
+      status: 'scheduled',
+    };
+    let detailReservation = buildReservationRow({
+      id: 'R-BILL',
+      rentalType: 'long_term',
+      customerName: '장기고객',
+      paymentStatus: '대기',
+      amount: 1600000,
+      billingSummary: {
+        paymentSummaryLabel: '연체/미수',
+        totalAmount: 1600000,
+        paidAmount: 0,
+        remainingAmount: 1600000,
+        overdueAmount: 800000,
+        chargeItemCount: 2,
+        paymentRecordCount: 0,
+        billingPlan: {
+          id: 'BPLAN-R-BILL',
+          reservationId: 'R-BILL',
+          monthlyAmount: 800000,
+          billingDay: 5,
+          billingTiming: 'prepaid',
+          cycleMonths: 1,
+          graceDays: 2,
+          installmentCount: 2,
+          payerType: 'customer',
+        },
+        chargeItems: [monthlyCharge, nextMonthlyCharge],
+        paymentRecords: [],
+      },
+    });
+    let createPaymentPayload: Record<string, unknown> | null = null;
+
+    await installApiMocks(page, {
+      user: {
+        role: 'admin',
+      },
+      handlers: {
+        'GET /api/v2/reservations': async ({ route }) => {
+          await fulfillSuccess(route, {
+            reservations: [detailReservation],
+            assets: [buildVehicleAsset()],
+            total: 1,
+            page: 1,
+            pageSize: 20,
+          });
+        },
+        'GET /api/v2/reservations/R-BILL': async ({ route }) => {
+          await fulfillSuccess(route, detailReservation);
+        },
+        'POST /api/v2/reservations/R-BILL/payment-records': async ({ route, request }) => {
+          createPaymentPayload = request.postDataJSON() as Record<string, unknown>;
+          const allocations = Array.isArray(createPaymentPayload.allocations)
+            ? createPaymentPayload.allocations
+            : [];
+          expect(createPaymentPayload.amount).toBe(800000);
+          expect(createPaymentPayload.confirmationStatus).toBe('confirmed');
+          expect(allocations).toEqual([{ chargeItemId: 'CHG-R-BILL-M001', amount: 800000 }]);
+          detailReservation = {
+            ...detailReservation,
+            billingSummary: {
+              ...(detailReservation.billingSummary ?? {}),
+              paymentRecordCount: 1,
+              paymentRecords: [
+                {
+                  id: 'PAYREC-R-BILL-1',
+                  reservationId: 'R-BILL',
+                  amount: 800000,
+                  paidAt: '2026-05-15',
+                  method: '계좌이체',
+                  confirmationStatus: 'confirmed',
+                  payerType: 'customer',
+                  allocations,
+                  status: 'active',
+                },
+              ],
+            },
+          };
+          await fulfillSuccess(route, detailReservation.billingSummary);
+        },
+      },
+    });
+
+    await loginViaUi(page, 'admin', { returnUrl: '/reservations' });
+    await expect(page.getByTestId('reservation-block-R-BILL')).toBeVisible();
+
+    await page.getByTestId('reservation-block-R-BILL').click();
+    await expect(page.getByTestId('reservation-detail-modal')).toBeVisible();
+    await page.getByRole('button', { name: '결제 정보' }).click();
+
+    await expect(page.getByText('월 800,000원')).toBeVisible();
+    await expect(page.getByText('청구일 매월 5일')).toBeVisible();
+    await expect(page.getByText('연체 1건')).toBeVisible();
+
+    await page.getByRole('button', { name: '수납 기록 추가' }).click();
+    const paymentForm = page.locator('div').filter({ hasText: '수납 금액' }).filter({ hasText: '배정 방식' }).last();
+    await paymentForm.getByLabel('수납 금액').fill('800000');
+    await paymentForm.getByLabel('배정 방식').selectOption('manual');
+    await page.getByRole('button', { name: '수납 기록 저장' }).click();
+
+    await expect.poll(() => createPaymentPayload).not.toBeNull();
+    await expect(page.getByText('수납 기록을 확정 등록했습니다.')).toBeVisible();
+  });
+
+  test('예약 상세 빠른 수납은 확인 모달에서 승인한 뒤 처리한다', async ({ page }) => {
+    const monthlyCharge = {
+      id: 'CHG-R-CONFIRM-M001',
+      reservationId: 'R-CONFIRM',
+      rentalType: 'long_term',
+      sequenceNo: 1,
+      chargeType: 'monthly_fee',
+      payerType: 'customer',
+      billingPeriodStart: '2026-05-01',
+      billingPeriodEnd: '2026-05-31',
+      dueDate: '2026-05-05',
+      amount: 800000,
+      paidAmount: 0,
+      remainingAmount: 800000,
+      status: 'overdue',
+    };
+    const detailReservation = buildReservationRow({
+      id: 'R-CONFIRM',
+      rentalType: 'long_term',
+      customerName: '확인고객',
+      paymentStatus: '대기',
+      amount: 800000,
+      billingSummary: {
+        paymentSummaryLabel: '연체/미수',
+        totalAmount: 800000,
+        paidAmount: 0,
+        remainingAmount: 800000,
+        overdueAmount: 800000,
+        chargeItemCount: 1,
+        paymentRecordCount: 0,
+        billingPlan: {
+          id: 'BPLAN-R-CONFIRM',
+          reservationId: 'R-CONFIRM',
+          monthlyAmount: 800000,
+          billingDay: 5,
+          billingTiming: 'prepaid',
+          cycleMonths: 1,
+          installmentCount: 1,
+          payerType: 'customer',
+        },
+        chargeItems: [monthlyCharge],
+        paymentRecords: [],
+      },
+    });
+    let createPaymentCount = 0;
+
+    await installApiMocks(page, {
+      user: {
+        role: 'admin',
+      },
+      handlers: {
+        'GET /api/v2/reservations': async ({ route }) => {
+          await fulfillSuccess(route, {
+            reservations: [detailReservation],
+            assets: [buildVehicleAsset()],
+            total: 1,
+            page: 1,
+            pageSize: 20,
+          });
+        },
+        'GET /api/v2/reservations/R-CONFIRM': async ({ route }) => {
+          await fulfillSuccess(route, detailReservation);
+        },
+        'POST /api/v2/reservations/R-CONFIRM/payment-records': async ({ route, request }) => {
+          createPaymentCount += 1;
+          const payload = request.postDataJSON() as Record<string, unknown>;
+          expect(payload.amount).toBe(800000);
+          expect(payload.confirmationStatus).toBe('confirmed');
+          expect(payload.allocations).toEqual([{ chargeItemId: 'CHG-R-CONFIRM-M001', amount: 800000 }]);
+          await fulfillSuccess(route, {
+            ...detailReservation.billingSummary,
+            paymentRecordCount: 1,
+          });
+        },
+      },
+    });
+
+    await loginViaUi(page, 'admin', { returnUrl: '/reservations' });
+    await expect(page.getByTestId('reservation-block-R-CONFIRM')).toBeVisible();
+
+    await page.getByTestId('reservation-block-R-CONFIRM').click();
+    await expect(page.getByTestId('reservation-detail-modal')).toBeVisible();
+    await page.getByRole('button', { name: '결제 정보' }).click();
+
+    await page.getByRole('button', { name: '수납', exact: true }).first().click();
+    expect(createPaymentCount).toBe(0);
+
+    const firstDialog = page.getByRole('dialog', { name: '청구 항목을 수납 처리하시겠습니까?' });
+    await expect(firstDialog).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(firstDialog).toBeHidden();
+    expect(createPaymentCount).toBe(0);
+
+    await page.getByRole('button', { name: '수납', exact: true }).first().click();
+    const secondDialog = page.getByRole('dialog', { name: '청구 항목을 수납 처리하시겠습니까?' });
+    await expect(secondDialog).toBeVisible();
+    await page.mouse.click(10, 10);
+    await expect(secondDialog).toBeHidden();
+    expect(createPaymentCount).toBe(0);
+
+    await page.getByRole('button', { name: '수납', exact: true }).first().click();
+    const confirmDialog = page.getByRole('dialog', { name: '청구 항목을 수납 처리하시겠습니까?' });
+    await confirmDialog.getByRole('button', { name: '수납 처리' }).click();
+    await expect.poll(() => createPaymentCount).toBe(1);
   });
 });

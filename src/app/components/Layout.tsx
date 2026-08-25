@@ -144,6 +144,10 @@ export function Layout({ children, title }: LayoutProps) {
   const [notificationsError, setNotificationsError] = useState<string | null>(null);
   const [isNotificationActionPending, setIsNotificationActionPending] = useState(false);
   const canUseNotifications = viewRole !== 'device-installer';
+  const rawAppVersion = import.meta.env.VITE_APP_VERSION?.trim();
+  const appVersionLabel = rawAppVersion
+    ? `v${rawAppVersion.replace(/^v/i, '')}`
+    : '';
 
   const notificationRef = useRef<HTMLDivElement>(null);
   const accountMenuRef = useRef<HTMLDivElement>(null);
@@ -433,8 +437,11 @@ export function Layout({ children, title }: LayoutProps) {
       {/* Sidebar */}
       <aside className={`${isSidebarCollapsed ? 'w-[80px]' : 'w-[240px]'} bg-[#1e3a8a] flex flex-col shrink-0 transition-all duration-300`}>
         <div className="h-14 flex items-center justify-between px-6 border-b border-[#1447e6]">
-          <h1 className="text-white text-xl font-bold overflow-hidden">
-            {isSidebarCollapsed ? 'P' : 'Pangea'}
+          <h1 className="flex min-w-0 items-baseline gap-2 overflow-hidden text-white">
+            <span className="text-xl font-bold">{isSidebarCollapsed ? 'P' : 'Pangea'}</span>
+            {!isSidebarCollapsed && appVersionLabel && (
+              <span className="shrink-0 text-[11px] font-medium text-blue-100/80">{appVersionLabel}</span>
+            )}
           </h1>
           <button 
             onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}

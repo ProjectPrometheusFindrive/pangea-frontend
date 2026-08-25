@@ -9,6 +9,11 @@ export interface GetReservationsListParams extends ReservationsRequestOptions {
   size: number;
   status?: string;
   contractStatus?: string;
+  workflowStatus?: string;
+  closeoutStatus?: string;
+  cancellationSettlementStatus?: string;
+  longTermAccountStatus?: string;
+  accidentReplacementStatus?: string;
   paymentScope?: 'delinquent';
   from?: string;
   to?: string;
@@ -17,9 +22,47 @@ export interface GetReservationsListParams extends ReservationsRequestOptions {
 
 export interface GetReservationDetailOptions extends ReservationsRequestOptions {}
 
+export interface ReservationPartyPayload {
+  type?: string;
+  source?: string;
+  name?: string;
+  organizationName?: string;
+  contactName?: string;
+  phone?: string;
+  businessNumber?: string;
+  address?: string;
+  licenseNumber?: string;
+  licenseDocumentObjectName?: string;
+  billingAccount?: string;
+  insurerName?: string;
+  claimNo?: string;
+  externalRequestNo?: string;
+}
+
+export interface ReservationPartiesPayload {
+  contractor?: ReservationPartyPayload;
+  driver?: ReservationPartyPayload;
+  additionalDrivers?: ReservationPartyPayload[];
+  requester?: ReservationPartyPayload;
+  payer?: ReservationPartyPayload;
+}
+
+export interface PrepareReservationCreationPayload {
+  idempotencyKey?: string;
+}
+
+export interface PrepareReservationCreationResponse {
+  reservationId?: string;
+  idempotencyKey?: string | null;
+  existingReservation?: unknown;
+}
+
 export interface CreateReservationPayload {
-  reservationId: string;
+  reservationId?: string;
+  idempotencyKey?: string;
   vin: string;
+  rentalType?: 'short_term' | 'long_term' | 'accident_replacement';
+  creationMode?: 'ui_confirmed' | 'external_intake' | 'migration';
   startAt: string;
   endAt: string;
   contractStatus?: string;
@@ -27,14 +70,63 @@ export interface CreateReservationPayload {
   plate?: string;
   vehicleNumber?: string;
   status?: string;
-  customerName?: string;
-  phone?: string;
-  licenseNumber?: string;
-  address?: string;
-  paymentMethod?: string;
-  paymentStatus?: string;
-  amount?: number;
-  deposit?: number;
+  parties?: ReservationPartiesPayload;
+  payerType?: 'customer' | 'insurer' | 'corporate' | 'repair_shop';
+  contractDocumentObjectName?: string;
+  contractDocumentType?: 'rental_contract' | 'long_term_contract' | 'payment_schedule' | 'accident_replacement_request';
+  contractDocuments?: Array<{
+    objectName: string;
+    fileName?: string;
+    documentType?: 'rental_contract' | 'long_term_contract' | 'payment_schedule' | 'accident_replacement_request';
+  }>;
+  initialBilling?: {
+    amount?: number;
+    deposit?: number;
+    chargeType?: string;
+    payerType?: 'customer' | 'corporate' | 'insurer' | 'repair_shop';
+    status?: string;
+    dueDate?: string;
+    memo?: string;
+    paymentRecord?: {
+      amount?: number;
+      method?: string;
+      payerType?: 'customer' | 'corporate' | 'insurer' | 'repair_shop';
+      confirmationStatus?: string;
+      depositorName?: string;
+      approvalNo?: string;
+    };
+  };
+  billingPlan?: {
+    monthlyAmount?: number;
+    billingDay?: number;
+    billingTiming?: 'prepaid' | 'postpaid';
+    cycleMonths?: number;
+    graceDays?: number;
+    deposit?: number;
+    advancePayment?: number;
+    payerType?: 'customer' | 'corporate';
+  };
+  accidentClaim?: {
+    requestSource?: string;
+    requesterOrganizationName?: string;
+    requesterName?: string;
+    requesterPhone?: string;
+    insurerName?: string;
+    claimNo?: string;
+    adjusterName?: string;
+    adjusterPhone?: string;
+    repairShopName?: string;
+    repairShopLocation?: string;
+    damagedVehicleNumber?: string;
+    damagedVehicleModel?: string;
+    deliveryLocation?: string;
+    billedAmount?: number;
+    documentStatus?: string;
+    claimStatus?: string;
+    approvalRequired?: boolean;
+    approvalStatus?: string;
+    approvalDocumentObjectName?: string;
+  };
   memo?: string;
   pickupLocation?: string;
   returnLocation?: string;
@@ -60,6 +152,11 @@ export interface PatchReservationPayload {
   vehicleNumber?: string;
   startAt?: string;
   endAt?: string;
+  parties?: ReservationPartiesPayload;
+  pickupLocation?: string;
+  returnLocation?: string;
+  contractDocumentObjectName?: string;
+  contractDocumentType?: 'rental_contract' | 'long_term_contract' | 'payment_schedule' | 'accident_replacement_request';
   memo?: string;
   reason?: string;
 }
@@ -75,14 +172,39 @@ export interface AccidentReportPayload {
   accidentSecond: string;
   accidentDateTime: string;
   accidentDisplayTime: string;
-  blackboxFileName: string;
+  accidentType?: string;
+  description?: string;
+  blackboxFileName?: string;
   blackboxGcsObjectName?: string;
   handlerName?: string;
   recordedAt?: string;
+  accidentLocation?: string;
+  opponentInfo?: string;
+  insuranceClaimNo?: string;
+  evidenceStatus?: string;
+  accidentEvidenceDocuments?: Record<string, string>;
+  insuranceProcessStatus?: string;
+  customerChargeAmount?: number;
+  customerChargeStatus?: string;
+  followupUpdatedAt?: string;
 }
 
 export interface ReportReservationAccidentPayload {
   accidentReport: AccidentReportPayload;
+  memo?: string;
+}
+
+export interface AccidentFollowupPayload {
+  actionItemId?: string;
+  accidentLocation?: string;
+  opponentInfo?: string;
+  insuranceClaimNo?: string;
+  evidenceStatus?: string;
+  accidentEvidenceDocuments?: Record<string, string>;
+  insuranceProcessStatus?: string;
+  repairCompletedAt?: string;
+  customerChargeAmount?: number;
+  customerChargeStatus?: string;
   memo?: string;
 }
 
@@ -117,6 +239,11 @@ export function getReservationsList({
   size,
   status,
   contractStatus,
+  workflowStatus,
+  closeoutStatus,
+  cancellationSettlementStatus,
+  longTermAccountStatus,
+  accidentReplacementStatus,
   paymentScope,
   from,
   to,
@@ -133,6 +260,11 @@ export function getReservationsList({
       size,
       status,
       contractStatus: normalizedContractStatus,
+      workflowStatus,
+      closeoutStatus,
+      cancellationSettlementStatus,
+      longTermAccountStatus,
+      accidentReplacementStatus,
       paymentScope,
       from,
       to,
@@ -159,6 +291,18 @@ export function createReservation(
 ): Promise<unknown> {
   return apiClient.requestData<unknown>({
     path: '/api/v2/reservations',
+    method: 'POST',
+    body: payload,
+    signal: options.signal,
+  });
+}
+
+export function prepareReservationCreation(
+  payload: PrepareReservationCreationPayload = {},
+  options: ReservationsRequestOptions = {},
+): Promise<PrepareReservationCreationResponse> {
+  return apiClient.requestData<PrepareReservationCreationResponse>({
+    path: '/api/v2/reservations/prepare',
     method: 'POST',
     body: payload,
     signal: options.signal,
@@ -225,6 +369,19 @@ export function reportReservationAccident(
   return apiClient.requestData<unknown>({
     path: `/api/v2/reservations/${encodeURIComponent(reservationId)}/accident`,
     method: 'POST',
+    body: payload,
+    signal: options.signal,
+  });
+}
+
+export function patchReservationAccidentFollowup(
+  reservationId: string,
+  payload: AccidentFollowupPayload,
+  options: ReservationsRequestOptions = {},
+): Promise<unknown> {
+  return apiClient.requestData<unknown>({
+    path: `/api/v2/reservations/${encodeURIComponent(reservationId)}/accident-followup`,
+    method: 'PATCH',
     body: payload,
     signal: options.signal,
   });

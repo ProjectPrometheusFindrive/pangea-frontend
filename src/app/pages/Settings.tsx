@@ -23,6 +23,7 @@ import {
   handlePageErrorAction,
   usePageEndpointState,
 } from '../hooks/usePageEndpointState';
+import { useModalDismiss } from '../hooks/useModalDismiss';
 import { reservations as templateReservations } from '../data/mockData';
 import { ApiError } from '../../services/api';
 import { useAuthorization } from '../context/AuthorizationContext';
@@ -909,6 +910,10 @@ export default function Settings() {
     () => geofences.find((item) => item.id === editingGeofenceId) ?? null,
     [editingGeofenceId, geofences],
   );
+  const selectedEditingGarage = useMemo(
+    () => garages.find((item) => item.id === editingGarageId) ?? null,
+    [editingGarageId, garages],
+  );
 
   const updateSettingsCompanyScope = useCallback((companyId: string | null, replace = false) => {
     const normalizedCompanyId = normalizeTenantCompanyId(companyId);
@@ -1376,6 +1381,24 @@ export default function Settings() {
     Boolean(invitationForm.email.trim())
     || invitationForm.role !== DEFAULT_INVITATION_FORM_STATE.role
   ), [invitationForm.email, invitationForm.role]);
+  const isGarageEditorDirty = useMemo(() => {
+    if (!isGarageEditorOpen) {
+      return false;
+    }
+
+    if (garageEditorMode === 'create') {
+      return Boolean(garageForm.name.trim()) || Boolean(garageForm.address.trim());
+    }
+
+    if (!selectedEditingGarage) {
+      return false;
+    }
+
+    return (
+      garageForm.name.trim() !== selectedEditingGarage.name.trim()
+      || garageForm.address.trim() !== selectedEditingGarage.address.trim()
+    );
+  }, [garageEditorMode, garageForm.address, garageForm.name, isGarageEditorOpen, selectedEditingGarage]);
 
   const isAnySaving = (
     isCompanySaving
@@ -1390,6 +1413,7 @@ export default function Settings() {
   const hasUnsavedChanges = (
     isCompanyDirty
     || isGeofenceEditorDirty
+    || isGarageEditorDirty
     || hasPendingMemberRoleChanges
     || (isInvitationEditorOpen && isInvitationEditorDirty)
   );
@@ -2053,6 +2077,26 @@ export default function Settings() {
     settingsCompanyId,
   ]);
 
+  const closeGarageEditor = useCallback(() => {
+    if (isGarageSaving) {
+      return;
+    }
+    if (isGarageEditorDirty && typeof window !== 'undefined') {
+      const shouldClose = window.confirm('저장하지 않은 차고지 변경 사항이 있습니다. 닫으시겠습니까?');
+      if (!shouldClose) {
+        return;
+      }
+    }
+
+    setIsGarageEditorOpen(false);
+    setGarageEditorMode('create');
+    setEditingGarageId(null);
+    setGarageForm(DEFAULT_GARAGE_FORM_STATE);
+    setGarageFieldErrors({});
+    setGarageSaveError(null);
+    setGarageSaveSuccess(null);
+  }, [isGarageEditorDirty, isGarageSaving]);
+
   const runGarageDelete = useCallback(async (garageId: string) => {
     if (!canEditSettings) {
       return;
@@ -2341,11 +2385,36 @@ export default function Settings() {
     if (isInvitationSaving) {
       return;
     }
+    if (isInvitationEditorDirty && typeof window !== 'undefined') {
+      const shouldClose = window.confirm('저장하지 않은 초대 정보가 있습니다. 닫으시겠습니까?');
+      if (!shouldClose) {
+        return;
+      }
+    }
 
     setIsInvitationEditorOpen(false);
     setInvitationForm(DEFAULT_INVITATION_FORM_STATE);
     setInvitationFieldErrors({});
-  }, [isInvitationSaving]);
+  }, [isInvitationEditorDirty, isInvitationSaving]);
+
+  useModalDismiss({
+    isOpen: isGeofenceEditorOpen,
+    onDismiss: closeGeofenceEditor,
+    disabled: isGeofenceSaving,
+    closeOnBackdrop: false,
+  });
+  useModalDismiss({
+    isOpen: isGarageEditorOpen,
+    onDismiss: closeGarageEditor,
+    disabled: isGarageSaving,
+    closeOnBackdrop: false,
+  });
+  useModalDismiss({
+    isOpen: isInvitationEditorOpen,
+    onDismiss: closeInvitationEditor,
+    disabled: isInvitationSaving,
+    closeOnBackdrop: false,
+  });
 
   const handleInvitationFieldChange = useCallback((field: InvitationField, value: string) => {
     setInvitationForm((prevState) => ({
@@ -2771,12 +2840,12 @@ export default function Settings() {
 
   const handleFileUpload = async (file: File) => {
     if (!canEditSettings) {
-      toast.error('??? CSV ???????????????.');
+      toast.error('CSV 파일을 업로드할 권한이 없습니다.');
       return;
     }
 
     if (!file.name.endsWith('.csv')) {
-      alert('CSV ??????????????????');
+      alert('CSV 파일만 업로드할 수 있습니다.');
       return;
     }
 
@@ -2784,7 +2853,7 @@ export default function Settings() {
       const { data, encoding } = await parseCsvFileWithEncodingFallback(file);
 
       if (data.length === 0) {
-        alert('??????????? ??????');
+        alert('업로드할 데이터가 없습니다.');
         return;
       }
 
@@ -2807,11 +2876,11 @@ export default function Settings() {
       });
 
       if (encoding !== 'utf-8') {
-        toast.success('CSV? ' + encoding + ' ????? ?????.');
+        toast.success(`CSV 파일을 ${encoding} 인코딩으로 읽었습니다.`);
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'CSV parsing error';
-      alert('??? ??? ???: ' + message);
+      alert(`파일 처리 중 오류가 발생했습니다: ${message}`);
     }
   };
   const handleDragOver = (event: React.DragEvent) => {
@@ -3821,15 +3890,7 @@ export default function Settings() {
                     </h2>
                     <button
                       type="button"
-                      onClick={() => {
-                        setIsGarageEditorOpen(false);
-                        setGarageEditorMode('create');
-                        setEditingGarageId(null);
-                        setGarageForm(DEFAULT_GARAGE_FORM_STATE);
-                        setGarageFieldErrors({});
-                        setGarageSaveError(null);
-                        setGarageSaveSuccess(null);
-                      }}
+                      onClick={closeGarageEditor}
                       className="text-sm text-gray-500 hover:text-gray-700"
                     >
                       닫기
@@ -3884,15 +3945,7 @@ export default function Settings() {
                     <div className="flex justify-end gap-2">
                       <button
                         type="button"
-                        onClick={() => {
-                          setIsGarageEditorOpen(false);
-                          setGarageEditorMode('create');
-                          setEditingGarageId(null);
-                          setGarageForm(DEFAULT_GARAGE_FORM_STATE);
-                          setGarageFieldErrors({});
-                          setGarageSaveError(null);
-                          setGarageSaveSuccess(null);
-                        }}
+                        onClick={closeGarageEditor}
                         disabled={isGarageSaving}
                         className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
                       >

@@ -1,4 +1,5 @@
 import { apiClient } from './api';
+import { normalizeActionMainCategory } from '../app/utils/actionItemTaxonomy';
 
 export interface ActionRequiredListRequestOptions {
   page?: number;
@@ -7,6 +8,9 @@ export interface ActionRequiredListRequestOptions {
   priority?: string;
   assignee?: string;
   reservationId?: string;
+  category?: string;
+  subCategory?: string;
+  reasonType?: string;
   signal?: AbortSignal;
 }
 
@@ -27,6 +31,34 @@ export interface ActionRequiredMemoPatchOptions {
   signal?: AbortSignal;
 }
 
+export interface ActionRequiredDomainActionOptions {
+  action: string;
+  memo?: string;
+  payload?: Record<string, unknown>;
+  signal?: AbortSignal;
+}
+
+export interface ActionRequiredDomainUpdateSummary {
+  targetType?: string;
+  targetId?: string;
+  changes?: Record<string, unknown>;
+}
+
+export interface ActionRequiredDomainActionResult {
+  item?: unknown;
+  action?: string;
+  actionLabel?: string;
+  statusChanged?: boolean;
+  domainUpdate?: ActionRequiredDomainUpdateSummary | null;
+}
+
+export interface AccidentApprovalRejectionOptions {
+  approvalMemo?: string;
+  approvalDocumentObjectNames?: string[];
+  cancelReason?: string;
+  signal?: AbortSignal;
+}
+
 export interface ActionRequiredTypeCountOptions {
   pageSize?: number;
   status?: string;
@@ -39,6 +71,9 @@ export interface ActionRequiredListAllRequestOptions {
   priority?: string;
   assignee?: string;
   reservationId?: string;
+  category?: string;
+  subCategory?: string;
+  reasonType?: string;
   signal?: AbortSignal;
 }
 
@@ -153,37 +188,7 @@ function hasPaymentInfo(source: Record<string, unknown>): boolean {
 }
 
 function normalizeActionItemType(rawValue: string | null, paymentInfoPresent: boolean): string | null {
-  if (!rawValue) {
-    return paymentInfoPresent ? '미납/결제 문제' : null;
-  }
-
-  const normalized = rawValue.replace(/\s+/g, '').toLowerCase();
-  if (normalized.includes('정기점검')) {
-    return '정기점검 만료 임박';
-  }
-  if (normalized.includes('미납') || normalized.includes('결제') || normalized.includes('연체')) {
-    return '미납/결제 문제';
-  }
-  if (normalized.includes('반납지연')) {
-    return '반납 지연';
-  }
-  if (normalized.includes('단말') && normalized.includes('off')) {
-    return '단말 OFF';
-  }
-  if (normalized.includes('도난')) {
-    return '도난 의심';
-  }
-  if (normalized.includes('사고')) {
-    return '사고 접수';
-  }
-  if (normalized.includes('차량이상')) {
-    return '차량이상';
-  }
-  if (normalized.includes('보험만료')) {
-    return '보험 만료 임박';
-  }
-
-  return rawValue;
+  return normalizeActionMainCategory(rawValue, paymentInfoPresent) ?? rawValue;
 }
 
 export function getActionRequiredList(options: ActionRequiredListRequestOptions = {}): Promise<unknown> {
@@ -194,6 +199,9 @@ export function getActionRequiredList(options: ActionRequiredListRequestOptions 
     priority,
     assignee,
     reservationId,
+    category,
+    subCategory,
+    reasonType,
     signal,
   } = options;
 
@@ -207,6 +215,9 @@ export function getActionRequiredList(options: ActionRequiredListRequestOptions 
       priority,
       assignee,
       reservationId,
+      category,
+      subCategory,
+      reasonType,
     },
     signal,
   });
@@ -221,6 +232,9 @@ export async function getActionRequiredListAll(
     priority,
     assignee,
     reservationId,
+    category,
+    subCategory,
+    reasonType,
     signal,
   } = options;
 
@@ -237,6 +251,9 @@ export async function getActionRequiredListAll(
       priority,
       assignee,
       reservationId,
+      category,
+      subCategory,
+      reasonType,
       signal,
     });
     const rows = getCollectionFromPayload(payload) ?? [];
@@ -312,6 +329,19 @@ export function getActionRequiredDetail(
   });
 }
 
+export function rejectActionRequiredAccidentApproval(
+  actionId: string,
+  options: AccidentApprovalRejectionOptions = {},
+): Promise<unknown> {
+  const { signal, ...body } = options;
+  return apiClient.requestData<unknown>({
+    path: `/api/v2/action-items/${encodeURIComponent(actionId)}/accident-approval-rejection`,
+    method: 'POST',
+    body,
+    signal,
+  });
+}
+
 function requestStatusPatch(
   path: string,
   status: string,
@@ -380,4 +410,21 @@ export async function patchActionRequiredMemo(
     options.assignee,
     options.signal,
   );
+}
+
+export async function runActionRequiredDomainAction(
+  actionId: string,
+  options: ActionRequiredDomainActionOptions,
+): Promise<ActionRequiredDomainActionResult> {
+  const encodedActionId = encodeURIComponent(actionId);
+  return apiClient.requestData<ActionRequiredDomainActionResult>({
+    path: `/api/v2/action-items/${encodedActionId}/domain-action`,
+    method: 'POST',
+    body: {
+      action: options.action,
+      ...(options.memo !== undefined ? { memo: options.memo } : {}),
+      ...(options.payload !== undefined ? { payload: options.payload } : {}),
+    },
+    signal: options.signal,
+  });
 }

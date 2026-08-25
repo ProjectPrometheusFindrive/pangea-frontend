@@ -15,7 +15,17 @@ test('home uses GT-visible section labels and removes the separate issue section
   assert.match(source, /오늘 할 일/u);
   assert.match(source, /자산 현황/u);
   assert.match(source, /계약 현황/u);
+  assert.match(source, /계약 유형/u);
+  assert.match(source, /contractRentalTypeData/u);
+  assert.match(source, /handleContractRentalTypeClick/u);
+  assert.match(source, /단기렌트/u);
+  assert.match(source, /장기렌트/u);
+  assert.match(source, /사고대차/u);
   assert.match(source, /운영 점수/u);
+  assert.doesNotMatch(source, />상태<\/p>/u);
+  assert.doesNotMatch(source, />유형<\/p>/u);
+  assert.doesNotMatch(source, /innerRadius=\{26\}/u);
+  assert.doesNotMatch(source, /outerRadius=\{48\}/u);
   assert.doesNotMatch(source, /관리해야 할 이슈/u);
   assert.doesNotMatch(source, /자산 운영 분포/u);
   assert.doesNotMatch(source, /계약 상태 분포/u);

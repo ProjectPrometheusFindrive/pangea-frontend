@@ -6,6 +6,7 @@ import type { AssetEditForm } from '../pages/assetsDetailForm';
 import { formatDateTimeKst } from '../utils/dateTimeFormat';
 import { navigateToPremiumInquiry } from '../utils/premiumInquiry';
 import { DateTextPicker } from './DateTextPicker';
+import { useModalDismiss } from '../hooks/useModalDismiss';
 
 interface AssetActivityEntry {
   id: string;
@@ -231,10 +232,6 @@ export function VehicleDetailModal({
   const [previewDocument, setPreviewDocument] = useState<AssetStoredDocument | null>(null);
   const navigate = useNavigate();
 
-  if (!isOpen) {
-    return null;
-  }
-
   const closeModal = () => {
     const closed = onClose();
     if (closed) {
@@ -242,9 +239,18 @@ export function VehicleDetailModal({
       setPreviewDocument(null);
     }
   };
+  const { handleBackdropMouseDown } = useModalDismiss({
+    isOpen,
+    onDismiss: closeModal,
+    disabled: isSaving || isDeleting,
+  });
+
+  if (!isOpen) {
+    return null;
+  }
 
   return (
-    <div data-testid="asset-detail-modal" className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+    <div data-testid="asset-detail-modal" className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onMouseDown={handleBackdropMouseDown}>
       <div className="flex max-h-[85vh] w-[1100px] max-w-[92vw] flex-col rounded-xl bg-white">
         <div className="border-b border-gray-200 p-6">
           <div className="flex items-center justify-between">
