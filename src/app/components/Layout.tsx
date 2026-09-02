@@ -125,6 +125,7 @@ export function Layout({ children, title }: LayoutProps) {
   const { canAccessRoute } = useAuthorization();
   const { company, isLoading: isCompanyLoading, isUpdating: isCompanyUpdating, error: companyError, updateCompany } = useCompany();
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [showAccountMenu, setShowAccountMenu] = useState(false);
   const [showAccountSettings, setShowAccountSettings] = useState(false);
@@ -151,6 +152,31 @@ export function Layout({ children, title }: LayoutProps) {
 
   const notificationRef = useRef<HTMLDivElement>(null);
   const accountMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setIsMobileNavOpen(false);
+  }, [location.pathname]);
+
+  useEffect(() => {
+    if (!isMobileNavOpen) {
+      return undefined;
+    }
+
+    const previousOverflow = document.body.style.overflow;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setIsMobileNavOpen(false);
+      }
+    };
+
+    document.body.style.overflow = 'hidden';
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isMobileNavOpen]);
 
   const accountName = useMemo(() => {
     const displayName = user?.name?.trim();
@@ -433,19 +459,42 @@ export function Layout({ children, title }: LayoutProps) {
   const filteredMenuItems = menuItems.filter((item) => canAccessRoute(item.permission));
 
   return (
-    <div className="flex h-screen bg-[#F7F8FA]">
+    <div data-testid="app-shell" className="flex h-dvh min-h-0 overflow-hidden bg-[#F7F8FA] md:h-screen">
+      {isMobileNavOpen && (
+        <button
+          type="button"
+          aria-label="메뉴 닫기"
+          className="fixed inset-0 z-[70] bg-slate-950/45 md:hidden"
+          onClick={() => setIsMobileNavOpen(false)}
+        />
+      )}
+
       {/* Sidebar */}
-      <aside className={`${isSidebarCollapsed ? 'w-[80px]' : 'w-[240px]'} bg-[#1e3a8a] flex flex-col shrink-0 transition-all duration-300`}>
-        <div className="h-14 flex items-center justify-between px-6 border-b border-[#1447e6]">
+      <aside
+        id="primary-navigation"
+        data-testid="app-navigation"
+        className={`${isMobileNavOpen ? 'translate-x-0' : '-translate-x-full'} ${isSidebarCollapsed ? 'md:w-[80px]' : 'md:w-[240px]'} fixed inset-y-0 left-0 z-[80] flex w-[min(19rem,85vw)] shrink-0 flex-col bg-[#1e3a8a] shadow-2xl transition-[transform,width] duration-300 md:static md:z-auto md:translate-x-0 md:shadow-none`}
+      >
+        <div className="flex h-14 items-center justify-between border-b border-[#1447e6] px-4 md:px-6">
           <h1 className="flex min-w-0 items-baseline gap-2 overflow-hidden text-white">
             <span className="text-xl font-bold">{isSidebarCollapsed ? 'P' : 'Pangea'}</span>
             {!isSidebarCollapsed && appVersionLabel && (
               <span className="shrink-0 text-[11px] font-medium text-blue-100/80">{appVersionLabel}</span>
             )}
           </h1>
+          <button
+            type="button"
+            aria-label="메뉴 닫기"
+            onClick={() => setIsMobileNavOpen(false)}
+            className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg text-white hover:bg-white/10 md:hidden"
+          >
+            <X className="h-5 w-5" />
+          </button>
           <button 
+            type="button"
+            aria-label={isSidebarCollapsed ? '사이드바 펼치기' : '사이드바 접기'}
             onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
-            className="text-white p-2 hover:bg-white/10 rounded-lg"
+            className="hidden items-center justify-center rounded-lg p-2 text-white hover:bg-white/10 md:inline-flex"
           >
             <Menu className="w-5 h-5" />
           </button>
@@ -466,6 +515,7 @@ export function Layout({ children, title }: LayoutProps) {
                     : 'hover:bg-white/10'
                 }`}
                 title={isSidebarCollapsed ? item.label : undefined}
+                onClick={() => setIsMobileNavOpen(false)}
               >
                 <Icon className="w-5 h-5 shrink-0" />
                 {!isSidebarCollapsed && <span className="text-base">{item.label}</span>}
@@ -476,20 +526,32 @@ export function Layout({ children, title }: LayoutProps) {
       </aside>
 
       {/* Main Content */}
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex min-w-0 flex-1 flex-col">
         {/* Top Bar */}
-        <header className="h-14 bg-white border-b border-[#e5e7eb] flex items-center justify-between px-6 shrink-0">
+        <header className="flex h-14 shrink-0 items-center justify-between gap-2 border-b border-[#e5e7eb] bg-white px-2 sm:px-4 md:px-6">
+          <button
+            type="button"
+            aria-label="메뉴 열기"
+            aria-controls="primary-navigation"
+            aria-expanded={isMobileNavOpen}
+            data-testid="mobile-navigation-trigger"
+            onClick={() => setIsMobileNavOpen(true)}
+            className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-lg text-slate-600 hover:bg-slate-100 md:hidden"
+          >
+            <Menu className="h-5 w-5" />
+          </button>
           {title && (
-            <h1 className="text-xl font-bold text-[#1e2939]">{title}</h1>
+            <h1 className="min-w-0 flex-1 truncate text-base font-bold text-[#1e2939] sm:text-xl">{title}</h1>
           )}
           {!title && <div />}
-          <div className="flex items-center gap-4">
+          <div className="flex shrink-0 items-center gap-1 sm:gap-3 md:gap-4">
             {/* 알림 버튼 */}
             {canUseNotifications && (
               <div className="relative" ref={notificationRef}>
               <button 
                 onClick={() => setShowNotifications(!showNotifications)}
-                className="relative p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                aria-label="알림 열기"
+                className="relative inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg p-2 transition-colors hover:bg-gray-100 md:min-h-0 md:min-w-0"
               >
                 <Bell className="w-5 h-5 text-[#4A5565]" />
                 {unreadCount > 0 && (
@@ -504,7 +566,7 @@ export function Layout({ children, title }: LayoutProps) {
 
               {/* 알림 드롭다운 */}
               {showNotifications && (
-                <div className="absolute right-0 top-full mt-2 w-96 bg-white rounded-xl shadow-2xl border border-gray-200 z-50 max-h-[600px] overflow-hidden flex flex-col">
+                <div className="fixed left-3 right-3 top-16 z-[90] flex max-h-[calc(100dvh-5rem)] flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-2xl sm:absolute sm:left-auto sm:right-0 sm:top-full sm:mt-2 sm:max-h-[min(600px,calc(100dvh-5rem))] sm:w-96">
                   <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between bg-gray-50">
                     <div>
                       <h3 className="text-base font-bold text-gray-900">알림</h3>
@@ -624,18 +686,19 @@ export function Layout({ children, title }: LayoutProps) {
             <div className="relative" ref={accountMenuRef}>
               <button
                 onClick={() => setShowAccountMenu(!showAccountMenu)}
-                className="flex items-center gap-2 px-3 py-2 hover:bg-gray-100 rounded-lg cursor-pointer"
+                aria-label={`계정 메뉴 열기 ${accountName}`}
+                className="flex min-h-11 min-w-11 cursor-pointer items-center justify-center gap-2 rounded-lg px-1 py-2 hover:bg-gray-100 sm:min-h-0 sm:min-w-0 sm:px-3"
               >
                 <div className="w-8 h-8 bg-[#155dfc] rounded-full flex items-center justify-center">
                   <span className="text-white text-sm font-semibold">{accountNameInitial}</span>
                 </div>
-                <span className="text-sm text-[#0a0a0a]">{accountName}</span>
-                <ChevronDown className="w-4 h-4 text-gray-500" />
+                <span className="hidden max-w-40 truncate text-sm text-[#0a0a0a] sm:inline">{accountName}</span>
+                <ChevronDown className="hidden h-4 w-4 text-gray-500 sm:block" />
               </button>
 
               {/* 계정 드롭다운 */}
               {showAccountMenu && (
-                <div className="absolute right-0 top-full mt-2 w-64 bg-white rounded-xl shadow-2xl border border-gray-200 z-50 overflow-hidden">
+                <div className="fixed left-3 right-3 top-16 z-[90] overflow-hidden rounded-xl border border-gray-200 bg-white shadow-2xl sm:absolute sm:left-auto sm:right-0 sm:top-full sm:mt-2 sm:w-64">
                   {/* 계정 정보 */}
                   <div className="px-4 py-3 border-b border-gray-200 bg-gray-50">
                     <div className="flex items-center gap-3">
@@ -674,8 +737,8 @@ export function Layout({ children, title }: LayoutProps) {
 
         {/* 계정 설정 모달 */}
         {showAccountSettings && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100]">
-            <div className="bg-white rounded-xl shadow-2xl w-full max-w-md m-4">
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-3 sm:p-4">
+            <div className="max-h-[calc(100dvh-1.5rem)] w-full max-w-md overflow-y-auto rounded-xl bg-white shadow-2xl sm:max-h-none sm:overflow-visible">
               {/* 헤더 */}
               <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
                 <h2 className="text-lg font-bold text-gray-900">계정 설정</h2>
@@ -766,8 +829,8 @@ export function Layout({ children, title }: LayoutProps) {
 
         {/* 계정 삭제 확인 모달 */}
         {showDeleteConfirm && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[110]">
-            <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm m-4">
+          <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/50 p-3 sm:p-4">
+            <div className="max-h-[calc(100dvh-1.5rem)] w-full max-w-sm overflow-y-auto rounded-xl bg-white shadow-2xl sm:max-h-none sm:overflow-visible">
               {/* 헤더 */}
               <div className="px-6 py-4 border-b border-gray-200">
                 <h2 className="text-lg font-bold text-red-600">계정 삭제 확인</h2>
@@ -816,13 +879,13 @@ export function Layout({ children, title }: LayoutProps) {
         )}
 
         {/* Page Content */}
-        <main className="flex-1 overflow-auto">
+        <main data-testid="app-page-content" className="min-h-0 flex-1 overflow-auto overscroll-contain md:overscroll-auto">
           {/* 프리미엄 업그레이드 배너 */}
           {showPremiumBanner && (
-            <div className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-6 py-3 flex items-center justify-between relative overflow-hidden">
+            <div className="relative flex flex-col gap-3 overflow-hidden bg-gradient-to-r from-blue-600 to-indigo-600 px-3 py-3 text-white sm:flex-row sm:items-center sm:justify-between sm:px-6">
               <div className="absolute inset-0 bg-white/10 transform -skew-x-12"></div>
               
-              <div className="relative z-10 flex items-center gap-4 flex-1">
+              <div className="relative z-10 flex min-w-0 flex-1 items-start gap-3 sm:items-center sm:gap-4">
                 <div className="w-10 h-10 bg-white/20 rounded-full flex items-center justify-center shrink-0">
                   <Sparkles className="w-5 h-5 text-white" />
                 </div>
@@ -832,16 +895,17 @@ export function Layout({ children, title }: LayoutProps) {
                 </div>
               </div>
               
-              <div className="relative z-10 flex items-center gap-3">
+              <div className="relative z-10 flex items-center justify-end gap-2 sm:gap-3">
                 <button
                   onClick={handlePremiumBannerClick}
-                  className="px-5 py-2 bg-white text-blue-600 font-bold rounded-lg hover:bg-gray-100 transition-colors"
+                  className="min-h-11 rounded-lg bg-white px-4 py-2 font-bold text-blue-600 transition-colors hover:bg-gray-100 sm:min-h-0 sm:px-5"
                 >
                   자세히 보기
                 </button>
                 <button
                   onClick={handleDismissBanner}
-                  className="w-8 h-8 flex items-center justify-center hover:bg-white/20 rounded-lg transition-colors"
+                  aria-label="프리미엄 배너 닫기"
+                  className="flex h-11 w-11 items-center justify-center rounded-lg transition-colors hover:bg-white/20 sm:h-8 sm:w-8"
                 >
                   <X className="w-5 h-5" />
                 </button>

@@ -868,11 +868,11 @@ const operationScores = useMemo(() => ([
         onErrorAction={handleBlockingErrorAction}
         emptyActionLabel="다시 불러오기"
         onEmptyAction={handleRetry}
-        className="m-6 min-h-[320px]"
+        className="m-3 min-h-[320px] sm:m-6"
       >
-        <div className="space-y-5 p-6">
+        <div className="space-y-4 p-3 sm:space-y-5 sm:p-6">
           {(isRefreshing || refreshError) && (
-            <div className={`flex items-center justify-between gap-3 rounded-lg border px-3 py-2 text-xs ${
+            <div className={`flex flex-col gap-3 rounded-lg border px-3 py-2 text-xs sm:flex-row sm:items-center sm:justify-between ${
               refreshError
                 ? 'border-amber-200 bg-amber-50 text-amber-700'
                 : 'border-blue-200 bg-blue-50 text-blue-700'
@@ -906,7 +906,7 @@ const operationScores = useMemo(() => ([
 
           <div
             data-testid="home-priority-panel"
-            className="rounded-xl bg-white p-5 shadow-sm"
+            className="rounded-xl bg-white p-3 shadow-sm sm:p-5"
           >
             <h2 className="mb-3 text-lg font-bold text-[#1e2939]">오늘 할 일</h2>
 
@@ -943,7 +943,7 @@ const operationScores = useMemo(() => ([
 
               <section
                 data-testid="home-issue-grid"
-                className="grid grid-cols-2 gap-3 xl:grid-cols-4"
+                className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4"
               >
                 {actionItemsForHome.map((issue) => {
                   const Icon = iconMap[issue.icon];
@@ -1170,7 +1170,7 @@ const operationScores = useMemo(() => ([
                 </button>
               </div>
 
-              <div className="mt-6 grid grid-cols-3 gap-4">
+              <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
                 <div className="relative rounded-lg bg-white p-4">
                   <div className="absolute inset-0 rounded-lg bg-white/50 backdrop-blur-sm"></div>
                   <div className="mb-3 flex items-center gap-3">
