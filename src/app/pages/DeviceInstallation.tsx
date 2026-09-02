@@ -498,14 +498,14 @@ export default function DeviceInstallation() {
 
   return (
     <Layout title="단말 장착/관리">
-      <div className="p-6">
+      <div className="p-3 sm:p-6">
         <div className="bg-gradient-to-r from-purple-600 to-blue-600 rounded-lg p-4 mb-4 text-white">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-center gap-2">
               <Zap className="w-6 h-6" />
               <h2 className="text-lg font-bold">단말 장착 작업</h2>
             </div>
-            <div className="flex items-center gap-4 text-sm">
+            <div className="flex flex-wrap items-center gap-3 text-sm sm:gap-4">
               <span>대기: <strong>{summary.scheduled + summary.inProgress}</strong>건</span>
               <span>완료: <strong>{summary.completed}</strong>건</span>
             </div>
@@ -540,7 +540,7 @@ export default function DeviceInstallation() {
           )}
 
           <div className="flex gap-3 items-end flex-wrap">
-            <div className="flex-shrink-0" style={{ width: '180px' }}>
+            <div className="w-full sm:w-[180px] sm:flex-shrink-0">
               <label className="block text-xs font-semibold text-gray-700 mb-1">
                 차량번호
               </label>
@@ -567,7 +567,7 @@ export default function DeviceInstallation() {
               )}
             </div>
 
-            <div className="flex-shrink-0" style={{ width: '180px' }}>
+            <div className="w-full sm:w-[180px] sm:flex-shrink-0">
               <label className="block text-xs font-semibold text-gray-700 mb-1">
                 단말 시리얼 번호
               </label>
@@ -582,7 +582,7 @@ export default function DeviceInstallation() {
               />
             </div>
 
-            <div className="flex-shrink-0" style={{ width: '140px' }}>
+            <div className="w-full sm:w-[140px] sm:flex-shrink-0">
               <label className="block text-xs font-semibold text-gray-700 mb-1">
                 장착 사진 <span className="text-red-600">*</span>
               </label>
@@ -646,7 +646,7 @@ export default function DeviceInstallation() {
               </div>
             )}
 
-            <div className="flex-shrink-0" style={{ width: '140px' }}>
+            <div className="w-full sm:w-[140px] sm:flex-shrink-0">
               <label className="block text-xs font-semibold text-gray-700 mb-1">
                 시리얼 사진 <span className="text-red-600">*</span>
               </label>
@@ -710,7 +710,7 @@ export default function DeviceInstallation() {
               </div>
             )}
 
-            <div className="flex-shrink-0 ml-auto" style={{ width: '120px' }}>
+            <div className="w-full sm:ml-auto sm:w-[120px] sm:flex-shrink-0">
               <button
                 onClick={() => {
                   void handleCreateInstallation();

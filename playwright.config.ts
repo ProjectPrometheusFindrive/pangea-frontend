@@ -3,6 +3,8 @@ import { defineConfig, devices } from '@playwright/test';
 const E2E_BASE_URL = process.env.E2E_BASE_URL ?? 'http://localhost:5173';
 const E2E_WEB_SERVER_COMMAND = process.env.E2E_WEB_SERVER_COMMAND ?? 'npm run dev -- --port 5173';
 const IS_CI = Boolean(process.env.CI);
+const MOBILE_RESPONSIVE_TEST = /mobile-responsive\.spec\.ts/;
+const ENABLE_WEBKIT = process.env.E2E_ENABLE_WEBKIT === '1';
 
 export default defineConfig({
   testDir: './e2e',
@@ -32,10 +34,35 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
+      testIgnore: MOBILE_RESPONSIVE_TEST,
       use: {
         ...devices['Desktop Chrome'],
       },
     },
+    {
+      name: 'mobile-chromium',
+      testMatch: MOBILE_RESPONSIVE_TEST,
+      use: {
+        ...devices['Pixel 5'],
+      },
+    },
+    {
+      name: 'mobile-iphone',
+      testMatch: MOBILE_RESPONSIVE_TEST,
+      use: {
+        ...devices['iPhone 13'],
+        browserName: 'chromium',
+      },
+    },
+    ...(ENABLE_WEBKIT ? [
+      {
+        name: 'mobile-webkit',
+        testMatch: MOBILE_RESPONSIVE_TEST,
+        use: {
+          ...devices['iPhone 13'],
+        },
+      },
+    ] : []),
   ],
   webServer: {
     command: E2E_WEB_SERVER_COMMAND,

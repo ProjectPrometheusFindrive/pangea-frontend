@@ -139,8 +139,8 @@ export default function Notifications() {
 
   return (
     <Layout title="모든 알림">
-      <div className="mx-auto flex w-full max-w-4xl flex-col gap-4 p-6">
-        <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+      <div className="mx-auto flex w-full max-w-4xl flex-col gap-3 p-3 sm:gap-4 sm:p-6">
+        <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm sm:p-5">
           <div className="flex items-center gap-3">
             <div className="rounded-full bg-blue-50 p-3 text-blue-600">
               <Bell className="h-5 w-5" />
@@ -201,7 +201,7 @@ export default function Notifications() {
                   onClick={() => {
                     void handleNotificationClick(notification);
                   }}
-                  className="flex w-full items-start justify-between gap-4 px-6 py-4 text-left transition hover:bg-gray-50"
+                  className="flex min-h-11 w-full flex-col items-start gap-2 px-4 py-4 text-left transition hover:bg-gray-50 sm:flex-row sm:justify-between sm:gap-4 sm:px-6"
                 >
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
