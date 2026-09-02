@@ -218,23 +218,23 @@ export default function Login() {
   };
 
   return (
-    <div
+    <main
       data-testid="login-shell"
-      className="min-h-screen bg-[#eef2f6] lg:grid lg:grid-cols-[minmax(0,1.05fr)_minmax(420px,0.95fr)]"
+      className="min-h-dvh bg-[#eef2f6] sm:min-h-screen lg:grid lg:grid-cols-[minmax(0,1.05fr)_minmax(420px,0.95fr)]"
     >
       <section
         data-testid="login-brand-panel"
-        className="relative overflow-hidden bg-gradient-to-br from-[#0f56dd] via-[#1f4bb2] to-[#13265d] px-6 py-10 text-white sm:px-10 lg:flex lg:min-h-screen lg:items-center lg:px-16"
+        className="relative overflow-hidden bg-gradient-to-br from-[#0f56dd] via-[#1f4bb2] to-[#13265d] px-4 py-5 text-white sm:px-10 sm:py-10 lg:flex lg:min-h-screen lg:items-center lg:px-16"
       >
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_bottom,_rgba(255,255,255,0.08),_transparent_44%)]" />
         <div className="relative mx-auto flex w-full max-w-[520px] flex-col items-center text-center lg:items-start lg:text-left">
           <div>
-            <h1 className="text-5xl font-bold tracking-tight sm:text-6xl">Pangea</h1>
-            <p className="mt-3 text-base font-medium text-white/80 sm:text-lg">
+            <h1 className="text-3xl font-bold tracking-tight sm:text-6xl">Pangea</h1>
+            <p className="mt-1 text-sm font-medium text-white/80 sm:mt-3 sm:text-lg">
               차량 관리의 새로운 기준
             </p>
           </div>
-          <div className="mt-8 w-full lg:mt-14">
+          <div className="mt-8 hidden w-full sm:block lg:mt-14">
             <LoginBrandIllustration />
           </div>
         </div>
@@ -242,17 +242,17 @@ export default function Login() {
 
       <section
         data-testid="login-form-panel"
-        className="flex min-h-[48vh] items-center justify-center px-4 py-8 sm:px-6 lg:min-h-screen lg:px-10"
+        className="flex items-center justify-center px-3 py-5 sm:min-h-[48vh] sm:px-6 sm:py-8 lg:min-h-screen lg:px-10"
       >
-        <div className="w-full max-w-[440px] rounded-[32px] border border-white/80 bg-white/95 p-6 shadow-[0_24px_80px_rgba(15,23,42,0.12)] backdrop-blur sm:p-8">
+        <div className="w-full max-w-[440px] rounded-3xl border border-white/80 bg-white/95 p-5 shadow-[0_24px_80px_rgba(15,23,42,0.12)] backdrop-blur sm:rounded-[32px] sm:p-8">
           <div className="text-center">
-            <h2 className="text-3xl font-bold text-slate-950">로그인</h2>
+            <h2 className="text-2xl font-bold text-slate-950 sm:text-3xl">로그인</h2>
             <p className="mt-3 text-sm text-slate-500">
               {returnUrl === '/' ? '로그인 후 대시보드로 이동합니다.' : '로그인 후 요청한 페이지로 이동합니다.'}
             </p>
           </div>
 
-          <form className="mt-8 space-y-4" onSubmit={handleLogin}>
+          <form className="mt-6 space-y-4 sm:mt-8" onSubmit={handleLogin}>
             <div>
               <label htmlFor="userId" className="mb-2 block text-sm font-semibold text-slate-700">
                 아이디
@@ -265,7 +265,7 @@ export default function Login() {
                 onChange={(event) => setUserId(event.target.value)}
                 autoComplete="username"
                 placeholder="아이디"
-                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-100"
+                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-base outline-none transition focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-100 sm:text-sm"
                 disabled={isBusy}
               />
             </div>
@@ -282,7 +282,7 @@ export default function Login() {
                 onChange={(event) => setPassword(event.target.value)}
                 autoComplete="current-password"
                 placeholder="비밀번호"
-                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-100"
+                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-base outline-none transition focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-100 sm:text-sm"
                 disabled={isBusy}
               />
             </div>
@@ -297,14 +297,14 @@ export default function Login() {
               type="submit"
               data-testid="login-submit"
               disabled={isBusy}
-              className="flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-[#0f56dd] to-[#2247b9] px-4 py-3 text-sm font-semibold text-white shadow-[0_12px_24px_rgba(15,86,221,0.24)] transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-60"
+              className="flex min-h-11 w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-[#0f56dd] to-[#2247b9] px-4 py-3 text-base font-semibold text-white shadow-[0_12px_24px_rgba(15,86,221,0.24)] transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0 sm:text-sm"
             >
               {isBusy && <Loader2 className="h-4 w-4 animate-spin" />}
               로그인
             </button>
           </form>
 
-          <div className="mt-6 flex items-center gap-4 text-xs text-slate-400">
+          <div className="mt-6 flex items-center gap-4 text-xs text-slate-500 sm:text-slate-400">
             <div className="h-px flex-1 bg-slate-200" />
             <span>또는</span>
             <div className="h-px flex-1 bg-slate-200" />
@@ -335,6 +335,6 @@ export default function Login() {
           )}
         </div>
       </section>
-    </div>
+    </main>
   );
 }

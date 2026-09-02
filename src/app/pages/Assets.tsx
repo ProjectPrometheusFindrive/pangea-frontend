@@ -2807,7 +2807,7 @@ export default function Assets() {
 
   return (
     <Layout title="차량 자산">
-      <div className="p-6">
+      <div className="p-3 sm:p-6">
         <PremiumInstallationRequestSection
           assets={premiumInstallableAssets}
           user={user ?? null}
@@ -2936,8 +2936,8 @@ export default function Assets() {
           </div>
 
           {/* 차종 필터 & 등록 버튼 */}
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex flex-wrap items-center gap-3">
               <label htmlFor="assets-model-filter" className="text-sm font-semibold text-gray-700">차종:</label>
               <select
                 id="assets-model-filter"
@@ -2959,7 +2959,7 @@ export default function Assets() {
             <button
               onClick={openCreateModal}
               disabled={!canWriteAssets}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium flex items-center gap-2 disabled:cursor-not-allowed disabled:opacity-60"
+              className="flex min-h-11 w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0 sm:w-auto"
             >
               <Plus className="w-4 h-4" />
               차량 자산 등록
@@ -3082,16 +3082,18 @@ export default function Assets() {
 
         {/* OCR 업로드 모달 */}
         {showModal && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onMouseDown={handleCreateModalBackdropMouseDown}>
-            <div className="bg-white rounded-xl w-[600px] max-h-[80vh] overflow-y-auto">
-              <div className="p-6">
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3 sm:p-4" onMouseDown={handleCreateModalBackdropMouseDown}>
+            <div data-testid="asset-create-modal" className="max-h-[calc(100dvh-1.5rem)] w-full max-w-[600px] overflow-y-auto rounded-xl bg-white sm:max-h-[80vh]">
+              <div className="p-4 sm:p-6">
                 <div className="flex items-center justify-between mb-6">
                   <h2 className="text-xl font-bold text-[#1e2939]">
                     {createMode === 'ocr' ? '차량등록증 업로드 (OCR)' : '차량 자산 직접 입력'}
                   </h2>
                   <button
+                    type="button"
+                    aria-label="차량 자산 등록 닫기"
                     onClick={closeCreateModal}
-                    className="p-2 hover:bg-gray-100 rounded-lg"
+                    className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg p-2 hover:bg-gray-100 sm:min-h-0 sm:min-w-0"
                   >
                     <X className="w-5 h-5" />
                   </button>
@@ -3152,8 +3154,8 @@ export default function Assets() {
 
                 {/* 단계 표시 */}
                 {createMode === 'ocr' && (
-                  <div className="flex items-center justify-center mb-8">
-                    <div className="flex items-center gap-4">
+                  <div className="mb-8 overflow-x-auto">
+                    <div className="mx-auto flex min-w-max items-center justify-center gap-3 sm:gap-4">
                       <div className={`flex items-center gap-2 ${uploadStep === 'upload' ? 'text-blue-600' : 'text-gray-400'}`}>
                         <div className={`w-8 h-8 rounded-full flex items-center justify-center ${uploadStep === 'upload' ? 'bg-blue-600 text-white' : 'bg-gray-200'}`}>
                           1
@@ -3539,8 +3541,8 @@ export default function Assets() {
         )}
 
         {detailSavePrompt && (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50">
-            <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-3 sm:p-4">
+            <div className="w-full max-w-md rounded-2xl bg-white p-4 shadow-2xl sm:p-6">
               <p className="text-base font-semibold text-[#1e2939]">{detailSavePrompt.message}</p>
               <div className="mt-6 flex justify-end gap-3">
                 {detailSavePrompt.mode === 'invalid' ? (

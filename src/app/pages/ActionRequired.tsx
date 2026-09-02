@@ -1496,8 +1496,8 @@ function RelatedContextDrawer({
   if (kind === 'reservation' || kind === 'asset') {
     const modalTitle = kind === 'reservation' ? '예약 상세 정보' : '차량 상세 정보';
     return (
-      <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50" onMouseDown={handleBackdropMouseDown}>
-        <div className="flex max-h-[85vh] w-[900px] max-w-[92vw] flex-col rounded-xl bg-white shadow-2xl">
+      <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-3 sm:p-4" onMouseDown={handleBackdropMouseDown}>
+        <div className="flex max-h-[calc(100dvh-1.5rem)] w-full max-w-[900px] flex-col rounded-xl bg-white shadow-2xl sm:max-h-[85vh] sm:w-[900px] sm:max-w-[92vw]">
           <div className="border-b border-gray-200 p-6">
             <div className="flex items-center justify-between">
               <h3 className="text-xl font-bold text-[#1e2939]">{modalTitle}</h3>
@@ -1573,7 +1573,7 @@ function RelatedContextDrawer({
           <div className="flex-1 overflow-y-auto p-6">
             {!isLoading && !error && kind === 'reservation' && detailTab === 'reservation' && (
               <div className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   <RelatedInfoRow label="예약번호" value={pickString(row, ['id', 'reservationId', 'rentalId'])} />
                   <RelatedInfoRow label="고객명" value={pickString(row, ['customerName', 'customer', 'name'])} />
                   <RelatedInfoRow label="연락처" value={pickString(row, ['phone', 'customerPhone'])} />
@@ -1646,7 +1646,7 @@ function RelatedContextDrawer({
                 {reservationAccidentClaim && (
                   <div className="rounded-lg border border-indigo-100 bg-indigo-50 p-4">
                     <p className="text-xs font-semibold text-indigo-700">청구 요약</p>
-                    <div className="mt-3 grid grid-cols-2 gap-3">
+                    <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
                       <RelatedInfoRow label="접수번호" value={pickString(reservationAccidentClaim, ['claimNo'])} />
                       <RelatedInfoRow label="보험사" value={pickString(reservationAccidentClaim, ['insurerName'])} />
                       <RelatedInfoRow label="청구액" value={formatCurrencyValue(reservationAccidentClaim.billedAmount)} />
@@ -1658,7 +1658,7 @@ function RelatedContextDrawer({
             )}
 
             {!isLoading && !error && kind === 'reservation' && detailTab === 'vehicle' && (
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <RelatedInfoRow label="차량번호" value={pickString(row, ['vehicleNumber', 'plate'])} />
                 <RelatedInfoRow label="차대번호" value={pickString(row, ['vin'])} />
                 <RelatedInfoRow label="대여 시작일" value={formatRelatedDate(row.startAt ?? row.startDateFull ?? row.startDate)} />
@@ -1668,7 +1668,7 @@ function RelatedContextDrawer({
 
             {!isLoading && !error && kind === 'asset' && detailTab === 'info' && (
               <div className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   <RelatedInfoRow label="차량번호" value={pickString(row, ['vehicleNumber', 'plate'])} />
                   <RelatedInfoRow label="차종" value={pickString(row, ['model'])} />
                   <RelatedInfoRow label="연식" value={pickString(row, ['year'])} />
@@ -1711,7 +1711,7 @@ function RelatedContextDrawer({
 
   return (
     <div className="fixed inset-0 z-[70] flex justify-end bg-black/30" onMouseDown={handleBackdropMouseDown}>
-      <div className="h-full w-[460px] max-w-[92vw] overflow-y-auto bg-white shadow-2xl">
+      <div className="h-full w-full overflow-y-auto bg-white shadow-2xl sm:w-[460px]">
         <div className="sticky top-0 z-10 flex items-center justify-between border-b border-gray-200 bg-white px-5 py-4">
           <h3 className="text-lg font-bold text-[#1e2939]">{title}</h3>
           <button type="button" onClick={onClose} className="rounded-lg p-2 hover:bg-gray-100" aria-label={`${title} 닫기`}>
@@ -1732,7 +1732,7 @@ function RelatedContextDrawer({
             </div>
           )}
           {!isLoading && !error && kind === 'reservation' && (
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <RelatedInfoRow label="고객명" value={pickString(row, ['customerName', 'customer', 'name'])} />
               <RelatedInfoRow label="차량번호" value={pickString(row, ['vehicleNumber', 'plate'])} />
               <RelatedInfoRow label="대여 시작" value={formatRelatedDate(row.startAt ?? row.startDate ?? row.rentalStartAt)} />
@@ -1744,7 +1744,7 @@ function RelatedContextDrawer({
             </div>
           )}
           {!isLoading && !error && kind === 'asset' && (
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <RelatedInfoRow label="차량번호" value={pickString(row, ['vehicleNumber', 'plate'])} />
               <RelatedInfoRow label="모델" value={pickString(row, ['model'])} />
               <RelatedInfoRow label="차고지" value={pickString(row, ['garage', 'location'])} />
@@ -1756,7 +1756,7 @@ function RelatedContextDrawer({
             </div>
           )}
           {!isLoading && !error && kind === 'claim' && (
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <RelatedInfoRow label="접수번호" value={pickString(row, ['claimNo', 'claimNumber'])} />
               <RelatedInfoRow label="보험사" value={pickString(row, ['insurerName', 'insuranceCompany'])} />
               <RelatedInfoRow label="정비공장" value={pickString(row, ['repairShopName', 'garageName'])} />
@@ -1772,7 +1772,7 @@ function RelatedContextDrawer({
           {!isLoading && !error && kind === 'billing' && (
             <div className="space-y-4">
               {Object.keys(billingPaymentInfo).length > 0 && (
-                <div className="grid grid-cols-2 gap-4 rounded-lg border border-gray-200 bg-gray-50 p-4">
+                <div className="grid grid-cols-1 gap-4 rounded-lg border border-gray-200 bg-gray-50 p-4 sm:grid-cols-2">
                   <RelatedInfoRow label="총 금액" value={formatCurrencyValue(billingPaymentInfo.totalAmount ?? billingPaymentInfo.amount)} />
                   <RelatedInfoRow label="기존 미납" value={formatCurrencyValue(billingPaymentInfo.principalAmount)} />
                   <RelatedInfoRow label="추가 금액" value={formatCurrencyValue(billingPaymentInfo.additionalAmount)} />
@@ -4858,7 +4858,7 @@ export default function ActionRequired() {
 
   return (
     <Layout title="조치 필요 항목">
-      <div className="p-6">
+      <div className="p-3 sm:p-6">
           <div className="mb-6 space-y-4">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
@@ -5098,8 +5098,8 @@ export default function ActionRequired() {
 
         {selectedItem && (
           <div className="fixed inset-0 z-50 flex justify-end bg-black/20" onMouseDown={handleActionDetailBackdropMouseDown}>
-            <div className="h-full w-96 overflow-y-auto bg-white shadow-2xl">
-              <div className="p-6">
+            <div className="h-full w-full overflow-y-auto bg-white shadow-2xl sm:w-96">
+              <div className="p-4 sm:p-6">
               <div className="flex items-center justify-between mb-6">
                 <h2 className="text-lg font-bold text-[#1e2939]">상세 정보</h2>
                 <button
@@ -5176,7 +5176,7 @@ export default function ActionRequired() {
                   <p className="text-base text-gray-900 mt-1">{selectedItem.subCategory ?? '-'}</p>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3 rounded-lg border border-gray-200 bg-gray-50 p-3">
+                <div className="grid grid-cols-1 gap-3 rounded-lg border border-gray-200 bg-gray-50 p-3 sm:grid-cols-2">
                   <div>
                     <label className="text-xs font-semibold text-gray-500">차량번호</label>
                     <p className="mt-1 text-sm font-bold text-gray-900">{selectedItem.vehicleNumber}</p>
@@ -5382,7 +5382,7 @@ export default function ActionRequired() {
                           {getRentalAccidentSummaryText(rentalAccidentIssueMode)}
                         </p>
                       </div>
-                      <div className="grid grid-cols-2 gap-2 rounded-lg border border-orange-100 bg-orange-50 p-3 text-xs">
+                      <div className="grid grid-cols-1 gap-2 rounded-lg border border-orange-100 bg-orange-50 p-3 text-xs sm:grid-cols-2">
                         <div>
                           <p className="font-semibold text-orange-700">사고자료 상태</p>
                           <p className="mt-1 text-sm font-bold text-gray-900">{getRelatedStatusLabel(rentalAccidentDraft.evidenceStatus)}</p>
@@ -5578,7 +5578,7 @@ export default function ActionRequired() {
                       )}
 
                       {shouldShowRentalAccidentCustomerCharge ? (
-                        <div className="grid grid-cols-2 gap-2 rounded-lg border border-amber-200 bg-white p-3">
+                        <div className="grid grid-cols-1 gap-2 rounded-lg border border-amber-200 bg-white p-3 sm:grid-cols-2">
                           <input
                             type="text"
                             value={rentalAccidentDraft.customerChargeAmount}
@@ -5605,7 +5605,7 @@ export default function ActionRequired() {
                       ) : (
                         <details className="rounded-lg border border-gray-200 bg-white px-3 py-2">
                           <summary className="cursor-pointer text-xs font-semibold text-gray-600">고객부담금</summary>
-                          <div className="mt-3 grid grid-cols-2 gap-2">
+                          <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
                             <input
                               type="text"
                               value={rentalAccidentDraft.customerChargeAmount}
@@ -5888,7 +5888,7 @@ export default function ActionRequired() {
                                 <p className="font-semibold text-blue-700">청구 상태</p>
                                 <p className="mt-1 text-base font-bold text-gray-900">{getRelatedStatusLabel(accidentClaimDraft.claimStatus)}</p>
                               </div>
-                              <div className="grid grid-cols-2 gap-2">
+                              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                                 <div>
                                   <p className="font-semibold text-blue-700">문서 상태</p>
                                   <p className="mt-1 text-sm font-bold text-gray-900">{getRelatedStatusLabel(accidentClaimDraft.documentStatus)}</p>
@@ -5904,7 +5904,7 @@ export default function ActionRequired() {
                           )}
                           {accidentClaimIssueMode === 'payment' && (
                             <div className="space-y-2">
-                              <div className="grid grid-cols-2 gap-2 rounded-lg border border-emerald-100 bg-emerald-50 p-3 text-xs">
+                              <div className="grid grid-cols-1 gap-2 rounded-lg border border-emerald-100 bg-emerald-50 p-3 text-xs sm:grid-cols-2">
                                 <div>
                                   <p className="font-semibold text-emerald-700">청구액</p>
                                   <p className="mt-1 text-sm font-bold text-gray-900">{toPaymentAmountFromInput(accidentClaimDraft.billedAmount).toLocaleString()}원</p>
@@ -5938,7 +5938,7 @@ export default function ActionRequired() {
                                   message={getSettlementDifferenceMessage(selectedItem, normalizeSettlementDifferenceStatus(selectedItem))}
                                 />
                               </div>
-                              <div className="grid grid-cols-3 gap-2 rounded-lg border border-emerald-100 bg-emerald-50 p-3 text-xs">
+                              <div className="grid grid-cols-1 gap-2 rounded-lg border border-emerald-100 bg-emerald-50 p-3 text-xs sm:grid-cols-3">
                                 <div>
                                   <p className="font-semibold text-emerald-700">청구액</p>
                                   <p className="mt-1 text-sm font-bold text-gray-900">{toPaymentAmountFromInput(accidentClaimDraft.billedAmount).toLocaleString()}원</p>
@@ -6465,7 +6465,7 @@ export default function ActionRequired() {
 
                 <div className="border-t border-gray-200 pt-4">
                   <label className="mb-3 block text-sm font-semibold text-gray-600">관련 데이터</label>
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                     <button
                       type="button"
                       className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"

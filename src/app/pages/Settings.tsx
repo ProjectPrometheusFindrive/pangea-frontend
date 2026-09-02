@@ -2943,14 +2943,14 @@ export default function Settings() {
   return (
     <Layout title="설정">
       {isSuperAdmin && (
-        <div className="px-6 pt-6">
+        <div className="px-3 pt-3 sm:px-6 sm:pt-6">
           <div className="rounded-xl border border-slate-200 bg-white px-5 py-4 shadow-sm">
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
               <div>
                 <h2 className="text-sm font-semibold text-slate-900">회사 범위</h2>
                 <p className="mt-1 text-sm text-slate-600">회사를 선택해 주세요. 선택한 범위로 설정 데이터가 다시 조회됩니다.</p>
               </div>
-              <div className="flex min-w-[240px] flex-col gap-2">
+              <div className="flex w-full flex-col gap-2 md:min-w-[240px] md:w-auto">
                 <select
                   value={settingsCompanyId ?? ''}
                   onChange={(event) => updateSettingsCompanyScope(event.target.value || null)}
@@ -2973,7 +2973,7 @@ export default function Settings() {
         </div>
       )}
       {shouldBlockSettingsSelection ? (
-        <div className="m-6 rounded-2xl border border-dashed border-slate-300 bg-white px-6 py-12 text-center shadow-sm">
+        <div className="m-3 rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-10 text-center shadow-sm sm:m-6 sm:px-6 sm:py-12">
           <p className="text-base font-semibold text-slate-900">회사를 선택해 주세요</p>
           <p className="mt-2 text-sm text-slate-600">super_admin은 회사를 선택한 뒤 회사 정보, 지오펜스, 계정관리 데이터를 조회할 수 있습니다.</p>
         </div>
@@ -2990,15 +2990,15 @@ export default function Settings() {
         onErrorAction={handleSettingsErrorAction}
         emptyActionLabel="다시 불러오기"
         onEmptyAction={handleSettingsRetry}
-        className="m-6 min-h-[320px]"
+        className="m-3 min-h-[320px] sm:m-6"
       >
-        <div className="p-6">
-          <div className="mb-6 flex gap-2 border-b border-gray-200">
+        <div className="p-3 sm:p-6">
+          <div className="mb-6 flex gap-1 overflow-x-auto border-b border-gray-200 sm:gap-2">
             <button
               type="button"
               data-testid="settings-tab-bulk"
               onClick={() => handleTabChange('bulk')}
-              className={`border-b-2 px-6 py-3 text-sm font-medium transition-colors ${
+              className={`shrink-0 border-b-2 px-4 py-3 text-sm font-medium transition-colors sm:px-6 ${
                 activeTab === 'bulk'
                   ? 'border-blue-600 text-blue-600'
                   : 'border-transparent text-gray-600 hover:text-gray-900'
@@ -3009,7 +3009,7 @@ export default function Settings() {
             <button
               type="button"
               onClick={() => handleTabChange('company')}
-              className={`border-b-2 px-6 py-3 text-sm font-medium transition-colors ${
+              className={`shrink-0 border-b-2 px-4 py-3 text-sm font-medium transition-colors sm:px-6 ${
                 activeTab === 'company'
                   ? 'border-blue-600 text-blue-600'
                   : 'border-transparent text-gray-600 hover:text-gray-900'
@@ -3021,7 +3021,7 @@ export default function Settings() {
               type="button"
               data-testid="settings-tab-geofence"
               onClick={() => handleTabChange('geofence')}
-              className={`border-b-2 px-6 py-3 text-sm font-medium transition-colors ${
+              className={`shrink-0 border-b-2 px-4 py-3 text-sm font-medium transition-colors sm:px-6 ${
                 activeTab === 'geofence'
                   ? 'border-blue-600 text-blue-600'
                   : 'border-transparent text-gray-600 hover:text-gray-900'
@@ -3033,7 +3033,7 @@ export default function Settings() {
               type="button"
               data-testid="settings-tab-garage"
               onClick={() => handleTabChange('garage')}
-              className={`border-b-2 px-6 py-3 text-sm font-medium transition-colors ${
+              className={`shrink-0 border-b-2 px-4 py-3 text-sm font-medium transition-colors sm:px-6 ${
                 activeTab === 'garage'
                   ? 'border-blue-600 text-blue-600'
                   : 'border-transparent text-gray-600 hover:text-gray-900'
@@ -3046,7 +3046,7 @@ export default function Settings() {
                 type="button"
                 data-testid="settings-tab-accounts"
                 onClick={() => handleTabChange('accounts')}
-                className={`border-b-2 px-6 py-3 text-sm font-medium transition-colors ${
+                className={`shrink-0 border-b-2 px-4 py-3 text-sm font-medium transition-colors sm:px-6 ${
                   activeTab === 'accounts'
                     ? 'border-blue-600 text-blue-600'
                     : 'border-transparent text-gray-600 hover:text-gray-900'
@@ -3058,7 +3058,7 @@ export default function Settings() {
             <button
               type="button"
               onClick={() => handleTabChange('support')}
-              className={`border-b-2 px-6 py-3 text-sm font-medium transition-colors ${
+              className={`shrink-0 border-b-2 px-4 py-3 text-sm font-medium transition-colors sm:px-6 ${
                 activeTab === 'support'
                   ? 'border-blue-600 text-blue-600'
                   : 'border-transparent text-gray-600 hover:text-gray-900'
@@ -3087,7 +3087,7 @@ export default function Settings() {
 
               <div className="rounded-xl bg-white p-6 shadow-sm">
                 <h2 className="mb-4 text-base font-semibold text-[#1e2939]">데이터 유형 선택</h2>
-                <div className="grid grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                   <button
                     type="button"
                     onClick={() => {
@@ -3414,7 +3414,7 @@ export default function Settings() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   <button
                     type="button"
                     onClick={() => downloadCurrentData('vehicles')}

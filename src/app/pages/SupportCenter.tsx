@@ -691,7 +691,7 @@ function SupportAdminManagementView({
   const statusUpdateErrorActionLabel = getPageErrorActionLabel(statusUpdateError?.kind ?? null);
 
   return (
-    <div className="space-y-4 p-6">
+    <div className="space-y-4 p-3 sm:p-6">
       <div className="rounded-lg bg-gradient-to-r from-slate-800 to-blue-700 px-5 py-4 text-white">
         <h2 className="text-lg font-bold" data-testid="support-admin-heading">고객센터 문의 관리</h2>
         <p className="mt-1 text-sm text-blue-100">
@@ -1504,7 +1504,7 @@ function SupportTicketSubmitView({
   const categoryErrorActionLabel = getPageErrorActionLabel(categoriesErrorKind);
 
   return (
-    <div className="space-y-4 p-6">
+    <div className="space-y-4 p-3 sm:p-6">
       <div className="rounded-lg bg-gradient-to-r from-slate-800 to-blue-700 px-5 py-4 text-white">
         <h2 className="text-lg font-bold">지원 문의 접수</h2>
         <p className="mt-1 text-sm text-blue-100">
