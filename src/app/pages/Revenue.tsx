@@ -950,7 +950,7 @@ export default function Revenue() {
 
   return (
     <Layout title="매출 요약">
-      <div className="m-4 mb-0 flex flex-wrap items-center gap-2 rounded-xl bg-white p-4 shadow-sm">
+      <div className="m-3 mb-0 flex flex-wrap items-center gap-2 rounded-xl bg-white p-3 shadow-sm sm:m-4 sm:mb-0 sm:p-4">
         <span className="text-sm font-semibold text-gray-600">기간:</span>
         {GT_PERIOD_OPTIONS.map((option) => (
           <button
@@ -967,7 +967,7 @@ export default function Revenue() {
           </button>
         ))}
         <div className="mx-2 hidden h-6 w-px bg-gray-200 md:block" />
-        <label className="flex items-center gap-2 text-sm font-semibold text-gray-600">
+        <label className="flex w-full items-center gap-2 text-sm font-semibold text-gray-600 sm:w-auto">
           집계:
           <select
             value={selectedGranularity}
@@ -979,7 +979,7 @@ export default function Revenue() {
             ))}
           </select>
         </label>
-        <label className="flex items-center gap-2 text-sm font-semibold text-gray-600">
+        <label className="flex w-full items-center gap-2 text-sm font-semibold text-gray-600 sm:w-auto">
           계약유형:
           <select
             value={selectedRentalType ?? 'all'}
@@ -993,7 +993,7 @@ export default function Revenue() {
             ))}
           </select>
         </label>
-        <label className="flex items-center gap-2 text-sm font-semibold text-gray-600">
+        <label className="flex w-full items-center gap-2 text-sm font-semibold text-gray-600 sm:w-auto">
           지급책임자:
           <select
             value={selectedPayerType ?? 'all'}

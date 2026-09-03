@@ -237,8 +237,8 @@ export default function DemoSimulationAdmin() {
         onRetry={() => { void loadState(); }}
         loadingTitle="데모 시뮬레이션 설정을 불러오는 중입니다"
       >
-        <div className="space-y-6">
-          <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <div className="space-y-4 p-3 sm:space-y-6 sm:p-0">
+          <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
               <div>
                 <p className="text-sm font-semibold text-blue-600">Super Admin Only</p>

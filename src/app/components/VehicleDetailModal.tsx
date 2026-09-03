@@ -250,20 +250,20 @@ export function VehicleDetailModal({
   }
 
   return (
-    <div data-testid="asset-detail-modal" className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onMouseDown={handleBackdropMouseDown}>
-      <div className="flex max-h-[85vh] w-[1100px] max-w-[92vw] flex-col rounded-xl bg-white">
-        <div className="border-b border-gray-200 p-6">
+    <div data-testid="asset-detail-modal" className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-0 sm:p-4" onMouseDown={handleBackdropMouseDown}>
+      <div className="flex h-full max-h-dvh w-full flex-col bg-white sm:h-auto sm:max-h-[85vh] sm:w-[1100px] sm:max-w-[92vw] sm:rounded-xl">
+        <div className="border-b border-gray-200 p-4 sm:p-6">
           <div className="flex items-center justify-between">
             <h2 className="text-xl font-bold text-[#1e2939]">{'차량 상세 정보'}</h2>
-            <button onClick={closeModal} className="rounded-lg p-2 hover:bg-gray-100">
+            <button aria-label="차량 상세 닫기" onClick={closeModal} className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg p-2 hover:bg-gray-100 sm:min-h-0 sm:min-w-0">
               <X className="h-5 w-5" />
             </button>
           </div>
 
-          <div className="mt-4 flex gap-1 border-b border-gray-200">
+          <div className="mt-4 flex gap-1 overflow-x-auto border-b border-gray-200">
             <button
               onClick={() => setDetailTab('info')}
-              className={`flex items-center gap-2 px-4 py-2 text-sm font-medium transition-colors ${
+              className={`flex min-h-11 shrink-0 items-center gap-2 px-4 py-2 text-sm font-medium transition-colors sm:min-h-0 sm:shrink ${
                 detailTab === 'info' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-600 hover:text-gray-900'
               }`}
             >
@@ -272,7 +272,7 @@ export function VehicleDetailModal({
             </button>
             <button
               onClick={() => setDetailTab('history')}
-              className={`flex items-center gap-2 px-4 py-2 text-sm font-medium transition-colors ${
+              className={`flex min-h-11 shrink-0 items-center gap-2 px-4 py-2 text-sm font-medium transition-colors sm:min-h-0 sm:shrink ${
                 detailTab === 'history' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-600 hover:text-gray-900'
               }`}
             >
@@ -284,7 +284,7 @@ export function VehicleDetailModal({
             </button>
             <button
               onClick={() => setDetailTab('sensor')}
-              className={`flex items-center gap-2 px-4 py-2 text-sm font-medium transition-colors ${
+              className={`flex min-h-11 shrink-0 items-center gap-2 px-4 py-2 text-sm font-medium transition-colors sm:min-h-0 sm:shrink ${
                 detailTab === 'sensor' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-600 hover:text-gray-900'
               }`}
             >
@@ -295,10 +295,10 @@ export function VehicleDetailModal({
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-6">
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6">
           {detailTab === 'info' && (
             <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div>
                   <label className="text-xs font-semibold uppercase text-gray-500">{'차량번호'}</label>
                   <p className="mt-1 text-lg font-bold text-gray-900">{asset.vehicleNumber}</p>
@@ -309,7 +309,7 @@ export function VehicleDetailModal({
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div>
                   <label className="text-xs font-semibold uppercase text-gray-500">{'연식'}</label>
                   <p className="mt-1 text-lg text-gray-900">{asset.year && asset.year !== '-' ? asset.year : '-'}</p>
@@ -320,7 +320,7 @@ export function VehicleDetailModal({
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div>
                   <label className="text-xs font-semibold uppercase text-gray-500">{'현재 상태'}</label>
                   <span className={`mt-2 inline-block rounded-full px-3 py-1 text-sm font-medium ${getStatusColor(asset.status)}`}>
@@ -522,8 +522,8 @@ export function VehicleDetailModal({
           )}
 
           {previewDocument && (
-            <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-6">
-              <div className="flex max-h-[85vh] w-[960px] max-w-[92vw] flex-col overflow-hidden rounded-xl bg-white shadow-2xl">
+            <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-3 sm:p-6">
+              <div className="flex max-h-[calc(100dvh-1.5rem)] w-full max-w-[960px] flex-col overflow-hidden rounded-xl bg-white shadow-2xl sm:max-h-[85vh] sm:w-[960px] sm:max-w-[92vw]">
                 <div className="flex items-center justify-between border-b border-gray-200 px-5 py-4">
                   <div>
                     <p className="text-sm font-semibold text-[#1e2939]">{getDocumentLabel(previewDocument)}</p>
@@ -707,7 +707,7 @@ export function VehicleDetailModal({
         </div>
 
         {detailTab === 'info' ? (
-          <div className="flex gap-3 border-t border-gray-200 p-6">
+          <div className="flex gap-3 border-t border-gray-200 p-4 sm:p-6">
             <button onClick={closeModal} className="flex-1 rounded-lg bg-gray-100 px-4 py-3 font-medium text-gray-700 hover:bg-gray-200">
               {'닫기'}
             </button>
@@ -724,7 +724,7 @@ export function VehicleDetailModal({
             </button>
           </div>
         ) : (
-          <div className="border-t border-gray-200 p-6">
+          <div className="border-t border-gray-200 p-4 sm:p-6">
             <button onClick={closeModal} className="w-full rounded-lg bg-gray-100 px-4 py-3 font-medium text-gray-700 hover:bg-gray-200">
               {'닫기'}
             </button>

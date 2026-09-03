@@ -1373,22 +1373,24 @@ export function NewContractModal({
 
   return (
     <>
-    <div data-testid="new-contract-modal" className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onMouseDown={handleMainBackdropMouseDown}>
-      <div className="bg-white rounded-xl w-[600px] max-h-[85vh] flex flex-col">
-        <div className="p-6 border-b border-gray-200 shrink-0">
+    <div data-testid="new-contract-modal" className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-0 sm:p-4" onMouseDown={handleMainBackdropMouseDown}>
+      <div className="flex h-full max-h-dvh w-full flex-col bg-white sm:h-auto sm:max-h-[85vh] sm:max-w-[600px] sm:rounded-xl">
+        <div className="shrink-0 border-b border-gray-200 p-4 sm:p-6">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-xl font-bold text-[#1e2939]">새 계약 등록</h2>
             <button
+              type="button"
+              aria-label="새 계약 등록 닫기"
               onClick={handleClose}
-              className="p-2 hover:bg-gray-100 rounded-lg"
+              className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg p-2 hover:bg-gray-100 sm:min-h-0 sm:min-w-0"
               disabled={isSubmitting}
             >
               <X className="w-5 h-5" />
             </button>
           </div>
 
-          <div className="flex items-center justify-center">
-            <div className="flex items-center gap-4">
+          <div className="overflow-x-auto">
+            <div className="mx-auto flex min-w-max items-center justify-center gap-3 sm:gap-4">
               <div className={`flex items-center gap-2 ${step === 1 ? 'text-blue-600' : 'text-gray-400'}`}>
                 <div className={`w-8 h-8 rounded-full flex items-center justify-center ${step >= 1 ? 'bg-blue-600 text-white' : 'bg-gray-200'}`}>
                   {step > 1 ? <CheckCircle className="w-5 h-5" /> : '1'}
@@ -1415,7 +1417,7 @@ export function NewContractModal({
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-6">
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6">
           {submitError && (
             <div data-testid="new-contract-submit-error" className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 flex items-start gap-2">
               <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
@@ -1429,7 +1431,7 @@ export function NewContractModal({
                 <label className="block text-sm font-semibold text-gray-600 mb-2">
                   계약 유형 <span className="text-red-600">*</span>
                 </label>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
                   {[
                     { value: 'short_term', label: '단기렌트' },
                     { value: 'long_term', label: '장기렌트' },
@@ -1470,7 +1472,7 @@ export function NewContractModal({
                     )}
                   </div>
 
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <div>
                       <label className="text-xs font-semibold text-blue-700 uppercase">픽업 일시</label>
                       <p className="text-base text-blue-900 mt-1 font-medium">
@@ -1507,7 +1509,7 @@ export function NewContractModal({
                   </p>
 
                   <div className="space-y-4">
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                       <div>
                         <label className="block text-sm font-semibold text-gray-600 mb-2">
                           대여 시작일 <span className="text-red-600">*</span>
@@ -1574,7 +1576,7 @@ export function NewContractModal({
                       </p>
                     )}
 
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                       <div>
                         <label className="block text-sm font-semibold text-gray-600 mb-2">
                           픽업 시간 <span className="text-red-600">*</span>
@@ -1716,7 +1718,7 @@ export function NewContractModal({
                     🕐 픽업/반납 시간을 설정하세요
                   </p>
 
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <div>
                       <label className="block text-sm font-semibold text-gray-600 mb-2">
                         픽업 시간 <span className="text-red-600">*</span>
@@ -1808,7 +1810,7 @@ export function NewContractModal({
                       ))}
                     </div>
                   </div>
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <div>
                       <label className="block text-sm font-semibold text-gray-600 mb-2">
                         {contractorType === 'corporate' ? '법인명' : '계약자명'} <span className="text-red-600">*</span>
@@ -1869,7 +1871,7 @@ export function NewContractModal({
                     )}
                   </div>
                   {contractorType === 'corporate' && (
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                       <div>
                         <label className="block text-sm font-semibold text-gray-600 mb-2">
                           계약 담당자명 <span className="text-red-600">*</span>
@@ -1962,7 +1964,7 @@ export function NewContractModal({
 
                   {activeDriverIndex === 0 ? (
                     <div className="space-y-4">
-                      <div className="grid grid-cols-2 gap-4">
+                      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                         <div>
                           <label className="block text-sm font-semibold text-gray-600 mb-2">운전자명</label>
                           <input type="text" value={firstDriver.name} className={fieldInputClass('customerName')} disabled />
@@ -2009,7 +2011,7 @@ export function NewContractModal({
                     </div>
                   ) : (
                     <div className="space-y-4">
-                      <div className="grid grid-cols-2 gap-4">
+                      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                         <div>
                           <label className="block text-sm font-semibold text-gray-600 mb-2">운전자명 <span className="text-red-600">*</span></label>
                           <input
@@ -2150,7 +2152,7 @@ export function NewContractModal({
               <div className="border-t border-gray-200 pt-4 mt-6">
                 <h3 className="text-sm font-bold text-gray-700 mb-4">🚗 차량 인도/반납 장소</h3>
 
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   {renderLocationField('pickup', '대여 장소', pickupLocation, pickupLocationMode, 'pickupLocation', 'new-contract-pickup-location-input', setPickupLocation)}
                   {renderLocationField('return', '반납 장소', returnLocation, returnLocationMode, 'returnLocation', 'new-contract-return-location-input', setReturnLocation)}
                 </div>
@@ -2179,7 +2181,7 @@ export function NewContractModal({
                     {fieldErrors.billingAccount && <p className="mt-1 text-xs text-red-600">{fieldErrors.billingAccount}</p>}
                   </div>
                   {contractorType === 'corporate' && (
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                       <div>
                         <label className="block text-sm font-semibold text-gray-600 mb-2">청구 담당자</label>
                         <input
@@ -2213,7 +2215,7 @@ export function NewContractModal({
                       </div>
                     </div>
                   )}
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <div>
                       <label className="block text-sm font-semibold text-gray-600 mb-2">
                         월 렌트료 <span className="text-red-600">*</span>
@@ -2253,7 +2255,7 @@ export function NewContractModal({
                       {fieldErrors.billingDay && <p className="mt-1 text-xs text-red-600">{fieldErrors.billingDay}</p>}
                     </div>
                   </div>
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <div>
                       <label className="block text-sm font-semibold text-gray-600 mb-2">
                         보증금
@@ -2287,7 +2289,7 @@ export function NewContractModal({
                       />
                     </div>
                   </div>
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <div>
                       <label className="block text-sm font-semibold text-gray-600 mb-2">
                         납부 방식
@@ -2320,7 +2322,7 @@ export function NewContractModal({
               ) : rentalType === 'accident_replacement' ? (
                 <div className="border-t border-gray-200 pt-4 mt-6 space-y-4">
                   <h3 className="text-sm font-bold text-gray-700">사고/보험 정보</h3>
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <div>
                       <label className="block text-sm font-semibold text-gray-600 mb-2">요청 출처</label>
                       <select
@@ -2354,7 +2356,7 @@ export function NewContractModal({
                       {fieldErrors.requesterOrganizationName && <p className="mt-1 text-xs text-red-600">{fieldErrors.requesterOrganizationName}</p>}
                     </div>
                   </div>
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <div>
                       <label className="block text-sm font-semibold text-gray-600 mb-2">요청자명 <span className="text-red-600">*</span></label>
                       <input
@@ -2385,7 +2387,7 @@ export function NewContractModal({
                       {fieldErrors.requesterPhone && <p className="mt-1 text-xs text-red-600">{fieldErrors.requesterPhone}</p>}
                     </div>
                   </div>
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <div>
                       <label className="block text-sm font-semibold text-gray-600 mb-2">보험사 <span className="text-red-600">*</span> <span className="text-xs font-medium text-gray-400">(사고접수번호 없을 때)</span></label>
                       <input type="text" value={insurerName} onChange={(event) => { setInsurerName(event.target.value); clearFieldError('insurerName'); }} className={fieldInputClass('insurerName')} disabled={isSubmitting} />
@@ -2398,7 +2400,7 @@ export function NewContractModal({
                     </div>
                     <p className="col-span-2 text-xs text-gray-500">보험사 또는 사고접수번호 중 하나는 필수입니다.</p>
                   </div>
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <div>
                       <label className="block text-sm font-semibold text-gray-600 mb-2">보험 담당자</label>
                       <input type="text" value={adjusterName} onChange={(event) => setAdjusterName(event.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" disabled={isSubmitting} />
@@ -2409,7 +2411,7 @@ export function NewContractModal({
                       {fieldErrors.adjusterPhone && <p className="mt-1 text-xs text-red-600">{fieldErrors.adjusterPhone}</p>}
                     </div>
                   </div>
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <div>
                       <label className="block text-sm font-semibold text-gray-600 mb-2">정비공장 <span className="text-red-600">*</span></label>
                       <input type="text" value={repairShopName} onChange={(event) => { setRepairShopName(event.target.value); clearFieldError('repairShopName'); }} className={fieldInputClass('repairShopName')} disabled={isSubmitting} />
@@ -2421,7 +2423,7 @@ export function NewContractModal({
                       {fieldErrors.repairShopLocation && <p className="mt-1 text-xs text-red-600">{fieldErrors.repairShopLocation}</p>}
                     </div>
                   </div>
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <div>
                       <label className="block text-sm font-semibold text-gray-600 mb-2">실제 인도지</label>
                       <input type="text" value={deliveryLocation} onChange={(event) => setDeliveryLocation(event.target.value)} placeholder="비워두면 대여 장소 사용" className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" disabled={isSubmitting} />
@@ -2432,7 +2434,7 @@ export function NewContractModal({
                       {fieldErrors.damagedVehicleNumber && <p className="mt-1 text-xs text-red-600">{fieldErrors.damagedVehicleNumber}</p>}
                     </div>
                   </div>
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <div>
                       <label className="block text-sm font-semibold text-gray-600 mb-2">피해차량 차종/차급</label>
                       <input type="text" value={damagedVehicleModel} onChange={(event) => setDamagedVehicleModel(event.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" disabled={isSubmitting} />
@@ -2444,7 +2446,7 @@ export function NewContractModal({
                   </div>
                 </div>
               ) : (
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   <div>
                     <label className="block text-sm font-semibold text-gray-600 mb-2">
                       대여 요금 <span className="text-red-600">*</span>
@@ -2529,7 +2531,7 @@ export function NewContractModal({
                   </div>
 
                   {(paymentStatus === '완료' || paymentStatus === '부분납부') && (
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                       <div>
                         <label className="block text-sm font-semibold text-gray-600 mb-2">입금자명</label>
                         <input
@@ -2786,8 +2788,8 @@ export function NewContractModal({
       </div>
     </div>
     {activeLocationRegistrationTarget !== null && (
-      <div data-testid="new-contract-garage-registration-modal" className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50" onMouseDown={handleGarageBackdropMouseDown}>
-        <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+      <div data-testid="new-contract-garage-registration-modal" className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-3 sm:p-4" onMouseDown={handleGarageBackdropMouseDown}>
+        <div className="max-h-[calc(100dvh-1.5rem)] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-4 shadow-2xl sm:max-h-none sm:overflow-visible sm:p-6">
           <div className="mb-5">
             <h2 className="text-lg font-bold text-[#1e2939]">신규 차고지 등록</h2>
             <p className="mt-2 text-sm leading-6 text-gray-600">
@@ -2866,8 +2868,8 @@ export function NewContractModal({
       </div>
     )}
     {pendingDriverRemovalIndex !== null && (
-      <div data-testid="driver-delete-confirm-modal" className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50" onMouseDown={handleDriverRemovalBackdropMouseDown}>
-        <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl">
+      <div data-testid="driver-delete-confirm-modal" className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-3 sm:p-4" onMouseDown={handleDriverRemovalBackdropMouseDown}>
+        <div className="max-h-[calc(100dvh-1.5rem)] w-full max-w-sm overflow-y-auto rounded-2xl bg-white p-4 shadow-2xl sm:max-h-none sm:overflow-visible sm:p-6">
           <div className="mb-5 flex items-start gap-3">
             <div className="rounded-full bg-red-50 p-2 text-red-600">
               <AlertTriangle className="h-5 w-5" />

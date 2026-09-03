@@ -6368,7 +6368,7 @@ export default function Reservations() {
 
   return (
     <Layout title="대여 예약">
-      <div className="p-4 h-full flex flex-col">
+      <div className="flex h-full flex-col p-3 sm:p-4">
         {/* 필터와 버튼 */}
         <div className="mb-3 shrink-0 space-y-2">
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -6444,7 +6444,7 @@ export default function Reservations() {
               }}
               data-testid="reservation-new-contract-button"
               disabled={!canStartReservationMutation}
-              className="px-4 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium flex items-center gap-2 text-sm disabled:cursor-not-allowed disabled:opacity-60"
+              className="flex min-h-11 w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0 sm:w-auto"
             >
               <Plus className="w-4 h-4" />
               새 계약 등록
@@ -6931,9 +6931,9 @@ export default function Reservations() {
 
         {/* 예약 상세 팝업 */}
         {selectedReservation && (
-          <div data-testid="reservation-detail-modal" className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onMouseDown={handleReservationDetailBackdropMouseDown}>
-            <div className="bg-white rounded-xl w-[700px] max-h-[80vh] flex flex-col">
-              <div className="p-6 border-b border-gray-200">
+          <div data-testid="reservation-detail-modal" className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-0 sm:p-4" onMouseDown={handleReservationDetailBackdropMouseDown}>
+            <div className="flex h-full max-h-dvh w-full flex-col bg-white sm:h-auto sm:max-h-[80vh] sm:max-w-[700px] sm:rounded-xl">
+              <div className="border-b border-gray-200 p-4 sm:p-6">
                 <div className="flex items-center justify-between">
                   <h2 className="text-xl font-bold text-[#1e2939]">
                     {isEditMode ? '예약 수정' : '예약 상세 정보'}
@@ -7028,11 +7028,11 @@ export default function Reservations() {
               </div>
 
               {/* 탭 컨텐츠 */}
-              <div className="p-6 flex-1 overflow-y-auto">
+              <div className="flex-1 overflow-y-auto p-4 sm:p-6">
                 {/* 예약 정보 탭 */}
                 {activeTab === 'reservation' && !isEditMode && (
                   <div className="space-y-4">
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                       <div>
                         <label className="text-xs font-semibold text-gray-500 uppercase">예약번호</label>
                         <p className="text-lg text-gray-900 mt-1 font-bold">{selectedReservation.id}</p>
@@ -7043,7 +7043,7 @@ export default function Reservations() {
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                       <div>
                         <label className="text-xs font-semibold text-gray-500 uppercase">연락처</label>
                         <p className="text-lg text-gray-900 mt-1">{selectedReservation.phone}</p>
@@ -7058,7 +7058,7 @@ export default function Reservations() {
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                       <div>
                         <label className="text-xs font-semibold text-gray-500 uppercase">진행 상태</label>
                         <span className={`inline-block px-3 py-1 text-sm font-medium rounded-full mt-2 ${
@@ -7132,7 +7132,7 @@ export default function Reservations() {
                       <p className="text-lg text-gray-900 mt-1 font-bold">{selectedReservation.vehicleNumber}</p>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                       <div>
                         <label className="text-xs font-semibold text-gray-500 uppercase">대여 시작일</label>
                         <p className="text-lg text-gray-900 mt-1">{selectedReservation.startDateFull}</p>
@@ -7182,7 +7182,7 @@ export default function Reservations() {
                 {/* 예약 수정 폼 */}
                 {activeTab === 'reservation' && isEditMode && (
                   <div className="space-y-4">
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                       <div>
                         <label className="text-xs font-semibold text-gray-500 uppercase">예약번호</label>
                         <p className="text-lg text-gray-900 mt-1 font-bold">{selectedReservation.id}</p>
@@ -7216,7 +7216,7 @@ export default function Reservations() {
                       )}
                     </div>
 
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                       <div>
                         <label className="text-xs font-semibold text-gray-500 uppercase mb-1 block">대여 시작일시</label>
                         <input
@@ -8533,7 +8533,7 @@ export default function Reservations() {
                 {/* 차량 자산 정보 탭 */}
                 {activeTab === 'vehicle' && selectedVehicleAsset && (
                   <div className="space-y-4">
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                       <div>
                         <label className="text-xs font-semibold text-gray-500 uppercase">차량번호</label>
                         <p className="text-lg text-gray-900 mt-1 font-bold">{selectedVehicleAsset.vehicleNumber}</p>
@@ -8544,7 +8544,7 @@ export default function Reservations() {
                       </div>
                     </div>
                     
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                       <div>
                         <label className="text-xs font-semibold text-gray-500 uppercase">연식</label>
                         <p className="text-lg text-gray-900 mt-1">{selectedVehicleAsset.year}년</p>
@@ -8564,7 +8564,7 @@ export default function Reservations() {
                       </p>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                       <div>
                         <label className="text-xs font-semibold text-gray-500 uppercase">보험 만료일</label>
                         <p className="text-lg text-gray-900 mt-1">{selectedVehicleAsset.insuranceExpiry}</p>
@@ -8601,7 +8601,7 @@ export default function Reservations() {
 
               {/* 액션 버튼 */}
               {isEditMode ? (
-                <div className="p-6 border-t border-gray-200 flex gap-3">
+                <div className="flex flex-col gap-3 border-t border-gray-200 p-4 sm:flex-row sm:p-6">
                   <button
                     onClick={handleCancelEditMode}
                     disabled={isEditSubmitting}
@@ -8630,7 +8630,7 @@ export default function Reservations() {
                   </button>
                 </div>
               ) : (
-                <div className="p-6 border-t border-gray-200 flex gap-3 flex-wrap">
+                <div className="flex flex-col gap-3 border-t border-gray-200 p-4 sm:flex-row sm:flex-wrap sm:p-6">
                   {reservationActionError && (
                     <div className="w-full rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 flex items-start gap-2">
                       <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
@@ -8642,7 +8642,7 @@ export default function Reservations() {
                       onClick={handleEnterEditMode}
                       data-testid="reservation-edit-button"
                       disabled={activeReservationAction !== null}
-                      className="flex-1 min-w-[200px] px-4 py-3 bg-amber-500 text-white rounded-lg hover:bg-amber-600 font-medium flex items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-60"
+                      className="flex min-h-11 flex-1 items-center justify-center gap-2 rounded-lg bg-amber-500 px-4 py-3 font-medium text-white hover:bg-amber-600 disabled:cursor-not-allowed disabled:opacity-60 sm:min-w-[200px]"
                     >
                       <Edit2 className="w-4 h-4" />
                       예약 수정
@@ -8657,7 +8657,7 @@ export default function Reservations() {
                       navigate(`/assets?search=${encodeURIComponent(selectedReservation.vehicleNumber)}`);
                     }}
                     disabled={!canViewAssets}
-                    className="flex-1 min-w-[200px] px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium disabled:cursor-not-allowed disabled:opacity-60"
+                    className="min-h-11 flex-1 rounded-lg bg-blue-600 px-4 py-3 font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60 sm:min-w-[200px]"
                   >
                     차량 자산 상세보기
                   </button>
@@ -8669,7 +8669,7 @@ export default function Reservations() {
                       setShowAccidentModal(true);
                     }}
                     disabled={!canWriteReservations || !canReportAccidentForReservation(selectedReservation)}
-                    className="flex-1 min-w-[200px] px-4 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium disabled:cursor-not-allowed disabled:opacity-60"
+                    className="min-h-11 flex-1 rounded-lg bg-red-600 px-4 py-3 font-medium text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60 sm:min-w-[200px]"
                   >
                     사고 등록
                   </button>
@@ -8682,7 +8682,7 @@ export default function Reservations() {
                       navigate(`/action-required?reservationId=${encodeURIComponent(selectedReservation.id)}`);
                     }}
                     disabled={!canViewActionRequired}
-                    className="flex-1 min-w-[200px] px-4 py-3 bg-gray-100 text-gray-700 hover:bg-gray-200 rounded-lg font-medium disabled:cursor-not-allowed disabled:opacity-60"
+                    className="min-h-11 flex-1 rounded-lg bg-gray-100 px-4 py-3 font-medium text-gray-700 hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-60 sm:min-w-[200px]"
                   >
                     이 차량의 조치항목 보기
                   </button>
@@ -8693,7 +8693,7 @@ export default function Reservations() {
                       }}
                       data-testid="reservation-start-button"
                       disabled={activeReservationAction !== null}
-                      className="flex-1 min-w-[200px] px-4 py-3 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 font-medium disabled:cursor-not-allowed disabled:opacity-60"
+                      className="min-h-11 flex-1 rounded-lg bg-emerald-600 px-4 py-3 font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60 sm:min-w-[200px]"
                     >
                       {activeReservationAction === 'start' ? '처리 중...' : '차량 인수 처리'}
                     </button>
@@ -8705,7 +8705,7 @@ export default function Reservations() {
                       }}
                       data-testid="reservation-cancel-button"
                       disabled={!canTransitionReservations || activeReservationAction !== null}
-                      className="flex-1 min-w-[200px] px-4 py-3 bg-gray-600 text-white rounded-lg hover:bg-gray-700 font-medium disabled:cursor-not-allowed disabled:opacity-60"
+                      className="min-h-11 flex-1 rounded-lg bg-gray-600 px-4 py-3 font-medium text-white hover:bg-gray-700 disabled:cursor-not-allowed disabled:opacity-60 sm:min-w-[200px]"
                     >
                       {activeReservationAction === 'cancel' ? '처리 중...' : '예약 취소'}
                     </button>
@@ -8715,7 +8715,7 @@ export default function Reservations() {
                       onClick={handleReturnClick}
                       data-testid="reservation-return-button"
                       disabled={!canWriteReservations}
-                      className="flex-1 min-w-[200px] px-4 py-3 bg-orange-600 text-white rounded-lg hover:bg-orange-700 font-medium disabled:cursor-not-allowed disabled:opacity-60"
+                      className="min-h-11 flex-1 rounded-lg bg-orange-600 px-4 py-3 font-medium text-white hover:bg-orange-700 disabled:cursor-not-allowed disabled:opacity-60 sm:min-w-[200px]"
                     >
                       차량 반납 처리
                     </button>
@@ -8937,9 +8937,9 @@ export default function Reservations() {
 
         {/* 반납 확인 모달 */}
         {showReturnConfirm && (
-          <div data-testid="reservation-return-confirm-modal" className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onMouseDown={handleReturnConfirmBackdropMouseDown}>
-            <div className="bg-white rounded-xl w-[400px] max-h-[80vh] overflow-y-auto">
-              <div className="p-6">
+          <div data-testid="reservation-return-confirm-modal" className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3 sm:p-4" onMouseDown={handleReturnConfirmBackdropMouseDown}>
+            <div className="max-h-[calc(100dvh-1.5rem)] w-full max-w-[400px] overflow-y-auto rounded-xl bg-white sm:max-h-[80vh]">
+              <div className="p-4 sm:p-6">
                 <div className="flex items-center justify-between mb-6">
                   <h2 className="text-xl font-bold text-[#1e2939]">
                     {resolvedLateReturnActionItemId
