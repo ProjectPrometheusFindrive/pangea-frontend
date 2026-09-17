@@ -53,6 +53,7 @@ import {
   deleteSettingsGarage,
   listSettingsMembers,
   patchSettingsMemberRole,
+  patchSettingsMemberPermissions,
   patchSettingsMemberStatus,
   type SettingsCompanyOption,
   type SettingsCompanyProfile,
@@ -83,13 +84,26 @@ import { formatDateTimeKst } from '../utils/dateTimeFormat';
 import SupportCenter from './SupportCenter';
 
 type TabType = 'bulk' | 'company' | 'geofence' | 'garage' | 'accounts' | 'support';
+
+const MEMBER_ACTION_GRANTS = [
+  { value: 'action.billing.charges.write', label: '청구 항목' },
+  { value: 'action.payments.create', label: '수납 기록' },
+  { value: 'action.payments.confirm', label: '수납 확정' },
+  { value: 'action.payments.allocate', label: '수납 배분' },
+  { value: 'action.payments.void', label: '수납 무효' },
+  { value: 'action.payments.refund', label: '환불' },
+  { value: 'action.billing.waive', label: '면제' },
+  { value: 'action.accident-claims.submit', label: '사고 청구 제출' },
+  { value: 'action.accident-claims.recognize', label: '사고 청구 인식' },
+  { value: 'action.reservations.transition', label: '예약 상태 전환' },
+] as const;
 type UploadType = 'vehicles' | 'reservations' | 'ocr';
 type CurrentDataType = Extract<UploadType, 'vehicles' | 'reservations'>;
 type CompanyField = 'name' | 'businessNumber' | 'phone' | 'email' | 'address';
 type GeofenceField = 'name' | 'lat' | 'lng' | 'radiusMeter' | 'polygon';
 type GarageField = 'name' | 'address';
 type MemberRoleField = 'role';
-type MemberRoleDraftValue = 'admin' | 'member' | 'viewer' | 'delete';
+type MemberRoleDraftValue = 'admin' | 'member' | 'delete';
 type InvitationField = 'email' | 'role' | 'companyId';
 type InvitationStatusFilter = 'pending' | 'accepted' | 'expired' | 'revoked' | 'all';
 type FieldErrorMap<TField extends string> = Partial<Record<TField, string>>;
@@ -887,11 +901,13 @@ export default function Settings() {
 
   const [members, setMembers] = useState<SettingsMember[]>([]);
   const [memberRoleDrafts, setMemberRoleDrafts] = useState<Record<string, string>>({});
+  const [memberPermissionDrafts, setMemberPermissionDrafts] = useState<Record<string, string[]>>({});
   const [memberFieldErrors, setMemberFieldErrors] = useState<Record<string, string>>({});
   const [memberSaveError, setMemberSaveError] = useState<string | null>(null);
   const [memberSaveSuccess, setMemberSaveSuccess] = useState<string | null>(null);
   const [memberRetryAction, setMemberRetryAction] = useState<(() => void) | null>(null);
   const [savingMemberId, setSavingMemberId] = useState<string | null>(null);
+  const [savingPermissionMemberId, setSavingPermissionMemberId] = useState<string | null>(null);
   const [invitations, setInvitations] = useState<Invitation[]>([]);
   const [isInvitationEditorOpen, setIsInvitationEditorOpen] = useState(false);
   const [invitationForm, setInvitationForm] = useState<InvitationFormState>(DEFAULT_INVITATION_FORM_STATE);
@@ -2170,7 +2186,7 @@ export default function Settings() {
     setMemberRetryAction(null);
   }, []);
 
-  const runMemberRoleSave = useCallback(async (memberId: string, role: 'admin' | 'member' | 'viewer') => {
+  const runMemberRoleSave = useCallback(async (memberId: string, role: 'admin' | 'member') => {
     if (!canManageMemberRoles) {
       return;
     }
@@ -2256,7 +2272,7 @@ export default function Settings() {
       return;
     }
 
-    if (nextRoleValue !== 'admin' && nextRoleValue !== 'member' && nextRoleValue !== 'viewer') {
+    if (nextRoleValue !== 'admin' && nextRoleValue !== 'member') {
       setMemberFieldErrors((prevErrors) => ({
         ...prevErrors,
         [memberId]: 'role 값은 admin 또는 member만 허용됩니다.',
@@ -2271,6 +2287,42 @@ export default function Settings() {
 
     void runMemberRoleSave(memberId, nextRoleValue);
   }, [memberRoleDrafts, members, runMemberRoleSave]);
+
+  const handleMemberPermissionToggle = useCallback((memberId: string, permission: string) => {
+    setMemberPermissionDrafts((previous) => {
+      const member = members.find((item) => item.userId === memberId);
+      const current = previous[memberId] ?? member?.permissionGrants ?? [];
+      const next = current.includes(permission)
+        ? current.filter((item) => item !== permission)
+        : [...current, permission];
+      return { ...previous, [memberId]: next };
+    });
+  }, [members]);
+
+  const handleMemberPermissionSave = useCallback(async (memberId: string) => {
+    if (!canManageMemberRoles) return;
+    const member = members.find((item) => item.userId === memberId);
+    if (!member) return;
+    const permissions = memberPermissionDrafts[memberId] ?? member.permissionGrants ?? [];
+    setSavingPermissionMemberId(memberId);
+    try {
+      const updated = await patchSettingsMemberPermissions(memberId, {
+        permissions,
+        companyId: settingsCompanyId ?? undefined,
+      }, { companyId: settingsCompanyId ?? undefined });
+      setMembers((previous) => previous.map((item) => item.userId === memberId ? updated : item));
+      setMemberPermissionDrafts((previous) => {
+        const next = { ...previous };
+        delete next[memberId];
+        return next;
+      });
+      toast.success('개별 권한이 저장되었습니다.');
+    } catch (error) {
+      setMemberSaveError(toErrorMessage(error, '개별 권한 저장에 실패했습니다.'));
+    } finally {
+      setSavingPermissionMemberId(null);
+    }
+  }, [canManageMemberRoles, memberPermissionDrafts, members, settingsCompanyId]);
 
   const handleMemberRoleReset = useCallback((memberId: string) => {
     setMemberRoleDrafts((prevDrafts) => {
@@ -4149,11 +4201,7 @@ export default function Settings() {
                           className="w-full rounded-lg border border-blue-200 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 disabled:bg-gray-100"
                         >
                           <option value="member">운영자</option>
-                          <option value="viewer">조회자</option>
                           <option value="admin">관리자</option>
-                          {isSuperAdmin && (
-                            <option value="installer">장착 기사</option>
-                          )}
                         </select>
                         {invitationFieldErrors.role && (
                           <p className="mt-1 text-xs text-red-600">{invitationFieldErrors.role}</p>
@@ -4206,14 +4254,14 @@ export default function Settings() {
                       )}
                       {members.map((member) => {
                         const draftRole = memberRoleDrafts[member.userId] ?? member.role;
-                        const normalizedDraftRole = draftRole === 'admin' || draftRole === 'viewer' || draftRole === 'delete' ? draftRole : 'member';
-                        const normalizedCurrentRole = member.role === 'admin' || member.role === 'viewer' ? member.role : 'member';
+                        const normalizedDraftRole = draftRole === 'admin' || draftRole === 'delete' ? draftRole : 'member';
+                        const normalizedCurrentRole = member.role === 'admin' ? member.role : 'member';
                         const isRoleDirty = normalizedDraftRole !== normalizedCurrentRole;
                         const isRowSaving = savingMemberId === member.userId;
                         const canEditRowRole = (
                           canManageMemberRoles
                           && member.status === 'approved'
-                          && (member.role === 'admin' || member.role === 'member' || member.role === 'viewer')
+                          && (member.role === 'admin' || member.role === 'member')
                         );
                         const canReviewPendingMember = canReviewPendingMemberStatus(member, user?.role, canManageMemberRoles);
                         const canDeleteMember = canDeleteManagedMember(member, user?.userId, canManageMemberRoles);
@@ -4236,7 +4284,6 @@ export default function Settings() {
                                 >
                                   <option value="admin">관리자</option>
                                   <option value="member">운영자</option>
-                                  <option value="viewer">조회자</option>
                                   {canDeleteMember && (
                                     <option value="delete">삭제</option>
                                   )}
@@ -4245,6 +4292,25 @@ export default function Settings() {
                                 <span className={`rounded-full px-2 py-1 text-xs font-medium ${getRoleBadgeColor(member.role)}`}>
                                   {toRoleLabel(member.role)}
                                 </span>
+                              )}
+                              {canManageMemberRoles && member.status === 'approved' && member.role === 'member' && (
+                                <div className="mt-2 space-y-1 text-[11px]">
+                                  <span className="block text-gray-500">개별 추가 권한</span>
+                                  {MEMBER_ACTION_GRANTS.map((grant) => {
+                                    const selected = (memberPermissionDrafts[member.userId] ?? member.permissionGrants ?? []).includes(grant.value);
+                                    return (
+                                      <label key={grant.value} className="flex items-center gap-1 text-gray-600">
+                                        <input type="checkbox" checked={selected} disabled={savingPermissionMemberId === member.userId} onChange={() => handleMemberPermissionToggle(member.userId, grant.value)} />
+                                        {grant.label}
+                                      </label>
+                                    );
+                                  })}
+                                  {memberPermissionDrafts[member.userId] && (
+                                    <button type="button" className="text-blue-600 hover:text-blue-800" disabled={savingPermissionMemberId === member.userId} onClick={() => { void handleMemberPermissionSave(member.userId); }}>
+                                      {savingPermissionMemberId === member.userId ? '저장 중...' : '권한 저장'}
+                                    </button>
+                                  )}
+                                </div>
                               )}
                             </td>
                             <td className="whitespace-nowrap px-6 py-4">
@@ -4317,7 +4383,7 @@ export default function Settings() {
                   <div className="space-y-1 text-sm text-gray-600">
                     <p><span className="font-medium">관리자(admin):</span> 멤버 권한 및 운영 설정 변경 가능</p>
                     <p><span className="font-medium">운영자(member):</span> 데이터 조회/운영 기능 사용, 설정 변경 제한</p>
-                    <p><span className="font-medium">조회자(viewer):</span> 데이터 조회 전용</p>
+                    <p><span className="font-medium">기존 조회자(viewer):</span> member로 마이그레이션됨</p>
                     <p><span className="font-medium">상태:</span> approved(활성), pending(승인 대기), rejected(거절), withdrawn(탈퇴)</p>
                   </div>
                 </div>

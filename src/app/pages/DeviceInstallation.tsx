@@ -17,6 +17,7 @@ import { getAssetsList } from '../../services/assets';
 import {
   createDeviceInstallation,
   getDeviceInstallationList,
+  patchDeviceInstallationStatus,
   type DeviceInstallationItem,
   type DeviceInstallationStatus,
 } from '../../services/deviceInstallations';
@@ -236,6 +237,10 @@ export default function DeviceInstallation() {
   const [pageNotice, setPageNotice] = useState<string | null>(null);
 
   const [vin, setVin] = useState('');
+  const [companyScope, setCompanyScope] = useState('');
+  const targetCompanyId = user?.role === 'super_admin' ? companyScope : user?.companyId;
+  const hasCompanyScope = user?.role !== 'super_admin' || Boolean(companyScope);
+  const [installerId, setInstallerId] = useState('');
   const [deviceSerial, setDeviceSerial] = useState('');
   const [installationPhotoFile, setInstallationPhotoFile] = useState<File | null>(null);
   const [installationPhotoPreview, setInstallationPhotoPreview] = useState<string>('');
@@ -244,6 +249,13 @@ export default function DeviceInstallation() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [activeStatusMutationId, setActiveStatusMutationId] = useState<string | null>(null);
+  const [pendingInstallation, setPendingInstallation] = useState<DeviceInstallationItem | null>(null);
+  const selectedInstallation = useMemo(
+    () => (pendingInstallation?.vin === vin ? pendingInstallation : null)
+      ?? installations.find((item) => item.vin === vin && !['completed', 'cancelled'].includes(item.status)),
+    [installations, pendingInstallation, vin],
+  );
 
   useEffect(() => () => {
     if (installationPhotoPreview) {
@@ -305,12 +317,15 @@ export default function DeviceInstallation() {
     })
   ), [installations, vehicleOptionsByVin]);
 
-  const fetchList = useCallback((signal: AbortSignal) => getDeviceInstallationList({
+  const fetchList = useCallback((signal: AbortSignal) => !hasCompanyScope
+    ? Promise.resolve({ items: [], total: 0, page: 1, pageSize: PAGE_SIZE })
+    : getDeviceInstallationList({
     page,
     pageSize: PAGE_SIZE,
     status: listStatus,
+    companyId: targetCompanyId || undefined,
     signal,
-  }), [listStatus, page]);
+  }), [hasCompanyScope, targetCompanyId, listStatus, page]);
 
   const handleListSuccess = useCallback((payload: { items: DeviceInstallationItem[]; total: number }) => {
     setInstallations(payload.items);
@@ -340,26 +355,29 @@ export default function DeviceInstallation() {
   });
 
   const hydrateVehicleOptions = useCallback(async () => {
+    if (!hasCompanyScope) { setVehicleOptions([]); return; }
     try {
       const payload = await getAssetsList({
         page: 1,
         size: 200,
+        companyId: targetCompanyId || undefined,
       });
       setVehicleOptions(toVehicleOptions(payload));
     } catch {
       setVehicleOptions([]);
     }
-  }, []);
+  }, [hasCompanyScope, targetCompanyId]);
 
   const hydrateSummary = useCallback(async () => {
     setSummaryError(null);
+    if (!hasCompanyScope) { setSummary(EMPTY_SUMMARY); return; }
 
     try {
       const [scheduled, inProgress, completed, cancelled] = await Promise.all([
-        getDeviceInstallationList({ page: 1, pageSize: 1, status: 'scheduled' }),
-        getDeviceInstallationList({ page: 1, pageSize: 1, status: 'in_progress' }),
-        getDeviceInstallationList({ page: 1, pageSize: 1, status: 'completed' }),
-        getDeviceInstallationList({ page: 1, pageSize: 1, status: 'cancelled' }),
+        getDeviceInstallationList({ page: 1, pageSize: 1, status: 'scheduled', companyId: targetCompanyId }),
+        getDeviceInstallationList({ page: 1, pageSize: 1, status: 'in_progress', companyId: targetCompanyId }),
+        getDeviceInstallationList({ page: 1, pageSize: 1, status: 'completed', companyId: targetCompanyId }),
+        getDeviceInstallationList({ page: 1, pageSize: 1, status: 'cancelled', companyId: targetCompanyId }),
       ]);
 
       setSummary({
@@ -372,7 +390,7 @@ export default function DeviceInstallation() {
       console.error(error);
       setSummaryError('집계 데이터를 불러오지 못했습니다.');
     }
-  }, []);
+  }, [hasCompanyScope, targetCompanyId]);
 
   useEffect(() => {
     void hydrateInstallations();
@@ -430,6 +448,7 @@ export default function DeviceInstallation() {
     }
 
     setVin('');
+    setInstallerId('');
     setDeviceSerial('');
     setInstallationPhotoFile(null);
     setInstallationPhotoPreview('');
@@ -450,7 +469,8 @@ export default function DeviceInstallation() {
     const normalizedVin = vin.trim().toUpperCase();
     const normalizedDeviceSerial = deviceSerial.trim().toUpperCase();
 
-    if (!normalizedVin || !normalizedDeviceSerial || !installationPhotoFile || !serialPhotoFile) {
+    const creatingSuperTask = user?.role === 'super_admin' && !selectedInstallation;
+    if (!normalizedVin || (!creatingSuperTask && (!normalizedDeviceSerial || !installationPhotoFile || !serialPhotoFile)) || (creatingSuperTask && !companyScope)) {
       setActionError('VIN, 단말 시리얼, 장착/시리얼 사진을 모두 입력해 주세요.');
       return;
     }
@@ -458,21 +478,38 @@ export default function DeviceInstallation() {
     setIsSubmitting(true);
 
     try {
+      if (creatingSuperTask) {
+        const created = await createDeviceInstallation({ vin: normalizedVin, scheduledAt: new Date().toISOString(), installer: installerId.trim() || undefined, companyId: companyScope }, { companyId: companyScope });
+        setPendingInstallation(created);
+        setActionMessage('장착 작업이 생성되었습니다.');
+        await refreshAll();
+        return;
+      }
       const [installationPhotoDataUrl, serialPhotoDataUrl] = await Promise.all([
         readFileAsDataUrl(installationPhotoFile),
         readFileAsDataUrl(serialPhotoFile),
       ]);
 
-      await createDeviceInstallation({
-        vin: normalizedVin,
-        scheduledAt: new Date().toISOString(),
-        installer: user?.name ?? undefined,
+      let installationId = selectedInstallation?.id;
+      if (!installationId) {
+        throw new ApiError('NOT_FOUND', '배정된 장착 작업을 먼저 선택해 주세요.', { status: 404 });
+      } else {
+        if (selectedInstallation.status !== 'in_progress') {
+          const started = await patchDeviceInstallationStatus(installationId, { status: 'in_progress' }, { companyId: targetCompanyId });
+          setPendingInstallation(started);
+        }
+      }
+      if (!installationId) throw new ApiError('NOT_FOUND', '장착 작업을 찾을 수 없습니다.', { status: 404 });
+      await patchDeviceInstallationStatus(installationId, {
+        status: 'completed',
+        installedAt: new Date().toISOString(),
         deviceSerial: normalizedDeviceSerial,
         photos: [installationPhotoDataUrl, serialPhotoDataUrl],
-      });
+      }, { companyId: targetCompanyId });
 
       setActionMessage('장착 완료가 등록되었습니다.');
       resetForm();
+      setPendingInstallation(null);
       setPage(1);
       await refreshAll();
     } catch (error) {
@@ -490,9 +527,35 @@ export default function DeviceInstallation() {
     refreshAll,
     resetForm,
     serialPhotoFile,
-    user?.name,
+    selectedInstallation,
+    installerId,
+    companyScope,
+    targetCompanyId,
+    user?.companyId,
+    user?.role,
     vin,
   ]);
+
+  const handleCancelInstallation = useCallback(async (installationId: string) => {
+    if (!canWriteDeviceInstallation || activeStatusMutationId) return;
+    const reason = typeof window !== 'undefined' ? window.prompt('취소 사유를 입력해 주세요.')?.trim() ?? '' : '';
+    if (!reason) {
+      setActionError('장착 작업 취소 사유는 필수입니다.');
+      return;
+    }
+    setActiveStatusMutationId(installationId);
+    setActionError(null);
+    try {
+      await patchDeviceInstallationStatus(installationId, { status: 'cancelled', cancelReason: reason }, { companyId: targetCompanyId });
+      if (pendingInstallation?.id === installationId) setPendingInstallation(null);
+      setActionMessage('장착 작업이 취소되었습니다.');
+      await refreshAll();
+    } catch (error) {
+      setActionError(toActionErrorMessage(error));
+    } finally {
+      setActiveStatusMutationId(null);
+    }
+  }, [activeStatusMutationId, canWriteDeviceInstallation, refreshAll, targetCompanyId, pendingInstallation]);
 
   const totalPages = useMemo(() => Math.max(1, Math.ceil(totalCount / PAGE_SIZE)), [totalCount]);
 
@@ -540,6 +603,15 @@ export default function DeviceInstallation() {
           )}
 
           <div className="flex gap-3 items-end flex-wrap">
+            {user?.role === 'super_admin' && (
+              <div className="flex-shrink-0" style={{ width: '150px' }}>
+                <label className="block text-xs font-semibold text-gray-700 mb-1">회사 scope</label>
+                <input data-testid="device-installation-company-input" value={companyScope} onChange={(event) => {
+                  setCompanyScope(event.target.value.trim()); setPage(1); setPendingInstallation(null);
+                  setInstallations([]); setVehicleOptions([]); resetForm(); setActionError(null); setActionMessage(null);
+                }} placeholder="companyId (필수)" disabled={isSubmitting} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+              </div>
+            )}
             <div className="flex-shrink-0" style={{ width: '180px' }}>
               <label className="block text-xs font-semibold text-gray-700 mb-1">
                 차량번호
@@ -566,6 +638,13 @@ export default function DeviceInstallation() {
                 </p>
               )}
             </div>
+
+            {user?.role === 'super_admin' && (
+              <div className="flex-shrink-0" style={{ width: '180px' }}>
+                <label className="block text-xs font-semibold text-gray-700 mb-1">담당 installer</label>
+                <input data-testid="device-installation-installer-input" value={installerId} onChange={(e) => setInstallerId(e.target.value)} placeholder="installer userId" disabled={isSubmitting} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+              </div>
+            )}
 
             <div className="flex-shrink-0" style={{ width: '180px' }}>
               <label className="block text-xs font-semibold text-gray-700 mb-1">
@@ -716,7 +795,7 @@ export default function DeviceInstallation() {
                   void handleCreateInstallation();
                 }}
                 data-testid="device-installation-submit"
-                disabled={!canWriteDeviceInstallation || isSubmitting || !vin || !deviceSerial || !installationPhotoFile || !serialPhotoFile}
+                disabled={!canWriteDeviceInstallation || isSubmitting || isInstallationsLoading || !vin || (user?.role === 'super_admin' ? !companyScope : !deviceSerial || !installationPhotoFile || !serialPhotoFile)}
                 className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-bold text-sm disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
               >
                 {isSubmitting ? (
@@ -724,7 +803,7 @@ export default function DeviceInstallation() {
                 ) : (
                   <Zap className="w-4 h-4" />
                 )}
-                장착 완료
+                {user?.role === 'super_admin' ? '작업 생성' : '장착 완료'}
               </button>
             </div>
           </div>
@@ -788,6 +867,7 @@ export default function DeviceInstallation() {
                     <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">Health Check</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">장착사진</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">시리얼사진</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">작업</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
@@ -802,7 +882,6 @@ export default function DeviceInstallation() {
                       <td className="px-4 py-3">
                         {getDisplayStatusBadge(row.displayStatus)}
                       </td>
-
                       <td className="px-4 py-3">
                         <span className="text-sm font-semibold text-gray-900">{row.vehicleNumber}</span>
                       </td>
@@ -826,15 +905,16 @@ export default function DeviceInstallation() {
                       </td>
 
                       <td className="px-4 py-3">
-                        {row.installation.installer ? (
-                          <span className="text-sm text-gray-700">{row.installation.installer}</span>
+                        {row.installation.completedBy || row.installation.installer ? (
+                          <span className="text-sm text-gray-700">{row.installation.completedBy || row.installation.installer}</span>
                         ) : (
                           <span className="text-xs text-gray-400">-</span>
                         )}
                       </td>
 
                       <td className="px-4 py-3">
-                        <span className="text-xs text-gray-600">{formatDateTime(row.installation.installedAt)}</span>
+                        <span className="text-xs text-gray-600">{formatDateTime(row.installation.completedAt || row.installation.installedAt)}</span>
+                        {row.installation.cancelReason && <p className="text-xs text-gray-500">취소 사유: {row.installation.cancelReason}</p>}
                       </td>
 
                       <td className="px-4 py-3">
@@ -864,6 +944,13 @@ export default function DeviceInstallation() {
                           </button>
                         ) : (
                           <span className="text-xs text-gray-400">-</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        {canWriteDeviceInstallation && !['completed', 'cancelled'].includes(row.installation.status) && (
+                          <button type="button" className="text-xs text-red-600 hover:text-red-800 disabled:opacity-50" disabled={activeStatusMutationId === row.installation.id} onClick={() => { void handleCancelInstallation(row.installation.id); }}>
+                            취소
+                          </button>
                         )}
                       </td>
                     </tr>

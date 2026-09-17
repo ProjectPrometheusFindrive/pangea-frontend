@@ -95,10 +95,10 @@ test.describe('SCRUM-183 Home E2E', () => {
         },
         'GET /api/v2/action-items': async ({ route }) => {
           await fulfillSuccess(route, buildActionItemsPayload([
-            { id: 'action-overdue-1', vehicleNumber: '12가3456', type: '반납 지연' },
-            { id: 'action-overdue-2', vehicleNumber: '23가4567', type: '반납 지연' },
-            { id: 'action-overdue-3', vehicleNumber: '34가5678', type: '반납 지연' },
-            { id: 'action-payment-1', vehicleNumber: '45가6789', type: '미납/결제 문제' },
+            { id: 'action-overdue-1', vehicleNumber: '12가3456', type: '반납/회수' },
+            { id: 'action-overdue-2', vehicleNumber: '23가4567', type: '반납/회수' },
+            { id: 'action-overdue-3', vehicleNumber: '34가5678', type: '반납/회수' },
+            { id: 'action-payment-1', vehicleNumber: '45가6789', type: '정산/수납' },
           ]));
         },
         'GET /api/v2/auth/me': async ({ route }) => {
@@ -139,13 +139,13 @@ test.describe('SCRUM-183 Home E2E', () => {
 
     await page.goto('/');
 
-    const overdueCard = getMetricCard(page, '반납 지연');
-    const unpaidCard = getMetricCard(page, '미납/결제 문제');
+    const overdueCard = getMetricCard(page, '반납/회수');
+    const unpaidCard = getMetricCard(page, '정산/수납');
 
     await expect(overdueCard).toBeVisible();
     await expect(overdueCard).toContainText('3');
     await expect(unpaidCard).toContainText('1');
-    await expect(unpaidCard).toContainText('미납/결제 문제');
+    await expect(unpaidCard).toContainText('정산/수납');
 
     await Promise.all([
       page.waitForURL(/\/action-required\?filter=/),
@@ -277,7 +277,7 @@ test.describe('SCRUM-183 Home E2E', () => {
       page.getByTestId('home-today-card-return').click(),
     ]);
 
-    await expect(page.getByRole('button', { name: '반납' })).toHaveClass(/bg-blue-600/);
+    await expect(page.getByRole('button', { name: '반납', exact: true })).toHaveClass(/bg-blue-600/);
   });
 });
 
@@ -690,6 +690,6 @@ test.describe('SCRUM-184 Home premium CTA E2E', () => {
 
     await expect(deviceOffCard).toBeVisible();
     await expect(deviceOffCard).toContainText('0');
-    await expect(deviceOffCard).toContainText('단말 장착 차량만');
+    await expect(deviceOffCard).toContainText('서비스 신청');
   });
 });

@@ -69,6 +69,9 @@ import {
   reportReservationAccident,
   returnReservation,
   transitionReservation,
+  verifyReservationLicense,
+  type LicenseVerificationResult,
+  type LicenseVerificationRecord,
 } from '../../services/reservations';
 import { createSettingsGarage, listSettingsGarages, listSettingsMembers, type SettingsGarage, type SettingsMember } from '../../services/settings';
 
@@ -318,6 +321,18 @@ function toIsoDateTimeFromDateAndTime(dateValue: string, timeValue: string): str
     return null;
   }
   return parsed.toISOString();
+}
+
+// datetime-local has no timezone and must represent the business timezone,
+// regardless of the browser's local timezone. Interpret the entered wall time
+// as Asia/Seoul (+09:00) before serializing it for the API.
+function toKstIsoFromDateTimeLocal(value: string): string | undefined {
+  const match = value.trim().match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+  if (!match) return undefined;
+  const [, year, month, day, hour, minute] = match;
+  const utcMillis = Date.UTC(Number(year), Number(month) - 1, Number(day), Number(hour) - 9, Number(minute));
+  const parsed = new Date(utcMillis);
+  return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
 }
 
 function parseDateOnly(value: string | null | undefined): Date | null {
@@ -2302,6 +2317,7 @@ function toReservationAccidentReport(value: unknown): ReservationAccidentReport 
     accidentType: toStringValue(value.accidentType) ?? undefined,
     description: toStringValue(value.description) ?? undefined,
     blackboxFileName: toStringValue(value.blackboxFileName) ?? undefined,
+    blackboxUnavailableReason: toStringValue(value.blackboxUnavailableReason) ?? undefined,
     blackboxGcsObjectName: toStringValue(value.blackboxGcsObjectName) ?? undefined,
     accidentEvidenceDocuments,
     accidentEvidenceDocumentDetails,
@@ -2542,6 +2558,18 @@ function toReservationRow(row: unknown, index: number): Reservation | null {
   }
 
   const parties = toReservationParties(row.parties);
+  const rawLicenseVerification = isRecord(row.licenseVerification) ? row.licenseVerification : undefined;
+  const licenseVerification = rawLicenseVerification && (
+    rawLicenseVerification.result === 'verified'
+      || rawLicenseVerification.result === 'rejected'
+      || rawLicenseVerification.result === 'unverifiable'
+  ) ? {
+    result: rawLicenseVerification.result,
+    memo: toStringValue(rawLicenseVerification.memo) ?? undefined,
+    checkedBy: toStringValue(rawLicenseVerification.checkedBy) ?? undefined,
+    checkedByName: toStringValue(rawLicenseVerification.checkedByName) ?? undefined,
+    checkedAt: toStringValue(rawLicenseVerification.checkedAt) ?? undefined,
+  } : undefined;
   const customer = reservationDisplayName(row, parties);
   const reservationId = toStringValue(row.id)
     ?? toStringValue(row.reservationId)
@@ -2656,6 +2684,7 @@ function toReservationRow(row: unknown, index: number): Reservation | null {
     accidentClaim,
     accidentReport,
     parties,
+    licenseVerification,
     startDateFull: startDateLabel,
     endDateFull: endDateLabel,
   };
@@ -2947,8 +2976,19 @@ export default function Reservations() {
   const { canPerformAction, canAccessRoute } = useAuthorization();
   const canWriteReservations = canPerformAction(ACTION_PERMISSIONS.reservationsWrite);
   const canWritePayments = canPerformAction(ACTION_PERMISSIONS.paymentsWrite);
+  const canCreateCharge = canWritePayments || canPerformAction(ACTION_PERMISSIONS.billingChargesWrite);
+  const canCreatePayment = canWritePayments || canPerformAction(ACTION_PERMISSIONS.paymentsCreate);
+  const canConfirmPayment = canWritePayments || canPerformAction(ACTION_PERMISSIONS.paymentsConfirm);
+  const canAllocatePayment = canWritePayments || canPerformAction(ACTION_PERMISSIONS.paymentsAllocate);
+  const canVoidPayment = canWritePayments || canPerformAction(ACTION_PERMISSIONS.paymentsVoid);
+  const canRefundPayment = canWritePayments || canPerformAction(ACTION_PERMISSIONS.paymentsRefund);
+  const canWaivePayment = canWritePayments || canPerformAction(ACTION_PERMISSIONS.billingWaive);
+  const canDraftClaim = canWritePayments || canPerformAction(ACTION_PERMISSIONS.accidentClaimsDraft);
+  const canSubmitClaim = canWritePayments || canPerformAction(ACTION_PERMISSIONS.accidentClaimsSubmit);
+  const canRecognizeClaim = canWritePayments || canPerformAction(ACTION_PERMISSIONS.accidentClaimsRecognize);
   const canTransitionReservations = canWriteReservations
-    && ['admin', 'super_admin'].includes((user?.role ?? '').trim().toLowerCase());
+    && (canPerformAction(ACTION_PERMISSIONS.reservationsTransition)
+      || ['admin', 'super_admin'].includes((user?.role ?? '').trim().toLowerCase()));
   const canViewAssets = canAccessRoute(ROUTE_PERMISSIONS.assets);
   const canViewActionRequired = canAccessRoute(ROUTE_PERMISSIONS.actionRequired);
   const page = DEFAULT_PAGE;
@@ -3021,7 +3061,7 @@ export default function Reservations() {
     method: '카드',
     payerType: 'customer',
     paidAt: toDateLabelFromOffset(0),
-    confirmationStatus: 'confirmed',
+    confirmationStatus: canConfirmPayment ? 'confirmed' : 'needs_confirmation',
     allocationMode: 'auto',
     allocations: [],
     depositorName: '',
@@ -3045,9 +3085,15 @@ export default function Reservations() {
   const [editReason, setEditReason] = useState('');
   const [isEditSubmitting, setIsEditSubmitting] = useState(false);
   const [editSubmitError, setEditSubmitError] = useState<string | null>(null);
+  const [editInspectionAckRequired, setEditInspectionAckRequired] = useState(false);
   const [activeReservationActionItems, setActiveReservationActionItems] = useState<ReservationActiveActionItem[]>([]);
   const [isActiveActionItemsLoading, setIsActiveActionItemsLoading] = useState(false);
   const [activeActionItemsError, setActiveActionItemsError] = useState<string | null>(null);
+  const [licenseVerificationResult, setLicenseVerificationResult] = useState<LicenseVerificationResult>('unverifiable');
+  const [licenseVerificationMemo, setLicenseVerificationMemo] = useState('');
+  const [licenseVerificationRecord, setLicenseVerificationRecord] = useState<LicenseVerificationRecord | null>(null);
+  const [licenseVerificationError, setLicenseVerificationError] = useState<string | null>(null);
+  const [isLicenseVerificationSaving, setIsLicenseVerificationSaving] = useState(false);
 
   // 동적 날짜 로딩을 위한 상태
   const [totalDaysToShow, setTotalDaysToShow] = useState(DEFAULT_TOTAL_DAYS_TO_SHOW); // 초기 6주
@@ -3074,7 +3120,7 @@ export default function Reservations() {
       method: normalizePaymentMethod(selectedReservation?.paymentMethod ?? '카드'),
       payerType: selectedReservation?.billingSummary?.billingPlan?.payerType ?? selectedReservation?.parties?.payer?.type ?? 'customer',
       paidAt: toDateLabelFromOffset(0),
-      confirmationStatus: 'confirmed',
+      confirmationStatus: canConfirmPayment ? 'confirmed' : 'needs_confirmation',
       allocationMode: 'auto',
       allocations: [],
       depositorName: '',
@@ -3084,7 +3130,7 @@ export default function Reservations() {
     setEditingAllocationRecordId(null);
     setAllocationEditDraft([]);
     setActiveChargeItemExceptionDraft(null);
-  }, [selectedReservation?.id, selectedReservation?.paymentMethod, selectedReservation?.billingSummary?.billingPlan?.payerType, selectedReservation?.parties?.payer?.type]);
+  }, [canConfirmPayment, selectedReservation?.id, selectedReservation?.paymentMethod, selectedReservation?.billingSummary?.billingPlan?.payerType, selectedReservation?.parties?.payer?.type]);
   const reservationCalendarCacheKey = useMemo(() => {
     const fetchWindows = buildReservationFetchWindows({
       currentWeekStart,
@@ -4371,9 +4417,36 @@ export default function Reservations() {
     setIsPaymentCompleting(false);
     setPendingReservationPaymentConfirmation(null);
     setReservationActionError(null);
+    setLicenseVerificationError(null);
+    setLicenseVerificationRecord(reservation.licenseVerification ?? null);
+    setLicenseVerificationResult(reservation.licenseVerification?.result ?? 'unverifiable');
+    setLicenseVerificationMemo(reservation.licenseVerification?.memo ?? '');
     setActiveReservationAction(null);
     void hydrateReservationDetail(reservation.id, reservation);
   }, [hydrateReservationDetail, vehicleAssets]);
+
+  const handleVerifyReservationLicense = useCallback(async () => {
+    if (!selectedReservation || !canWriteReservations || isLicenseVerificationSaving) return;
+    setIsLicenseVerificationSaving(true);
+    setLicenseVerificationError(null);
+    try {
+      const response = await verifyReservationLicense(selectedReservation.id, {
+        result: licenseVerificationResult,
+        ...(licenseVerificationMemo.trim() ? { memo: licenseVerificationMemo.trim() } : {}),
+      });
+      const record = (response && typeof response === 'object' && 'licenseVerification' in response
+        ? (response as { licenseVerification?: LicenseVerificationRecord }).licenseVerification
+        : response) as LicenseVerificationRecord;
+      setLicenseVerificationRecord(record);
+      setLicenseVerificationResult(record.result);
+      setLicenseVerificationMemo(record.memo ?? '');
+      setSelectedReservation((previous) => previous ? { ...previous, licenseVerification: record } : previous);
+    } catch (error) {
+      setLicenseVerificationError(error instanceof ApiError ? error.message : '수동 면허 확인을 저장하지 못했습니다. 입력값을 확인해 주세요.');
+    } finally {
+      setIsLicenseVerificationSaving(false);
+    }
+  }, [canWriteReservations, isLicenseVerificationSaving, licenseVerificationMemo, licenseVerificationResult, selectedReservation]);
 
   const refreshReservationsAfterMutation = useCallback((warningMessage: string) => {
     void hydrateReservationsData().catch(() => {
@@ -4533,7 +4606,7 @@ export default function Reservations() {
         },
       };
     }
-    if (assetWarning.prompt) {
+    if (assetWarning.prompt && formValues.inspectionAcknowledged !== true) {
       const shouldProceed = await confirmReservationWarning(assetWarning.prompt);
       if (!shouldProceed) {
         return {
@@ -4825,6 +4898,7 @@ export default function Reservations() {
         startAt,
         endAt,
         contractStatus: nextContractStatus,
+        inspectionAcknowledged: formValues.inspectionAcknowledged === true ? true : undefined,
         vehicleNumber: formValues.selectedVehicle,
         plate: formValues.selectedVehicle,
         parties,
@@ -4928,6 +5002,12 @@ export default function Reservations() {
           };
         }
         if (error.status === 409) {
+          if (error.code === 'INSPECTION_ACK_REQUIRED' || error.message.includes('INSPECTION_ACK_REQUIRED')) {
+            return {
+              formError: 'INSPECTION_ACK_REQUIRED: 예약 기간 중 정기점검 만료가 예정되어 있습니다. 경고 내용을 확인하고 다시 제출해 주세요.',
+              fieldErrors: { selectedVehicle: '정기점검 경고 확인이 필요합니다.' },
+            };
+          }
           return {
             formError: error.message || '동일한 예약이 이미 존재합니다. 입력값을 확인해 주세요.',
           };
@@ -4954,7 +5034,7 @@ export default function Reservations() {
   const handleUpdateReservationPaymentStatus = useCallback(async (
     nextStatus: 'paid' | 'canceled',
   ) => {
-    if (!canWritePayments) {
+    if (!canConfirmPayment) {
       setReservationActionError('결제 상태 변경 권한이 없습니다. 관리자에게 권한을 요청해 주세요.');
       return;
     }
@@ -5033,7 +5113,7 @@ export default function Reservations() {
       setIsPaymentCompleting(false);
     }
   }, [
-    canWritePayments,
+    canConfirmPayment,
     hasSelectedReservationBillingLedger,
     hydrateReservationDetail,
     hydrateReservationsData,
@@ -5044,7 +5124,7 @@ export default function Reservations() {
   ]);
 
   const handleSaveAdditionalPaymentAmount = useCallback(async () => {
-    if (!canWritePayments) {
+    if (!canCreateCharge) {
       setReservationActionError('추가 결제 금액 수정 권한이 없습니다. 관리자에게 권한을 요청해 주세요.');
       return;
     }
@@ -5093,7 +5173,7 @@ export default function Reservations() {
       setIsPaymentAmountSaving(false);
     }
   }, [
-    canWritePayments,
+    canCreateCharge,
     hasSelectedReservationBillingLedger,
     hydrateReservationDetail,
     isPaymentAmountSaving,
@@ -5104,7 +5184,7 @@ export default function Reservations() {
   ]);
 
   const handleSaveReservationPaymentMethod = useCallback(async () => {
-    if (!canWritePayments) {
+    if (!canCreatePayment) {
       setReservationActionError('결제 방법 수정 권한이 없습니다. 관리자에게 권한을 요청해 주세요.');
       return;
     }
@@ -5158,7 +5238,7 @@ export default function Reservations() {
       setIsPaymentMethodSaving(false);
     }
   }, [
-    canWritePayments,
+    canCreatePayment,
     hasSelectedReservationBillingLedger,
     hydrateReservationDetail,
     isPaymentMethodSaving,
@@ -5187,7 +5267,7 @@ export default function Reservations() {
   }, []);
 
   const handleCreateManualChargeItem = useCallback(async () => {
-    if (!selectedReservation || !canWritePayments || isChargeItemCreating) {
+    if (!selectedReservation || !canCreateCharge || isChargeItemCreating) {
       return;
     }
     const amount = toCurrencyNumberValue(chargeItemDraft.amount);
@@ -5230,7 +5310,7 @@ export default function Reservations() {
       setIsChargeItemCreating(false);
     }
   }, [
-    canWritePayments,
+    canCreateCharge,
     chargeItemDraft,
     hydrateReservationDetail,
     isChargeItemCreating,
@@ -5240,7 +5320,12 @@ export default function Reservations() {
   ]);
 
   const handleCreateManualPaymentRecord = useCallback(async () => {
-    if (!selectedReservation || !canWritePayments || isPaymentRecordCreating) {
+    if (!selectedReservation || !canCreatePayment || isPaymentRecordCreating) {
+      return;
+    }
+    if ((paymentRecordDraft.confirmationStatus === 'confirmed' && !canConfirmPayment)
+      || (paymentRecordDraft.allocationMode === 'manual' && !canAllocatePayment)) {
+      setReservationActionError('수납 확정 또는 수동 배정 권한이 없습니다.');
       return;
     }
     const amount = toCurrencyNumberValue(paymentRecordDraft.amount);
@@ -5285,7 +5370,7 @@ export default function Reservations() {
         method: normalizePaymentMethod(selectedReservation.paymentMethod ?? '카드'),
         payerType: selectedReservationDefaultPayerType ?? 'customer',
         paidAt: toDateLabelFromOffset(0),
-        confirmationStatus: 'confirmed',
+        confirmationStatus: canConfirmPayment ? 'confirmed' : 'needs_confirmation',
         allocationMode: 'auto',
         allocations: [],
         depositorName: '',
@@ -5301,7 +5386,9 @@ export default function Reservations() {
       setIsPaymentRecordCreating(false);
     }
   }, [
-    canWritePayments,
+    canCreatePayment,
+    canConfirmPayment,
+    canAllocatePayment,
     hydrateReservationDetail,
     isPaymentRecordCreating,
     paymentRecordDraft,
@@ -5312,7 +5399,7 @@ export default function Reservations() {
   ]);
 
   const handleSavePaymentRecordAllocations = useCallback(async (record: ReservationPaymentRecord) => {
-    if (!selectedReservation || !canWritePayments || activePaymentRecordMutationId) {
+    if (!selectedReservation || !canAllocatePayment || activePaymentRecordMutationId) {
       return;
     }
     const allocations = allocationEditDraft
@@ -5350,14 +5437,14 @@ export default function Reservations() {
   }, [
     activePaymentRecordMutationId,
     allocationEditDraft,
-    canWritePayments,
+    canAllocatePayment,
     hydrateReservationDetail,
     refreshReservationsAfterMutation,
     selectedReservation,
   ]);
 
   const handleConfirmManualPaymentRecord = useCallback(async (record: ReservationPaymentRecord) => {
-    if (!selectedReservation || !canWritePayments || activePaymentRecordMutationId) {
+    if (!selectedReservation || !canConfirmPayment || activePaymentRecordMutationId) {
       return;
     }
     setActivePaymentRecordMutationId(record.id);
@@ -5372,7 +5459,7 @@ export default function Reservations() {
     } finally {
       setActivePaymentRecordMutationId(null);
     }
-  }, [activePaymentRecordMutationId, canWritePayments, hydrateReservationDetail, refreshReservationsAfterMutation, selectedReservation]);
+  }, [activePaymentRecordMutationId, canConfirmPayment, hydrateReservationDetail, refreshReservationsAfterMutation, selectedReservation]);
 
   const handleOpenChargeItemException = useCallback((
     item: ReservationChargeItem,
@@ -5467,7 +5554,12 @@ export default function Reservations() {
   }, []);
 
   const handleSubmitChargeItemException = useCallback(async () => {
-    if (!selectedReservation || !canWritePayments || !activeChargeItemExceptionDraft || isChargeItemExceptionSaving) {
+    const exceptionPermission = activeChargeItemExceptionDraft?.action === 'refund_complete'
+      ? canRefundPayment
+      : activeChargeItemExceptionDraft?.action === 'refund_waive' || activeChargeItemExceptionDraft?.action === 'waive'
+        ? canWaivePayment
+        : canWritePayments;
+    if (!selectedReservation || !exceptionPermission || !activeChargeItemExceptionDraft || isChargeItemExceptionSaving) {
       return;
     }
     const item = selectedReservationChargeItems.find((chargeItem) => chargeItem.id === activeChargeItemExceptionDraft.itemId);
@@ -5493,16 +5585,15 @@ export default function Reservations() {
         switch (activeChargeItemExceptionDraft.action) {
           case 'refund_complete':
             return {
-              status: 'paid',
-              paidAmount: item.amount,
+              status: 'refunded',
               refundCompletedAt: new Date().toISOString(),
               refundMethod: 'manual',
               refundReason: reason,
             };
           case 'refund_waive':
-            return { status: 'waived', paidAmount: 0, refundReason: reason };
+            return { status: 'waived', refundReason: reason };
           case 'waive':
-            return { status: 'waived', paidAmount: 0 };
+            return { status: 'waived' };
           case 'dispute':
             return { status: 'disputed' };
           case 'release_dispute':
@@ -5529,6 +5620,8 @@ export default function Reservations() {
     }
   }, [
     activeChargeItemExceptionDraft,
+    canRefundPayment,
+    canWaivePayment,
     canWritePayments,
     hydrateReservationDetail,
     isChargeItemExceptionSaving,
@@ -5538,7 +5631,7 @@ export default function Reservations() {
   ]);
 
   const handleVoidPaymentRecord = useCallback(async (record: ReservationPaymentRecord) => {
-    if (!selectedReservation || !canWritePayments || activePaymentRecordMutationId) {
+    if (!selectedReservation || !canVoidPayment || activePaymentRecordMutationId) {
       return;
     }
     setActivePaymentRecordMutationId(record.id);
@@ -5553,10 +5646,10 @@ export default function Reservations() {
     } finally {
       setActivePaymentRecordMutationId(null);
     }
-  }, [activePaymentRecordMutationId, canWritePayments, hydrateReservationDetail, refreshReservationsAfterMutation, selectedReservation]);
+  }, [activePaymentRecordMutationId, canVoidPayment, hydrateReservationDetail, refreshReservationsAfterMutation, selectedReservation]);
 
   const handleSettleChargeItem = useCallback(async (item: ReservationChargeItem) => {
-    if (!selectedReservation || !canWritePayments || activePaymentRecordMutationId) {
+    if (!selectedReservation || !canCreatePayment || !canConfirmPayment || !canAllocatePayment || activePaymentRecordMutationId) {
       return;
     }
     const amount = Math.max(item.remainingAmount || item.amount || 0, 0);
@@ -5585,7 +5678,9 @@ export default function Reservations() {
     }
   }, [
     activePaymentRecordMutationId,
-    canWritePayments,
+    canAllocatePayment,
+    canCreatePayment,
+    canConfirmPayment,
     hydrateReservationDetail,
     paymentMethodDraft,
     refreshReservationsAfterMutation,
@@ -5593,7 +5688,7 @@ export default function Reservations() {
   ]);
 
   const handleCreateRefundChargeItem = useCallback(async (record: ReservationPaymentRecord) => {
-    if (!selectedReservation || !canWritePayments || activePaymentRecordMutationId) {
+    if (!selectedReservation || !canCreateCharge || activePaymentRecordMutationId) {
       return;
     }
     setActivePaymentRecordMutationId(record.id);
@@ -5614,7 +5709,7 @@ export default function Reservations() {
     } finally {
       setActivePaymentRecordMutationId(null);
     }
-  }, [activePaymentRecordMutationId, canWritePayments, hydrateReservationDetail, refreshReservationsAfterMutation, selectedReservation]);
+  }, [activePaymentRecordMutationId, canCreateCharge, hydrateReservationDetail, refreshReservationsAfterMutation, selectedReservation]);
 
   const handleConfirmReservationPaymentConfirmation = useCallback(async () => {
     if (!pendingReservationPaymentConfirmation) {
@@ -5652,15 +5747,14 @@ export default function Reservations() {
   ]);
 
   const handleCompleteRefundChargeItem = useCallback(async (item: ReservationChargeItem) => {
-    if (!selectedReservation || !canWritePayments || activePaymentRecordMutationId) {
+    if (!selectedReservation || !canRefundPayment || activePaymentRecordMutationId) {
       return;
     }
     setActivePaymentRecordMutationId(item.id);
     setReservationActionError(null);
     try {
       await patchChargeItem(item.id, {
-        status: 'paid',
-        paidAmount: item.amount,
+        status: 'refunded',
         refundCompletedAt: new Date().toISOString(),
         refundMethod: 'manual',
         refundReason: item.memo ?? '예약 상세에서 환불 완료 처리',
@@ -5674,10 +5768,10 @@ export default function Reservations() {
     } finally {
       setActivePaymentRecordMutationId(null);
     }
-  }, [activePaymentRecordMutationId, canWritePayments, hydrateReservationDetail, refreshReservationsAfterMutation, selectedReservation]);
+  }, [activePaymentRecordMutationId, canRefundPayment, hydrateReservationDetail, refreshReservationsAfterMutation, selectedReservation]);
 
   const handleWaiveRefundChargeItem = useCallback(async (item: ReservationChargeItem) => {
-    if (!selectedReservation || !canWritePayments || activePaymentRecordMutationId) {
+    if (!selectedReservation || !canWaivePayment || activePaymentRecordMutationId) {
       return;
     }
     setActivePaymentRecordMutationId(item.id);
@@ -5685,7 +5779,6 @@ export default function Reservations() {
     try {
       await patchChargeItem(item.id, {
         status: 'waived',
-        paidAmount: 0,
         refundReason: item.memo ?? '예약 상세에서 환불 면제 처리',
         memo: item.memo ?? '예약 상세에서 환불 면제 처리',
       });
@@ -5697,7 +5790,7 @@ export default function Reservations() {
     } finally {
       setActivePaymentRecordMutationId(null);
     }
-  }, [activePaymentRecordMutationId, canWritePayments, hydrateReservationDetail, refreshReservationsAfterMutation, selectedReservation]);
+  }, [activePaymentRecordMutationId, canWaivePayment, hydrateReservationDetail, refreshReservationsAfterMutation, selectedReservation]);
 
   const handleStartReservation = useCallback(async () => {
     if (!canTransitionReservations) {
@@ -5964,7 +6057,7 @@ export default function Reservations() {
     disabled: isReservationPaymentConfirmationSaving,
   });
 
-  const handleSubmitEdit = useCallback(async () => {
+  const handleSubmitEdit = useCallback(async (inspectionAcknowledged = false) => {
     if (!selectedReservation || isEditSubmitting) {
       return;
     }
@@ -5976,14 +6069,15 @@ export default function Reservations() {
     const currentVin = selectedReservation.vin ?? '';
     const vehicleChanged = editVin !== currentVin && editVin.length > 0;
 
-    const startIso = editStartAt ? new Date(editStartAt).toISOString() : undefined;
-    const endIso = editEndAt ? new Date(editEndAt).toISOString() : undefined;
+    const startIso = editStartAt ? toKstIsoFromDateTimeLocal(editStartAt) : undefined;
+    const endIso = editEndAt ? toKstIsoFromDateTimeLocal(editEndAt) : undefined;
     if (startIso && endIso && new Date(startIso) >= new Date(endIso)) {
       setEditSubmitError('종료일은 시작일보다 이후여야 합니다.');
       return;
     }
 
-    const payload: Record<string, string | undefined> = {};
+    const payload: Record<string, unknown> = {};
+    if (inspectionAcknowledged) payload.inspectionAcknowledged = true;
     if (startIso) {
       payload.startAt = startIso;
     }
@@ -6035,6 +6129,10 @@ export default function Reservations() {
           return;
         }
         if (error.status === 409) {
+          if (error.code === 'INSPECTION_ACK_REQUIRED' || error.message.includes('INSPECTION_ACK_REQUIRED')) {
+            setEditInspectionAckRequired(true);
+            return;
+          }
           setEditSubmitError(error.message || '해당 차량에 겹치는 예약이 존재합니다.');
           void hydrateReservationDetail(selectedReservation.id, selectedReservation);
           return;
@@ -6291,6 +6389,7 @@ export default function Reservations() {
           description: report.description,
           ...(blackboxFileName ? { blackboxFileName } : {}),
           ...(blackboxGcsObjectName ? { blackboxGcsObjectName } : {}),
+          ...(report.blackboxUnavailableReason ? { blackboxUnavailableReason: report.blackboxUnavailableReason } : {}),
           ...(report.assignee ? { handlerName: report.assignee } : {}),
           recordedAt: accidentDateTime,
         },
@@ -7043,6 +7142,55 @@ export default function Reservations() {
                       </div>
                     </div>
 
+                    <div data-testid="license-verification-panel" className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <h3 className="text-sm font-semibold text-slate-800">수동 면허 확인</h3>
+                          <p className="mt-1 text-xs text-slate-600">외부 진위 확인이 아닌 담당자의 수동 기록입니다.</p>
+                        </div>
+                        {licenseVerificationRecord?.checkedAt && (
+                          <span className="text-xs text-slate-500">{formatDateTimeKst(licenseVerificationRecord.checkedAt)}</span>
+                        )}
+                      </div>
+                      <div className="mt-3 grid gap-2 md:grid-cols-[180px_1fr_auto]">
+                        <select
+                          aria-label="수동 면허 확인 결과"
+                          value={licenseVerificationResult}
+                          onChange={(event) => setLicenseVerificationResult(event.target.value as LicenseVerificationResult)}
+                          disabled={!canWriteReservations || isLicenseVerificationSaving}
+                          className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm"
+                        >
+                          <option value="verified">확인됨</option>
+                          <option value="rejected">거부됨</option>
+                          <option value="unverifiable">확인 불가</option>
+                        </select>
+                        <input
+                          aria-label="수동 면허 확인 메모"
+                          value={licenseVerificationMemo}
+                          onChange={(event) => setLicenseVerificationMemo(event.target.value)}
+                          disabled={!canWriteReservations || isLicenseVerificationSaving}
+                          placeholder="확인 메모 (선택)"
+                          className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm"
+                        />
+                        <button
+                          type="button"
+                          data-testid="license-verification-save"
+                          onClick={() => { void handleVerifyReservationLicense(); }}
+                          disabled={!canWriteReservations || isLicenseVerificationSaving}
+                          className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {isLicenseVerificationSaving ? '저장 중...' : '저장'}
+                        </button>
+                      </div>
+                      {licenseVerificationRecord && (
+                        <p data-testid="license-verification-audit" className="mt-2 text-xs text-slate-600">
+                          결과: {licenseVerificationRecord.result} · 확인자: {licenseVerificationRecord.checkedByName ?? licenseVerificationRecord.checkedBy ?? '-'}
+                          {licenseVerificationRecord.checkedAt ? ` · 확인 시각: ${formatDateTimeKst(licenseVerificationRecord.checkedAt)}` : ''}
+                        </p>
+                      )}
+                      {licenseVerificationError && <p data-testid="license-verification-error" className="mt-2 text-sm text-red-600">{licenseVerificationError}</p>}
+                    </div>
+
                     <div className="grid grid-cols-2 gap-4">
                       <div>
                         <label className="text-xs font-semibold text-gray-500 uppercase">연락처</label>
@@ -7496,7 +7644,7 @@ export default function Reservations() {
                                     }))}
                                     className="mt-1 w-full rounded-md border border-gray-300 bg-white px-2 py-2 text-sm font-normal text-gray-900"
                                   >
-                                    <option value="confirmed">확정</option>
+                                    <option value="confirmed" disabled={!canConfirmPayment}>확정</option>
                                     <option value="needs_confirmation">확인 필요</option>
                                   </select>
                                 </label>
@@ -7778,7 +7926,7 @@ export default function Reservations() {
                                 <span className="text-right font-semibold text-red-600 tabular-nums">{toCurrencyValue(item.remainingAmount)}</span>
                                 <span className="text-right text-gray-600">{getChargeStatusLabel(item.status)}</span>
                                 <span className="flex flex-wrap gap-1">
-	                                  {canWritePayments && item.remainingAmount > 0 && !['paid', 'waived', 'refunded', 'disputed'].includes(item.status) && (
+	                                  {canCreatePayment && canConfirmPayment && canAllocatePayment && item.remainingAmount > 0 && !['paid', 'waived', 'refunded', 'disputed'].includes(item.status) && (
 	                                    <button
 	                                      type="button"
 	                                      onClick={() => {
@@ -7790,7 +7938,7 @@ export default function Reservations() {
 	                                      수납
 	                                    </button>
                                   )}
-                                  {canWritePayments && !['paid', 'waived', 'refunded', 'disputed'].includes(item.status) && (
+                                  {canWaivePayment && !['paid', 'waived', 'refunded', 'disputed'].includes(item.status) && (
                                     <>
                                       <button
                                         type="button"
@@ -7810,7 +7958,7 @@ export default function Reservations() {
                                       </button>
                                     </>
                                   )}
-                                  {canWritePayments && item.status === 'disputed' && (
+                                  {canWaivePayment && item.status === 'disputed' && (
                                     <button
                                       type="button"
                                       onClick={() => handleOpenChargeItemException(item, 'release_dispute')}
@@ -7879,9 +8027,9 @@ export default function Reservations() {
                                 </span>
                                 <span className="whitespace-nowrap text-right text-gray-600">{getChargeStatusLabel(item.status)}</span>
                                 <span className="min-w-0 space-y-1">
-                                  {canWritePayments && item.chargeType === 'refund' && item.status === 'refund_due' && (
+                                  {(canRefundPayment || canWaivePayment) && item.chargeType === 'refund' && item.status === 'refund_due' && (
                                     <span className="flex min-w-0 flex-wrap gap-1">
-                                      <button
+                                      {canRefundPayment && <button
                                         type="button"
                                         onClick={() => {
                                           handleOpenChargeItemException(item, 'refund_complete');
@@ -7890,8 +8038,8 @@ export default function Reservations() {
                                         className="whitespace-nowrap rounded-md bg-emerald-600 px-2 py-1 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
                                       >
                                         환불완료
-                                      </button>
-                                      <button
+                                      </button>}
+                                      {canWaivePayment && <button
                                         type="button"
                                         onClick={() => {
                                           handleOpenChargeItemException(item, 'refund_waive');
@@ -7900,7 +8048,7 @@ export default function Reservations() {
                                         className="whitespace-nowrap rounded-md bg-slate-600 px-2 py-1 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
                                       >
                                         환불면제
-                                      </button>
+                                      </button>}
                                     </span>
                                   )}
 	                                  {canWritePayments && item.chargeType !== 'refund' && item.remainingAmount > 0 && !['paid', 'waived', 'refunded', 'disputed'].includes(item.status) && (
@@ -7915,7 +8063,7 @@ export default function Reservations() {
 	                                      수납
 	                                    </button>
                                   )}
-                                  {canWritePayments && item.chargeType !== 'refund' && !['paid', 'waived', 'refunded', 'disputed'].includes(item.status) && (
+                                  {canWaivePayment && item.chargeType !== 'refund' && !['paid', 'waived', 'refunded', 'disputed'].includes(item.status) && (
                                     <span className="flex min-w-0 flex-wrap gap-1">
                                       <button
                                         type="button"
@@ -8015,9 +8163,9 @@ export default function Reservations() {
                                   )}
                                 </span>
                                 <span className="min-w-0 space-y-1">
-                                  {canWritePayments && record.status !== 'voided' && (
+                                  {(canConfirmPayment || canVoidPayment || canAllocatePayment || canCreateCharge) && record.status !== 'voided' && (
                                     <span className="flex flex-wrap gap-1">
-                                      {record.confirmationStatus === 'needs_confirmation' && (
+                                      {canConfirmPayment && record.confirmationStatus === 'needs_confirmation' && (
 	                                        <button
 	                                          type="button"
 	                                          onClick={() => {
@@ -8035,12 +8183,12 @@ export default function Reservations() {
                                           setEditingAllocationRecordId(record.id);
                                           setAllocationEditDraft(paymentAllocationDraftsFromRecord(record));
                                         }}
-                                        disabled={activePaymentRecordMutationId === record.id}
+                                        disabled={activePaymentRecordMutationId === record.id || !canAllocatePayment}
                                         className="rounded-md bg-blue-600 px-2 py-1 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
                                       >
                                         배정수정
                                       </button>
-	                                      <button
+	                                      {canVoidPayment && <button
 	                                        type="button"
 	                                        onClick={() => {
 	                                          openPaymentRecordVoidConfirmation(record);
@@ -8049,8 +8197,8 @@ export default function Reservations() {
 	                                        className="rounded-md bg-slate-700 px-2 py-1 text-xs font-semibold text-white shadow-sm ring-1 ring-slate-800/20 disabled:cursor-not-allowed disabled:opacity-60"
 	                                      >
 	                                        무효
-	                                      </button>
-	                                      <button
+	                                      </button>}
+	                                      {canCreateCharge && <button
 	                                        type="button"
 	                                        onClick={() => {
 	                                          openRefundChargeCreateConfirmation(record);
@@ -8059,7 +8207,7 @@ export default function Reservations() {
 	                                        className="rounded-md bg-orange-600 px-2 py-1 text-xs font-semibold text-white shadow-sm ring-1 ring-orange-700/20 disabled:cursor-not-allowed disabled:opacity-60"
 	                                      >
 	                                        환불예정
-	                                      </button>
+	                                      </button>}
                                     </span>
                                   )}
                                   {record.changeHistory && record.changeHistory.length > 0 && (
@@ -8775,6 +8923,18 @@ export default function Reservations() {
                     {reservationWarningPrompt.confirmLabel}
                   </button>
                 )}
+              </div>
+            </div>
+          </div>
+        )}
+        {editInspectionAckRequired && (
+          <div role="dialog" aria-label="정기점검 수정 확인" className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4">
+            <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+              <h3 className="text-lg font-bold text-[#1e2939]">정기점검 예정 확인</h3>
+              <p className="mt-3 text-sm text-gray-700">변경한 예약 기간에 정기점검 만료가 포함됩니다. 확인 후 수정 요청을 다시 보냅니다.</p>
+              <div className="mt-6 flex justify-end gap-3">
+                <button type="button" onClick={() => setEditInspectionAckRequired(false)} className="rounded-lg border border-gray-300 px-4 py-2 text-sm">취소</button>
+                <button type="button" onClick={() => { setEditInspectionAckRequired(false); void handleSubmitEdit(true); }} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white">확인 후 재제출</button>
               </div>
             </div>
           </div>

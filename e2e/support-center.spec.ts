@@ -230,7 +230,7 @@ test.describe('Support Center super_admin management view', () => {
     await expect(page.getByTestId('support-admin-detail-status')).toContainText('처리중');
   });
 
-  test('admin also sees the management view instead of the submit form', async ({ page }) => {
+  test('admin sees the submit form without support management permission', async ({ page }) => {
     const permissions = [
       'route.home',
       'route.action-required',
@@ -244,11 +244,11 @@ test.describe('Support Center super_admin management view', () => {
       'action.action-required.write',
       'action.revenue.write',
       'action.payments.write',
-      'action.support.manage',
       'action.settings.write',
       'action.settings.members.write',
     ];
 
+    let managementRequests = 0;
     await seedAuthorization(page, 'admin', permissions);
     await installApiMocks(page, {
       user: {
@@ -256,6 +256,7 @@ test.describe('Support Center super_admin management view', () => {
       },
       handlers: {
         'GET /api/v2/support/tickets': async ({ route }) => {
+          managementRequests += 1;
           await fulfillSuccess(route, {
             items: [],
             limit: 200,
@@ -278,9 +279,11 @@ test.describe('Support Center super_admin management view', () => {
       },
     });
 
-    await loginViaUi(page, 'admin', { returnUrl: '/support-center' });
+    await loginViaUi(page, 'admin', { returnUrl: '/support-center', permissions });
 
-    await expect(page.getByTestId('support-admin-heading')).toBeVisible();
-    await expect(page.getByTestId('support-admin-open-submit')).toHaveText('문의 등록');
+    await expect(page.getByRole('heading', { name: '지원 문의 접수' })).toBeVisible();
+    await expect(page.getByTestId('support-admin-heading')).toHaveCount(0);
+    await expect(page.getByTestId('support-admin-open-submit')).toHaveCount(0);
+    expect(managementRequests).toBe(0);
   });
 });

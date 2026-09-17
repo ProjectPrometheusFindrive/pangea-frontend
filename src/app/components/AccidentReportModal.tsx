@@ -5,13 +5,14 @@ import { useModalDismiss } from '../hooks/useModalDismiss';
 
 const MAX_BLACKBOX_FILE_BYTES = 50 * 1024 * 1024;
 
-export type AccidentReportField = 'description' | 'assignee' | 'blackboxFile';
+export type AccidentReportField = 'description' | 'assignee' | 'blackboxFile' | 'blackboxUnavailableReason';
 
 export interface AccidentReportFormValues {
   accidentType: 'major' | 'medium' | 'minor';
   description: string;
   assignee: string;
   blackboxFile?: File | null;
+  blackboxUnavailableReason: string;
 }
 
 export interface AccidentReportSubmitFeedback {
@@ -51,6 +52,7 @@ export function AccidentReportModal({
   const [description, setDescription] = useState('');
   const [assigneeId, setAssigneeId] = useState('');
   const [blackboxFile, setBlackboxFile] = useState<File | null>(null);
+  const [blackboxUnavailableReason, setBlackboxUnavailableReason] = useState('');
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Partial<Record<AccidentReportField, string>>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -58,7 +60,8 @@ export function AccidentReportModal({
   const isDirty = accidentType !== 'minor'
     || description.trim().length > 0
     || assigneeId.trim().length > 0
-    || blackboxFile !== null;
+    || blackboxFile !== null
+    || blackboxUnavailableReason.trim().length > 0;
 
   const clearFieldError = (field: AccidentReportField) => {
     setFieldErrors((prev) => {
@@ -86,6 +89,7 @@ export function AccidentReportModal({
     setDescription('');
     setAssigneeId('');
     setBlackboxFile(null);
+    setBlackboxUnavailableReason('');
     setSubmitError(null);
     setFieldErrors({});
     setIsSubmitting(false);
@@ -133,6 +137,7 @@ export function AccidentReportModal({
         description: description.trim(),
         assignee: assigneeLabel,
         blackboxFile,
+        blackboxUnavailableReason: blackboxUnavailableReason.trim(),
       });
 
       if (feedback) {
@@ -310,7 +315,24 @@ export function AccidentReportModal({
               </p>
             )}
             {fieldErrors.blackboxFile && <p className="mt-1 text-xs text-red-600">{fieldErrors.blackboxFile}</p>}
-            <p className="mt-1 text-xs text-gray-500">선택 항목입니다. 최대 50MB, 영상 파일만 업로드할 수 있습니다.</p>
+            {!blackboxFile && (
+              <>
+                <textarea
+                  aria-label="블랙박스 미첨부 사유"
+                  value={blackboxUnavailableReason}
+                  onChange={(event) => {
+                    setBlackboxUnavailableReason(event.target.value);
+                    clearFieldError('blackboxUnavailableReason');
+                  }}
+                  rows={2}
+                  placeholder="파일을 확보할 수 없는 사유를 입력하세요."
+                  disabled={isSubmitting}
+                  className={`mt-2 w-full rounded-lg border px-3 py-2 text-sm ${fieldErrors.blackboxUnavailableReason ? 'border-red-400 bg-red-50' : 'border-gray-300'}`}
+                />
+                {fieldErrors.blackboxUnavailableReason && <p className="mt-1 text-xs text-red-600">{fieldErrors.blackboxUnavailableReason}</p>}
+              </>
+            )}
+            <p className="mt-1 text-xs text-gray-500">파일을 첨부하지 않는 경우 사유를 기록해야 합니다. 최대 50MB.</p>
           </div>
 
           <div>

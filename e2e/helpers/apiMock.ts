@@ -75,24 +75,42 @@ export const E2E_MEMBER_ACTION_PERMISSIONS = [
   'action.action-required.write',
 ] as const;
 
+const E2E_ADMIN_GRANULAR_ACTION_PERMISSIONS = [
+  'action.accident-claims.draft',
+  'action.accident-claims.recognize',
+  'action.accident-claims.submit',
+  'action.billing.charges.write',
+  'action.billing.waive',
+  'action.payments.allocate',
+  'action.payments.confirm',
+  'action.payments.create',
+  'action.payments.refund',
+  'action.payments.void',
+  'action.reservations.transition',
+] as const;
+
 export const E2E_ROLE_DEFAULT_PERMISSIONS: Record<MockUser['role'], readonly string[]> = {
   member: [
-    ...E2E_ROUTE_PERMISSIONS,
+    ...E2E_ROUTE_PERMISSIONS.filter((permission) => permission !== 'route.settings'),
     ...E2E_MEMBER_ACTION_PERMISSIONS,
+    'action.accident-claims.draft',
   ],
   admin: [
     ...E2E_ROUTE_PERMISSIONS,
     ...E2E_MEMBER_ACTION_PERMISSIONS,
+    ...E2E_ADMIN_GRANULAR_ACTION_PERMISSIONS,
     'action.revenue.write',
     'action.payments.write',
-    'action.support.manage',
     'action.settings.write',
     'action.settings.members.write',
   ],
   super_admin: [
     ...E2E_ROUTE_PERMISSIONS,
     'route.demo-simulation',
+    'route.device-installation',
+    'action.device-installation.write',
     ...E2E_MEMBER_ACTION_PERMISSIONS,
+    ...E2E_ADMIN_GRANULAR_ACTION_PERMISSIONS,
     'action.revenue.write',
     'action.payments.write',
     'action.support.manage',

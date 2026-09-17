@@ -2,6 +2,7 @@ import { createBrowserRouter } from 'react-router';
 import { createElement } from 'react';
 
 import { RequireAuth } from './components/RequireAuth';
+import { useAuth } from './context/AuthContext';
 import ActionRequired from './pages/ActionRequired';
 import Assets from './pages/Assets';
 import DeviceInstallation from './pages/DeviceInstallation';
@@ -26,7 +27,10 @@ function RequireRentalBusinessRoute() {
 }
 
 function RequireDeviceInstallerRoute() {
-  return createElement(RequireAuth, { allowedRoles: ['device-installer'] });
+  const { user } = useAuth();
+  return createElement(RequireAuth, {
+    allowedRoles: user?.role === 'super_admin' ? undefined : ['device-installer'],
+  });
 }
 
 export const router = createBrowserRouter([

@@ -13,6 +13,11 @@ interface InstallationRow {
   photos: string[];
 }
 
+const assignedTask: InstallationRow = {
+  id: 'INST-001', vin: 'KMH12A34560000001', status: 'scheduled',
+  scheduledAt: '2026-09-16T00:00:00Z', installer: 'installer-001', photos: [],
+};
+
 function filterInstallations(
   rows: InstallationRow[],
   status: string | null,
@@ -56,8 +61,8 @@ async function openDeviceInstallationPage(page: Page): Promise<void> {
 }
 
 test.describe('BK-091 Premium Installation E2E', () => {
-  test('장착 신청 성공 시 로딩 후 성공 메시지와 목록 반영을 확인한다', async ({ page }) => {
-    const installations: InstallationRow[] = [];
+  test('배정된 장착 작업 완료 시 로딩 후 성공 메시지와 목록 반영을 확인한다', async ({ page }) => {
+    const installations: InstallationRow[] = [{ ...assignedTask }];
     let firstListDelay = true;
 
     await installApiMocks(page, {
@@ -91,19 +96,19 @@ test.describe('BK-091 Premium Installation E2E', () => {
             pageSize: pageSizeParam,
           });
         },
-        'POST /api/v2/device-installations': async ({ route }) => {
+        'PATCH /api/v2/device-installations/INST-001/status': async ({ route, request }) => {
           await delay(250);
           const created: InstallationRow = {
             id: 'INST-001',
             vin: 'KMH12A34560000001',
-            status: 'scheduled',
+            status: request.postDataJSON().status,
             scheduledAt: '2025-02-20T09:00:00.000Z',
             installer: 'E2E Installer',
             deviceSerial: 'DEV-2026-0001',
             photos: ['data:image/png;base64,test-photo-1', 'data:image/png;base64,test-photo-2'],
           };
-          installations.unshift(created);
-          await fulfillSuccess(route, created, 201);
+          installations[0] = created;
+          await fulfillSuccess(route, created);
         },
       },
     });
@@ -118,7 +123,7 @@ test.describe('BK-091 Premium Installation E2E', () => {
     await expect(page.getByRole('table').getByText('KMH12A34560000001')).toBeVisible();
   });
 
-  test('장착 신청 403 오류 시 권한 안내를 표시한다', async ({ page }) => {
+  test('배정 작업 수행 403 오류 시 권한 안내를 표시한다', async ({ page }) => {
     await installApiMocks(page, {
       user: { role: 'installer', userId: 'installer-001', name: 'E2E Installer' },
       handlers: {
@@ -130,13 +135,13 @@ test.describe('BK-091 Premium Installation E2E', () => {
         },
         'GET /api/v2/device-installations/tasks': async ({ route }) => {
           await fulfillSuccess(route, {
-            items: [],
-            total: 0,
+            items: [{ ...assignedTask }],
+            total: 1,
             page: 1,
             pageSize: 10,
           });
         },
-        'POST /api/v2/device-installations': async ({ route }) => {
+        'PATCH /api/v2/device-installations/INST-001/status': async ({ route }) => {
           await fulfillError(route, 403, 'FORBIDDEN', 'forbidden');
         },
       },
@@ -149,7 +154,7 @@ test.describe('BK-091 Premium Installation E2E', () => {
     await expect(page.getByTestId('device-installation-action-error')).toContainText('권한이 없어 요청을 처리할 수 없습니다.');
   });
 
-  test('장착 신청 5xx 오류 시 서버 오류 안내를 표시한다', async ({ page }) => {
+  test('배정 작업 수행 5xx 오류 시 서버 오류 안내를 표시한다', async ({ page }) => {
     await installApiMocks(page, {
       user: { role: 'installer', userId: 'installer-001', name: 'E2E Installer' },
       handlers: {
@@ -161,13 +166,13 @@ test.describe('BK-091 Premium Installation E2E', () => {
         },
         'GET /api/v2/device-installations/tasks': async ({ route }) => {
           await fulfillSuccess(route, {
-            items: [],
-            total: 0,
+            items: [{ ...assignedTask }],
+            total: 1,
             page: 1,
             pageSize: 10,
           });
         },
-        'POST /api/v2/device-installations': async ({ route }) => {
+        'PATCH /api/v2/device-installations/INST-001/status': async ({ route }) => {
           await fulfillError(route, 500, 'SERVER_ERROR', 'temporary server error');
         },
       },

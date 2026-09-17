@@ -26,6 +26,12 @@ test.describe('Wave 1 Settings Bulk OCR', () => {
         'GET /api/v2/settings/geofences': async ({ route }) => {
           await fulfillSuccess(route, { items: [] });
         },
+        'GET /api/v2/settings/garages': async ({ route }) => {
+          await fulfillSuccess(route, { items: [], companyAddress: '서울특별시 강남구' });
+        },
+        'GET /api/v2/invitations': async ({ route }) => {
+          await fulfillSuccess(route, { items: [] });
+        },
         'GET /api/v2/settings/members': async ({ route }) => {
           await fulfillSuccess(route, { items: [] });
         },
