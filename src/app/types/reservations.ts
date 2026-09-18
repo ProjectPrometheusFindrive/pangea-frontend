@@ -258,6 +258,13 @@ export interface Reservation {
   accidentClaim?: ReservationAccidentClaim;
   accidentReport?: ReservationAccidentReport;
   parties?: ReservationParties;
+  licenseVerification?: {
+    result: 'verified' | 'rejected' | 'unverifiable';
+    memo?: string;
+    checkedBy?: string;
+    checkedByName?: string;
+    checkedAt?: string;
+  };
   startDateFull?: string;
   endDateFull?: string;
 }

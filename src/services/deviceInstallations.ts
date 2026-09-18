@@ -11,6 +11,10 @@ export interface DeviceInstallationItem {
   status: DeviceInstallationStatus;
   scheduledAt: string;
   installedAt?: string;
+  completedAt?: string;
+  completedBy?: string;
+  cancelledBy?: string;
+  cancelReason?: string;
   installer?: string;
   deviceSerial?: string;
   photos: string[];
@@ -62,6 +66,8 @@ export interface DeviceInstallationStatusPatchRequest {
   deviceSerial?: string;
   photos?: string[];
   memo?: string;
+  cancelReason?: string;
+  companyId?: string;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -143,6 +149,10 @@ function toInstallation(value: unknown): DeviceInstallationItem | null {
     status: normalizeStatus(value.status),
     scheduledAt: toNonEmptyString(value.scheduledAt) ?? '',
     installedAt: toNonEmptyString(value.installedAt) ?? undefined,
+    completedAt: toNonEmptyString(value.completedAt) ?? undefined,
+    completedBy: toNonEmptyString(value.completedBy) ?? undefined,
+    cancelledBy: toNonEmptyString(value.cancelledBy) ?? undefined,
+    cancelReason: toNonEmptyString(value.cancelReason) ?? undefined,
     installer: toNonEmptyString(value.installer) ?? undefined,
     deviceSerial: toNonEmptyString(value.deviceSerial) ?? undefined,
     photos: toPhotos(value.photos),
@@ -285,6 +295,7 @@ export async function getDeviceInstallation(
 export async function patchDeviceInstallationStatus(
   installationId: string,
   payload: DeviceInstallationStatusPatchRequest,
+  options: { companyId?: string } = {},
 ): Promise<DeviceInstallationItem | null> {
   const response = await apiClient.requestData<unknown>({
     path: `/api/v2/device-installations/${encodeURIComponent(installationId)}/status`,
@@ -295,7 +306,9 @@ export async function patchDeviceInstallationStatus(
       deviceSerial: payload.deviceSerial,
       photos: payload.photos,
       memo: payload.memo,
+      cancelReason: payload.cancelReason,
     },
+    query: { companyId: options.companyId },
   });
 
   return toInstallation(response);

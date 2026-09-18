@@ -58,6 +58,7 @@ export interface NewContractFormValues {
   startTime: string;
   endTime: string;
   contractStatus?: '예약중' | '대여중' | '완료';
+  inspectionAcknowledged?: boolean;
   customerName: string;
   customerPhone: string;
   customerLicense: string;
@@ -293,6 +294,12 @@ export function NewContractModal({
   const [startTime, setStartTime] = useState('09:00');
   const [endTime, setEndTime] = useState('18:00');
   const [contractStatus, setContractStatus] = useState<'' | '예약중' | '대여중' | '완료'>('');
+  const [inspectionAcknowledged, setInspectionAcknowledged] = useState(false);
+  const [inspectionAcknowledgementRequired, setInspectionAcknowledgementRequired] = useState(false);
+  useEffect(() => {
+    setInspectionAcknowledged(false);
+    setInspectionAcknowledgementRequired(false);
+  }, [selectedVehicle, startDate, endDate]);
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
   const [customerLicense, setCustomerLicense] = useState('');
@@ -630,6 +637,7 @@ export function NewContractModal({
     setEndDate('');
     setStartTime('09:00');
     setEndTime('18:00');
+    setInspectionAcknowledged(false);
     setCustomerName('');
     setCustomerPhone('');
     setCustomerLicense('');
@@ -1251,7 +1259,7 @@ export function NewContractModal({
     setStep(3);
   };
 
-  const handleSubmit = async () => {
+  const handleSubmit = async (ackOverride = false) => {
     if (isSubmitting) {
       return;
     }
@@ -1294,6 +1302,7 @@ export function NewContractModal({
         startTime,
         endTime,
         contractStatus: contractStatus || undefined,
+        inspectionAcknowledged: inspectionAcknowledged || ackOverride,
         customerName,
         customerPhone,
         customerLicense,
@@ -1342,6 +1351,7 @@ export function NewContractModal({
       });
 
       if (feedback) {
+        if (feedback.formError?.includes('INSPECTION_ACK_REQUIRED')) setInspectionAcknowledgementRequired(true);
         if (feedback.fieldErrors) {
           setFieldErrors((prev) => ({ ...prev, ...feedback.fieldErrors }));
         }
@@ -1371,8 +1381,26 @@ export function NewContractModal({
     fieldErrors[field] ? 'border-red-400 bg-red-50' : 'border-gray-300'
   }`;
 
+  const confirmInspectionAcknowledgement = () => {
+    setInspectionAcknowledged(true);
+    setInspectionAcknowledgementRequired(false);
+    void handleSubmit(true);
+  };
+
   return (
     <>
+    {inspectionAcknowledgementRequired && (
+      <div role="dialog" aria-label="정기점검 확인" className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4">
+        <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl">
+          <h3 className="text-lg font-bold text-gray-900">정기점검 예정 확인</h3>
+          <p className="mt-3 text-sm text-gray-700">예약 기간 중 정기점검 수검 가능 만료일이 포함됩니다. 확인 후에만 다시 제출합니다.</p>
+          <div className="mt-5 flex justify-end gap-2">
+            <button type="button" onClick={() => setInspectionAcknowledgementRequired(false)} className="rounded-lg border border-gray-300 px-4 py-2 text-sm">취소</button>
+            <button type="button" onClick={confirmInspectionAcknowledgement} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white">확인 후 재제출</button>
+          </div>
+        </div>
+      </div>
+    )}
     <div data-testid="new-contract-modal" className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-0 sm:p-4" onMouseDown={handleMainBackdropMouseDown}>
       <div className="flex h-full max-h-dvh w-full flex-col bg-white sm:h-auto sm:max-h-[85vh] sm:max-w-[600px] sm:rounded-xl">
         <div className="shrink-0 border-b border-gray-200 p-4 sm:p-6">

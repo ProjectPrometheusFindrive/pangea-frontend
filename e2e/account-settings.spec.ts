@@ -67,6 +67,9 @@ test.describe('Account settings', () => {
         email: 'admin@pangea.local',
       },
       handlers: {
+        'GET /api/v2/settings/company': async ({ route }) => {
+          await fulfillSuccess(route, { companyId: 'company-001', name: 'Pangea Mobility', businessNumber: '123-45-67890', phone: '02-0000-0000', email: 'admin@pangea.local', address: '서울특별시' });
+        },
         'GET /api/v2/assets': async ({ route }) => {
           await fulfillSuccess(route, { items: [], total: 0, page: 1, pageSize: 1 });
         },
@@ -75,6 +78,9 @@ test.describe('Account settings', () => {
         },
         'GET /api/v2/settings/geofences': async ({ route }) => {
           await fulfillSuccess(route, { items: [] });
+        },
+        'GET /api/v2/settings/garages': async ({ route }) => {
+          await fulfillSuccess(route, { items: [], companyAddress: '서울특별시' });
         },
         'GET /api/v2/settings/members': async ({ route }) => {
           await fulfillSuccess(route, {
@@ -131,7 +137,8 @@ test.describe('Account settings', () => {
 
     await loginViaUi(page, 'admin', { returnUrl: '/settings' });
 
-    await page.getByRole('button', { name: '계정 관리' }).click();
+    await expect(page.getByTestId('settings-tab-accounts')).toBeVisible();
+    await page.getByTestId('settings-tab-accounts').click();
     await expect(page.getByText('pending@example.com')).toBeVisible();
 
     await page.getByTestId('settings-invite-open-button').click();

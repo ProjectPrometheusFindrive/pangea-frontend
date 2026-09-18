@@ -54,6 +54,42 @@ export interface HomeSummaryRequestParams {
   signal?: AbortSignal;
 }
 
+export interface ContractUtilizationRow {
+  assetId: string;
+  vin: string;
+  vehicleNumber?: string;
+  model?: string;
+  usedSeconds: number;
+  utilizationRate: number;
+}
+
+export interface ContractUtilizationResponse {
+  formulaVersion: string;
+  timezone: string;
+  from: string;
+  to: string;
+  kpi: { assetCount: number; usedSeconds: number; capacitySeconds: number; utilizationRate: number };
+  rows: ContractUtilizationRow[];
+  excludedCounts: Record<string, number>;
+  limitations: string[];
+}
+
+export async function getContractUtilization(params: HomeSummaryRequestParams): Promise<ContractUtilizationResponse> {
+  const payload = await apiClient.requestData<unknown>({ path: '/api/v2/home/utilization', method: 'GET', query: params });
+  const source = isRecord(payload) ? payload : {};
+  const kpiSource = isRecord(source.kpi) ? source.kpi : {};
+  const rows = Array.isArray(source.rows) ? source.rows.filter(isRecord).map((row) => ({
+    assetId: toText(row.assetId), vin: toText(row.vin), vehicleNumber: toText(row.vehicleNumber), model: toText(row.model), usedSeconds: toNumber(row.usedSeconds), utilizationRate: toNumber(row.utilizationRate),
+  })) : [];
+  return {
+    formulaVersion: toText(source.formulaVersion, 'contract-occupancy-v1'), timezone: toText(source.timezone, 'Asia/Seoul'),
+    from: toText(source.from, params.from), to: toText(source.to, params.to),
+    kpi: { assetCount: toInteger(kpiSource.assetCount), usedSeconds: toInteger(kpiSource.usedSeconds), capacitySeconds: toInteger(kpiSource.capacitySeconds), utilizationRate: Math.max(0, Math.min(1, toNumber(kpiSource.utilizationRate))) },
+    rows, excludedCounts: isRecord(source.excludedCounts) ? Object.fromEntries(Object.entries(source.excludedCounts).map(([key, value]) => [key, toInteger(value)])) : {},
+    limitations: Array.isArray(source.limitations) ? source.limitations.filter((value): value is string => typeof value === 'string') : [],
+  };
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }

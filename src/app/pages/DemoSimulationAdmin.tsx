@@ -382,6 +382,9 @@ export default function DemoSimulationAdmin() {
                   <dl className="mt-4 space-y-2 text-sm">
                     <div className="flex justify-between gap-3"><dt className="text-slate-500">단계</dt><dd className="font-semibold text-slate-900">{activeRun?.stage ?? '-'}</dd></div>
                     <div className="flex justify-between gap-3"><dt className="text-slate-500">마지막 시뮬레이션 날짜</dt><dd className="font-semibold text-slate-900">{activeRun?.lastSimulatedDate ?? '-'}</dd></div>
+                    <div className="flex justify-between gap-3"><dt className="text-slate-500">데이터 기준 시각</dt><dd className="font-semibold text-slate-900">{activeRun?.anchorAt ? new Date(activeRun.anchorAt).toLocaleString('ko-KR') : '-'}</dd></div>
+                    <div className="flex justify-between gap-3"><dt className="text-slate-500">업무 이벤트</dt><dd className="font-semibold text-slate-900">{activeRun?.eventCount?.toLocaleString('ko-KR') ?? '-'}</dd></div>
+                    <div className="flex justify-between gap-3"><dt className="text-slate-500">합성 첨부 문서</dt><dd className="font-semibold text-slate-900">{activeRun?.artifactSummary ? `${(activeRun.artifactSummary.dryRun ? activeRun.artifactSummary.planned : activeRun.artifactSummary.uploaded).toLocaleString('ko-KR')}개${activeRun.artifactSummary.dryRun ? ' 예정' : ''}` : '-'}</dd></div>
                     <div className="flex justify-between gap-3"><dt className="text-slate-500">소요시간</dt><dd className="font-semibold text-slate-900">{activeRun?.durationMs ? `${activeRun.durationMs}ms` : '-'}</dd></div>
                   </dl>
                   {activeRun?.error?.message && (

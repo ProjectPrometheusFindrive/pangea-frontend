@@ -19,7 +19,7 @@ test('payment issue done transitions are guided through paid/canceled popup', ()
   assert.match(source, /if \(nextStatusCode === 'resolved' && isPaymentActionItem\(item\)\) \{\s*setPaymentIssueResolveDialog\('choose-payment-resolution'\);/u);
   assert.match(source, /paymentIssueResolveDialog === 'choose-payment-resolution'/u);
   assert.match(source, /const isPaymentIssueResolved = isSelectedPaymentIssue\s*&& selectedItem\?\.statusCode === 'resolved';/u);
-  assert.match(source, /const canEditPaymentIssueFields = canWritePayments && !isPaymentIssueResolved;/u);
+  assert.match(source, /const canEditPaymentIssueFields = canCreateCharge && !isPaymentIssueResolved;/u);
   assert.match(source, /결제 완료 처리/u);
   assert.match(source, /결제 면제 처리/u);
   assert.match(source, /setPaymentIssueResolveDialog\(null\)/u);
@@ -39,8 +39,8 @@ test('payment issue card treats payment evidence as optional convenience attachm
 test('action required reservation navigation prefers reservation id when available', () => {
   const source = readProjectFile('src/app/pages/ActionRequired.tsx');
 
-  assert.match(source, /const reservationSearch = selectedItem\.reservationId \|\| selectedItem\.customerName;/u);
-  assert.match(source, /reservationParam \|\| searchParam/u);
+  assert.match(source, /const reservationParam = searchParams\.get\('reservationId'\);/u);
+  assert.match(source, /setSearchQuery\(reservationParam \|\| searchParam \|\| ''\);/u);
   assert.match(source, /\|\| \(item\.reservationId \?\? ''\)\.includes\(searchQuery\)/u);
 });
 
@@ -52,7 +52,8 @@ test('payment issue card supports manual additional amount save via payments API
   assert.match(source, /async function runPaymentAdditionalAmountSave\(item: ActionItem\): Promise<void>/u);
   assert.match(source, /await patchPaymentStatus\(paymentId,\s*\{\s*status:\s*'overdue'/u);
   assert.match(source, /additionalAmount:\s*amount,\s*force:\s*true,\s*forceReason:\s*'manual-additional-payment'/u);
-  assert.match(source, /invalidatePaymentStatusCache\(\{\s*reservationId:\s*item\.reservationId \?\? item\.paymentInfo\?\.reservationId \?\? null,\s*paymentId,\s*\}\);/u);
-  assert.match(source, /기존 미납 금액/u);
+  assert.match(source, /const reservationId = getActionItemReservationId\(item\);/u);
+  assert.match(source, /invalidatePaymentStatusCache\(\{\s*reservationId,\s*paymentId,\s*\}\);/u);
+  assert.match(source, /추가 결제 금액을 저장했습니다\./u);
   assert.doesNotMatch(source, /연체료/u);
 });

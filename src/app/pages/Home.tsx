@@ -26,6 +26,7 @@ import { getActionItemTypeCounts } from '../../services/actionRequired';
 import { getHomeSummary, type HomeSummaryResponse } from '../../services/home';
 import { ROUTE_PERMISSIONS, type AppRoutePermission } from '../authorization';
 import { Layout } from '../components/Layout';
+import { ContractUtilizationPanel } from '../components/ContractUtilizationPanel';
 import { PageStateBoundary } from '../components/PageStateBoundary';
 import { useAuthorization } from '../context/AuthorizationContext';
 import { useAuth } from '../context/AuthContext';
@@ -121,16 +122,12 @@ const DEFAULT_ACTION_ITEM_COUNTS = {
   '단말 OFF': 0,
 } as const;
 
-function toIsoDate(value: Date): string {
-  const year = value.getFullYear();
-  const month = String(value.getMonth() + 1).padStart(2, '0');
-  const day = String(value.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
+import { todayDateKst } from '../utils/dateTimeFormat';
+
+function toIsoDate(value: Date): string { return todayDateKst(value); }
 
 function resolveTodayRange(): { from: string; to: string } {
   const today = new Date();
-  today.setHours(0, 0, 0, 0);
   return {
     from: toIsoDate(today),
     to: toIsoDate(today),
@@ -871,6 +868,7 @@ const operationScores = useMemo(() => ([
         className="m-3 min-h-[320px] sm:m-6"
       >
         <div className="space-y-4 p-3 sm:space-y-5 sm:p-6">
+          <ContractUtilizationPanel companyId={filters.companyId} role={user?.role} />
           {(isRefreshing || refreshError) && (
             <div className={`flex flex-col gap-3 rounded-lg border px-3 py-2 text-xs sm:flex-row sm:items-center sm:justify-between ${
               refreshError
