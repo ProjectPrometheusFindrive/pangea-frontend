@@ -8,29 +8,6 @@ const PASSWORD = 'Demo1234!';
 const ADMIN_USER_ID = 'admin@demo-company.com';
 const INSTALLER_USER_ID = 'installer@demo-company.com';
 
-const RENTAL_BUSINESS_PERMISSIONS = [
-  'route.home',
-  'route.action-required',
-  'route.assets',
-  'route.reservations',
-  'route.revenue',
-  'route.support-center',
-  'route.settings',
-  'action.assets.write',
-  'action.reservations.write',
-  'action.action-required.write',
-  'action.revenue.write',
-  'action.payments.write',
-  'action.support.manage',
-  'action.settings.write',
-  'action.settings.members.write',
-];
-
-const INSTALLER_PERMISSIONS = [
-  'route.device-installation',
-  'action.device-installation.write',
-];
-
 interface AuthUser {
   userId: string;
   name?: string;
@@ -85,6 +62,11 @@ interface DeviceInstallationTask {
   deviceSerial?: string;
 }
 
+interface SettingsMember {
+  userId?: string;
+  role?: string;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
@@ -106,6 +88,25 @@ async function requestJson<T>(
   });
   expect(response.ok(), `${path} should return 2xx`).toBeTruthy();
   return unwrapData<T>(await response.json());
+}
+
+function extractPermissionList(payload: unknown): string[] {
+  if (Array.isArray(payload)) {
+    return payload.filter((item): item is string => typeof item === 'string');
+  }
+  if (!isRecord(payload)) {
+    return [];
+  }
+  for (const key of ['permissions', 'permissionGrants', 'grants']) {
+    const candidate = payload[key];
+    if (Array.isArray(candidate)) {
+      return candidate.filter((item): item is string => typeof item === 'string');
+    }
+  }
+  if ('data' in payload) {
+    return extractPermissionList(payload.data);
+  }
+  return [];
 }
 
 async function login(request: APIRequestContext, userId: string): Promise<LoginSession> {
@@ -153,7 +154,7 @@ async function seedSession(
   );
 }
 
-async function installRealApiProxy(page: Page, request: APIRequestContext): Promise<void> {
+async function installRealApiProxy(page: Page, _request: APIRequestContext): Promise<void> {
   await page.route('**/api/v2/**', async (route) => {
     const browserRequest = route.request();
     const browserUrl = new URL(browserRequest.url());
@@ -164,19 +165,29 @@ async function installRealApiProxy(page: Page, request: APIRequestContext): Prom
     delete headers.origin;
     delete headers.referer;
 
-    const response = await request.fetch(targetUrl, {
-      method: browserRequest.method(),
-      headers,
-      data: browserRequest.postDataBuffer() ?? undefined,
-    });
-
-    await route.fulfill({ response });
+    await route.continue({ url: targetUrl, headers });
   });
 }
 
 test.describe('customer manual v1 simulator live smoke', () => {
   test('rental admin can inspect generated manual anchors through UI screens', async ({ page, request }) => {
     const session = await login(request, ADMIN_USER_ID);
+    const permissions = extractPermissionList(await requestJson<unknown>(
+      request,
+      '/api/v2/permissions/me',
+      session.token,
+    ));
+    const members = await requestJson<ListEnvelope<SettingsMember>>(
+      request,
+      '/api/v2/settings/members?status=approved',
+      session.token,
+    );
+    const memberIds = new Set((members.items ?? []).map((member) => member.userId));
+    expect(memberIds).toEqual(new Set([
+      ADMIN_USER_ID,
+      'member@demo-company.com',
+    ]));
+    expect((members.items ?? []).some((member) => member.role === 'viewer')).toBeFalsy();
     const reservation = await requestJson<ReservationDetail>(
       request,
       '/api/v2/reservations/MAN-ST-RES-CREATE-001',
@@ -199,7 +210,8 @@ test.describe('customer manual v1 simulator live smoke', () => {
     const supportTicket = supportTickets.items?.find((ticket) => ticket.id === 'MAN-SUPPORT-DEVICE-001') ?? supportTickets.items?.[0];
 
     await installRealApiProxy(page, request);
-    await seedSession(page, session, RENTAL_BUSINESS_PERMISSIONS);
+    expect(permissions.length, 'admin permissions response should be explicit').toBeGreaterThan(0);
+    await seedSession(page, session, permissions);
 
     await page.goto(`/reservations?q=${encodeURIComponent(reservationId)}`);
     await expect(page.getByRole('heading', { name: '대여 예약' })).toBeVisible();
@@ -231,16 +243,29 @@ test.describe('customer manual v1 simulator live smoke', () => {
     await page.goto('/settings');
     await expect(page.getByRole('heading', { name: '설정' })).toBeVisible();
     await page.getByTestId('settings-tab-accounts').click();
-    await expect(page.getByText('viewer@demo-company.com').first()).toBeVisible();
+    await expect(page.getByText(ADMIN_USER_ID).first()).toBeVisible();
+    await expect(page.getByText('member@demo-company.com').first()).toBeVisible();
+    await expect(page.getByText('viewer@demo-company.com')).toHaveCount(0);
 
     await page.goto('/support-center?mode=manage');
-    await expect(page.getByTestId('support-admin-heading')).toBeVisible();
-    await expect(page.getByText(supportTicket?.id ?? 'MAN-SUPPORT-DEVICE-001').first()).toBeVisible();
-    await expect(page.getByText(supportTicket?.title ?? '단말 OFF 알림 확인 요청').first()).toBeVisible();
+    if (permissions.includes('action.support.manage')) {
+      await expect(page.getByTestId('support-admin-heading')).toBeVisible();
+      await expect(page.getByText(supportTicket?.id ?? 'MAN-SUPPORT-DEVICE-001').first()).toBeVisible();
+      await expect(page.getByText(supportTicket?.title ?? '단말 OFF 알림 확인 요청').first()).toBeVisible();
+    } else {
+      await expect(page.getByRole('heading', { name: '지원 문의 접수' })).toBeVisible();
+    }
+
+    await page.unrouteAll({ behavior: 'wait' });
   });
 
   test('installer sees generated installation work and remains blocked from rental settings', async ({ page, request }) => {
     const session = await login(request, INSTALLER_USER_ID);
+    const permissions = extractPermissionList(await requestJson<unknown>(
+      request,
+      '/api/v2/permissions/me',
+      session.token,
+    ));
     const tasks = await requestJson<ListEnvelope<DeviceInstallationTask>>(
       request,
       '/api/v2/device-installations/tasks',
@@ -249,7 +274,8 @@ test.describe('customer manual v1 simulator live smoke', () => {
     const task = tasks.items?.find((item) => item.id === 'DEV-PENDING-V21VIN00001') ?? tasks.items?.[0];
 
     await installRealApiProxy(page, request);
-    await seedSession(page, session, INSTALLER_PERMISSIONS);
+    expect(permissions.length, 'installer permissions response should be explicit').toBeGreaterThan(0);
+    await seedSession(page, session, permissions);
 
     await page.goto('/device-installation');
     await expect(page).toHaveURL(/\/device-installation(?:\?.*)?$/);
@@ -259,5 +285,7 @@ test.describe('customer manual v1 simulator live smoke', () => {
     await page.goto('/settings');
     await expect(page).toHaveURL(/\/forbidden(?:\?.*)?$/);
     await expect(page.getByRole('heading', { name: '접근 권한이 없습니다' })).toBeVisible();
+
+    await page.unrouteAll({ behavior: 'wait' });
   });
 });

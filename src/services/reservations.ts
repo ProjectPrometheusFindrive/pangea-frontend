@@ -165,6 +165,29 @@ export interface CancelReservationPayload {
   reason?: string;
 }
 
+export type LicenseVerificationResult = 'verified' | 'rejected' | 'unverifiable';
+export interface LicenseVerificationPayload { result: LicenseVerificationResult; memo?: string; }
+export interface LicenseVerificationRecord {
+  result: LicenseVerificationResult;
+  memo?: string;
+  checkedBy?: string;
+  checkedByName?: string;
+  checkedAt?: string;
+}
+
+export function verifyReservationLicense(
+  reservationId: string,
+  payload: LicenseVerificationPayload,
+  options: ReservationsRequestOptions = {},
+): Promise<unknown> {
+  return apiClient.requestData<unknown>({
+    path: `/api/v2/reservations/${encodeURIComponent(reservationId)}/license-verification`,
+    method: 'POST',
+    body: payload,
+    signal: options.signal,
+  });
+}
+
 export interface AccidentReportPayload {
   accidentDate: string;
   accidentHour: string;
@@ -176,6 +199,7 @@ export interface AccidentReportPayload {
   description?: string;
   blackboxFileName?: string;
   blackboxGcsObjectName?: string;
+  blackboxUnavailableReason?: string;
   handlerName?: string;
   recordedAt?: string;
   accidentLocation?: string;

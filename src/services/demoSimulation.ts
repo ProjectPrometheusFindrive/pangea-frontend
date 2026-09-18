@@ -25,6 +25,15 @@ export interface DemoSimulationRun {
   lastSimulatedDate?: string;
   windowStart?: string;
   windowEnd?: string;
+  anchorAt?: string;
+  eventCount?: number;
+  artifactSummary?: {
+    success: boolean;
+    planned: number;
+    uploaded: number;
+    bytes: number;
+    dryRun?: boolean;
+  };
 }
 
 export interface DemoSimulationTenant {
@@ -69,6 +78,7 @@ export interface DemoSimulationRunPayload {
   resetConfirmed?: boolean;
   async?: boolean;
   profile?: Record<string, unknown>;
+  anchorAt?: string;
 }
 
 export function getDefaultDemoSimulationProfile(companyId?: string, signal?: AbortSignal): Promise<DemoSimulationProfileResponse> {

@@ -26,7 +26,10 @@ function toValidDate(value: unknown): Date | null {
     if (!normalized) {
       return null;
     }
-    const parsed = new Date(normalized);
+    // Preserve legacy wall-clock fields independently of the browser timezone.
+    // Their original timezone is unverified; new API instants must carry an offset.
+    const hasTimezone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(normalized);
+    const parsed = new Date(hasTimezone || /^\d{4}-\d{2}-\d{2}$/.test(normalized) ? normalized : `${normalized}+09:00`);
     return Number.isNaN(parsed.getTime()) ? null : parsed;
   }
   if (typeof value === 'number' && Number.isFinite(value)) {
@@ -50,6 +53,7 @@ function getPart(parts: Intl.DateTimeFormatPart[], type: Intl.DateTimeFormatPart
 }
 
 export function formatDateKst(value: unknown, fallback = '-'): string {
+  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value.trim())) return value.trim();
   const parsed = toValidDate(value);
   if (!parsed) {
     return getRawStringOrFallback(value, fallback);
@@ -60,6 +64,10 @@ export function formatDateKst(value: unknown, fallback = '-'): string {
   const month = getPart(parts, 'month');
   const day = getPart(parts, 'day');
   return `${year}-${month}-${day}`;
+}
+
+export function todayDateKst(now = new Date()): string {
+  return formatDateKst(now, '');
 }
 
 export function formatDateTimeKst(value: unknown, fallback = '-'): string {

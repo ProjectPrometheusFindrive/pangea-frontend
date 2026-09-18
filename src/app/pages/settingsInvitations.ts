@@ -17,7 +17,6 @@ const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const INVALID_COMPANY_IDS = new Set(['0000000000', '__global__', 'company-local', 'null', 'none']);
 const BASE_INVITATION_ROLE_OPTIONS: Array<{ value: InvitationRole; label: string }> = [
   { value: 'member', label: '\uC6B4\uC601\uC790' },
-  { value: 'viewer', label: '\uC870\uD68C\uC790' },
   { value: 'admin', label: '\uAD00\uB9AC\uC790' },
 ];
 const INSTALLER_INVITATION_ROLE_OPTION = { value: 'installer' as const, label: '\uC7A5\uCC29 \uAE30\uC0AC' };
@@ -69,8 +68,8 @@ export function validateInvitationDraft(
     } else if (!resolvedCompanyId) {
       errors.companyId = 'installer \uCD08\uB300\uB294 \uD68C\uC0AC \uC120\uD0DD\uC774 \uD544\uC694\uD569\uB2C8\uB2E4.';
     }
-  } else if (draft.role !== 'admin' && draft.role !== 'member' && draft.role !== 'viewer') {
-    errors.role = '\uCD08\uB300 \uAD8C\uD55C\uC740 admin, member \uB610\uB294 viewer\uB9CC \uD5C8\uC6A9\uB429\uB2C8\uB2E4.';
+  } else if (draft.role !== 'admin' && draft.role !== 'member') {
+    errors.role = '\uCD08\uB300 \uAD8C\uD55C\uC740 admin \uB610\uB294 member\uB9CC \uD5C8\uC6A9\uB429\uB2C8\uB2E4.';
   }
 
   return errors;
@@ -106,8 +105,6 @@ export function toInvitationRoleLabel(role: string): string {
     ? '\uAD00\uB9AC\uC790'
     : role === 'member'
       ? '\uC6B4\uC601\uC790'
-      : role === 'viewer'
-        ? '\uC870\uD68C\uC790'
       : role === 'installer'
         ? '\uC7A5\uCC29 \uAE30\uC0AC'
         : role || '-';

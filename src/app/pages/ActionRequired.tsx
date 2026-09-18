@@ -441,6 +441,7 @@ interface RentalAccidentDraft {
   insuranceClaimNo: string;
   evidenceStatus: string;
   accidentEvidenceDocuments: Record<string, string>;
+  blackboxUnavailableReason: string;
   accidentEvidenceDocumentDetails: Record<string, ActionDocumentDetail>;
   insuranceProcessStatus: string;
   customerChargeAmount: string;
@@ -952,7 +953,7 @@ function getRentalAccidentPanelTitle(mode: RentalAccidentIssueMode): string {
 function getRentalAccidentSummaryText(mode: RentalAccidentIssueMode): string {
   switch (mode) {
     case 'evidence':
-      return '사고 사진, 블랙박스, 상대방 정보, 보험 접수증, 수리 견적서를 확보하거나 자료 생략으로 정리하세요.';
+      return '사고 사진·상대방 정보·보험 접수증·수리 견적서는 필수입니다. 블랙박스가 없으면 미보유·취득 불가 사유를 입력하세요. 미완성 자료는 준비중으로 저장할 수 있습니다.';
     case 'insurance':
       return '보험처리 결과를 처리완료 또는 고객부담 전환으로 정리하세요.';
     case 'intake':
@@ -970,7 +971,9 @@ function isRentalAccidentIntakeComplete(draft: RentalAccidentDraft): boolean {
 }
 
 function isRentalAccidentEvidenceComplete(draft: RentalAccidentDraft): boolean {
-  return draft.evidenceStatus === 'ready' || draft.evidenceStatus === 'completed' || draft.evidenceStatus === 'waived';
+  if (draft.evidenceStatus === 'waived') return true;
+  if (!['ready', 'completed'].includes(draft.evidenceStatus)) return false;
+  return Boolean(draft.accidentEvidenceDocuments.blackbox || draft.blackboxUnavailableReason.trim());
 }
 
 function isRentalAccidentInsuranceResultComplete(draft: RentalAccidentDraft): boolean {
@@ -1149,18 +1152,23 @@ function getSettlementDifferenceMessage(item: ActionItem, status: SettlementDiff
   }
 }
 
-function getActionItemCapabilities(item: ActionItem | null, canWritePayments: boolean, canWriteActionRequired: boolean) {
+function getActionItemCapabilities(item: ActionItem | null, canWritePayments: boolean, canWriteActionRequired: boolean, canDraftClaim = false, canSubmitClaim = false, canRecognizeClaim = false, canRefundPayment = false, canWaivePayment = false, canEditCharges = canWritePayments) {
   const isPaymentIssue = isPaymentActionItem(item);
   const isResolved = item?.statusCode === 'resolved';
   const actions = new Set(item?.availableActions ?? []);
   const hasActions = actions.size > 0;
   const hasLedgerChargeContext = Boolean(item?.relatedChargeItemId) || toWorkChargeItems(item?.workContext).length > 0;
   return {
-    canEditPaymentFields: Boolean(isPaymentIssue && canWritePayments && !isResolved),
-    canEditStandalonePaymentType: Boolean(isPaymentIssue && canWritePayments && !isResolved && !hasLedgerChargeContext),
+    canEditPaymentFields: Boolean(isPaymentIssue && canEditCharges && !isResolved),
+    canEditStandalonePaymentType: Boolean(isPaymentIssue && canEditCharges && !isResolved && !hasLedgerChargeContext),
     canUseLateReturnFlow: isLateReturnActionItem(item),
     canEditIssueAsset: Boolean(item && getIssueAssetKind(item) && canWriteActionRequired && (!hasActions || actions.has('asset_update'))),
-    canUseAccidentClaimActions: Boolean(item?.type === '대차/보험청구' && item?.reservationId && canWriteActionRequired && (!hasActions || actions.has('accident_claim_update') || actions.has('accident_claim_submit') || actions.has('accident_claim_recognize'))),
+    canUseAccidentClaimActions: Boolean(item?.type === '대차/보험청구' && item?.reservationId && canWriteActionRequired && (canDraftClaim || canSubmitClaim || canRecognizeClaim) && (!hasActions || actions.has('accident_claim_update') || actions.has('accident_claim_submit') || actions.has('accident_claim_recognize'))),
+    canDraftClaim,
+    canSubmitClaim,
+    canRecognizeClaim,
+    canRefundPayment,
+    canWaivePayment,
     canUseAccidentReplacementDriverActions: Boolean(item?.type === '대차/보험청구' && item?.reservationId && canWriteActionRequired && (
       item.reasonType === 'accident_replacement_driver_license_required'
       || item.reasonType === 'accident_replacement_driver_required'
@@ -1886,6 +1894,7 @@ function toRentalAccidentDraft(payload: unknown): RentalAccidentDraft {
     insuranceClaimNo: pickString(report, ['insuranceClaimNo']) ?? '',
     evidenceStatus: pickString(report, ['evidenceStatus']) ?? 'pending',
     accidentEvidenceDocuments: evidenceDocuments,
+    blackboxUnavailableReason: pickString(report, ['blackboxUnavailableReason']) ?? '',
     accidentEvidenceDocumentDetails: evidenceDocumentDetails,
     insuranceProcessStatus: pickString(report, ['insuranceProcessStatus']) ?? 'reported',
     customerChargeAmount: String(Math.max(0, Math.trunc(toNumberValue(report.customerChargeAmount) ?? 0)) || ''),
@@ -2544,6 +2553,16 @@ export default function ActionRequired() {
   const { canPerformAction, canAccessRoute } = useAuthorization();
   const canWriteActionRequired = canPerformAction(ACTION_PERMISSIONS.actionRequiredWrite);
   const canWritePayments = canPerformAction(ACTION_PERMISSIONS.paymentsWrite);
+  const canCreateCharge = canWritePayments || canPerformAction(ACTION_PERMISSIONS.billingChargesWrite);
+  const canCreatePayment = canWritePayments || canPerformAction(ACTION_PERMISSIONS.paymentsCreate);
+  const canVoidPayment = canWritePayments || canPerformAction(ACTION_PERMISSIONS.paymentsVoid);
+  const canConfirmPayment = canWritePayments || canPerformAction(ACTION_PERMISSIONS.paymentsConfirm);
+  const canDraftClaim = canWritePayments || canPerformAction(ACTION_PERMISSIONS.accidentClaimsDraft);
+  const canSubmitClaim = canWritePayments || canPerformAction(ACTION_PERMISSIONS.accidentClaimsSubmit);
+  const canRecognizeClaim = canWritePayments || canPerformAction(ACTION_PERMISSIONS.accidentClaimsRecognize);
+  const canAllocatePayment = canWritePayments || canPerformAction(ACTION_PERMISSIONS.paymentsAllocate);
+  const canRefundPayment = canWritePayments || canPerformAction(ACTION_PERMISSIONS.paymentsRefund);
+  const canWaivePayment = canWritePayments || canPerformAction(ACTION_PERMISSIONS.billingWaive);
   const canViewAssets = canAccessRoute(ROUTE_PERMISSIONS.assets);
   const canViewReservations = canAccessRoute(ROUTE_PERMISSIONS.reservations);
 
@@ -2557,7 +2576,7 @@ export default function ActionRequired() {
   const [pageSize, setPageSize] = useState(20);
 
   const [selectedItem, setSelectedItem] = useState<ActionItem | null>(null);
-  const selectedItemCapabilities = getActionItemCapabilities(selectedItem, canWritePayments, canWriteActionRequired);
+  const selectedItemCapabilities = getActionItemCapabilities(selectedItem, canWritePayments, canWriteActionRequired, canDraftClaim, canSubmitClaim, canRecognizeClaim, canRefundPayment, canWaivePayment, canCreateCharge);
   const [searchQuery, setSearchQuery] = useState('');
   const [sortField, setSortField] = useState<SortField | null>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>(null);
@@ -2881,6 +2900,7 @@ export default function ActionRequired() {
         insuranceClaimNo: '',
         evidenceStatus: 'pending',
         accidentEvidenceDocuments: {},
+        blackboxUnavailableReason: '',
         accidentEvidenceDocumentDetails: {},
         insuranceProcessStatus: 'reported',
         customerChargeAmount: '',
@@ -3185,7 +3205,16 @@ export default function ActionRequired() {
 
   const isPaymentIssueResolved = isSelectedPaymentIssue
     && selectedItem?.statusCode === 'resolved';
-  const canEditPaymentIssueFields = canWritePayments && !isPaymentIssueResolved;
+  const canEditPaymentIssueFields = canCreateCharge && !isPaymentIssueResolved;
+  const canResolveSelectedPayment = selectedItem && !isPaymentIssueResolved
+    ? (selectedItem.relatedChargeItemId
+      ? canConfirmPayment && canCreatePayment && canAllocatePayment
+      : canConfirmPayment)
+    : false;
+  const canCancelSelectedPayment = selectedItem && !isPaymentIssueResolved
+    ? (selectedItem.relatedChargeItemId ? canWaivePayment : canVoidPayment)
+    : false;
+  const canShowPaymentIssueActions = canEditPaymentIssueFields || canResolveSelectedPayment || canCancelSelectedPayment;
 
   const closeRelatedContext = useCallback(() => {
     setRelatedContextKind(null);
@@ -3559,7 +3588,10 @@ export default function ActionRequired() {
     item: ActionItem,
     nextStatus: 'paid' | 'canceled',
   ): Promise<void> {
-    if (!canWritePayments) {
+    const allowed = nextStatus === 'canceled'
+      ? (item.relatedChargeItemId ? canWaivePayment : canVoidPayment)
+      : canConfirmPayment && (!item.relatedChargeItemId || (canCreatePayment && canAllocatePayment));
+    if (!allowed) {
       setWriteError({
         kind: 'resolve',
         message: '권한이 없어 결제 상태를 변경할 수 없습니다.',
@@ -3654,7 +3686,7 @@ export default function ActionRequired() {
   }
 
   async function runPaymentAdditionalAmountSave(item: ActionItem): Promise<void> {
-    if (!canWritePayments) {
+    if (!canCreateCharge) {
       setWriteError({
         kind: 'memo',
         message: '권한이 없어 추가 결제 금액을 저장할 수 없습니다.',
@@ -3716,7 +3748,7 @@ export default function ActionRequired() {
   }
 
   async function runPaymentTypeSave(item: ActionItem): Promise<void> {
-    if (!canWritePayments) {
+    if (!canCreateCharge) {
       setWriteError({
         kind: 'memo',
         message: '권한이 없어 결제 유형을 저장할 수 없습니다.',
@@ -4398,7 +4430,8 @@ export default function ActionRequired() {
     charge: ActionItemWorkChargeItem,
     mode: 'paid' | 'waived' | 'refunded',
   ) => {
-    if (!canWritePayments) {
+    const allowed = mode === 'refunded' ? canRefundPayment : mode === 'waived' ? canWaivePayment : canCreatePayment && canConfirmPayment && canAllocatePayment;
+    if (!allowed) {
       setWriteError({
         kind: 'resolve',
         message: '권한이 없어 청구/환불 항목을 변경할 수 없습니다.',
@@ -4451,7 +4484,6 @@ export default function ActionRequired() {
           : undefined;
         await patchChargeItem(charge.id, {
           status: 'refunded',
-          paidAmount: amount,
           refundCompletedAt: refundCompletedAtDraft || toDateInputValue(new Date().toISOString()),
           refundMethod: refundMethodDraft.trim() || '계좌이체',
           evidenceRefs,
@@ -4477,7 +4509,11 @@ export default function ActionRequired() {
       setIsWorkActionSaving(false);
     }
   }, [
-    canWritePayments,
+    canRefundPayment,
+    canWaivePayment,
+    canAllocatePayment,
+    canCreatePayment,
+    canConfirmPayment,
     hydrateActionDetail,
     hydrateActionItems,
     paymentEvidenceFile,
@@ -4528,7 +4564,12 @@ export default function ActionRequired() {
       setAccidentClaimError('연결된 예약건을 찾을 수 없습니다.');
       return;
     }
-    if (!selectedItemCapabilities.canUseAccidentClaimActions) {
+    const allowed = action === 'save-info'
+      ? selectedItemCapabilities.canDraftClaim
+      : action === 'submit'
+        ? selectedItemCapabilities.canSubmitClaim
+        : selectedItemCapabilities.canRecognizeClaim;
+    if (!selectedItemCapabilities.canUseAccidentClaimActions || !allowed) {
       setAccidentClaimError('보험청구 정보를 변경할 권한이 없습니다.');
       return;
     }
@@ -4563,13 +4604,14 @@ export default function ActionRequired() {
           void hydrateActionDetail(selectedItem.id, selectedItem);
           return;
         }
+        const isMemberDraft = (user?.role ?? '').trim().toLowerCase() === 'member';
         await patchAccidentClaim(reservationId, {
           claimNo: accidentClaimDraft.claimNo.trim(),
           insurerName: accidentClaimDraft.insurerName.trim(),
           repairShopName: accidentClaimDraft.repairShopName.trim(),
           repairCompletedAt: accidentClaimDraft.repairCompletedAt || undefined,
           billingAccount: accidentClaimDraft.billingAccount.trim(),
-          ...(selectedItem.reasonType === 'accident_replacement_approval_required'
+          ...(!isMemberDraft && selectedItem.reasonType === 'accident_replacement_approval_required'
             ? {
                 approvalRequired: true,
                 approvalStatus: accidentClaimDraft.approvalStatus,
@@ -4580,7 +4622,7 @@ export default function ActionRequired() {
             : {}),
           supplementMemo: accidentClaimDraft.supplementMemo.trim(),
           billedAmount,
-          memo: 'Action Required에서 사고대차 접수 정보를 저장',
+          ...(!isMemberDraft ? { memo: 'Action Required에서 사고대차 접수 정보를 저장' } : {}),
         });
         setAccidentApprovalDocumentFiles([]);
         setAccidentClaimNotice('사고대차 접수 정보를 저장했습니다.');
@@ -4593,8 +4635,9 @@ export default function ActionRequired() {
           billingAccount: accidentClaimDraft.billingAccount.trim(),
           supplementMemo: accidentClaimDraft.supplementMemo.trim(),
           ...(documentObjectNames.length > 0 ? { documentObjectNames } : {}),
-          submittedAt: new Date().toISOString(),
-          memo: 'Action Required에서 보험청구 제출 처리',
+          ...((user?.role ?? '').trim().toLowerCase() !== 'member'
+            ? { submittedAt: new Date().toISOString(), memo: 'Action Required에서 보험청구 제출 처리' }
+            : {}),
         });
         setAccidentClaimDocumentFile(null);
         setAccidentClaimNotice('보험청구 제출 처리했습니다.');
@@ -4623,7 +4666,7 @@ export default function ActionRequired() {
     } finally {
       setIsAccidentClaimSaving(false);
     }
-  }, [accidentApprovalDocumentFiles, accidentClaimDocumentFile, accidentClaimDraft, hydrateActionDetail, hydrateActionItems, selectedItem, selectedItemCapabilities.canUseAccidentClaimActions, tryResolveCurrentActionItem, uploadAccidentClaimFiles]);
+  }, [accidentApprovalDocumentFiles, accidentClaimDocumentFile, accidentClaimDraft, hydrateActionDetail, hydrateActionItems, selectedItem, selectedItemCapabilities.canDraftClaim, selectedItemCapabilities.canRecognizeClaim, selectedItemCapabilities.canSubmitClaim, selectedItemCapabilities.canUseAccidentClaimActions, tryResolveCurrentActionItem, uploadAccidentClaimFiles, user?.role]);
 
   const handleWorkContextAction = useCallback((actionKey: string, chargeItem?: ActionItemWorkChargeItem) => {
     if (!selectedItem) {
@@ -4731,6 +4774,7 @@ export default function ActionRequired() {
         insuranceClaimNo: rentalAccidentDraft.insuranceClaimNo.trim(),
         evidenceStatus: rentalAccidentDraft.evidenceStatus,
         accidentEvidenceDocuments,
+        blackboxUnavailableReason: rentalAccidentDraft.blackboxUnavailableReason.trim(),
         insuranceProcessStatus: rentalAccidentDraft.insuranceProcessStatus,
         customerChargeAmount: toPaymentAmountFromInput(rentalAccidentDraft.customerChargeAmount),
         customerChargeStatus: rentalAccidentDraft.customerChargeStatus,
@@ -5458,8 +5502,17 @@ export default function ActionRequired() {
                             <option value="pending">자료 대기</option>
                             <option value="ready">자료 확보</option>
                             <option value="completed">확인 완료</option>
-                            <option value="waived">자료 생략</option>
+                            <option value="waived">자료 확인 완료 (기존 생략 상태)</option>
                           </select>
+                          <textarea
+                            aria-label="블랙박스 미첨부 사유"
+                            value={rentalAccidentDraft.blackboxUnavailableReason}
+                            onChange={(event) => setRentalAccidentDraft((prev) => ({ ...prev, blackboxUnavailableReason: event.target.value }))}
+                            placeholder="블랙박스 미첨부/확인 불가 사유 (자료 확보 시 비워도 됩니다)"
+                            rows={2}
+                            disabled={isRentalAccidentSaving || isRentalAccidentLoading}
+                            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                          />
                           {RENTAL_ACCIDENT_EVIDENCE_SLOTS.map((slot) => {
                             const savedObjectName = rentalAccidentDraft.accidentEvidenceDocuments[slot.key];
                             const savedDetail = rentalAccidentDraft.accidentEvidenceDocumentDetails[slot.key];
@@ -5498,7 +5551,7 @@ export default function ActionRequired() {
                               <option value="pending">자료 대기</option>
                               <option value="ready">자료 확보</option>
                               <option value="completed">확인 완료</option>
-                              <option value="waived">자료 생략</option>
+                              <option value="waived">자료 확인 완료 (기존 생략 상태)</option>
                             </select>
                             {RENTAL_ACCIDENT_EVIDENCE_SLOTS.map((slot) => {
                               const savedObjectName = rentalAccidentDraft.accidentEvidenceDocuments[slot.key];
@@ -5598,8 +5651,8 @@ export default function ActionRequired() {
                             <option value="pending">수납 예정</option>
                             <option value="due">수납 필요</option>
                             <option value="overdue">연체</option>
-                            <option value="waived">면제</option>
-                            <option value="paid">수납 완료</option>
+                            <option value="waived" disabled={!canWaivePayment}>면제</option>
+                            <option value="paid" disabled={!canConfirmPayment}>수납 완료</option>
                           </select>
                         </div>
                       ) : (
@@ -5625,8 +5678,8 @@ export default function ActionRequired() {
                               <option value="pending">수납 예정</option>
                               <option value="due">수납 필요</option>
                               <option value="overdue">연체</option>
-                              <option value="waived">면제</option>
-                              <option value="paid">수납 완료</option>
+                              <option value="waived" disabled={!canWaivePayment}>면제</option>
+                              <option value="paid" disabled={!canConfirmPayment}>수납 완료</option>
                             </select>
                           </div>
                         </details>
@@ -5778,7 +5831,7 @@ export default function ActionRequired() {
                             value={accidentClaimDraft.claimNo}
                             onChange={(event) => setAccidentClaimDraft((prev) => ({ ...prev, claimNo: event.target.value }))}
                             placeholder="사고접수번호"
-                            disabled={isAccidentClaimSaving || isAccidentClaimLoading}
+                            disabled={isAccidentClaimSaving || isAccidentClaimLoading || !selectedItemCapabilities.canDraftClaim}
                             className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
                           />
                           <input
@@ -5786,7 +5839,7 @@ export default function ActionRequired() {
                             value={accidentClaimDraft.insurerName}
                             onChange={(event) => setAccidentClaimDraft((prev) => ({ ...prev, insurerName: event.target.value }))}
                             placeholder="보험사"
-                            disabled={isAccidentClaimSaving || isAccidentClaimLoading}
+                            disabled={isAccidentClaimSaving || isAccidentClaimLoading || !selectedItemCapabilities.canSubmitClaim}
                             className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
                           />
                           <input
@@ -5794,7 +5847,7 @@ export default function ActionRequired() {
                             value={accidentClaimDraft.repairShopName}
                             onChange={(event) => setAccidentClaimDraft((prev) => ({ ...prev, repairShopName: event.target.value }))}
                             placeholder="정비소"
-                            disabled={isAccidentClaimSaving || isAccidentClaimLoading}
+                            disabled={isAccidentClaimSaving || isAccidentClaimLoading || !selectedItemCapabilities.canRecognizeClaim}
                             className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
                           />
                           <details className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
@@ -6214,14 +6267,14 @@ export default function ActionRequired() {
                                 openWorkChargeSettlementConfirmation(selectedItem, refundCharge, 'refunded');
                               }
                             }}
-                            disabled={isWriteSaving || !canWritePayments || !getPrimarySettlementCharge(selectedItem)}
+                            disabled={isWriteSaving || !canRefundPayment || !getPrimarySettlementCharge(selectedItem)}
                             className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
                           >
                             환불 완료 처리
                           </button>
                         </div>
                       )}
-                      {canEditPaymentIssueFields && selectedItem.workContext?.module !== 'payment_deposit_refund' && (
+                      {canShowPaymentIssueActions && selectedItem.workContext?.module !== 'payment_deposit_refund' && (
                         <div className="space-y-3 rounded-lg border border-red-200 bg-white p-3">
                           <div className="flex flex-wrap items-center justify-between gap-3">
                             <span className="text-xs font-semibold text-gray-600">결제 유형</span>
@@ -6270,7 +6323,7 @@ export default function ActionRequired() {
                             onClick={() => {
                               openPaymentIssueConfirmation(selectedItem, 'paid');
                             }}
-                            disabled={isWriteSaving}
+                            disabled={isWriteSaving || !canResolveSelectedPayment}
                             className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
                           >
                             결제 완료 처리
@@ -6280,7 +6333,7 @@ export default function ActionRequired() {
                             onClick={() => {
                               openPaymentIssueConfirmation(selectedItem, 'canceled');
                             }}
-                            disabled={isWriteSaving}
+                            disabled={isWriteSaving || !canCancelSelectedPayment}
                             className="rounded-lg bg-slate-600 px-3 py-2 text-xs font-medium text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
                           >
                             결제 면제 처리
@@ -6689,7 +6742,7 @@ export default function ActionRequired() {
                     }
                     openPaymentIssueConfirmation(selectedItem, 'paid');
                   }}
-                  disabled={isResolveSaving}
+                  disabled={isResolveSaving || !canResolveSelectedPayment}
                   className="w-full rounded-lg bg-emerald-600 px-4 py-3 font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {isResolveSaving ? '처리 중...' : '결제 완료 처리'}
@@ -6702,7 +6755,7 @@ export default function ActionRequired() {
                     }
                     openPaymentIssueConfirmation(selectedItem, 'canceled');
                   }}
-                  disabled={isResolveSaving}
+                  disabled={isResolveSaving || !canCancelSelectedPayment}
                   className="w-full rounded-lg bg-slate-600 px-4 py-3 font-medium text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {isResolveSaving ? '처리 중...' : '결제 면제 처리'}

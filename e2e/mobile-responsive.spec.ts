@@ -207,7 +207,6 @@ test.describe('Mobile responsive foundation', () => {
       { path: '/reservations', title: '대여 예약' },
       { path: '/revenue', title: '매출 요약' },
       { path: '/notifications', title: '모든 알림' },
-      { path: '/settings', title: '설정' },
     ] as const;
 
     for (const route of routes) {
@@ -216,6 +215,13 @@ test.describe('Mobile responsive foundation', () => {
       await expect(appHeader.getByRole('heading', { name: route.title, exact: true })).toBeVisible();
       await expectNoDocumentOverflow(page);
     }
+
+    await installMobileAssetMocks(page, 'admin');
+    await loginViaUi(page, 'admin', { returnUrl: '/settings' });
+    await page.goto('/settings');
+    const settingsHeader = page.getByTestId('app-shell').locator('header');
+    await expect(settingsHeader.getByRole('heading', { name: '설정', exact: true })).toBeVisible();
+    await expectNoDocumentOverflow(page);
   });
 
   test('keeps the new-contract workflow usable as a full-screen mobile form', async ({ page }) => {

@@ -29,8 +29,16 @@ export function toDateInputValue(value: string | null | undefined): string {
     return '';
   }
 
-  const isoPrefix = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  const isoPrefix = raw.match(/^(\d{4})-(\d{2})-(\d{2})(?:$|T)/);
   if (isoPrefix) {
+    if (raw.includes('T') && /(?:Z|[+-]\d{2}:?\d{2})$/.test(raw)) {
+      const parsed = new Date(raw.replace('Z', '+00:00'));
+      if (!Number.isNaN(parsed.getTime())) {
+        const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(parsed);
+        const get = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value ?? '';
+        return toValidatedYmd(get('year'), get('month'), get('day'));
+      }
+    }
     return toValidatedYmd(isoPrefix[1], isoPrefix[2], isoPrefix[3]);
   }
 

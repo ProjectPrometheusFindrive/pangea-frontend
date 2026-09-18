@@ -80,7 +80,7 @@ export type SettingsGeofenceUpdateRequest = Partial<
   active?: boolean;
 };
 
-export type SettingsMemberRole = 'admin' | 'member' | 'viewer' | 'installer' | string;
+export type SettingsMemberRole = 'admin' | 'member' | 'installer' | string;
 export type SettingsMemberStatus = 'approved' | 'pending' | 'rejected' | 'withdrawn' | string;
 
 export interface SettingsMember {
@@ -90,6 +90,7 @@ export interface SettingsMember {
   companyId?: string | null;
   role: SettingsMemberRole;
   status: SettingsMemberStatus;
+  permissionGrants?: string[];
 }
 
 export interface SettingsMembersListData {
@@ -97,7 +98,12 @@ export interface SettingsMembersListData {
 }
 
 export interface SettingsMemberRolePatchRequest {
-  role: 'admin' | 'member' | 'viewer';
+  role: 'admin' | 'member';
+}
+
+export interface SettingsMemberPermissionsPatchRequest {
+  permissions: string[];
+  companyId?: string;
 }
 
 export interface SettingsMemberStatusPatchRequest {
@@ -296,6 +302,20 @@ export function patchSettingsMemberRole(
     query: {
       companyId: options.companyId,
     },
+    signal: options.signal,
+  });
+}
+
+export function patchSettingsMemberPermissions(
+  userId: string,
+  payload: SettingsMemberPermissionsPatchRequest,
+  options: SettingsRequestOptions = {},
+): Promise<SettingsMember> {
+  return apiClient.requestData<SettingsMember>({
+    path: `/api/v2/settings/members/${encodeURIComponent(userId)}/permissions`,
+    method: 'PATCH',
+    body: payload,
+    query: { companyId: options.companyId },
     signal: options.signal,
   });
 }

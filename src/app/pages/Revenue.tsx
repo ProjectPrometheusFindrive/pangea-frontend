@@ -190,17 +190,14 @@ type RevenueModelRow = {
   shareRate: number;
 };
 
-function toIsoDate(value: Date): string {
-  const year = value.getFullYear();
-  const month = String(value.getMonth() + 1).padStart(2, '0');
-  const day = String(value.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
+import { todayDateKst } from '../utils/dateTimeFormat';
+
+function toIsoDate(value: Date): string { return todayDateKst(value); }
 
 function resolveDateRange(preset: PeriodPreset): { from: string; to: string } {
   const days = PERIOD_DAYS_BY_PRESET[preset];
   const toDate = new Date();
-  toDate.setHours(0, 0, 0, 0);
+  // The reporting period is based on the Asia/Seoul calendar, independent of browser TZ.
 
   const fromDate = new Date(toDate);
   fromDate.setDate(fromDate.getDate() - (days - 1));
