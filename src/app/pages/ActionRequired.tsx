@@ -44,6 +44,7 @@ import {
   submitAccidentClaim,
 } from '../../services/accidentClaims';
 import { listSettingsMembers, type SettingsMember } from '../../services/settings';
+import { RecentPositionMapModal } from '../components/RecentPositionMapModal';
 import { formatDateKst, formatDateTimeKst } from '../utils/dateTimeFormat';
 import { toDateInputValue } from '../utils/dateInputValue';
 import { DateTextPicker } from '../components/DateTextPicker';
@@ -105,6 +106,7 @@ interface ActionItem {
   availableActions?: string[];
   relatedChargeItemId?: string;
   vehicleNumber: string;
+  geotabVehicleId?: string;
   customerName: string;
   date: string;
   severity: 'High' | 'Medium' | 'Low';
@@ -115,6 +117,9 @@ interface ActionItem {
   reservationId?: string;
   paymentId?: string;
   description?: string;
+  notificationType?: 'theft-suspicion' | 'accident-confirmation' | 'vehicle-anomaly';
+  customerConfirmationStatus?: 'pending' | 'confirmed' | 'rejected' | 'not_required';
+  telemetryCardStatus?: string;
   memos?: MemoLog[];
   documentDetails?: ActionDocumentDetail[];
   workContext?: ActionItemWorkContext;
@@ -491,6 +496,10 @@ const OPERATIONAL_DOMAIN_ACTIONS: Record<string, OperationalDomainActionConfig[]
     { action: 'false_alarm', label: '오탐 처리', group: '확인 조치' },
     { action: 'reported_to_authority', label: '신고 처리', group: '위험 조치', tone: 'danger' },
     { action: 'vehicle_recovered', label: '차량 회수', group: '위험 조치', tone: 'danger' },
+  ],
+  'rental_accident.customer_confirmation_required': [
+    { action: 'customer_confirmation_confirmed', label: '고객 사고 확인', group: '확인 조치' },
+    { action: 'customer_confirmation_rejected', label: '고객 미확인 처리', group: '확인 조치', tone: 'danger' },
   ],
 };
 
@@ -1175,7 +1184,14 @@ function getActionItemCapabilities(item: ActionItem | null, canWritePayments: bo
       || item.reasonType === 'accident_replacement_license_required'
     )),
     canUseRentalAccidentActions: Boolean(item?.reservationId && canWriteActionRequired && (item.type === '대여 중 사고' || String(item.issueCode ?? '').startsWith('rental_accident.')) && (!hasActions || actions.has('accident_followup_update'))),
-    canUseOperationalDomainActions: Boolean(item?.issueCode && OPERATIONAL_DOMAIN_ACTIONS[item.issueCode] && canWriteActionRequired),
+    canUseOperationalDomainActions: Boolean(
+      item?.issueCode
+      && OPERATIONAL_DOMAIN_ACTIONS[item.issueCode]
+      && canWriteActionRequired
+      && !(item.issueCode === 'rental_accident.customer_confirmation_required'
+        && item.customerConfirmationStatus
+        && item.customerConfirmationStatus !== 'pending'),
+    ),
   };
 }
 
@@ -1924,7 +1940,7 @@ function toAccidentReplacementDriverDraft(payload: unknown): AccidentReplacement
 
 function normalizeSeverity(rawValue: string | null): ActionItem['severity'] {
   if (!rawValue) {
-    return 'Low';
+    return 'Medium';
   }
 
   const normalized = rawValue.toLowerCase().replace(/_/g, '-');
@@ -2420,6 +2436,7 @@ function toActionItem(row: unknown, index: number, fallbackId?: string): ActionI
       : undefined,
     relatedChargeItemId: pickString(row, ['relatedChargeItemId']) ?? undefined,
     vehicleNumber,
+    geotabVehicleId: pickString(row, ['geotabVehicleId', 'vehicleId', 'assetId']) ?? undefined,
     customerName: pickPartyDisplayName(row) ?? pickString(row, ['customerName', 'customer', 'customerDisplayName']) ?? '-',
     date: pickString(row, ['date', 'dueDate', 'occurredAt', 'createdAt']) ?? '-',
     severity: normalizeSeverity(pickString(row, ['severity', 'priority'])),
@@ -2430,6 +2447,15 @@ function toActionItem(row: unknown, index: number, fallbackId?: string): ActionI
     reservationId: reservationId ?? undefined,
     paymentId: paymentId ?? undefined,
     description: pickString(row, ['description', 'detail']),
+    notificationType: (() => {
+      const raw = pickString(row, ['notificationType', 'alertType', 'eventType', 'reasonType', 'issueCode'])?.toLowerCase() ?? '';
+      if (raw.includes('theft') || raw.includes('도난')) return 'theft-suspicion';
+      if (raw.includes('accident') || raw.includes('사고')) return 'accident-confirmation';
+      if (raw.includes('malfunction') || raw.includes('anomaly') || raw.includes('이상')) return 'vehicle-anomaly';
+      return undefined;
+    })(),
+    customerConfirmationStatus: pickString(row, ['customerConfirmationStatus', 'customerConfirmation', 'confirmationStatus']) as ActionItem['customerConfirmationStatus'] | undefined,
+    telemetryCardStatus: pickString(row, ['telemetryCardStatus']) ?? undefined,
     memos: memos.length > 0 ? memos : undefined,
     workContext,
     paymentInfo,
@@ -2576,6 +2602,7 @@ export default function ActionRequired() {
   const [pageSize, setPageSize] = useState(20);
 
   const [selectedItem, setSelectedItem] = useState<ActionItem | null>(null);
+  const [recentPositionItem, setRecentPositionItem] = useState<ActionItem | null>(null);
   const selectedItemCapabilities = getActionItemCapabilities(selectedItem, canWritePayments, canWriteActionRequired, canDraftClaim, canSubmitClaim, canRecognizeClaim, canRefundPayment, canWaivePayment, canCreateCharge);
   const [searchQuery, setSearchQuery] = useState('');
   const [sortField, setSortField] = useState<SortField | null>(null);
@@ -5062,7 +5089,12 @@ export default function ActionRequired() {
                 <tbody className="divide-y divide-gray-200">
                   {pagedItems.map((item) => (
                     <tr key={item.id} className="hover:bg-gray-50">
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{item.type}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        <div className="flex items-center gap-2">
+                          {item.notificationType && <span className="rounded-full bg-red-100 px-2 py-1 text-[11px] font-bold text-red-700">알림</span>}
+                          <span>{item.type}</span>
+                        </div>
+                      </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">{item.subCategory ?? '-'}</td>
                       <td
                         className="px-6 py-4 whitespace-nowrap text-sm font-medium text-blue-600 hover:text-blue-800 cursor-pointer hover:underline"
@@ -5098,12 +5130,12 @@ export default function ActionRequired() {
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{item.status}</td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">{item.assignee}</td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm">
-                        <button
-                          className="text-blue-600 hover:text-blue-800 font-medium"
-                          onClick={() => handleOpenDetail(item)}
-                        >
-                          보기
-                        </button>
+                        <div className="flex items-center gap-3">
+                          <button className="text-blue-600 hover:text-blue-800 font-medium" onClick={() => handleOpenDetail(item)}>보기</button>
+                          {(item.notificationType === 'theft-suspicion' || item.notificationType === 'accident-confirmation') && (item.geotabVehicleId || item.vehicleNumber) && (
+                            <button type="button" className="font-medium text-indigo-600 hover:text-indigo-800" onClick={() => setRecentPositionItem(item)}>최근 위치 조회</button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -5210,6 +5242,14 @@ export default function ActionRequired() {
               )}
 
               <div className="space-y-4">
+                {selectedItem.notificationType && (
+                  <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+                    <p className="font-bold">{selectedItem.notificationType === 'theft-suspicion' ? '도난 의심 알림' : selectedItem.notificationType === 'accident-confirmation' ? '사고 확인 알림' : '차량 이상 알림'}</p>
+                    {selectedItem.customerConfirmationStatus && selectedItem.customerConfirmationStatus !== 'not_required' && <p className="mt-1 text-xs">고객 확인 상태: {selectedItem.customerConfirmationStatus === 'confirmed' ? '확인됨' : selectedItem.customerConfirmationStatus === 'rejected' ? '미확인' : '확인 대기'}</p>}
+                    {selectedItem.telemetryCardStatus === 'accident_intake' && <p className="mt-1 text-xs font-semibold">사고접수 단계로 전환되었습니다.</p>}
+                    {(selectedItem.notificationType === 'theft-suspicion' || selectedItem.notificationType === 'accident-confirmation') && (selectedItem.geotabVehicleId || selectedItem.vehicleNumber) && <button type="button" className="mt-2 rounded-md bg-white px-3 py-1.5 text-xs font-semibold text-indigo-700 shadow-sm ring-1 ring-indigo-200 hover:bg-indigo-50" onClick={() => setRecentPositionItem(selectedItem)}>최근 위치 조회</button>}
+                  </div>
+                )}
                 <div>
                   <label className="text-sm font-semibold text-gray-600">유형</label>
                   <p className="text-base text-gray-900 mt-1">{selectedItem.type}</p>
@@ -6858,6 +6898,13 @@ export default function ActionRequired() {
               )}
             </div>
           </div>
+        )}
+        {recentPositionItem && (
+          <RecentPositionMapModal
+            vehicleId={recentPositionItem.geotabVehicleId ?? recentPositionItem.vehicleNumber}
+            vehicleLabel={`${recentPositionItem.vehicleNumber} · ${recentPositionItem.customerName}`}
+            onClose={() => setRecentPositionItem(null)}
+          />
         )}
       </div>
     </Layout>

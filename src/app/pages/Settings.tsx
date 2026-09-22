@@ -16,6 +16,7 @@ import Papa from 'papaparse';
 import { toast } from 'sonner';
 import { KakaoGeofenceInput, type KakaoGeofenceShape, type GeofencePoint } from '../components/KakaoGeofenceInput';
 import { KakaoGeofenceOverviewMap } from '../components/KakaoGeofenceOverviewMap';
+import { getGeotabThresholds, updateGeotabThresholds, type GeotabThresholdConfig } from '../../services/geotab';
 import { PageStateBoundary } from '../components/PageStateBoundary';
 import {
   getCollectionFromPayload,
@@ -886,6 +887,9 @@ export default function Settings() {
   const [isGeofenceSaving, setIsGeofenceSaving] = useState(false);
   const [activeToggleTargetId, setActiveToggleTargetId] = useState<string | null>(null);
   const [deletingGeofenceId, setDeletingGeofenceId] = useState<string | null>(null);
+  const [geotabThresholds, setGeotabThresholds] = useState<GeotabThresholdConfig>({ theftDwellMinutes: 30, geofenceRadiusMeters: 100, accidentDeltaV: 3.0 });
+  const [isGeotabThresholdSaving, setIsGeotabThresholdSaving] = useState(false);
+  const [geotabThresholdNotice, setGeotabThresholdNotice] = useState<string | null>(null);
 
   const [garages, setGarages] = useState<SettingsGarage[]>([]);
   const [garageCompanyAddress, setGarageCompanyAddress] = useState('');
@@ -930,6 +934,27 @@ export default function Settings() {
     () => garages.find((item) => item.id === editingGarageId) ?? null,
     [editingGarageId, garages],
   );
+
+  useEffect(() => {
+    const controller = new AbortController();
+    getGeotabThresholds({ signal: controller.signal, companyId: settingsCompanyId ?? undefined })
+      .then((payload) => { if (!controller.signal.aborted && payload) setGeotabThresholds((prev) => ({ ...prev, ...payload })); })
+      .catch(() => { /* safe defaults remain when Geotab is not enabled */ });
+    return () => controller.abort();
+  }, [settingsCompanyId]);
+
+  const saveGeotabThresholds = useCallback(async () => {
+    if (!canEditSettings || isGeotabThresholdSaving) return;
+    setIsGeotabThresholdSaving(true);
+    setGeotabThresholdNotice(null);
+    try {
+      const saved = await updateGeotabThresholds(geotabThresholds, { companyId: settingsCompanyId ?? undefined });
+      setGeotabThresholds(saved);
+      setGeotabThresholdNotice('Geotab/지오펜스 기준값이 저장되었습니다.');
+    } catch (error) {
+      setGeotabThresholdNotice(error instanceof Error ? error.message : '기준값 저장에 실패했습니다.');
+    } finally { setIsGeotabThresholdSaving(false); }
+  }, [canEditSettings, geotabThresholds, isGeotabThresholdSaving, settingsCompanyId]);
 
   const updateSettingsCompanyScope = useCallback((companyId: string | null, replace = false) => {
     const normalizedCompanyId = normalizeTenantCompanyId(companyId);
@@ -3671,6 +3696,20 @@ export default function Settings() {
 
           {activeTab === 'geofence' && (
             <div className="space-y-6">
+              <section className="rounded-xl border border-indigo-100 bg-indigo-50/50 p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div><h2 className="text-base font-semibold text-[#1e2939]">Geotab 이벤트 기준값</h2><p className="mt-1 text-xs text-slate-600">도난 의심, 사고 확인, 지오펜스 알림에 적용할 테넌트별 기준입니다.</p></div>
+                  <button type="button" onClick={() => void saveGeotabThresholds()} disabled={!canEditSettings || isGeotabThresholdSaving} className="rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white hover:bg-indigo-700 disabled:opacity-50">{isGeotabThresholdSaving ? '저장 중...' : '기준값 저장'}</button>
+                </div>
+                <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                  {([
+                    ['theftDwellMinutes', '도난 의심 체류(분)', 1, 1, 10080],
+                    ['geofenceRadiusMeters', '지오펜스 반경(m)', 1, 10, 100000],
+                    ['accidentDeltaV', '사고 ΔV 임계값', 0.1, 0.1, 20],
+                  ] as const).map(([key, label, step, min, max]) => <label key={key} className="text-xs font-semibold text-slate-700">{label}<input type="number" min={min} max={max} step={step} value={geotabThresholds[key]} onChange={(event) => setGeotabThresholds((prev) => ({ ...prev, [key]: Number(event.target.value) }))} disabled={!canEditSettings || isGeotabThresholdSaving} className="mt-1 w-full rounded-lg border border-indigo-200 bg-white px-3 py-2 text-sm" /></label>)}
+                </div>
+                {geotabThresholdNotice && <p className="mt-3 text-xs font-semibold text-indigo-700">{geotabThresholdNotice}</p>}
+              </section>
               {!canEditSettings && (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
                   현재 계정은 지오펜스를 읽기 전용으로만 볼 수 있습니다.
