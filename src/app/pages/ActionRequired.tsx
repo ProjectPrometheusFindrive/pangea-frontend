@@ -499,7 +499,7 @@ const OPERATIONAL_DOMAIN_ACTIONS: Record<string, OperationalDomainActionConfig[]
   ],
   'rental_accident.customer_confirmation_required': [
     { action: 'customer_confirmation_confirmed', label: '고객 사고 확인', group: '확인 조치' },
-    { action: 'customer_confirmation_rejected', label: '고객 미확인 처리', group: '확인 조치', tone: 'danger' },
+    { action: 'customer_confirmation_rejected', label: '고객 사고 아님 확인', group: '확인 조치', tone: 'danger' },
   ],
 };
 
@@ -5245,7 +5245,7 @@ export default function ActionRequired() {
                 {selectedItem.notificationType && (
                   <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
                     <p className="font-bold">{selectedItem.notificationType === 'theft-suspicion' ? '도난 의심 알림' : selectedItem.notificationType === 'accident-confirmation' ? '사고 확인 알림' : '차량 이상 알림'}</p>
-                    {selectedItem.customerConfirmationStatus && selectedItem.customerConfirmationStatus !== 'not_required' && <p className="mt-1 text-xs">고객 확인 상태: {selectedItem.customerConfirmationStatus === 'confirmed' ? '확인됨' : selectedItem.customerConfirmationStatus === 'rejected' ? '미확인' : '확인 대기'}</p>}
+                    {selectedItem.customerConfirmationStatus && selectedItem.customerConfirmationStatus !== 'not_required' && <p className="mt-1 text-xs">고객 확인 상태: {selectedItem.customerConfirmationStatus === 'confirmed' ? '사고 확인됨' : selectedItem.customerConfirmationStatus === 'rejected' ? '사고 아님 확인됨' : '확인 대기'}</p>}
                     {selectedItem.telemetryCardStatus === 'accident_intake' && <p className="mt-1 text-xs font-semibold">사고접수 단계로 전환되었습니다.</p>}
                     {(selectedItem.notificationType === 'theft-suspicion' || selectedItem.notificationType === 'accident-confirmation') && (selectedItem.geotabVehicleId || selectedItem.vehicleNumber) && <button type="button" className="mt-2 rounded-md bg-white px-3 py-1.5 text-xs font-semibold text-indigo-700 shadow-sm ring-1 ring-indigo-200 hover:bg-indigo-50" onClick={() => setRecentPositionItem(selectedItem)}>최근 위치 조회</button>}
                   </div>

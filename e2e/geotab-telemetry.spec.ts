@@ -79,7 +79,7 @@ test('Geotab accident card shows recent path and moves to accident intake after 
   await page.getByRole('button', { name: '고객 사고 확인', exact: true }).click();
 
   await expect.poll(() => domainActionBody).toMatchObject({ action: 'customer_confirmation_confirmed' });
-  await expect(page.getByText('고객 확인 상태: 확인됨')).toBeVisible();
+  await expect(page.getByText('고객 확인 상태: 사고 확인됨')).toBeVisible();
   await expect(page.getByText('사고접수 단계로 전환되었습니다.')).toBeVisible();
   await expect(page.getByRole('button', { name: '고객 사고 확인', exact: true })).toHaveCount(0);
 });
