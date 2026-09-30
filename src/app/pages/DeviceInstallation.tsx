@@ -14,6 +14,8 @@ import { ACTION_PERMISSIONS } from '../authorization';
 import { formatDateTimeKst } from '../utils/dateTimeFormat';
 import { ApiError } from '../../services/api';
 import { getAssetsList } from '../../services/assets';
+import { lookupInstallationDevice } from '../../services/geotab';
+import { GeotabDeviceMapping } from '../components/GeotabDeviceMapping';
 import {
   createDeviceInstallation,
   getDeviceInstallationList,
@@ -242,6 +244,7 @@ export default function DeviceInstallation() {
   const hasCompanyScope = user?.role !== 'super_admin' || Boolean(companyScope);
   const [installerId, setInstallerId] = useState('');
   const [deviceSerial, setDeviceSerial] = useState('');
+  const [serialLookup, setSerialLookup] = useState<{ status: string; message: string } | null>(null);
   const [installationPhotoFile, setInstallationPhotoFile] = useState<File | null>(null);
   const [installationPhotoPreview, setInstallationPhotoPreview] = useState<string>('');
   const [serialPhotoFile, setSerialPhotoFile] = useState<File | null>(null);
@@ -256,6 +259,18 @@ export default function DeviceInstallation() {
       ?? installations.find((item) => item.vin === vin && !['completed', 'cancelled'].includes(item.status)),
     [installations, pendingInstallation, vin],
   );
+
+  useEffect(() => {
+    setSerialLookup(null);
+    if (!selectedInstallation || !deviceSerial.trim()) return;
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      lookupInstallationDevice(selectedInstallation.id, deviceSerial, { companyId: targetCompanyId, signal: controller.signal })
+        .then((result) => { if (!controller.signal.aborted) setSerialLookup(result); })
+        .catch(() => { if (!controller.signal.aborted) setSerialLookup({ status: 'error', message: '단말 수집 여부를 확인하지 못했습니다. 완료 후 매칭 상태를 확인하세요.' }); });
+    }, 400);
+    return () => { window.clearTimeout(timer); controller.abort(); };
+  }, [selectedInstallation?.id, deviceSerial, targetCompanyId]);
 
   useEffect(() => () => {
     if (installationPhotoPreview) {
@@ -500,14 +515,14 @@ export default function DeviceInstallation() {
         }
       }
       if (!installationId) throw new ApiError('NOT_FOUND', '장착 작업을 찾을 수 없습니다.', { status: 404 });
-      await patchDeviceInstallationStatus(installationId, {
+      const completed = await patchDeviceInstallationStatus(installationId, {
         status: 'completed',
         installedAt: new Date().toISOString(),
         deviceSerial: normalizedDeviceSerial,
         photos: [installationPhotoDataUrl, serialPhotoDataUrl],
       }, { companyId: targetCompanyId });
 
-      setActionMessage('장착 완료가 등록되었습니다.');
+      setActionMessage(`장착 완료가 등록되었습니다. ${completed.geotabMappingMessage ?? ''}`);
       resetForm();
       setPendingInstallation(null);
       setPage(1);
@@ -578,6 +593,7 @@ export default function DeviceInstallation() {
           )}
         </div>
 
+        {targetCompanyId && ['admin', 'super_admin'].includes(user?.role ?? '') && <GeotabDeviceMapping key={targetCompanyId} companyId={targetCompanyId} />}
         <div className="bg-white rounded-lg shadow-sm p-4 mb-4">
           {(actionError || actionMessage) && (
             <div data-testid={actionError ? 'device-installation-action-error' : 'device-installation-action-message'} className={`mb-4 rounded-lg border px-3 py-2 text-sm ${
@@ -653,12 +669,13 @@ export default function DeviceInstallation() {
               <input
                 data-testid="device-installation-serial-input"
                 type="text"
-                placeholder="DEV-2024-XXX"
+                placeholder="Geotab 단말 일련번호"
                 value={deviceSerial}
                 onChange={(e) => setDeviceSerial(e.target.value.toUpperCase())}
                 disabled={!canWriteDeviceInstallation || isSubmitting}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm"
               />
+              {serialLookup && <p role="status" className={`mt-1 text-xs ${serialLookup.status === 'conflict' ? 'text-red-700' : 'text-slate-600'}`}>{serialLookup.message}</p>}
             </div>
 
             <div className="w-full sm:w-[140px] sm:flex-shrink-0">
@@ -898,6 +915,7 @@ export default function DeviceInstallation() {
                         {row.installation.deviceSerial ? (
                           <span className="font-mono text-xs text-gray-900 bg-gray-100 px-2 py-1 rounded">
                             {row.installation.deviceSerial}
+                            {row.installation.geotabMappingMessage && <span className="mt-1 block text-xs">{row.installation.geotabMappingMessage}</span>}
                           </span>
                         ) : (
                           <span className="text-xs text-gray-400">-</span>

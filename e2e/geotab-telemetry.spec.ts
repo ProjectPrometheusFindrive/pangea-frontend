@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-import { fulfillSuccess, installApiMocks } from './helpers/apiMock';
+import { fulfillSuccess, installApiMocks, type ApiMockHandler } from './helpers/apiMock';
 import { seedAuthSession } from './helpers/session';
 
 const pendingAccidentItem = {
@@ -28,6 +28,12 @@ const pendingAccidentItem = {
     'status_update',
   ],
 };
+
+const settingsMocks: Record<string, ApiMockHandler> = Object.fromEntries([
+  '/api/v2/notifications', '/api/v2/notifications/summary', '/api/v2/settings/geofences',
+  '/api/v2/settings/garages', '/api/v2/settings/members', '/api/v2/invitations',
+  '/api/v2/assets', '/api/v2/reservations', '/api/v2/settings/geotab-thresholds',
+].map((path) => [`GET ${path}`, async ({ route }: Parameters<ApiMockHandler>[0]) => fulfillSuccess(route, { items: [], totalCount: 0, unreadCount: 0 })]));
 
 test('Geotab accident card shows recent path and moves to accident intake after confirmation', async ({ page }) => {
   let currentItem = { ...pendingAccidentItem };
@@ -71,6 +77,8 @@ test('Geotab accident card shows recent path and moves to accident intake after 
   const mapDialog = page.getByRole('dialog', { name: '최근 위치 조회' });
   await expect(mapDialog).toContainText('37.50120, 127.03230');
   await expect(mapDialog).toContainText('최근 위치');
+  await expect(mapDialog.getByTestId('telemetry-route-line')).toBeVisible();
+  await expect(mapDialog.getByTestId('telemetry-latest-marker')).toBeVisible();
   await mapDialog.getByRole('button', { name: '최근 위치 조회 닫기' }).click();
 
   await page.getByRole('button', { name: '보기', exact: true }).click();
@@ -82,4 +90,52 @@ test('Geotab accident card shows recent path and moves to accident intake after 
   await expect(page.getByText('고객 확인 상태: 사고 확인됨')).toBeVisible();
   await expect(page.getByText('사고접수 단계로 전환되었습니다.')).toBeVisible();
   await expect(page.getByRole('button', { name: '고객 사고 확인', exact: true })).toHaveCount(0);
+});
+
+test('tenant admin maps collected serial to Pangea plate without changing provider ID', async ({ page }) => {
+  let mappingBody: Record<string, unknown> | null = null;
+  const device = { id: 'inventory-1', deviceId: 'b1', sourceDatabase: 'fleet', serialNumber: 'G9TEST123', name: 'G9TEST123',
+    providerVin: 'PROVIDER-VIN', providerPlate: '', deviceType: 'GO9', mapped: false, revision: 0, lastSyncedAt: '2026-09-29T00:00:00Z' };
+  await seedAuthSession(page, 'admin');
+  await installApiMocks(page, {
+    user: { role: 'admin' },
+    handlers: {
+      ...settingsMocks,
+      'GET /api/v2/geotab/devices': async ({ route }) => fulfillSuccess(route, { items: [device] }),
+      'GET /api/v2/geotab/mapping-vehicles': async ({ route }) => fulfillSuccess(route, { items: [{ vin: 'PANGEA-VIN', vehicleNumber: '12가3456' }], hasMore: false }),
+      'PATCH /api/v2/geotab/devices/inventory-1/mapping': async ({ route, request }) => {
+        mappingBody = request.postDataJSON();
+        await fulfillSuccess(route, { ...device, vin: 'PANGEA-VIN', vehicleNumber: '12가3456', mapped: true, revision: 1 });
+      },
+    },
+  });
+  await page.goto('/settings');
+  await page.getByRole('button', { name: '지오펜스', exact: true }).click();
+  const panel = page.getByRole('region', { name: 'Geotab 단말 차량 매칭' });
+  await panel.getByLabel('수집된 단말 일련번호').selectOption('inventory-1');
+  await expect(panel).toContainText('MyGeotab 차량번호: 미입력');
+  await panel.getByLabel('연결할 Pangea 차량번호', { exact: true }).selectOption('PANGEA-VIN');
+  await panel.getByRole('button', { name: '차량 매칭 저장' }).click();
+  await expect.poll(() => mappingBody).toEqual({ vin: 'PANGEA-VIN', revision: 0 });
+  await expect(panel).toContainText('현재 매칭: 12가3456');
+  await expect(panel).toContainText('단말 ID: b1');
+  await expect(panel.getByRole('button', { name: '최근 위치 조회' })).toBeVisible();
+});
+
+test('mapping conflict is visible and does not claim a successful match', async ({ page }) => {
+  await seedAuthSession(page, 'admin');
+  await installApiMocks(page, { user: { role: 'admin' }, handlers: {
+    ...settingsMocks,
+    'GET /api/v2/geotab/devices': async ({ route }) => fulfillSuccess(route, { items: [{ id: 'd1', deviceId: 'b1', serialNumber: 'G9TEST', sourceDatabase: 'fleet', name: '', mapped: false, revision: 0, lastSyncedAt: '2026-09-29T00:00:00Z' }] }),
+    'GET /api/v2/geotab/mapping-vehicles': async ({ route }) => fulfillSuccess(route, { items: [{ vin: 'V1', vehicleNumber: '12가3456' }], hasMore: false }),
+    'PATCH /api/v2/geotab/devices/d1/mapping': async ({ route }) => route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ status: 'error', error: { code: 'MAPPING_CONFLICT', message: 'mapping changed; refresh before saving' } }) }),
+  } });
+  await page.goto('/settings');
+  await page.getByRole('button', { name: '지오펜스', exact: true }).click();
+  const panel = page.getByRole('region', { name: 'Geotab 단말 차량 매칭' });
+  await panel.getByLabel('수집된 단말 일련번호').selectOption('d1');
+  await panel.getByLabel('연결할 Pangea 차량번호', { exact: true }).selectOption('V1');
+  await panel.getByRole('button', { name: '차량 매칭 저장' }).click();
+  await expect(panel.getByRole('alert')).toContainText('mapping changed');
+  await expect(panel).toContainText('현재 매칭: 미매칭');
 });

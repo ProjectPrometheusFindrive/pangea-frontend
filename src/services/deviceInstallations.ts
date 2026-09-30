@@ -17,6 +17,8 @@ export interface DeviceInstallationItem {
   cancelReason?: string;
   installer?: string;
   deviceSerial?: string;
+  geotabMappingStatus?: 'mapped' | 'pending_inventory' | 'conflict';
+  geotabMappingMessage?: string;
   photos: string[];
   memo?: string;
   createdAt?: string;
@@ -155,6 +157,8 @@ function toInstallation(value: unknown): DeviceInstallationItem | null {
     cancelReason: toNonEmptyString(value.cancelReason) ?? undefined,
     installer: toNonEmptyString(value.installer) ?? undefined,
     deviceSerial: toNonEmptyString(value.deviceSerial) ?? undefined,
+    geotabMappingStatus: ['mapped', 'pending_inventory', 'conflict'].includes(String(value.geotabMappingStatus)) ? value.geotabMappingStatus as DeviceInstallationItem['geotabMappingStatus'] : undefined,
+    geotabMappingMessage: toNonEmptyString(value.geotabMappingMessage) ?? undefined,
     photos: toPhotos(value.photos),
     memo: toNonEmptyString(value.memo) ?? undefined,
     createdAt: toNonEmptyString(value.createdAt) ?? undefined,

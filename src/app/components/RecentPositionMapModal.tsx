@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { X, Loader2, MapPin } from 'lucide-react';
 import { getGeotabRecentPositions, type GeotabPosition } from '../../services/geotab';
+import { TelemetryRouteMap } from './TelemetryRouteMap';
 
-interface RecentPositionMapModalProps { vehicleId: string; vehicleLabel: string; onClose: () => void; }
+interface RecentPositionMapModalProps { vehicleId: string; vehicleLabel: string; companyId?: string; onClose: () => void; }
 
-export function RecentPositionMapModal({ vehicleId, vehicleLabel, onClose }: RecentPositionMapModalProps) {
+export function RecentPositionMapModal({ vehicleId, vehicleLabel, companyId, onClose }: RecentPositionMapModalProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
   const overlaysRef = useRef<any[]>([]);
@@ -16,12 +17,12 @@ export function RecentPositionMapModal({ vehicleId, vehicleLabel, onClose }: Rec
 
   useEffect(() => {
     const controller = new AbortController();
-    getGeotabRecentPositions(vehicleId, { signal: controller.signal })
+    getGeotabRecentPositions(vehicleId, { signal: controller.signal, companyId })
       .then((payload) => setPositions(Array.isArray(payload.positions) ? payload.positions : []))
       .catch((reason) => { if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : '최근 위치를 불러오지 못했습니다.'); })
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
-  }, [vehicleId]);
+  }, [vehicleId, companyId]);
 
   useEffect(() => {
     const key = import.meta.env.VITE_KAKAO_MAP_API_KEY as string | undefined;
@@ -60,8 +61,7 @@ export function RecentPositionMapModal({ vehicleId, vehicleLabel, onClose }: Rec
       {error && <p className="m-5 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</p>}
       {!loading && !error && positions.length === 0 && <p className="m-5 rounded border border-gray-200 bg-gray-50 p-3 text-sm text-gray-600">최근 위치 데이터가 없습니다.</p>}
       <div className="relative">
-        <div ref={mapContainerRef} className="min-h-[360px] w-full bg-slate-100" aria-label="최근 위치 경로 지도" />
-        {!hasMapKey && positions.length > 0 && <p className="absolute inset-x-4 top-4 rounded border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">지도 키가 설정되지 않아 좌표 목록으로 표시합니다.</p>}
+        {!hasMapKey && positions.length > 0 ? <TelemetryRouteMap positions={positions} /> : <div ref={mapContainerRef} className="min-h-[360px] w-full bg-slate-100" aria-label="최근 위치 경로 지도" />}
       </div>
       {positions.length > 0 && <div className="max-h-32 overflow-y-auto border-t px-5 py-3 text-xs text-gray-600">{positions.slice(-5).reverse().map((position, index) => <div key={`${position.recordedAt}-${index}`} className="flex items-center gap-2"><MapPin className={`h-3 w-3 ${index === 0 ? 'text-red-600' : 'text-blue-600'}`} />{index === 0 ? '최근 위치 · ' : ''}{new Date(position.recordedAt).toLocaleString('ko-KR')} · {position.latitude.toFixed(5)}, {position.longitude.toFixed(5)}</div>)}</div>}
     </div>

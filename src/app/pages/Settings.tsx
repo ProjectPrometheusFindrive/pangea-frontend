@@ -17,6 +17,7 @@ import { toast } from 'sonner';
 import { KakaoGeofenceInput, type KakaoGeofenceShape, type GeofencePoint } from '../components/KakaoGeofenceInput';
 import { KakaoGeofenceOverviewMap } from '../components/KakaoGeofenceOverviewMap';
 import { getGeotabThresholds, updateGeotabThresholds, type GeotabThresholdConfig } from '../../services/geotab';
+import { GeotabDeviceMapping } from '../components/GeotabDeviceMapping';
 import { PageStateBoundary } from '../components/PageStateBoundary';
 import {
   getCollectionFromPayload,
@@ -887,7 +888,7 @@ export default function Settings() {
   const [isGeofenceSaving, setIsGeofenceSaving] = useState(false);
   const [activeToggleTargetId, setActiveToggleTargetId] = useState<string | null>(null);
   const [deletingGeofenceId, setDeletingGeofenceId] = useState<string | null>(null);
-  const [geotabThresholds, setGeotabThresholds] = useState<GeotabThresholdConfig>({ theftDwellMinutes: 30, geofenceRadiusMeters: 100, accidentDeltaV: 3.0 });
+  const [geotabThresholds, setGeotabThresholds] = useState<GeotabThresholdConfig>({ theftDwellMinutes: 30, geofenceRadiusMeters: 100, accidentDeltaV: 3.0, collisionConfidenceThreshold: 50, eventFreshnessMinutes: 15, locationMaxGapMinutes: 10 });
   const [isGeotabThresholdSaving, setIsGeotabThresholdSaving] = useState(false);
   const [geotabThresholdNotice, setGeotabThresholdNotice] = useState<string | null>(null);
 
@@ -3705,11 +3706,16 @@ export default function Settings() {
                   {([
                     ['theftDwellMinutes', '도난 의심 체류(분)', 1, 1, 10080],
                     ['geofenceRadiusMeters', '지오펜스 반경(m)', 1, 10, 100000],
-                    ['accidentDeltaV', '사고 ΔV 임계값', 0.1, 0.1, 20],
+                    ['collisionConfidenceThreshold', '충돌 AI 신뢰도 기준(0–100)', 1, 1, 100],
+                    ['accidentDeltaV', '외부 ΔV 신호 기준(m/s)', 0.1, 0.1, 20],
+                    ['eventFreshnessMinutes', '실시간 알림 허용 지연(분)', 1, 1, 1440],
+                    ['locationMaxGapMinutes', '체류 판정 최대 수집 공백(분)', 1, 1, 1440],
                   ] as const).map(([key, label, step, min, max]) => <label key={key} className="text-xs font-semibold text-slate-700">{label}<input type="number" min={min} max={max} step={step} value={geotabThresholds[key]} onChange={(event) => setGeotabThresholds((prev) => ({ ...prev, [key]: Number(event.target.value) }))} disabled={!canEditSettings || isGeotabThresholdSaving} className="mt-1 w-full rounded-lg border border-indigo-200 bg-white px-3 py-2 text-sm" /></label>)}
                 </div>
+                <p className="mt-2 text-xs text-slate-600">AI 신뢰도는 해당 진단이 수집될 때만 적용되며 피해 심각도가 아닙니다. Geotab 충돌 규칙은 별도 의심 신호로 사용합니다. ΔV는 단위가 명시된 외부 신호 전용이며 급제동 가속도에 적용하지 않습니다.</p>
                 {geotabThresholdNotice && <p className="mt-3 text-xs font-semibold text-indigo-700">{geotabThresholdNotice}</p>}
               </section>
+              {settingsCompanyId && canEditSettings && <GeotabDeviceMapping key={settingsCompanyId} companyId={settingsCompanyId} />}
               {!canEditSettings && (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
                   현재 계정은 지오펜스를 읽기 전용으로만 볼 수 있습니다.
