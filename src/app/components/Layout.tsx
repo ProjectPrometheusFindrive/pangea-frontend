@@ -454,6 +454,7 @@ export function Layout({ children, title }: LayoutProps) {
 { path: '/device-installation', label: '단말 장착/관리', icon: Zap, permission: ROUTE_PERMISSIONS.deviceInstallation },
     { path: '/settings', label: '설정', icon: Settings, permission: ROUTE_PERMISSIONS.settings },
     { path: '/admin/demo-simulation', label: '데모 시뮬레이션', icon: DatabaseZap, permission: ROUTE_PERMISSIONS.demoSimulation },
+    ...(user?.role === 'super_admin' ? [{ path: '/admin/geotab', label: 'Geotab 수집 모니터', icon: Signal, permission: ROUTE_PERMISSIONS.home }] : []),
   ];
 
   const filteredMenuItems = menuItems.filter((item) => canAccessRoute(item.permission));
