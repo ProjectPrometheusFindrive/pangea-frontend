@@ -18,6 +18,7 @@ test('super admin sees unregistered device, maps and trip; tenant save requires 
     'GET /api/v2/admin/geotab/devices': async ({ route }) => fulfillSuccess(route, { items: [device], hasMore: false }),
     'GET /api/v2/admin/geotab/tenants': async ({ route }) => fulfillSuccess(route, { items: [{ companyId: 'A', name: '테스트 테넌트' }] }),
     'GET /api/v2/admin/geotab/devices/test-device': async ({ route, request }) => { tripQuery = new URL(request.url()).search; await fulfillSuccess(route, detail); },
+    'GET /api/v2/geotab/mapping-vehicles': async ({ route }) => fulfillSuccess(route, { items: [], hasMore: false }),
     'PATCH /api/v2/admin/geotab/devices/test-device/tenant': async ({ route, request }) => { saved = request.postDataJSON(); await fulfillSuccess(route, { ...device, companyId: 'A', revision: 1 }); },
   } });
   await page.goto('/admin/geotab');
@@ -78,4 +79,42 @@ test('assignment conflict does not claim success and offers refresh', async ({ p
   await page.getByRole('button', { name: '변경 확인', exact: true }).click();
   await expect(page.getByRole('alert')).toContainText('새로고침');
   await expect(page.getByText('테넌트 설정을 저장했습니다.', { exact: false })).toHaveCount(0);
+});
+
+test('super admin creates a Geotab-reported vehicle and binds it in one step', async ({ page }) => {
+  let createBody: Record<string, unknown> | null = null;
+  const assigned = {
+    ...device,
+    companyId: 'A',
+    revision: 1,
+    providerVin: 'KMHLN41EERU575890',
+    providerMake: 'Hyundai',
+    providerModel: 'Elantra',
+    providerYear: '2024',
+  };
+  await seedAuthSession(page, 'super_admin');
+  await installApiMocks(page, { user: { role: 'super_admin' }, handlers: {
+    'GET /api/v2/admin/geotab/devices': async ({ route }) => fulfillSuccess(route, { items: [assigned], hasMore: false }),
+    'GET /api/v2/admin/geotab/tenants': async ({ route }) => fulfillSuccess(route, { items: [{ companyId: 'A', name: '테스트회사' }] }),
+    'GET /api/v2/admin/geotab/devices/test-device': async ({ route }) => fulfillSuccess(route, { ...detail, ...assigned }),
+    'GET /api/v2/geotab/mapping-vehicles': async ({ route }) => fulfillSuccess(route, { items: [], hasMore: false }),
+    'POST /api/v2/admin/geotab/devices/test-device/vehicle': async ({ route, request }) => {
+      createBody = request.postDataJSON();
+      await fulfillSuccess(route, {
+        created: true,
+        replayedCount: 3,
+        device: { ...assigned, revision: 2, vehicle: { vin: assigned.providerVin, companyId: 'A', vehicleNumber: '282누7485', model: 'Elantra' } },
+      });
+    },
+  } });
+  await page.goto('/admin/geotab');
+  const panel = page.getByRole('region', { name: '차량 자산 및 단말 매칭' });
+  await expect(panel).toContainText('등록된 차량 없음');
+  await expect(panel).toContainText('KMHLN41EERU575890');
+  await expect(panel).toContainText('Hyundai · Elantra · 2024');
+  await panel.getByLabel('새 차량번호').fill('282누7485');
+  await panel.getByRole('button', { name: '자산 등록 및 매칭' }).click();
+  await expect.poll(() => createBody).toEqual({ companyId: 'A', vehicleNumber: '282누7485', revision: 1 });
+  await expect(page.getByRole('status')).toContainText('차량 자산을 등록하고 단말을 매칭했습니다');
+  await expect(panel).toContainText('현재 매칭: 282누7485');
 });
