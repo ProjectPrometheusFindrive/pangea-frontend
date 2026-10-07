@@ -4,7 +4,7 @@ import { RefreshCw, Radio, MapPin } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { Layout } from '../components/Layout';
 import { TelemetryRouteMap } from '../components/TelemetryRouteMap';
-import { assignPlatformDevice, getPlatformDevice, listGeotabTenants, listPlatformDevices, type PlatformDevice, type PlatformDeviceDetail, type PlatformTrip } from '../../services/geotabAdmin';
+import { assignPlatformDevice, bindPlatformVehicle, createPlatformVehicleAndBind, getPlatformDevice, listGeotabTenants, listPlatformDevices, listPlatformTenantVehicles, type PlatformDevice, type PlatformDeviceDetail, type PlatformTrip, type PlatformVehicle, type PlatformVehicleBindingResult } from '../../services/geotabAdmin';
 import type { GeotabPosition } from '../../services/geotab';
 
 const date = (v?: string | null) => v ? new Date(v).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', hour12: false }) : '정보 없음';
@@ -40,6 +40,12 @@ function GeotabAdminContent() {
   const [tripBusy, setTripBusy] = useState(false);
   const [tripWarning, setTripWarning] = useState('');
   const [tripError, setTripError] = useState('');
+  const [vehicles, setVehicles] = useState<PlatformVehicle[]>([]);
+  const [vehicleVin, setVehicleVin] = useState('');
+  const [vehicleNumber, setVehicleNumber] = useState('');
+  const [vehicleLoading, setVehicleLoading] = useState(false);
+  const [vehicleSaving, setVehicleSaving] = useState(false);
+  const [vehicleError, setVehicleError] = useState('');
 
   useEffect(() => {
     const abort = new AbortController();
@@ -82,6 +88,23 @@ function GeotabAdminContent() {
     return () => abort.abort();
   }, [selected, trip]);
 
+  useEffect(() => {
+    const abort = new AbortController();
+    setVehicles([]); setVehicleVin(''); setVehicleError(''); setVehicleLoading(false);
+    const companyId = detail?.companyId;
+    if (!companyId || detail.vehicle) return () => abort.abort();
+    setVehicleLoading(true);
+    listPlatformTenantVehicles(companyId, abort.signal)
+      .then((result) => {
+        if (abort.signal.aborted) return;
+        setVehicles(result.items);
+        setVehicleVin(result.items[0]?.vin ?? '');
+      })
+      .catch((e) => { if (!abort.signal.aborted) setVehicleError(errorText(e)); })
+      .finally(() => { if (!abort.signal.aborted) setVehicleLoading(false); });
+    return () => abort.abort();
+  }, [detail?.companyId, detail?.vehicle]);
+
   const save = useCallback(async () => {
     if (!detail || saving) return;
     setSaving(true); setDetailError(''); setNotice('');
@@ -95,6 +118,33 @@ function GeotabAdminContent() {
   }, [detail, tenant, saving]);
   const tenantName = (id?: string | null) => !id ? '미지정' : tenants.find((t) => t.companyId === id)?.name ?? id;
   const route = trip ? tripRoute : detail?.positions ?? [];
+  const applyVehicleBinding = useCallback((result: PlatformVehicleBindingResult, message: string) => {
+    setDetail((old) => old?.id === result.device.id ? { ...old, ...result.device } : old);
+    setDevices((old) => old.map((row) => row.id === result.device.id ? result.device : row));
+    setNotice(message);
+    setVehicleError('');
+  }, []);
+  const bindExistingVehicle = useCallback(async () => {
+    if (!detail?.companyId || !vehicleVin || vehicleSaving) return;
+    setVehicleSaving(true); setVehicleError(''); setNotice('');
+    try {
+      const result = await bindPlatformVehicle(detail.id, detail.companyId, vehicleVin, detail.revision);
+      applyVehicleBinding(result, '기존 차량과 단말을 매칭했습니다. 이후 수집 데이터부터 차량에 연결됩니다.');
+    } catch (e) { setVehicleError(errorText(e)); }
+    finally { setVehicleSaving(false); }
+  }, [applyVehicleBinding, detail, vehicleSaving, vehicleVin]);
+  const createAndBindVehicle = useCallback(async () => {
+    if (!detail?.companyId || !vehicleNumber.trim() || vehicleSaving) return;
+    setVehicleSaving(true); setVehicleError(''); setNotice('');
+    try {
+      const result = await createPlatformVehicleAndBind(detail.id, detail.companyId, vehicleNumber.trim(), detail.revision);
+      applyVehicleBinding(result, result.created
+        ? '차량 자산을 등록하고 단말을 매칭했습니다.'
+        : '같은 VIN의 기존 차량을 확인해 단말을 매칭했습니다.');
+      setVehicleNumber('');
+    } catch (e) { setVehicleError(errorText(e)); }
+    finally { setVehicleSaving(false); }
+  }, [applyVehicleBinding, detail, vehicleNumber, vehicleSaving]);
 
   return <Layout title="Geotab 수집 모니터">
     <div className="space-y-5 p-4 md:p-6">
@@ -141,6 +191,38 @@ function GeotabAdminContent() {
               <div className="flex flex-wrap gap-2"><select aria-label="단말 소속 테넌트" className="min-w-0 max-w-full rounded border p-2" value={tenant} disabled={saving || !!detail.vehicle} onChange={(e) => { setTenant(e.target.value); setConfirming(false); }}><option value="">미지정</option>{tenants.map((t) => <option key={t.companyId} value={t.companyId}>{t.name} ({t.companyId})</option>)}</select>
                 <button className={button} disabled={saving || !!detail.vehicle || tenant === (detail.companyId ?? '')} onClick={() => setConfirming(true)}>테넌트 설정 저장</button></div>
               {confirming && <div className="mt-3 rounded border border-amber-200 bg-amber-50 p-3" role="group" aria-label="테넌트 변경 확인"><p className="mb-2 text-sm">{tenantName(detail.companyId)} → {tenantName(tenant)}로 변경할까요? 단말 위치의 공개 범위가 변경됩니다.</p><button className={button} disabled={saving} onClick={save}>{saving ? '저장 중...' : '변경 확인'}</button><button className={`${button} ml-2`} disabled={saving} onClick={() => setConfirming(false)}>취소</button></div>}
+            </section>
+            <section className="rounded-xl border bg-white p-5" aria-label="차량 자산 및 단말 매칭">
+              <h2 className="font-semibold">차량 자산 및 단말 매칭</h2>
+              {!detail.companyId && <p className="mt-2 text-sm text-slate-500">먼저 단말 소속 테넌트를 저장해 주세요.</p>}
+              {detail.vehicle && <p className="mt-2 rounded bg-green-50 p-3 text-sm text-green-800">현재 매칭: {detail.vehicle.vehicleNumber || detail.vehicle.vin} · {detail.vehicle.vin}</p>}
+              {detail.companyId && !detail.vehicle && <div className="mt-3 space-y-4">
+                <div>
+                  <h3 className="text-sm font-medium">등록된 차량에 매칭</h3>
+                  <p className="mt-1 text-xs text-slate-500">{tenantName(detail.companyId)}에 이미 등록된 차량이 있으면 선택합니다.</p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <select aria-label="연결할 기존 차량" className="min-w-0 max-w-full rounded border p-2" value={vehicleVin} disabled={vehicleLoading || vehicleSaving || !vehicles.length} onChange={(e) => setVehicleVin(e.target.value)}>
+                      {!vehicles.length && <option value="">등록된 차량 없음</option>}
+                      {vehicles.map((row) => <option key={row.vin} value={row.vin}>{row.vehicleNumber || row.vin} · {row.vin}</option>)}
+                    </select>
+                    <button className={button} disabled={!vehicleVin || vehicleLoading || vehicleSaving} onClick={() => void bindExistingVehicle()}>{vehicleSaving ? '처리 중...' : '기존 차량 매칭'}</button>
+                  </div>
+                </div>
+                <div className="border-t pt-4">
+                  <h3 className="text-sm font-medium">새 차량 자산 생성 후 매칭</h3>
+                  <p className="mt-1 text-xs text-slate-500">VIN·제조사·모델·연식은 Geotab 수집값을 사용하고, 차량번호만 입력하면 자산 생성과 단말 매칭을 한 번에 처리합니다.</p>
+                  <dl className="mt-2 grid gap-2 text-sm sm:grid-cols-2">
+                    <div><dt className="text-slate-500">VIN</dt><dd className="break-all font-medium">{detail.providerVin || '미수집'}</dd></div>
+                    <div><dt className="text-slate-500">Geotab 차량 정보</dt><dd className="font-medium">{[detail.providerMake, detail.providerModel, detail.providerYear].filter(Boolean).join(' · ') || '미수집'}</dd></div>
+                  </dl>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <input aria-label="새 차량번호" className="min-w-0 rounded border p-2" placeholder="예: 282누7485" value={vehicleNumber} disabled={vehicleSaving} onChange={(e) => setVehicleNumber(e.target.value)} />
+                    <button className={button} disabled={!detail.providerVin || !vehicleNumber.trim() || vehicleSaving} onClick={() => void createAndBindVehicle()}>{vehicleSaving ? '처리 중...' : '자산 등록 및 매칭'}</button>
+                  </div>
+                  {!detail.providerVin && <p className="mt-2 text-xs text-amber-700">Geotab VIN이 없어 자동 자산 등록은 사용할 수 없습니다.</p>}
+                </div>
+                {vehicleError && <p role="alert" className="rounded bg-red-50 p-3 text-sm text-red-700">{vehicleError}</p>}
+              </div>}
             </section>
             <section className="overflow-hidden rounded-xl border bg-white" aria-label="최근 위치">
               <h2 className="p-4 font-semibold"><MapPin className="mr-1 inline h-4 w-4" />최근 위치</h2>
