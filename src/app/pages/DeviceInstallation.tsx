@@ -14,7 +14,7 @@ import { ACTION_PERMISSIONS } from '../authorization';
 import { formatDateTimeKst } from '../utils/dateTimeFormat';
 import { ApiError } from '../../services/api';
 import { getAssetsList } from '../../services/assets';
-import { lookupInstallationDevice } from '../../services/geotab';
+import { getGeotabMappingVehicles, lookupInstallationDevice } from '../../services/geotab';
 import { listGeotabTenants } from '../../services/geotabAdmin';
 import { GeotabDeviceMapping } from '../components/GeotabDeviceMapping';
 import {
@@ -401,16 +401,14 @@ export default function DeviceInstallation() {
   const hydrateVehicleOptions = useCallback(async () => {
     if (!hasCompanyScope) { setVehicleOptions([]); return; }
     try {
-      const payload = await getAssetsList({
-        page: 1,
-        size: 200,
-        companyId: targetCompanyId || undefined,
-      });
+      const payload = user?.role === 'super_admin'
+        ? await getGeotabMappingVehicles('', { companyId: targetCompanyId || undefined })
+        : await getAssetsList({ page: 1, size: 200 });
       setVehicleOptions(toVehicleOptions(payload));
     } catch {
       setVehicleOptions([]);
     }
-  }, [hasCompanyScope, targetCompanyId]);
+  }, [hasCompanyScope, targetCompanyId, user?.role]);
 
   const hydrateSummary = useCallback(async () => {
     setSummaryError(null);

@@ -29,7 +29,15 @@ export interface GeotabDevice {
   id: string; deviceId: string; sourceDatabase: string; serialNumber?: string;
   name: string; providerVin?: string; providerPlate?: string; deviceType?: string;
   vin?: string | null; vehicleNumber?: string; mapped: boolean; mappedAt?: string;
-  revision: number; lastSyncedAt: string;
+  revision: number; lastSyncedAt: string; replayedCount?: number;
+}
+
+export interface GeotabMappingVehicle {
+  vin: string;
+  vehicleNumber: string;
+  make?: string;
+  model?: string;
+  year?: number | string;
 }
 
 export function getGeotabDevices(options: GeotabRequestOptions = {}) {
@@ -37,7 +45,7 @@ export function getGeotabDevices(options: GeotabRequestOptions = {}) {
 }
 
 export function getGeotabMappingVehicles(q: string, options: GeotabRequestOptions = {}) {
-  return apiClient.requestData<{ items: { vin: string; vehicleNumber: string }[]; hasMore: boolean }>({ path: '/api/v2/geotab/mapping-vehicles', method: 'GET', query: { companyId: options.companyId, q }, signal: options.signal });
+  return apiClient.requestData<{ items: GeotabMappingVehicle[]; hasMore: boolean }>({ path: '/api/v2/geotab/mapping-vehicles', method: 'GET', query: { companyId: options.companyId, q }, signal: options.signal });
 }
 
 export function mapGeotabDevice(deviceId: string, payload: { vin: string | null; revision: number; effectiveFrom?: string }, options: GeotabRequestOptions = {}) {

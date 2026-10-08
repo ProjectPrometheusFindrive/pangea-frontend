@@ -62,6 +62,7 @@ test('Q05 super scope creates once, then retries completion without a second POS
   let row = { ...assigned, id: '' };
   let postCount = 0;
   let completeAttempts = 0;
+  const mappingVehicleScopes: string[] = [];
   const requests: Array<{ method: string; url: string; body: any }> = [];
   // AuthContext requires a string companyId; empty means no selected scope.
   const superUser = { ...buildMockUser('super_admin'), userId: 'boss-001', companyId: '', name: 'Boss' };
@@ -76,7 +77,11 @@ test('Q05 super scope creates once, then retries completion without a second POS
       'GET /api/v2/home/summary': async ({ route }) => fulfillSuccess(route, { kpis: {}, statusCounts: {}, today: {}, recentChanges: [] }),
       'GET /api/v2/action-items': async ({ route }) => fulfillSuccess(route, { items: [], totalCount: 0 }),
       'GET /api/v2/admin/geotab/tenants': async ({ route }) => fulfillSuccess(route, { items: [{ companyId: 'C1', name: '테스트회사' }] }),
-      'GET /api/v2/assets': async ({ route }) => fulfillSuccess(route, { items: [{ vin: row.vin, vehicleNumber: row.vin, model: 'Test', year: 2026 }] }),
+      'GET /api/v2/assets': async ({ route }) => fulfillSuccess(route, { items: [{ vin: 'OTHER-COMPANY-VIN', vehicleNumber: '타사차량', model: 'Other', year: 2025 }] }),
+      'GET /api/v2/geotab/mapping-vehicles': async ({ route, request }) => {
+        mappingVehicleScopes.push(new URL(request.url()).searchParams.get('companyId') ?? '');
+        await fulfillSuccess(route, { items: [{ vin: row.vin, vehicleNumber: '12가3456', model: 'Test', year: 2026 }], hasMore: false });
+      },
       'GET /api/v2/device-installations/tasks': async ({ route }) => fulfillSuccess(route, { items: row.id ? [row] : [], total: row.id ? 1 : 0, page: 1, pageSize: 10 }),
       'POST /api/v2/device-installations': async ({ route, request }) => { postCount += 1; requests.push({ method: 'POST', url: request.url(), body: request.postDataJSON() }); row = { ...row, id: 'DI-Q05-001', status: 'scheduled' }; await fulfillSuccess(route, row, 201); },
       'PATCH /api/v2/device-installations/DI-Q05-001/status': async ({ route, request }) => {
@@ -93,6 +98,10 @@ test('Q05 super scope creates once, then retries completion without a second POS
   await page.getByTestId('device-installation-company-input').fill('테스트');
   await page.getByRole('option', { name: /테스트회사/ }).click();
   await expect(page.getByTestId('device-installation-company-input')).toHaveValue('테스트회사');
+  await expect(page.getByTestId('device-installation-vin-input').getByRole('option', { name: /12가3456/ })).toBeAttached();
+  await expect(page.getByTestId('device-installation-vin-input').getByRole('option', { name: /타사차량/ })).toHaveCount(0);
+  expect(mappingVehicleScopes.length).toBeGreaterThan(0);
+  expect(mappingVehicleScopes.every((scope) => scope === 'C1')).toBeTruthy();
   await page.getByTestId('device-installation-vin-input').selectOption(row.vin);
   await page.getByTestId('device-installation-installer-input').fill('installer-001');
   await page.getByTestId('device-installation-submit').click();

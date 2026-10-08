@@ -54,7 +54,9 @@ export function GeotabDeviceMapping({ companyId }: Props) {
       }, { companyId });
       setDevices((rows) => rows.map((row) => row.id === mapped.id ? mapped : row));
       setVin(mapped.vin ?? ''); setInstalledAt('');
-      setNotice(unlink ? '단말 매칭을 해제했습니다. 기존 경로는 원래 차량에 보존됩니다.' : '일련번호와 차량 매칭을 저장했습니다. 매칭 시점 이후 수집·재수집되는 데이터에 적용됩니다.');
+      setNotice(unlink
+        ? '단말 매칭을 해제했습니다. 기존 경로는 원래 차량에 보존됩니다.'
+        : `일련번호와 차량 매칭을 저장했습니다. 보관 중인 데이터 ${mapped.replayedCount ?? 0}건을 차량에 연결했습니다.`);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '매칭에 실패했습니다. 새로고침 후 다시 시도하세요.');
     } finally { setBusy(false); }
@@ -94,9 +96,9 @@ export function GeotabDeviceMapping({ companyId }: Props) {
       <p>단말 ID: {device.deviceId} · DB: {device.sourceDatabase} · 종류: {device.deviceType || '미확인'}</p>
       <p>단말 보고 VIN: {device.providerVin || '없음'} · MyGeotab 차량번호: {device.providerPlate || '미입력'}</p>
       <p>현재 매칭: {device.vehicleNumber || '미매칭'} · 마지막 단말 목록 수집: {formatDateTimeKst(device.lastSyncedAt)}</p>
-      {device.revision === 0 && <label className="block">최초 장착 시점 (선택, 비워두면 지금부터)
+      {!device.mapped && <label className="block">최초 장착 시점 (선택)
         <input aria-label="최초 장착 시점" type="datetime-local" value={installedAt} onChange={(e) => setInstalledAt(e.target.value)} disabled={busy} className="ml-2 rounded border p-2" />
-        <span className="mt-1 block">과거 시점을 지정할 때는 해당 기간에도 이 차량에 장착되어 있었는지 확인하세요. 과거 데이터 수집은 알림을 재발송하지 않습니다.</span>
+        <span className="mt-1 block">비워두면 테넌트에 단말이 지정된 시점부터 보관 데이터를 연결합니다. 더 늦게 장착했다면 실제 장착 시점을 입력하세요. 과거 데이터는 알림을 새로 발송하지 않습니다.</span>
       </label>}
       <div className="flex flex-wrap gap-2 pt-1">
         <button type="button" onClick={() => void save()} disabled={busy || !vin || !device.serialNumber} className="rounded bg-indigo-600 px-3 py-2 text-white disabled:opacity-50">차량 매칭 저장</button>
