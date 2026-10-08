@@ -81,8 +81,8 @@ test('assignment conflict does not claim success and offers refresh', async ({ p
   await expect(page.getByText('테넌트 설정을 저장했습니다.', { exact: false })).toHaveCount(0);
 });
 
-test('super admin creates a Geotab-reported vehicle and binds it in one step', async ({ page }) => {
-  let createBody: Record<string, unknown> | null = null;
+test('super admin sees provider metadata and can bind only a registered tenant asset', async ({ page }) => {
+  let bindBody: Record<string, unknown> | null = null;
   const assigned = {
     ...device,
     companyId: 'A',
@@ -97,11 +97,10 @@ test('super admin creates a Geotab-reported vehicle and binds it in one step', a
     'GET /api/v2/admin/geotab/devices': async ({ route }) => fulfillSuccess(route, { items: [assigned], hasMore: false }),
     'GET /api/v2/admin/geotab/tenants': async ({ route }) => fulfillSuccess(route, { items: [{ companyId: 'A', name: '테스트회사' }] }),
     'GET /api/v2/admin/geotab/devices/test-device': async ({ route }) => fulfillSuccess(route, { ...detail, ...assigned }),
-    'GET /api/v2/geotab/mapping-vehicles': async ({ route }) => fulfillSuccess(route, { items: [], hasMore: false }),
-    'POST /api/v2/admin/geotab/devices/test-device/vehicle': async ({ route, request }) => {
-      createBody = request.postDataJSON();
+    'GET /api/v2/geotab/mapping-vehicles': async ({ route }) => fulfillSuccess(route, { items: [{ vin: assigned.providerVin, companyId: 'A', vehicleNumber: '282누7485', model: 'Elantra' }], hasMore: false }),
+    'PATCH /api/v2/admin/geotab/devices/test-device/vehicle': async ({ route, request }) => {
+      bindBody = request.postDataJSON();
       await fulfillSuccess(route, {
-        created: true,
         replayedCount: 3,
         device: { ...assigned, revision: 2, vehicle: { vin: assigned.providerVin, companyId: 'A', vehicleNumber: '282누7485', model: 'Elantra' } },
       });
@@ -109,12 +108,15 @@ test('super admin creates a Geotab-reported vehicle and binds it in one step', a
   } });
   await page.goto('/admin/geotab');
   const panel = page.getByRole('region', { name: '차량 자산 및 단말 매칭' });
-  await expect(panel).toContainText('등록된 차량 없음');
-  await expect(panel).toContainText('KMHLN41EERU575890');
-  await expect(panel).toContainText('Hyundai · Elantra · 2024');
-  await panel.getByLabel('새 차량번호').fill('282누7485');
-  await panel.getByRole('button', { name: '자산 등록 및 매칭' }).click();
-  await expect.poll(() => createBody).toEqual({ companyId: 'A', vehicleNumber: '282누7485', revision: 1 });
-  await expect(page.getByRole('status')).toContainText('차량 자산을 등록하고 단말을 매칭했습니다');
+  const detailPanel = page.getByRole('main', { name: '단말 상세' });
+  await expect(detailPanel).toContainText('KMHLN41EERU575890');
+  await expect(detailPanel).toContainText('Hyundai');
+  await expect(detailPanel).toContainText('Elantra');
+  await expect(detailPanel).toContainText('2024');
+  await expect(panel.getByLabel('연결할 기존 차량')).toHaveValue(assigned.providerVin);
+  await expect(panel.getByRole('button', { name: '자산 등록 및 매칭' })).toHaveCount(0);
+  await panel.getByRole('button', { name: '기존 차량 매칭' }).click();
+  await expect.poll(() => bindBody).toEqual({ companyId: 'A', vin: assigned.providerVin, revision: 1 });
+  await expect(page.getByRole('status')).toContainText('기존 차량과 단말을 매칭했습니다');
   await expect(panel).toContainText('현재 매칭: 282누7485');
 });

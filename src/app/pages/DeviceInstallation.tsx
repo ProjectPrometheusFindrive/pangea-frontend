@@ -15,6 +15,7 @@ import { formatDateTimeKst } from '../utils/dateTimeFormat';
 import { ApiError } from '../../services/api';
 import { getAssetsList } from '../../services/assets';
 import { lookupInstallationDevice } from '../../services/geotab';
+import { listGeotabTenants } from '../../services/geotabAdmin';
 import { GeotabDeviceMapping } from '../components/GeotabDeviceMapping';
 import {
   createDeviceInstallation,
@@ -32,6 +33,11 @@ interface DeviceInstallationVehicleOption {
   vehicleNumber: string;
   model: string;
   year: string;
+}
+
+interface CompanyOption {
+  companyId: string;
+  name: string;
 }
 
 interface DeviceInstallationDisplayRow {
@@ -240,6 +246,10 @@ export default function DeviceInstallation() {
 
   const [vin, setVin] = useState('');
   const [companyScope, setCompanyScope] = useState('');
+  const [companyQuery, setCompanyQuery] = useState('');
+  const [companyOptions, setCompanyOptions] = useState<CompanyOption[]>([]);
+  const [companyPickerOpen, setCompanyPickerOpen] = useState(false);
+  const [companyOptionsError, setCompanyOptionsError] = useState<string | null>(null);
   const targetCompanyId = user?.role === 'super_admin' ? companyScope : user?.companyId;
   const hasCompanyScope = user?.role !== 'super_admin' || Boolean(companyScope);
   const [installerId, setInstallerId] = useState('');
@@ -254,6 +264,25 @@ export default function DeviceInstallation() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [activeStatusMutationId, setActiveStatusMutationId] = useState<string | null>(null);
   const [pendingInstallation, setPendingInstallation] = useState<DeviceInstallationItem | null>(null);
+  const filteredCompanyOptions = useMemo(() => {
+    const query = companyQuery.trim().toLocaleLowerCase('ko-KR');
+    const matches = query
+      ? companyOptions.filter((company) => company.name.toLocaleLowerCase('ko-KR').includes(query)
+        || company.companyId.toLocaleLowerCase('ko-KR').includes(query))
+      : companyOptions;
+    return matches.slice(0, 12);
+  }, [companyOptions, companyQuery]);
+
+  useEffect(() => {
+    if (user?.role !== 'super_admin') return;
+    const controller = new AbortController();
+    setCompanyOptionsError(null);
+    listGeotabTenants(controller.signal)
+      .then((result) => { if (!controller.signal.aborted) setCompanyOptions(result.items); })
+      .catch(() => { if (!controller.signal.aborted) setCompanyOptionsError('회사 목록을 불러오지 못했습니다.'); });
+    return () => controller.abort();
+  }, [user?.role]);
+
   const selectedInstallation = useMemo(
     () => (pendingInstallation?.vin === vin ? pendingInstallation : null)
       ?? installations.find((item) => item.vin === vin && !['completed', 'cancelled'].includes(item.status)),
@@ -303,8 +332,8 @@ export default function DeviceInstallation() {
     return entries;
   }, [installations, vehicleOptions]);
   const vehicleSelectOptions = useMemo(
-    () => Array.from(vehicleOptionsByVin.values()).sort((left, right) => left.vehicleNumber.localeCompare(right.vehicleNumber, 'ko-KR')),
-    [vehicleOptionsByVin],
+    () => [...vehicleOptions].sort((left, right) => left.vehicleNumber.localeCompare(right.vehicleNumber, 'ko-KR')),
+    [vehicleOptions],
   );
   const selectedVehicleOption = useMemo(
     () => (vin ? vehicleOptionsByVin.get(vin) ?? null : null),
@@ -620,12 +649,53 @@ export default function DeviceInstallation() {
 
           <div className="flex gap-3 items-end flex-wrap">
             {user?.role === 'super_admin' && (
-              <div className="flex-shrink-0" style={{ width: '150px' }}>
-                <label className="block text-xs font-semibold text-gray-700 mb-1">회사 scope</label>
-                <input data-testid="device-installation-company-input" value={companyScope} onChange={(event) => {
-                  setCompanyScope(event.target.value.trim()); setPage(1); setPendingInstallation(null);
-                  setInstallations([]); setVehicleOptions([]); resetForm(); setActionError(null); setActionMessage(null);
-                }} placeholder="companyId (필수)" disabled={isSubmitting} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+              <div className="relative w-full sm:w-[260px] sm:flex-shrink-0">
+                <label htmlFor="device-installation-company-input" className="block text-xs font-semibold text-gray-700 mb-1">회사</label>
+                <input
+                  id="device-installation-company-input"
+                  data-testid="device-installation-company-input"
+                  role="combobox"
+                  aria-expanded={companyPickerOpen}
+                  aria-controls="device-installation-company-options"
+                  aria-autocomplete="list"
+                  value={companyQuery}
+                  onFocus={() => setCompanyPickerOpen(true)}
+                  onBlur={() => window.setTimeout(() => setCompanyPickerOpen(false), 100)}
+                  onChange={(event) => {
+                    setCompanyQuery(event.target.value);
+                    setCompanyPickerOpen(true);
+                    setCompanyScope(''); setPage(1); setPendingInstallation(null);
+                    setInstallations([]); setVehicleOptions([]); resetForm(); setActionError(null); setActionMessage(null);
+                  }}
+                  placeholder="회사 이름 검색"
+                  disabled={isSubmitting}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                />
+                {companyPickerOpen && (
+                  <div id="device-installation-company-options" role="listbox" className="absolute z-30 mt-1 max-h-64 w-full overflow-y-auto rounded-lg border border-gray-200 bg-white py-1 shadow-lg">
+                    {filteredCompanyOptions.map((company) => (
+                      <button
+                        key={company.companyId}
+                        type="button"
+                        role="option"
+                        aria-selected={companyScope === company.companyId}
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={() => {
+                          setCompanyScope(company.companyId); setCompanyQuery(company.name); setCompanyPickerOpen(false);
+                          setPage(1); setPendingInstallation(null); setInstallations([]); setVehicleOptions([]);
+                          resetForm(); setActionError(null); setActionMessage(null);
+                        }}
+                        className="block w-full px-3 py-2 text-left text-sm hover:bg-blue-50"
+                      >
+                        <span className="block font-medium text-gray-900">{company.name}</span>
+                        <span className="block text-xs text-gray-500">{company.companyId}</span>
+                      </button>
+                    ))}
+                    {!filteredCompanyOptions.length && <p className="px-3 py-2 text-sm text-gray-500">일치하는 회사가 없습니다.</p>}
+                  </div>
+                )}
+                {companyScope && <p className="mt-1 text-[11px] text-gray-500">선택됨: {companyOptions.find((company) => company.companyId === companyScope)?.name}</p>}
+                {companyOptionsError && <p role="alert" className="mt-1 text-xs text-red-600">{companyOptionsError}</p>}
               </div>
             )}
             <div className="w-full sm:w-[180px] sm:flex-shrink-0">
@@ -638,7 +708,7 @@ export default function DeviceInstallation() {
                 onChange={(event) => {
                   setVin(event.target.value.toUpperCase());
                 }}
-                disabled={!canWriteDeviceInstallation || isSubmitting}
+                disabled={!canWriteDeviceInstallation || isSubmitting || !hasCompanyScope || !vehicleSelectOptions.length}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
               >
                 <option value="">선택하세요</option>
@@ -652,6 +722,9 @@ export default function DeviceInstallation() {
                 <p className="mt-1 text-[11px] text-gray-500">
                   {selectedVehicleOption.model} · {selectedVehicleOption.year}
                 </p>
+              )}
+              {hasCompanyScope && !vehicleSelectOptions.length && (
+                <p className="mt-1 text-[11px] text-amber-700">등록된 차량 자산이 없습니다. <button type="button" className="font-medium underline" onClick={() => navigate('/assets')}>차량 자산에서 먼저 등록</button>해 주세요.</p>
               )}
             </div>
 
