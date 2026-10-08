@@ -882,7 +882,7 @@ export function Layout({ children, title }: LayoutProps) {
         {/* Page Content */}
         <main data-testid="app-page-content" className="min-h-0 flex-1 overflow-auto overscroll-contain md:overscroll-auto">
           {/* 프리미엄 업그레이드 배너 */}
-          {showPremiumBanner && (
+          {showPremiumBanner && user && user.role !== 'super_admin' && (
             <div className="relative flex flex-col gap-3 overflow-hidden bg-gradient-to-r from-blue-600 to-indigo-600 px-3 py-3 text-white sm:flex-row sm:items-center sm:justify-between sm:px-6">
               <div className="absolute inset-0 bg-white/10 transform -skew-x-12"></div>
               

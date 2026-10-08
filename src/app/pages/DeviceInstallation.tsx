@@ -23,6 +23,7 @@ import {
   getMappedDeviceForInstallationVehicle,
   getDeviceInstallationList,
   patchDeviceInstallationStatus,
+  uploadDeviceInstallationPhoto,
   type DeviceInstallationItem,
   type DeviceInstallationStatus,
 } from '../../services/deviceInstallations';
@@ -230,21 +231,6 @@ function toActionErrorMessage(error: unknown): string {
   return '요청 처리 중 오류가 발생했습니다.';
 }
 
-function readFileAsDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(new Error('사진 파일을 읽는 중 오류가 발생했습니다.'));
-    reader.onload = () => {
-      if (typeof reader.result !== 'string' || !reader.result) {
-        reject(new Error('사진 파일을 읽는 중 오류가 발생했습니다.'));
-        return;
-      }
-      resolve(reader.result);
-    };
-    reader.readAsDataURL(file);
-  });
-}
-
 export default function DeviceInstallation() {
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -276,8 +262,10 @@ export default function DeviceInstallation() {
   const [serialLookup, setSerialLookup] = useState<{ status: string; message: string } | null>(null);
   const [installationPhotoFile, setInstallationPhotoFile] = useState<File | null>(null);
   const [installationPhotoPreview, setInstallationPhotoPreview] = useState<string>('');
+  const [installationPhotoUploadedUrl, setInstallationPhotoUploadedUrl] = useState<string | null>(null);
   const [serialPhotoFile, setSerialPhotoFile] = useState<File | null>(null);
   const [serialPhotoPreview, setSerialPhotoPreview] = useState<string>('');
+  const [serialPhotoUploadedUrl, setSerialPhotoUploadedUrl] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -590,8 +578,10 @@ export default function DeviceInstallation() {
     setSerialPrefillMessage(null);
     setInstallationPhotoFile(null);
     setInstallationPhotoPreview('');
+    setInstallationPhotoUploadedUrl(null);
     setSerialPhotoFile(null);
     setSerialPhotoPreview('');
+    setSerialPhotoUploadedUrl(null);
   }, [installationPhotoPreview, serialPhotoPreview, user?.role, user?.userId]);
 
   const handleCreateInstallation = useCallback(async () => {
@@ -627,10 +617,17 @@ export default function DeviceInstallation() {
         await refreshAll();
         return;
       }
-      const [installationPhotoDataUrl, serialPhotoDataUrl] = await Promise.all([
-        readFileAsDataUrl(installationPhotoFile),
-        readFileAsDataUrl(serialPhotoFile),
+      const photoCompanyId = String(targetCompanyId || user?.companyId || '').trim();
+      const [installationPhotoUrl, serialPhotoUrl] = await Promise.all([
+        installationPhotoUploadedUrl
+          ? Promise.resolve(installationPhotoUploadedUrl)
+          : uploadDeviceInstallationPhoto(installationPhotoFile, photoCompanyId),
+        serialPhotoUploadedUrl
+          ? Promise.resolve(serialPhotoUploadedUrl)
+          : uploadDeviceInstallationPhoto(serialPhotoFile, photoCompanyId),
       ]);
+      setInstallationPhotoUploadedUrl(installationPhotoUrl);
+      setSerialPhotoUploadedUrl(serialPhotoUrl);
 
       let installationId = selectedInstallation?.id;
       if (!installationId) {
@@ -646,7 +643,7 @@ export default function DeviceInstallation() {
         status: 'completed',
         installedAt: new Date().toISOString(),
         deviceSerial: normalizedDeviceSerial,
-        photos: [installationPhotoDataUrl, serialPhotoDataUrl],
+        photos: [installationPhotoUrl, serialPhotoUrl],
       }, { companyId: targetCompanyId });
 
       setActionMessage(`장착 완료가 등록되었습니다. ${completed.geotabMappingMessage ?? ''}`);
@@ -666,10 +663,12 @@ export default function DeviceInstallation() {
     canWriteDeviceInstallation,
     deviceSerial,
     installationPhotoFile,
+    installationPhotoUploadedUrl,
     isCreatingTask,
     refreshAll,
     resetForm,
     serialPhotoFile,
+    serialPhotoUploadedUrl,
     selectedInstallation,
     installerId,
     companyScope,
@@ -898,6 +897,7 @@ export default function DeviceInstallation() {
                   capture="environment"
                   onChange={(e) => {
                     const file = e.target.files?.[0];
+                    setInstallationPhotoUploadedUrl(null);
                     handleFilePreviewChange(
                       file ?? null,
                       installationPhotoPreview,
@@ -962,6 +962,7 @@ export default function DeviceInstallation() {
                   capture="environment"
                   onChange={(e) => {
                     const file = e.target.files?.[0];
+                    setSerialPhotoUploadedUrl(null);
                     handleFilePreviewChange(
                       file ?? null,
                       serialPhotoPreview,
