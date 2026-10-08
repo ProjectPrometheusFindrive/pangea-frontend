@@ -22,7 +22,6 @@ export interface PlatformDeviceDetail extends PlatformDevice {
   assignmentHistory: { fromCompanyId: string | null; toCompanyId: string | null; at: string; actor: string }[];
 }
 export interface PlatformVehicleBindingResult {
-  created?: boolean;
   replayedCount: number;
   device: PlatformDevice;
 }
@@ -33,4 +32,3 @@ export const getPlatformDevice = (id: string, range: { from?: string; to?: strin
 export const assignPlatformDevice = (id: string, companyId: string | null, revision: number) => apiClient.requestData<PlatformDevice>({ path: `${base}/devices/${encodeURIComponent(id)}/tenant`, method: 'PATCH', body: { companyId, revision } });
 export const listPlatformTenantVehicles = (companyId: string, signal?: AbortSignal) => apiClient.requestData<{ items: PlatformVehicle[]; hasMore: boolean }>({ path: '/api/v2/geotab/mapping-vehicles', query: { companyId }, signal });
 export const bindPlatformVehicle = (id: string, companyId: string, vin: string, revision: number) => apiClient.requestData<PlatformVehicleBindingResult>({ path: `${base}/devices/${encodeURIComponent(id)}/vehicle`, method: 'PATCH', body: { companyId, vin, revision } });
-export const createPlatformVehicleAndBind = (id: string, companyId: string, vehicleNumber: string, revision: number) => apiClient.requestData<PlatformVehicleBindingResult>({ path: `${base}/devices/${encodeURIComponent(id)}/vehicle`, method: 'POST', body: { companyId, vehicleNumber, revision } });
