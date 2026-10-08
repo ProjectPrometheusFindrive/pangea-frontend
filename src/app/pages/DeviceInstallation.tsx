@@ -45,6 +45,7 @@ interface CompanyOption {
 interface InstallerOption {
   userId: string;
   label: string;
+  isSuperAdminFallback?: boolean;
 }
 
 interface DeviceInstallationDisplayRow {
@@ -330,6 +331,16 @@ export default function DeviceInstallation() {
           .filter((member) => member.role === 'installer' && member.userId.trim())
           .map((member) => ({ userId: member.userId, label: toInstallerDisplayName(member) }))
           .sort((left, right) => left.label.localeCompare(right.label, 'ko-KR'));
+        if (!options.length && user.userId) {
+          const fallback = {
+            userId: user.userId,
+            label: `${signedInInstallerLabel} (슈퍼 관리자 직접 설치)`,
+            isSuperAdminFallback: true,
+          };
+          setInstallerOptions([fallback]);
+          setInstallerId(user.userId);
+          return;
+        }
         setInstallerOptions(options);
         setInstallerId((current) => options.some((option) => option.userId === current) ? current : '');
       })
@@ -340,7 +351,7 @@ export default function DeviceInstallation() {
         }
       });
     return () => controller.abort();
-  }, [companyScope, user?.role]);
+  }, [companyScope, signedInInstallerLabel, user?.role, user?.userId]);
 
   const selectedInstallation = useMemo(
     () => (pendingInstallation?.vin === vin ? pendingInstallation : null)
@@ -834,8 +845,8 @@ export default function DeviceInstallation() {
                     <option key={option.userId} value={option.userId}>{option.label}</option>
                   ))}
                 </select>
-                {!installerOptions.length && companyScope && !installerOptionsError && (
-                  <p className="mt-1 text-[11px] text-amber-700">승인된 설치 기사 계정이 없습니다.</p>
+                {installerOptions.some((option) => option.isSuperAdminFallback) && (
+                  <p className="mt-1 text-[11px] text-blue-700">승인된 설치 기사가 없어 로그인한 슈퍼 관리자가 자동 지정되었습니다.</p>
                 )}
                 {installerOptionsError && <p role="alert" className="mt-1 text-xs text-red-600">{installerOptionsError}</p>}
               </div>
