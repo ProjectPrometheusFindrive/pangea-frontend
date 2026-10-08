@@ -105,8 +105,12 @@ test('tenant admin maps collected serial to Pangea plate without changing provid
       'GET /api/v2/geotab/mapping-vehicles': async ({ route }) => fulfillSuccess(route, { items: [{ vin: 'PANGEA-VIN', vehicleNumber: '12가3456' }], hasMore: false }),
       'PATCH /api/v2/geotab/devices/inventory-1/mapping': async ({ route, request }) => {
         mappingBody = request.postDataJSON();
-        await fulfillSuccess(route, { ...device, vin: 'PANGEA-VIN', vehicleNumber: '12가3456', mapped: true, revision: 1 });
+        await fulfillSuccess(route, { ...device, vin: 'PANGEA-VIN', vehicleNumber: '12가3456', mapped: true, revision: 1, replayedCount: 2 });
       },
+      'GET /api/v2/geotab/vehicles/PANGEA-VIN/positions': async ({ route }) => fulfillSuccess(route, {
+        vehicleId: 'PANGEA-VIN', vehicleNumber: '12가3456',
+        positions: [{ latitude: 37.5, longitude: 127.1, recordedAt: '2026-09-29T00:00:00Z' }],
+      }),
     },
   });
   await page.goto('/settings');
@@ -118,8 +122,11 @@ test('tenant admin maps collected serial to Pangea plate without changing provid
   await panel.getByRole('button', { name: '차량 매칭 저장' }).click();
   await expect.poll(() => mappingBody).toEqual({ vin: 'PANGEA-VIN', revision: 0 });
   await expect(panel).toContainText('현재 매칭: 12가3456');
+  await expect(panel).toContainText('보관 중인 데이터 2건을 차량에 연결했습니다');
   await expect(panel).toContainText('단말 ID: b1');
   await expect(panel.getByRole('button', { name: '최근 위치 조회' })).toBeVisible();
+  await panel.getByRole('button', { name: '최근 위치 조회' }).click();
+  await expect(page.getByRole('dialog', { name: '최근 위치 조회' })).toContainText('37.50000, 127.10000');
 });
 
 test('mapping conflict is visible and does not claim a successful match', async ({ page }) => {
