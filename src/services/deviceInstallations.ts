@@ -1,4 +1,5 @@
 import { ApiError, apiClient } from './api';
+import { uploadFileToSignedUrl } from './assetOcr';
 
 export type DeviceInstallationStatus = 'scheduled' | 'in_progress' | 'completed' | 'cancelled';
 export type DeviceInstallationStatusMutation = 'in_progress' | 'completed' | 'cancelled';
@@ -78,6 +79,41 @@ export interface DeviceInstallationStatusPatchRequest {
   memo?: string;
   cancelReason?: string;
   companyId?: string;
+}
+
+interface DeviceInstallationPhotoUploadSignData {
+  uploadUrl: string;
+  objectName: string;
+  publicUrl?: string;
+  contentType?: string;
+}
+
+export async function uploadDeviceInstallationPhoto(file: File, companyId: string): Promise<string> {
+  const normalizedCompanyId = companyId.trim();
+  if (!normalizedCompanyId) {
+    throw new ApiError('VALIDATION_ERROR', '사진을 업로드할 회사를 먼저 선택해 주세요.', { status: 400 });
+  }
+
+  const signed = await apiClient.requestData<DeviceInstallationPhotoUploadSignData>({
+    path: '/api/v2/uploads/sign',
+    method: 'POST',
+    body: {
+      fileName: file.name,
+      fileSize: file.size,
+      contentType: file.type || undefined,
+      folder: `company/${normalizedCompanyId}/docs`,
+    },
+  });
+  if (!signed?.uploadUrl || !signed.objectName) {
+    throw new ApiError('SERVER_ERROR', '사진 업로드 URL 응답 형식이 올바르지 않습니다.');
+  }
+
+  await uploadFileToSignedUrl(
+    signed.uploadUrl,
+    file,
+    signed.contentType || file.type || 'application/octet-stream',
+  );
+  return signed.publicUrl?.trim() || signed.objectName;
 }
 
 export function getMappedDeviceForInstallationVehicle(

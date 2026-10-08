@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { delay, fulfillError, fulfillSuccess, installApiMocks } from './helpers/apiMock';
+import { delay, fulfillError, fulfillSuccess, installApiMocks, type ApiMockHandler } from './helpers/apiMock';
 import { TEST_IMAGE_FILE } from './helpers/files';
 import { loginViaUi } from './helpers/session';
 
@@ -60,14 +60,33 @@ async function openDeviceInstallationPage(page: Page): Promise<void> {
   await expect(page.getByTestId('device-installation-vin-input')).toBeVisible();
 }
 
+async function installDevicePhotoUploadMock(page: Page): Promise<ApiMockHandler> {
+  let uploadCount = 0;
+  await page.route('https://device-upload.test/**', async (route) => {
+    await route.fulfill({ status: 200, body: '' });
+  });
+  return async ({ route, request }) => {
+    uploadCount += 1;
+    const fileName = (request.postDataJSON() as { fileName: string }).fileName;
+    await fulfillSuccess(route, {
+      uploadUrl: `https://device-upload.test/${uploadCount}`,
+      objectName: `uploads/company/company-001/docs/${fileName}`,
+      publicUrl: `https://cdn.test/device-installations/${uploadCount}-${fileName}`,
+      contentType: 'image/png',
+    });
+  };
+}
+
 test.describe('BK-091 Premium Installation E2E', () => {
   test('배정된 장착 작업 완료 시 로딩 후 성공 메시지와 목록 반영을 확인한다', async ({ page }) => {
     const installations: InstallationRow[] = [{ ...assignedTask }];
     let firstListDelay = true;
+    const photoUploadHandler = await installDevicePhotoUploadMock(page);
 
     await installApiMocks(page, {
       user: { role: 'installer', userId: 'installer-001', name: 'E2E Installer' },
       handlers: {
+        'POST /api/v2/uploads/sign': photoUploadHandler,
         'GET /api/v2/assets': async ({ route }) => {
           await fulfillSuccess(route, {
             items: [{ vin: 'KMH12A34560000001', vehicleNumber: 'KMH12A34560000001', model: '쏘나타', year: 2024 }],
@@ -124,9 +143,11 @@ test.describe('BK-091 Premium Installation E2E', () => {
   });
 
   test('배정 작업 수행 403 오류 시 권한 안내를 표시한다', async ({ page }) => {
+    const photoUploadHandler = await installDevicePhotoUploadMock(page);
     await installApiMocks(page, {
       user: { role: 'installer', userId: 'installer-001', name: 'E2E Installer' },
       handlers: {
+        'POST /api/v2/uploads/sign': photoUploadHandler,
         'GET /api/v2/assets': async ({ route }) => {
           await fulfillSuccess(route, {
             items: [{ vin: 'KMH12A34560000001', vehicleNumber: 'KMH12A34560000001', model: '쏘나타', year: 2024 }],
@@ -155,9 +176,11 @@ test.describe('BK-091 Premium Installation E2E', () => {
   });
 
   test('배정 작업 수행 5xx 오류 시 서버 오류 안내를 표시한다', async ({ page }) => {
+    const photoUploadHandler = await installDevicePhotoUploadMock(page);
     await installApiMocks(page, {
       user: { role: 'installer', userId: 'installer-001', name: 'E2E Installer' },
       handlers: {
+        'POST /api/v2/uploads/sign': photoUploadHandler,
         'GET /api/v2/assets': async ({ route }) => {
           await fulfillSuccess(route, {
             items: [{ vin: 'KMH12A34560000001', vehicleNumber: 'KMH12A34560000001', model: '쏘나타', year: 2024 }],
