@@ -18,6 +18,7 @@ test('Q05/Q08 installer completes assigned task with two-photo PATCH and never P
     handlers: {
       'POST /api/v2/device-installations': async ({ route }) => { postCount += 1; await fulfillSuccess(route, assigned); },
       'GET /api/v2/assets': async ({ route }) => fulfillSuccess(route, { items: [{ vin: row.vin, vehicleNumber: row.vin, model: 'Test', year: 2026 }] }),
+      'GET /api/v2/device-installations/mapped-device': async ({ route }) => fulfillSuccess(route, { device: { vin: row.vin, deviceId: 'b1', serialNumber: 'DEV-Q05-001' } }),
       'GET /api/v2/device-installations/tasks': async ({ route }) => fulfillSuccess(route, { items: [row], total: 1, page: 1, pageSize: 10 }),
       'PATCH /api/v2/device-installations/DI-Q05-001/status': async ({ route, request }) => {
         patchBodies.push(request.postDataJSON());
@@ -29,7 +30,9 @@ test('Q05/Q08 installer completes assigned task with two-photo PATCH and never P
   });
   await loginViaUi(page, 'installer', { returnUrl: '/device-installation' });
   await page.getByTestId('device-installation-vin-input').selectOption(row.vin);
-  await page.getByTestId('device-installation-serial-input').fill('DEV-Q05-001');
+  await expect(page.getByTestId('device-installation-installer-input')).toHaveValue('Installer');
+  await expect(page.getByTestId('device-installation-serial-input')).toHaveValue('DEV-Q05-001');
+  await expect(page.getByText('이 차량에 매칭된 Geotab 단말에서 자동 입력했습니다.')).toBeVisible();
   await page.getByTestId('device-installation-photo-file-input').setInputFiles(TEST_IMAGE_FILE);
   await page.getByTestId('device-installation-serial-photo-file-input').setInputFiles(TEST_IMAGE_FILE);
   await page.getByTestId('device-installation-submit').click();
@@ -77,11 +80,13 @@ test('Q05 super scope creates once, then retries completion without a second POS
       'GET /api/v2/home/summary': async ({ route }) => fulfillSuccess(route, { kpis: {}, statusCounts: {}, today: {}, recentChanges: [] }),
       'GET /api/v2/action-items': async ({ route }) => fulfillSuccess(route, { items: [], totalCount: 0 }),
       'GET /api/v2/admin/geotab/tenants': async ({ route }) => fulfillSuccess(route, { items: [{ companyId: 'C1', name: '테스트회사' }] }),
+      'GET /api/v2/settings/members': async ({ route }) => fulfillSuccess(route, { items: [{ userId: 'installer-001', name: '홍길동 기사', email: 'installer@example.com', role: 'installer', status: 'approved', companyId: 'C1' }] }),
       'GET /api/v2/assets': async ({ route }) => fulfillSuccess(route, { items: [{ vin: 'OTHER-COMPANY-VIN', vehicleNumber: '타사차량', model: 'Other', year: 2025 }] }),
       'GET /api/v2/geotab/mapping-vehicles': async ({ route, request }) => {
         mappingVehicleScopes.push(new URL(request.url()).searchParams.get('companyId') ?? '');
         await fulfillSuccess(route, { items: [{ vin: row.vin, vehicleNumber: '12가3456', model: 'Test', year: 2026 }], hasMore: false });
       },
+      'GET /api/v2/device-installations/mapped-device': async ({ route }) => fulfillSuccess(route, { device: null }),
       'GET /api/v2/device-installations/tasks': async ({ route }) => fulfillSuccess(route, { items: row.id ? [row] : [], total: row.id ? 1 : 0, page: 1, pageSize: 10 }),
       'POST /api/v2/device-installations': async ({ route, request }) => { postCount += 1; requests.push({ method: 'POST', url: request.url(), body: request.postDataJSON() }); row = { ...row, id: 'DI-Q05-001', status: 'scheduled' }; await fulfillSuccess(route, row, 201); },
       'PATCH /api/v2/device-installations/DI-Q05-001/status': async ({ route, request }) => {
@@ -103,9 +108,11 @@ test('Q05 super scope creates once, then retries completion without a second POS
   expect(mappingVehicleScopes.length).toBeGreaterThan(0);
   expect(mappingVehicleScopes.every((scope) => scope === 'C1')).toBeTruthy();
   await page.getByTestId('device-installation-vin-input').selectOption(row.vin);
-  await page.getByTestId('device-installation-installer-input').fill('installer-001');
+  await page.getByTestId('device-installation-installer-input').selectOption({ label: '홍길동 기사' });
+  await expect(page.getByText('설치 예약·기사 배정 작업을 목록에 추가합니다. 단말 매칭은 장착 완료 시 처리됩니다.')).toBeVisible();
   await page.getByTestId('device-installation-submit').click();
   await expect(page.getByTestId('device-installation-action-message')).toContainText('작업이 생성');
+  await expect(page.getByTestId('device-installation-submit')).toContainText('장착 완료');
   await page.getByTestId('device-installation-serial-input').fill('DEV-SUPER-001');
   await page.getByTestId('device-installation-photo-file-input').setInputFiles(TEST_IMAGE_FILE);
   await page.getByTestId('device-installation-serial-photo-file-input').setInputFiles(TEST_IMAGE_FILE);

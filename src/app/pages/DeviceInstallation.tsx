@@ -16,9 +16,11 @@ import { ApiError } from '../../services/api';
 import { getAssetsList } from '../../services/assets';
 import { getGeotabMappingVehicles, lookupInstallationDevice } from '../../services/geotab';
 import { listGeotabTenants } from '../../services/geotabAdmin';
+import { listSettingsMembers, type SettingsMember } from '../../services/settings';
 import { GeotabDeviceMapping } from '../components/GeotabDeviceMapping';
 import {
   createDeviceInstallation,
+  getMappedDeviceForInstallationVehicle,
   getDeviceInstallationList,
   patchDeviceInstallationStatus,
   type DeviceInstallationItem,
@@ -38,6 +40,11 @@ interface DeviceInstallationVehicleOption {
 interface CompanyOption {
   companyId: string;
   name: string;
+}
+
+interface InstallerOption {
+  userId: string;
+  label: string;
 }
 
 interface DeviceInstallationDisplayRow {
@@ -66,6 +73,14 @@ const EMPTY_SUMMARY: DeviceInstallationSummary = {
   completed: 0,
   cancelled: 0,
 };
+
+function toInstallerDisplayName(member: Pick<SettingsMember, 'userId' | 'name' | 'email'>): string {
+  const name = String(member.name ?? '').trim();
+  if (name) return name;
+  const email = String(member.email ?? '').trim();
+  if (email) return email;
+  return member.userId;
+}
 
 const FILTER_OPTIONS: { value: DeviceInstallationStatusFilter; label: string }[] = [
   { value: 'all', label: '전체' },
@@ -253,7 +268,10 @@ export default function DeviceInstallation() {
   const targetCompanyId = user?.role === 'super_admin' ? companyScope : user?.companyId;
   const hasCompanyScope = user?.role !== 'super_admin' || Boolean(companyScope);
   const [installerId, setInstallerId] = useState('');
+  const [installerOptions, setInstallerOptions] = useState<InstallerOption[]>([]);
+  const [installerOptionsError, setInstallerOptionsError] = useState<string | null>(null);
   const [deviceSerial, setDeviceSerial] = useState('');
+  const [serialPrefillMessage, setSerialPrefillMessage] = useState<string | null>(null);
   const [serialLookup, setSerialLookup] = useState<{ status: string; message: string } | null>(null);
   const [installationPhotoFile, setInstallationPhotoFile] = useState<File | null>(null);
   const [installationPhotoPreview, setInstallationPhotoPreview] = useState<string>('');
@@ -272,6 +290,13 @@ export default function DeviceInstallation() {
       : companyOptions;
     return matches.slice(0, 12);
   }, [companyOptions, companyQuery]);
+  const signedInInstallerLabel = useMemo(() => {
+    const name = String(user?.name ?? '').trim();
+    if (name) return name;
+    const email = String(user?.email ?? '').trim();
+    if (email) return email;
+    return String(user?.userId ?? '').trim();
+  }, [user?.email, user?.name, user?.userId]);
 
   useEffect(() => {
     if (user?.role !== 'super_admin') return;
@@ -283,11 +308,70 @@ export default function DeviceInstallation() {
     return () => controller.abort();
   }, [user?.role]);
 
+  useEffect(() => {
+    if (user?.role === 'installer') {
+      setInstallerId(user.userId);
+    }
+  }, [user?.role, user?.userId]);
+
+  useEffect(() => {
+    if (user?.role !== 'super_admin' || !companyScope) {
+      setInstallerOptions([]);
+      setInstallerOptionsError(null);
+      if (user?.role === 'super_admin') setInstallerId('');
+      return;
+    }
+    const controller = new AbortController();
+    setInstallerOptionsError(null);
+    listSettingsMembers('approved', { companyId: companyScope, signal: controller.signal })
+      .then((result) => {
+        if (controller.signal.aborted) return;
+        const options = result.items
+          .filter((member) => member.role === 'installer' && member.userId.trim())
+          .map((member) => ({ userId: member.userId, label: toInstallerDisplayName(member) }))
+          .sort((left, right) => left.label.localeCompare(right.label, 'ko-KR'));
+        setInstallerOptions(options);
+        setInstallerId((current) => options.some((option) => option.userId === current) ? current : '');
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) {
+          setInstallerOptions([]);
+          setInstallerOptionsError('설치 기사 목록을 불러오지 못했습니다.');
+        }
+      });
+    return () => controller.abort();
+  }, [companyScope, user?.role]);
+
   const selectedInstallation = useMemo(
     () => (pendingInstallation?.vin === vin ? pendingInstallation : null)
       ?? installations.find((item) => item.vin === vin && !['completed', 'cancelled'].includes(item.status)),
     [installations, pendingInstallation, vin],
   );
+  const isCreatingTask = user?.role === 'super_admin' && !selectedInstallation;
+
+  useEffect(() => {
+    setSerialPrefillMessage(null);
+    if (!vin || !hasCompanyScope) return;
+    if (selectedInstallation?.deviceSerial) {
+      setDeviceSerial(selectedInstallation.deviceSerial);
+      setSerialPrefillMessage('장착 작업에 저장된 일련번호를 불러왔습니다.');
+      return;
+    }
+    const controller = new AbortController();
+    getMappedDeviceForInstallationVehicle(vin, {
+      companyId: targetCompanyId || undefined,
+      signal: controller.signal,
+    })
+      .then((device) => {
+        if (controller.signal.aborted || !device?.serialNumber) return;
+        setDeviceSerial(device.serialNumber.toUpperCase());
+        setSerialPrefillMessage('이 차량에 매칭된 Geotab 단말에서 자동 입력했습니다.');
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setSerialPrefillMessage(null);
+      });
+    return () => controller.abort();
+  }, [hasCompanyScope, selectedInstallation?.deviceSerial, targetCompanyId, vin]);
 
   useEffect(() => {
     setSerialLookup(null);
@@ -490,13 +574,14 @@ export default function DeviceInstallation() {
     }
 
     setVin('');
-    setInstallerId('');
+    setInstallerId(user?.role === 'installer' ? user.userId : '');
     setDeviceSerial('');
+    setSerialPrefillMessage(null);
     setInstallationPhotoFile(null);
     setInstallationPhotoPreview('');
     setSerialPhotoFile(null);
     setSerialPhotoPreview('');
-  }, [installationPhotoPreview, serialPhotoPreview]);
+  }, [installationPhotoPreview, serialPhotoPreview, user?.role, user?.userId]);
 
   const handleCreateInstallation = useCallback(async () => {
     if (!canWriteDeviceInstallation) {
@@ -511,9 +596,13 @@ export default function DeviceInstallation() {
     const normalizedVin = vin.trim().toUpperCase();
     const normalizedDeviceSerial = deviceSerial.trim().toUpperCase();
 
-    const creatingSuperTask = user?.role === 'super_admin' && !selectedInstallation;
-    if (!normalizedVin || (!creatingSuperTask && (!normalizedDeviceSerial || !installationPhotoFile || !serialPhotoFile)) || (creatingSuperTask && !companyScope)) {
-      setActionError('VIN, 단말 시리얼, 장착/시리얼 사진을 모두 입력해 주세요.');
+    const creatingSuperTask = isCreatingTask;
+    if (creatingSuperTask && (!normalizedVin || !companyScope)) {
+      setActionError('회사와 차량번호를 선택해 주세요.');
+      return;
+    }
+    if (!creatingSuperTask && (!normalizedVin || !normalizedDeviceSerial || !installationPhotoFile || !serialPhotoFile)) {
+      setActionError('차량번호, 단말 시리얼, 장착/시리얼 사진을 모두 입력해 주세요.');
       return;
     }
 
@@ -566,6 +655,7 @@ export default function DeviceInstallation() {
     canWriteDeviceInstallation,
     deviceSerial,
     installationPhotoFile,
+    isCreatingTask,
     refreshAll,
     resetForm,
     serialPhotoFile,
@@ -705,6 +795,9 @@ export default function DeviceInstallation() {
                 value={vin}
                 onChange={(event) => {
                   setVin(event.target.value.toUpperCase());
+                  setDeviceSerial('');
+                  setSerialPrefillMessage(null);
+                  setSerialLookup(null);
                 }}
                 disabled={!canWriteDeviceInstallation || isSubmitting || !hasCompanyScope || !vehicleSelectOptions.length}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
@@ -728,8 +821,37 @@ export default function DeviceInstallation() {
 
             {user?.role === 'super_admin' && (
               <div className="flex-shrink-0" style={{ width: '180px' }}>
-                <label className="block text-xs font-semibold text-gray-700 mb-1">담당 installer</label>
-                <input data-testid="device-installation-installer-input" value={installerId} onChange={(e) => setInstallerId(e.target.value)} placeholder="installer userId" disabled={isSubmitting} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+                <label className="block text-xs font-semibold text-gray-700 mb-1">담당 설치 기사</label>
+                <select
+                  data-testid="device-installation-installer-input"
+                  value={installerId}
+                  onChange={(event) => setInstallerId(event.target.value)}
+                  disabled={isSubmitting || !companyScope}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                >
+                  <option value="">미배정</option>
+                  {installerOptions.map((option) => (
+                    <option key={option.userId} value={option.userId}>{option.label}</option>
+                  ))}
+                </select>
+                {!installerOptions.length && companyScope && !installerOptionsError && (
+                  <p className="mt-1 text-[11px] text-amber-700">승인된 설치 기사 계정이 없습니다.</p>
+                )}
+                {installerOptionsError && <p role="alert" className="mt-1 text-xs text-red-600">{installerOptionsError}</p>}
+              </div>
+            )}
+
+            {user?.role === 'installer' && (
+              <div className="flex-shrink-0" style={{ width: '180px' }}>
+                <label className="block text-xs font-semibold text-gray-700 mb-1">담당 설치 기사</label>
+                <input
+                  data-testid="device-installation-installer-input"
+                  value={signedInInstallerLabel}
+                  readOnly
+                  aria-label="로그인한 설치 기사"
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 text-sm"
+                />
+                <p className="mt-1 text-[11px] text-gray-500">로그인 계정으로 자동 지정됩니다.</p>
               </div>
             )}
 
@@ -742,10 +864,14 @@ export default function DeviceInstallation() {
                 type="text"
                 placeholder="Geotab 단말 일련번호"
                 value={deviceSerial}
-                onChange={(e) => setDeviceSerial(e.target.value.toUpperCase())}
+                onChange={(e) => {
+                  setDeviceSerial(e.target.value.toUpperCase());
+                  setSerialPrefillMessage(null);
+                }}
                 disabled={!canWriteDeviceInstallation || isSubmitting}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm"
               />
+              {serialPrefillMessage && <p role="status" className="mt-1 text-xs text-blue-700">{serialPrefillMessage}</p>}
               {serialLookup && <p role="status" className={`mt-1 text-xs ${serialLookup.status === 'conflict' ? 'text-red-700' : 'text-slate-600'}`}>{serialLookup.message}</p>}
             </div>
 
@@ -883,7 +1009,7 @@ export default function DeviceInstallation() {
                   void handleCreateInstallation();
                 }}
                 data-testid="device-installation-submit"
-                disabled={!canWriteDeviceInstallation || isSubmitting || isInstallationsLoading || !vin || (user?.role === 'super_admin' ? !companyScope : !deviceSerial || !installationPhotoFile || !serialPhotoFile)}
+                disabled={!canWriteDeviceInstallation || isSubmitting || isInstallationsLoading || !vin || (isCreatingTask ? !companyScope : !deviceSerial || !installationPhotoFile || !serialPhotoFile)}
                 className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-bold text-sm disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
               >
                 {isSubmitting ? (
@@ -891,8 +1017,13 @@ export default function DeviceInstallation() {
                 ) : (
                   <Zap className="w-4 h-4" />
                 )}
-                {user?.role === 'super_admin' ? '작업 생성' : '장착 완료'}
+                {isCreatingTask ? '작업 생성' : '장착 완료'}
               </button>
+              {isCreatingTask && (
+                <p className="mt-1 text-[11px] leading-4 text-gray-500">
+                  설치 예약·기사 배정 작업을 목록에 추가합니다. 단말 매칭은 장착 완료 시 처리됩니다.
+                </p>
+              )}
             </div>
           </div>
         </div>
@@ -994,8 +1125,8 @@ export default function DeviceInstallation() {
                       </td>
 
                       <td className="px-4 py-3">
-                        {row.installation.completedBy || row.installation.installer ? (
-                          <span className="text-sm text-gray-700">{row.installation.completedBy || row.installation.installer}</span>
+                        {row.installation.completedByName || row.installation.installerName || row.installation.completedBy || row.installation.installer ? (
+                          <span className="text-sm text-gray-700">{row.installation.completedByName || row.installation.installerName || row.installation.completedBy || row.installation.installer}</span>
                         ) : (
                           <span className="text-xs text-gray-400">-</span>
                         )}
