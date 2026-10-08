@@ -13,9 +13,11 @@ export interface DeviceInstallationItem {
   installedAt?: string;
   completedAt?: string;
   completedBy?: string;
+  completedByName?: string;
   cancelledBy?: string;
   cancelReason?: string;
   installer?: string;
+  installerName?: string;
   deviceSerial?: string;
   geotabMappingStatus?: 'mapped' | 'pending_inventory' | 'conflict';
   geotabMappingMessage?: string;
@@ -46,6 +48,12 @@ export interface DeviceInstallationDetailOptions {
   signal?: AbortSignal;
 }
 
+export interface DeviceInstallationMappedDevice {
+  deviceId?: string;
+  serialNumber?: string;
+  vin: string;
+}
+
 export interface CreateDeviceInstallationPayload {
   vin: string;
   scheduledAt: string;
@@ -70,6 +78,21 @@ export interface DeviceInstallationStatusPatchRequest {
   memo?: string;
   cancelReason?: string;
   companyId?: string;
+}
+
+export function getMappedDeviceForInstallationVehicle(
+  vin: string,
+  options: DeviceInstallationDetailOptions = {},
+): Promise<DeviceInstallationMappedDevice | null> {
+  return apiClient.requestData<{ device: DeviceInstallationMappedDevice | null }>({
+    path: '/api/v2/device-installations/mapped-device',
+    method: 'GET',
+    query: {
+      vin,
+      companyId: options.companyId,
+    },
+    signal: options.signal,
+  }).then((payload) => payload.device ?? null);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -153,9 +176,11 @@ function toInstallation(value: unknown): DeviceInstallationItem | null {
     installedAt: toNonEmptyString(value.installedAt) ?? undefined,
     completedAt: toNonEmptyString(value.completedAt) ?? undefined,
     completedBy: toNonEmptyString(value.completedBy) ?? undefined,
+    completedByName: toNonEmptyString(value.completedByName) ?? undefined,
     cancelledBy: toNonEmptyString(value.cancelledBy) ?? undefined,
     cancelReason: toNonEmptyString(value.cancelReason) ?? undefined,
     installer: toNonEmptyString(value.installer) ?? undefined,
+    installerName: toNonEmptyString(value.installerName) ?? undefined,
     deviceSerial: toNonEmptyString(value.deviceSerial) ?? undefined,
     geotabMappingStatus: ['mapped', 'pending_inventory', 'conflict'].includes(String(value.geotabMappingStatus)) ? value.geotabMappingStatus as DeviceInstallationItem['geotabMappingStatus'] : undefined,
     geotabMappingMessage: toNonEmptyString(value.geotabMappingMessage) ?? undefined,
