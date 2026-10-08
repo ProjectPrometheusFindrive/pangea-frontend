@@ -80,7 +80,7 @@ test('Q05 super scope creates once, then retries completion without a second POS
       'GET /api/v2/home/summary': async ({ route }) => fulfillSuccess(route, { kpis: {}, statusCounts: {}, today: {}, recentChanges: [] }),
       'GET /api/v2/action-items': async ({ route }) => fulfillSuccess(route, { items: [], totalCount: 0 }),
       'GET /api/v2/admin/geotab/tenants': async ({ route }) => fulfillSuccess(route, { items: [{ companyId: 'C1', name: '테스트회사' }] }),
-      'GET /api/v2/settings/members': async ({ route }) => fulfillSuccess(route, { items: [{ userId: 'installer-001', name: '홍길동 기사', email: 'installer@example.com', role: 'installer', status: 'approved', companyId: 'C1' }] }),
+      'GET /api/v2/settings/members': async ({ route }) => fulfillSuccess(route, { items: [] }),
       'GET /api/v2/assets': async ({ route }) => fulfillSuccess(route, { items: [{ vin: 'OTHER-COMPANY-VIN', vehicleNumber: '타사차량', model: 'Other', year: 2025 }] }),
       'GET /api/v2/geotab/mapping-vehicles': async ({ route, request }) => {
         mappingVehicleScopes.push(new URL(request.url()).searchParams.get('companyId') ?? '');
@@ -108,7 +108,8 @@ test('Q05 super scope creates once, then retries completion without a second POS
   expect(mappingVehicleScopes.length).toBeGreaterThan(0);
   expect(mappingVehicleScopes.every((scope) => scope === 'C1')).toBeTruthy();
   await page.getByTestId('device-installation-vin-input').selectOption(row.vin);
-  await page.getByTestId('device-installation-installer-input').selectOption({ label: '홍길동 기사' });
+  await expect(page.getByTestId('device-installation-installer-input')).toHaveValue('boss-001');
+  await expect(page.getByText('승인된 설치 기사가 없어 로그인한 슈퍼 관리자가 자동 지정되었습니다.')).toBeVisible();
   await expect(page.getByText('설치 예약·기사 배정 작업을 목록에 추가합니다. 단말 매칭은 장착 완료 시 처리됩니다.')).toBeVisible();
   await page.getByTestId('device-installation-submit').click();
   await expect(page.getByTestId('device-installation-action-message')).toContainText('작업이 생성');
@@ -121,6 +122,7 @@ test('Q05 super scope creates once, then retries completion without a second POS
   await page.getByTestId('device-installation-submit').click();
   await expect(page.getByTestId('device-installation-action-message')).toContainText('장착 완료');
   expect(postCount).toBe(1);
+  expect(requests.find((request) => request.method === 'POST')?.body.installer).toBe('boss-001');
   expect(requests.filter((r) => r.method === 'PATCH').map((r) => r.body.status)).toEqual(['in_progress', 'completed', 'completed']);
   expect(requests.every((r) => r.url.includes('companyId=C1') || r.method === 'POST')).toBeTruthy();
   await expect(page.getByRole('cell', { name: 'boss-001', exact: true })).toBeVisible();
