@@ -70,3 +70,8 @@ test('notifications service delegates path resolution to the shared helper', () 
 
   assert.match(source, /resolveNotificationPath/u);
 });
+
+test('telemetry notifications prefer their action card over legacy reservation links', () => {
+  assert.equal(resolveNotificationPath({entityType: 'telemetry_card', entityId: 'TEL-1', linkUrl: '/reservations?search=VIN', metadata: {vin: 'VIN'}}), '/action-required?actionItemId=GEOTAB-ACTION%3ATEL-1');
+  assert.equal(resolveNotificationPath({entityType: 'telemetry_card', entityId: 'TEL-1', metadata: {actionItemId: 'GEOTAB-ACTION:TEL-2'}}), '/action-required?actionItemId=GEOTAB-ACTION%3ATEL-2');
+});

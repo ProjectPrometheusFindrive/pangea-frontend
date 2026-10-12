@@ -21,6 +21,7 @@ export interface GeotabThresholdConfig {
   collisionConfidenceThreshold: number;
   eventFreshnessMinutes: number;
   locationMaxGapMinutes: number;
+  terminalOffMinutes: number;
 }
 
 export interface GeotabRequestOptions { signal?: AbortSignal; companyId?: string; }

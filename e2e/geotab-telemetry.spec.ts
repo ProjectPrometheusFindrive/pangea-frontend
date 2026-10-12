@@ -218,3 +218,35 @@ test('mapping conflict is visible and does not claim a successful match', async 
   await expect(panel.getByRole('alert')).toContainText('mapping changed');
   await expect(panel).toContainText('현재 매칭: 미매칭');
 });
+
+test('theft notification opens its own detail even when not on the current list page', async ({ page }) => {
+  const item = { ...pendingAccidentItem, id: 'GEOTAB-ACTION:TEL-1', companyId: 'company-001',
+    category: '도난 의심', type: '도난 의심', issueCode: 'vehicle.theft_suspected', reasonType: 'theft_suspected',
+    subCategory: '지정 구역 장기 체류', notificationType: 'theft-suspicion',
+    evidenceSummary: { geofenceName: '알림 대상 구역', thresholdMinutes: 5 } };
+  await seedAuthSession(page, 'admin');
+  await installApiMocks(page, { user: { role: 'admin' }, handlers: {
+    ...settingsMocks,
+    'GET /api/v2/action-items': async ({ route }) => fulfillSuccess(route, { items: [], total: 0 }),
+    'GET /api/v2/action-items/GEOTAB-ACTION%3ATEL-1': async ({ route }) => fulfillSuccess(route, item),
+    'GET /api/v2/notifications': async ({ route }) => fulfillSuccess(route, { items: [{ id: 'N1', title: '도난 의심', message: '12가3456 체류 기준 초과',
+      isRead: true, createdAt: '2026-10-13T00:00:00Z', entityType: 'telemetry_card', entityId: 'TEL-1', metadata: { vin: 'VIN-GEO-1' } }] }),
+  } });
+  await page.goto('/action-required');
+  await page.getByRole('button', { name: '알림 열기' }).click();
+  await page.getByRole('heading', { name: '도난 의심', exact: true }).click();
+  await expect(page).toHaveURL(/action-required\?actionItemId=GEOTAB-ACTION%3ATEL-1/);
+  await expect(page.getByRole('region', { name: '도난 의심 검출 근거' })).toContainText('알림 대상 구역');
+});
+
+test('inaccessible notification card shows an error without a wrong fallback card', async ({ page }) => {
+  await seedAuthSession(page, 'admin');
+  await installApiMocks(page, { user: { role: 'admin' }, handlers: {
+    ...settingsMocks,
+    'GET /api/v2/action-items': async ({ route }) => fulfillSuccess(route, { items: [], total: 0 }),
+    'GET /api/v2/action-items/forbidden': async ({ route }) => route.fulfill({ status: 403, contentType: 'application/json', body: JSON.stringify({ status: 'error', error: { message: 'Forbidden' } }) }),
+  } });
+  await page.goto('/action-required?actionItemId=forbidden');
+  await expect(page.getByRole('alert')).toContainText('이슈가 없거나 조회 권한이 없습니다');
+  await expect(page.getByRole('heading', { name: '상세 정보', exact: true })).toHaveCount(0);
+});

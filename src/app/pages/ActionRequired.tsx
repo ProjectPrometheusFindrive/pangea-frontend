@@ -1,5 +1,5 @@
 import { Layout } from '../components/Layout';
-import { useSearchParams, useNavigate } from 'react-router';
+import { useSearchParams, useNavigate, useLocation } from 'react-router';
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Search, X, ArrowUp, ArrowDown, Clock, User, CheckCircle2, Loader2, AlertTriangle, ChevronLeft, ChevronRight, Calendar, DollarSign, Car, Info, Activity, Upload } from 'lucide-react';
 import { PageStateBoundary } from '../components/PageStateBoundary';
@@ -2590,6 +2590,7 @@ function toActionItemDetail(payload: unknown, fallbackItem: ActionItem): ActionI
 
 export default function ActionRequired() {
   const [searchParams] = useSearchParams();
+  const navigationKey = useLocation().key;
   const navigate = useNavigate();
   const { user } = useAuth();
   const { canPerformAction, canAccessRoute } = useAuthorization();
@@ -2659,6 +2660,7 @@ export default function ActionRequired() {
   const [isDetailLoading, setIsDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [isDetailNotFound, setIsDetailNotFound] = useState(false);
+  const [notificationTargetError, setNotificationTargetError] = useState<string | null>(null);
   const [issueAsset, setIssueAsset] = useState<IssueAssetRecord | null>(null);
   const [issueAssetDate, setIssueAssetDate] = useState('');
   const [issueAssetFile, setIssueAssetFile] = useState<File | null>(null);
@@ -3045,6 +3047,28 @@ export default function ActionRequired() {
   const handleActionItemsRetry = useCallback(() => {
     void hydrateActionItems();
   }, [hydrateActionItems]);
+
+  const notificationActionId = searchParams.get('actionItemId');
+  useEffect(() => {
+    if (!notificationActionId) return;
+    const controller = new AbortController();
+    setNotificationTargetError(null);
+    detailControllerRef.current?.abort();
+    detailRequestSequenceRef.current += 1;
+    setIsDetailLoading(false);
+    setSelectedItem(null);
+    setDetailError(null);
+    setRecentPositionItem(null);
+    void getActionRequiredDetail(notificationActionId, { signal: controller.signal }).then((payload) => {
+      if (controller.signal.aborted) return;
+      const item = toActionItem(payload, 0);
+      if (!item) throw new Error('이슈 정보를 확인할 수 없습니다.');
+      setSelectedItem(item);
+    }).catch((error) => {
+      if (!controller.signal.aborted) setNotificationTargetError(error instanceof ApiError && [403, 404].includes(error.status) ? '이슈가 없거나 조회 권한이 없습니다.' : '알림의 이슈를 불러오지 못했습니다. 다시 시도해 주세요.');
+    });
+    return () => controller.abort();
+  }, [notificationActionId, navigationKey]);
 
   const resetActionFilters = useCallback(() => {
     setSelectedFilters([]);
@@ -4945,6 +4969,7 @@ export default function ActionRequired() {
 
   return (
     <Layout title="조치 필요 항목">
+      {notificationTargetError && <p role="alert" className="m-4 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">{notificationTargetError}</p>}
       <div className="p-3 sm:p-6">
           <div className="mb-6 space-y-4">
             <div className="relative">

@@ -112,6 +112,13 @@ export function resolveNotificationPath(payload) {
     return ACTION_REQUIRED_ROUTE;
   }
 
+  const metadata = isRecord(payload.metadata) ? payload.metadata : {};
+  if (payload.entityType === 'telemetry_card') {
+    const actionId = firstNonEmpty(metadata.actionItemId, payload.actionItemId,
+      payload.entityId ? `GEOTAB-ACTION:${payload.entityId}` : '');
+    return actionId ? `${ACTION_REQUIRED_ROUTE}?actionItemId=${encodeURIComponent(actionId)}` : ACTION_REQUIRED_ROUTE;
+  }
+
   const explicitPath = toNavigationPath(
     payload.path
       ?? payload.route
