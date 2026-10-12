@@ -888,7 +888,7 @@ export default function Settings() {
   const [isGeofenceSaving, setIsGeofenceSaving] = useState(false);
   const [activeToggleTargetId, setActiveToggleTargetId] = useState<string | null>(null);
   const [deletingGeofenceId, setDeletingGeofenceId] = useState<string | null>(null);
-  const [geotabThresholds, setGeotabThresholds] = useState<GeotabThresholdConfig>({ theftDwellMinutes: 30, geofenceRadiusMeters: 100, accidentDeltaV: 3.0, collisionConfidenceThreshold: 50, eventFreshnessMinutes: 15, locationMaxGapMinutes: 10 });
+  const [geotabThresholds, setGeotabThresholds] = useState<GeotabThresholdConfig>({ theftDwellMinutes: 30, geofenceRadiusMeters: 100, accidentDeltaV: 3.0, collisionConfidenceThreshold: 50, eventFreshnessMinutes: 15, locationMaxGapMinutes: 10, terminalOffMinutes: 60 });
   const [isGeotabThresholdSaving, setIsGeotabThresholdSaving] = useState(false);
   const [geotabThresholdNotice, setGeotabThresholdNotice] = useState<string | null>(null);
 
@@ -3710,11 +3710,13 @@ export default function Settings() {
                     ['accidentDeltaV', '외부 ΔV 신호 기준(m/s)', 0.1, 0.1, 20],
                     ['eventFreshnessMinutes', '실시간 알림 허용 지연(분)', 1, 1, 1440],
                     ['locationMaxGapMinutes', '체류 판정 최대 수집 공백(분)', 1, 1, 1440],
+                    ['terminalOffMinutes', '단말 통신 중단 지속(분)', 1, 5, 1440],
                   ] as const).map(([key, label, step, min, max]) => <label key={key} className="text-xs font-semibold text-slate-700">{label}<input type="number" min={min} max={max} step={step} value={geotabThresholds[key]} onChange={(event) => setGeotabThresholds((prev) => ({ ...prev, [key]: Number(event.target.value) }))} disabled={!canEditSettings || isGeotabThresholdSaving} className="mt-1 w-full rounded-lg border border-indigo-200 bg-white px-3 py-2 text-sm" /></label>)}
                 </div>
                 <p className="mt-2 text-xs text-slate-600">AI 신뢰도는 해당 진단이 수집될 때만 적용되며 피해 심각도가 아닙니다. Geotab 충돌 규칙은 별도 의심 신호로 사용합니다. ΔV는 단위가 명시된 외부 신호 전용이며 급제동 가속도에 적용하지 않습니다.</p>
                 <p className="mt-2 text-xs text-slate-600">체류 시간은 새 위치 데이터가 도착할 때 판정합니다. 정차 중 위치 전송 간격은 수집 주기보다 길 수 있으며, 최대 수집 공백을 넘으면 체류 시간을 다시 계산합니다. 활성 지오펜스 안에서 기준 시간 이상 체류하면 도난 의심으로 표시하므로, 회사 주차장 등 정상 주차 장소를 등록할 때 주의해 주세요.</p>
                 {geotabThresholdNotice && <p className="mt-3 text-xs font-semibold text-indigo-700">{geotabThresholdNotice}</p>}
+                <p className="mt-2 text-xs text-slate-600">단말 OFF는 Geotab이 통신 안 됨으로 보고한 상태가 기준 시간 이상 지속될 때 생성합니다. GPS 위치 갱신 지연만으로는 판단하지 않으며, 상태 조회가 15분 이상 끊기면 누적을 다시 시작합니다. 복구 후에도 카드는 확인 후 수동 완료합니다.</p>
               </section>
               {settingsCompanyId && canEditSettings && <GeotabDeviceMapping key={settingsCompanyId} companyId={settingsCompanyId} />}
               {!canEditSettings && (
