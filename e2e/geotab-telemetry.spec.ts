@@ -92,6 +92,61 @@ test('Geotab accident card shows recent path and moves to accident intake after 
   await expect(page.getByRole('button', { name: '고객 사고 확인', exact: true })).toHaveCount(0);
 });
 
+test('super admin recent-position requests use each action card company, including detail view', async ({ page }) => {
+  const companies = ['tenant-a', 'tenant-b'];
+  const items = companies.map((companyId, index) => ({
+    ...pendingAccidentItem,
+    id: `theft-${index}`,
+    companyId,
+    type: '도난 의심',
+    category: '도난 의심',
+    subCategory: 'Vehicle theft suspected',
+    issueCode: 'vehicle.theft_suspected',
+    reasonType: 'theft_suspected',
+    notificationType: 'theft-suspicion',
+    vehicleNumber: `12가345${index}`,
+    geotabVehicleId: `VIN-${index}`,
+  }));
+  const positionScopes: string[] = [];
+  await seedAuthSession(page, 'super_admin', { companyId: '' });
+  await installApiMocks(page, {
+    user: { role: 'super_admin', companyId: '' },
+    handlers: {
+      ...settingsMocks,
+      'GET /api/v2/action-items': async ({ route }) => fulfillSuccess(route, { items, totalCount: items.length }),
+      ...Object.fromEntries(items.flatMap((item) => [
+        [`GET /api/v2/action-items/${item.id}`, async ({ route }: Parameters<ApiMockHandler>[0]) => fulfillSuccess(route, item)],
+        [`GET /api/v2/geotab/vehicles/${item.geotabVehicleId}/positions`, async ({ route, request }: Parameters<ApiMockHandler>[0]) => {
+          const scope = new URL(request.url()).searchParams.get('companyId');
+          positionScopes.push(scope ?? 'missing');
+          if (scope !== item.companyId) {
+            await route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ status: 'error', error: { message: 'companyId is required for this request' } }) });
+            return;
+          }
+          await fulfillSuccess(route, { positions: [
+            { latitude: 37.40768, longitude: 127.09077, recordedAt: '2026-10-12T02:10:49Z' },
+            { latitude: 37.40769, longitude: 127.09078, recordedAt: '2026-10-12T02:40:49Z' },
+          ] });
+        }],
+      ])),
+    },
+  });
+  await page.goto('/action-required');
+  for (const item of items) {
+    await page.getByRole('row').filter({ hasText: item.vehicleNumber }).getByRole('button', { name: '최근 위치 조회' }).click();
+    const dialog = page.getByRole('dialog', { name: '최근 위치 조회' });
+    await expect(dialog).toContainText('37.40769, 127.09078');
+    await expect(dialog.getByTestId('telemetry-route-line')).toBeVisible();
+    await expect(dialog.getByTestId('telemetry-latest-marker')).toBeVisible();
+    await dialog.getByRole('button', { name: '최근 위치 조회 닫기' }).click();
+  }
+  await page.getByRole('row').filter({ hasText: items[1].vehicleNumber }).getByRole('button', { name: '보기', exact: true }).click();
+  await expect(page.getByText('도난 의심 알림', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: '최근 위치 조회', exact: true }).last().click();
+  await expect(page.getByRole('dialog', { name: '최근 위치 조회' })).toContainText('37.40769, 127.09078');
+  expect(positionScopes).toEqual(['tenant-a', 'tenant-b', 'tenant-b']);
+});
+
 test('tenant admin maps collected serial to Pangea plate without changing provider ID', async ({ page }) => {
   let mappingBody: Record<string, unknown> | null = null;
   const device = { id: 'inventory-1', deviceId: 'b1', sourceDatabase: 'fleet', serialNumber: 'G9TEST123', name: 'G9TEST123',

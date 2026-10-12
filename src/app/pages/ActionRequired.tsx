@@ -88,6 +88,7 @@ interface MemoLog {
 
 interface ActionItem {
   id: string;
+  companyId?: string;
   type: string;
   subCategory?: string;
   reasonType?: string;
@@ -2417,6 +2418,7 @@ function toActionItem(row: unknown, index: number, fallbackId?: string): ActionI
   return {
     id,
     type,
+    companyId: pickString(row, ['companyId']) ?? undefined,
     subCategory: subCategory ?? undefined,
     reasonType: pickString(row, ['reasonType']) ?? undefined,
     issueCode: canonicalActionIssueCode(pickString(row, ['issueCode'])),
@@ -6903,6 +6905,7 @@ export default function ActionRequired() {
           <RecentPositionMapModal
             vehicleId={recentPositionItem.geotabVehicleId ?? recentPositionItem.vehicleNumber}
             vehicleLabel={`${recentPositionItem.vehicleNumber} · ${recentPositionItem.customerName}`}
+            companyId={recentPositionItem.companyId}
             onClose={() => setRecentPositionItem(null)}
           />
         )}
