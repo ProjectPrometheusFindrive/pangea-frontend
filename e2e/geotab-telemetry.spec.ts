@@ -100,12 +100,17 @@ test('super admin recent-position requests use each action card company, includi
     companyId,
     type: '도난 의심',
     category: '도난 의심',
-    subCategory: 'Vehicle theft suspected',
+    subCategory: '지정 구역 장기 체류',
     issueCode: 'vehicle.theft_suspected',
     reasonType: 'theft_suspected',
     notificationType: 'theft-suspicion',
     vehicleNumber: `12가345${index}`,
     geotabVehicleId: `VIN-${index}`,
+    evidenceSummary: {
+      geofenceName: '테스트 지정 구역', thresholdMinutes: 5,
+      firstObservedAt: index ? '2026-10-12T02:10:49Z' : undefined,
+      lastObservedAt: '2026-10-12T02:40:49Z', observedMinutes: index ? 30 : undefined,
+    },
   }));
   const positionScopes: string[] = [];
   await seedAuthSession(page, 'super_admin', { companyId: '' });
@@ -142,9 +147,21 @@ test('super admin recent-position requests use each action card company, includi
   }
   await page.getByRole('row').filter({ hasText: items[1].vehicleNumber }).getByRole('button', { name: '보기', exact: true }).click();
   await expect(page.getByText('도난 의심 알림', { exact: true })).toBeVisible();
+  const evidence = page.getByRole('region', { name: '도난 의심 검출 근거' });
+  await expect(evidence).toContainText('지정 구역 장기 체류');
+  await expect(evidence).toContainText('테스트 지정 구역');
+  await expect(evidence).toContainText('5분 이상');
+  await expect(evidence).toContainText('11:10');
+  await expect(evidence).toContainText('11:40');
+  await expect(evidence).toContainText('30분');
+  await expect(evidence).toContainText('실제 도난 여부는 확인이 필요합니다');
   await page.getByRole('button', { name: '최근 위치 조회', exact: true }).last().click();
   await expect(page.getByRole('dialog', { name: '최근 위치 조회' })).toContainText('37.40769, 127.09078');
   expect(positionScopes).toEqual(['tenant-a', 'tenant-b', 'tenant-b']);
+  await page.goto('/action-required');
+  await page.getByRole('row').filter({ hasText: items[0].vehicleNumber }).getByRole('button', { name: '보기', exact: true }).click();
+  await expect(page.getByRole('region', { name: '도난 의심 검출 근거' })).toContainText('미기록');
+  await expect(page.getByRole('region', { name: '도난 의심 검출 근거' })).toContainText('추정하지 않습니다');
 });
 
 test('tenant admin maps collected serial to Pangea plate without changing provider ID', async ({ page }) => {
