@@ -121,6 +121,13 @@ interface ActionItem {
   notificationType?: 'theft-suspicion' | 'accident-confirmation' | 'vehicle-anomaly';
   customerConfirmationStatus?: 'pending' | 'confirmed' | 'rejected' | 'not_required';
   telemetryCardStatus?: string;
+  evidenceSummary?: {
+    geofenceName?: string;
+    thresholdMinutes?: number;
+    firstObservedAt?: string;
+    lastObservedAt?: string;
+    observedMinutes?: number;
+  };
   memos?: MemoLog[];
   documentDetails?: ActionDocumentDetail[];
   workContext?: ActionItemWorkContext;
@@ -2458,6 +2465,13 @@ function toActionItem(row: unknown, index: number, fallbackId?: string): ActionI
     })(),
     customerConfirmationStatus: pickString(row, ['customerConfirmationStatus', 'customerConfirmation', 'confirmationStatus']) as ActionItem['customerConfirmationStatus'] | undefined,
     telemetryCardStatus: pickString(row, ['telemetryCardStatus']) ?? undefined,
+    evidenceSummary: isRecord(row.evidenceSummary) ? {
+      geofenceName: pickString(row.evidenceSummary, ['geofenceName']) ?? undefined,
+      thresholdMinutes: toNumberValue(row.evidenceSummary.thresholdMinutes) ?? undefined,
+      firstObservedAt: pickString(row.evidenceSummary, ['firstObservedAt']) ?? undefined,
+      lastObservedAt: pickString(row.evidenceSummary, ['lastObservedAt']) ?? undefined,
+      observedMinutes: toNumberValue(row.evidenceSummary.observedMinutes) ?? undefined,
+    } : undefined,
     memos: memos.length > 0 ? memos : undefined,
     workContext,
     paymentInfo,
@@ -5247,6 +5261,20 @@ export default function ActionRequired() {
                 {selectedItem.notificationType && (
                   <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
                     <p className="font-bold">{selectedItem.notificationType === 'theft-suspicion' ? '도난 의심 알림' : selectedItem.notificationType === 'accident-confirmation' ? '사고 확인 알림' : '차량 이상 알림'}</p>
+                    {selectedItem.notificationType === 'theft-suspicion' && (
+                      <section aria-label="도난 의심 검출 근거" className="mt-3 space-y-2 text-xs">
+                        <p className="font-semibold">감지 사유: {selectedItem.subCategory || '도난 의심 신호'}</p>
+                        <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
+                          <dt>구역</dt><dd>{selectedItem.evidenceSummary?.geofenceName || '미기록'}</dd>
+                          <dt>설정 기준</dt><dd>{selectedItem.evidenceSummary?.thresholdMinutes != null ? `${selectedItem.evidenceSummary.thresholdMinutes}분 이상` : '미기록'}</dd>
+                          <dt>최초 내부 관측</dt><dd>{selectedItem.evidenceSummary?.firstObservedAt ? formatDateTimeKst(selectedItem.evidenceSummary.firstObservedAt, '미기록') : '미기록'}</dd>
+                          <dt>검출 판단 관측</dt><dd>{selectedItem.evidenceSummary?.lastObservedAt ? formatDateTimeKst(selectedItem.evidenceSummary.lastObservedAt, '미기록') : '미기록'}</dd>
+                          {selectedItem.evidenceSummary?.observedMinutes != null && <><dt>관측 간 경과</dt><dd>{Math.floor(selectedItem.evidenceSummary.observedMinutes * 10) / 10}분</dd></>}
+                        </dl>
+                        <p>관측 시각은 실제 진입 시각과 다를 수 있으며, 관측 사이의 연속 체류를 보장하지 않습니다. 실제 도난 여부는 확인이 필요합니다.</p>
+                        {!selectedItem.evidenceSummary?.firstObservedAt && <p>이전 기록에 저장되지 않은 관측 시각은 추정하지 않습니다.</p>}
+                      </section>
+                    )}
                     {selectedItem.customerConfirmationStatus && selectedItem.customerConfirmationStatus !== 'not_required' && <p className="mt-1 text-xs">고객 확인 상태: {selectedItem.customerConfirmationStatus === 'confirmed' ? '사고 확인됨' : selectedItem.customerConfirmationStatus === 'rejected' ? '사고 아님 확인됨' : '확인 대기'}</p>}
                     {selectedItem.telemetryCardStatus === 'accident_intake' && <p className="mt-1 text-xs font-semibold">사고접수 단계로 전환되었습니다.</p>}
                     {(selectedItem.notificationType === 'theft-suspicion' || selectedItem.notificationType === 'accident-confirmation') && (selectedItem.geotabVehicleId || selectedItem.vehicleNumber) && <button type="button" className="mt-2 rounded-md bg-white px-3 py-1.5 text-xs font-semibold text-indigo-700 shadow-sm ring-1 ring-indigo-200 hover:bg-indigo-50" onClick={() => setRecentPositionItem(selectedItem)}>최근 위치 조회</button>}
