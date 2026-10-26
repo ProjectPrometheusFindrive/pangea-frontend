@@ -25,7 +25,7 @@ test('map hover, selection, memo persistence, exclusion filters, viewport list a
   await page.goto('/admin/rental-prospects');
   await expect(page.getByRole('link', { name: '렌터카 영업 지도' })).toBeVisible();
   await expect(page.locator('.leaflet-interactive')).toHaveCount(2);
-  const radii = await page.locator('.leaflet-interactive').evaluateAll(elements => elements.map(e => e.getBoundingClientRect().width));
+  const radii = await page.locator('.leaflet-interactive').evaluateAll(elements => elements.map(e => (e as SVGGraphicsElement).getBBox().width));
   expect(radii[0]).toBeGreaterThan(radii[1]);
   await page.locator('.leaflet-interactive').first().hover();
   await expect(page.locator('.leaflet-tooltip')).toContainText('승용 80대');
@@ -74,3 +74,41 @@ for (const role of ['admin', 'member', 'installer'] as const) {
     expect(requested).toBe(false);
   });
 }
+
+test('fleet range filters, unknown sizes and bounded stable logarithmic radii', async ({ page }) => {
+  await seedAuthSession(page, 'super_admin');
+  const totals = [100, 4, 1000000, null, 0];
+  await installApiMocks(page, { user: { role: 'super_admin' }, handlers: {
+    'GET /api/v2/admin/rental-prospects': async ({ route }) => fulfillSuccess(route, {
+      items: totals.map((totalVehicles, index) => ({ ...office, id: `size-${index}`, name: `규모 테스트 ${index}`, totalVehicles })),
+      sourceUrl: 'https://www.data.go.kr/data/15025689/standard.do', fetchedAt: '2026-10-26',
+    }),
+  }});
+  await page.goto('/admin/rental-prospects');
+  const markers = page.locator('.leaflet-interactive');
+  await expect(markers).toHaveCount(5);
+  const widths = await markers.evaluateAll(elements => elements.map(e => (e as SVGGraphicsElement).getBBox().width));
+  for (const width of widths) expect(width).toBeLessThanOrEqual(28.1);
+  expect(widths[2]).toBeCloseTo(28, 0);
+  expect(widths[0]).toBeCloseTo(2 * Math.round(4 + 10 * Math.log1p(100) / Math.log1p(1000000)), 0);
+  expect(widths[3]).toBeCloseTo(8, 0);
+  await page.getByLabel('최대 보유 차량 대수').fill('99');
+  await expect(markers).toHaveCount(3);
+  await page.getByLabel('최대 보유 차량 대수').fill('200');
+  await page.getByLabel('최소 보유 차량 대수').fill('50');
+  await expect(markers).toHaveCount(2);
+  await page.getByRole('checkbox', { name: '규모 미제공 포함' }).uncheck();
+  await expect(markers).toHaveCount(1);
+  const filteredWidth = await markers.first().evaluate(e => (e as SVGGraphicsElement).getBBox().width);
+  expect(filteredWidth).toBeCloseTo(widths[0], 0);
+  await page.getByLabel('최대 보유 차량 대수').fill('49');
+  await expect(page.getByRole('alert')).toContainText('최소값은 최대값 이하여야');
+  await page.getByLabel('최소 보유 차량 대수').fill('0');
+  await page.getByLabel('최대 보유 차량 대수').fill('0');
+  await expect(markers).toHaveCount(1);
+  await page.getByLabel('최소 보유 차량 대수').fill('');
+  await page.getByLabel('최대 보유 차량 대수').fill('');
+  await expect(markers).toHaveCount(4);
+  await page.getByRole('checkbox', { name: '규모 미제공 포함' }).check();
+  await expect(markers).toHaveCount(5);
+});
