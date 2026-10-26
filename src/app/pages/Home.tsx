@@ -26,7 +26,6 @@ import { getActionItemTypeCounts } from '../../services/actionRequired';
 import { getHomeSummary, type HomeSummaryResponse } from '../../services/home';
 import { ROUTE_PERMISSIONS, type AppRoutePermission } from '../authorization';
 import { Layout } from '../components/Layout';
-import { ContractUtilizationPanel } from '../components/ContractUtilizationPanel';
 import { PageStateBoundary } from '../components/PageStateBoundary';
 import { useAuthorization } from '../context/AuthorizationContext';
 import { useAuth } from '../context/AuthContext';
@@ -868,7 +867,6 @@ const operationScores = useMemo(() => ([
         className="m-3 min-h-[320px] sm:m-6"
       >
         <div className="space-y-4 p-3 sm:space-y-5 sm:p-6">
-          <ContractUtilizationPanel companyId={filters.companyId} role={user?.role} />
           {(isRefreshing || refreshError) && (
             <div className={`flex flex-col gap-3 rounded-lg border px-3 py-2 text-xs sm:flex-row sm:items-center sm:justify-between ${
               refreshError
