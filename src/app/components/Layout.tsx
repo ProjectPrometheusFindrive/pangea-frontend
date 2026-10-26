@@ -457,6 +457,9 @@ export function Layout({ children, title }: LayoutProps) {
   ];
 
   const filteredMenuItems = menuItems.filter((item) => canAccessRoute(item.permission));
+  if (user?.role === 'super_admin') {
+    filteredMenuItems.push({ path: '/admin/rental-prospects', label: '렌터카 영업 지도', icon: Car, permission: ROUTE_PERMISSIONS.home });
+  }
 
   return (
     <div data-testid="app-shell" className="flex h-dvh min-h-0 overflow-hidden bg-[#F7F8FA] md:h-screen">
