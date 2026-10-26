@@ -10,8 +10,8 @@ const count = (n: number | null) => n === null ? '미제공' : `${n.toLocaleStri
 const hasLocation = (p: RentalProspect) => p.latitude !== null && p.longitude !== null;
 const vehicleDetails = (p: RentalProspect) => `승용 ${count(p.passengerVehicles)} · 승합 ${count(p.vans)} · 전기승용 ${count(p.electricPassengerVehicles)} · 전기승합 ${count(p.electricVans)}`;
 
-function ProspectMap({ items, selected, onSelect, onBounds }: {
-  items: RentalProspect[]; selected?: string;
+function ProspectMap({ items, selected, maxVehicles, onSelect, onBounds }: {
+  items: RentalProspect[]; selected?: string; maxVehicles: number;
   onSelect: (id: string) => void; onBounds: (bounds: L.LatLngBounds) => void;
 }) {
   const element = useRef<HTMLDivElement>(null);
@@ -50,7 +50,7 @@ function ProspectMap({ items, selected, onSelect, onBounds }: {
         const line = document.createElement('div'); line.textContent = text; content.append(line);
       });
       const marker = L.circleMarker([p.latitude!, p.longitude!], {
-        radius: p.totalVehicles === null ? 5 : Math.max(5, Math.min(42, Math.sqrt(p.totalVehicles) * 1.25)),
+        radius: p.totalVehicles === null ? 4 : 4 + 10 * Math.min(1, Math.log1p(Math.max(0, p.totalVehicles)) / Math.log1p(Math.max(1, maxVehicles))),
         color: p.excluded ? '#64748b' : '#2563eb', fillOpacity: 0.55, weight: 2,
       }).bindTooltip(content).on('click', () => onSelect(p.id)).addTo(group);
       markers.current.set(p.id, marker);
@@ -60,7 +60,7 @@ function ProspectMap({ items, selected, onSelect, onBounds }: {
     }
     onBounds(instance.getBounds());
     return () => { group.remove(); };
-  }, [items, onSelect, onBounds]);
+  }, [items, maxVehicles, onSelect, onBounds]);
   useEffect(() => {
     markers.current.forEach((marker, id) => marker.setStyle({ weight: selected === id ? 4 : 2 }));
     if (selected && centeredSelection.current !== selected) {
@@ -81,6 +81,9 @@ function ProspectWorkspace() {
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState('target');
+  const [minVehicles, setMinVehicles] = useState('');
+  const [maxVehicles, setMaxVehicles] = useState('');
+  const [includeUnknownSize, setIncludeUnknownSize] = useState(true);
   const [bounds, setBounds] = useState<L.LatLngBounds>();
   const [selected, setSelected] = useState<string>();
   const [drafts, setDrafts] = useState<Record<string, string>>({});
@@ -102,9 +105,17 @@ function ProspectWorkspace() {
     window.addEventListener('beforeunload', warn);
     return () => window.removeEventListener('beforeunload', warn);
   }, [dirty]);
+  const minimum = minVehicles === '' ? null : Number(minVehicles);
+  const maximum = maxVehicles === '' ? null : Number(maxVehicles);
+  const validRange = (minimum === null || (Number.isInteger(minimum) && minimum >= 0))
+    && (maximum === null || (Number.isInteger(maximum) && maximum >= 0))
+    && (minimum === null || maximum === null || minimum <= maximum);
+  const fleetScaleMaximum = useMemo(() => Math.max(1, ...(data?.items || []).map(p => p.totalVehicles ?? 0)), [data]);
   const filtered = useMemo(() => (data?.items || []).filter(p =>
+    (p.totalVehicles === null ? includeUnknownSize : !validRange ||
+      ((minimum === null || p.totalVehicles >= minimum) && (maximum === null || p.totalVehicles <= maximum))) &&
     (filter === 'all' || (filter === 'excluded' ? p.excluded : !p.excluded)) &&
-    `${p.name} ${p.address} ${p.phone}`.toLowerCase().includes(query.trim().toLowerCase())), [data, filter, query]);
+    `${p.name} ${p.address} ${p.phone}`.toLowerCase().includes(query.trim().toLowerCase())), [data, filter, query, minimum, maximum, validRange, includeUnknownSize]);
   const visible = useMemo(() => filtered.filter(p => hasLocation(p) && bounds?.contains([p.latitude!, p.longitude!])), [filtered, bounds]);
   const missing = filtered.filter(p => !hasLocation(p));
   const office = data?.items.find(p => p.id === selected);
@@ -138,12 +149,20 @@ function ProspectWorkspace() {
         <select aria-label="마케팅 대상 필터" value={filter} onChange={e => setFilter(e.target.value)} className="rounded-lg border bg-white p-2">
           <option value="target">마케팅 대상만</option><option value="all">전체 업체</option><option value="excluded">제외 업체만</option>
         </select>
+        <label className="flex items-center gap-2 text-sm">최소 차량
+          <input aria-label="최소 보유 차량 대수" type="number" min="0" step="1" value={minVehicles} onChange={e => setMinVehicles(e.target.value)} placeholder="제한 없음" className="w-28 rounded-lg border bg-white p-2" />대
+        </label>
+        <label className="flex items-center gap-2 text-sm">최대 차량
+          <input aria-label="최대 보유 차량 대수" type="number" min="0" step="1" value={maxVehicles} onChange={e => setMaxVehicles(e.target.value)} placeholder="제한 없음" className="w-28 rounded-lg border bg-white p-2" />대
+        </label>
+        <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={includeUnknownSize} onChange={e => setIncludeUnknownSize(e.target.checked)} />규모 미제공 포함</label>
         <span className="text-sm text-slate-600">지도 내 {visible.length}곳 · 조건 일치 {filtered.length}곳 · 좌표 미제공 {missing.length}곳</span>
       </div>
+      {!validRange && <p role="alert" className="text-sm text-red-700">차량 대수는 0 이상의 정수이며, 최소값은 최대값 이하여야 합니다. 올바른 범위를 입력할 때까지 대수 범위 필터는 적용되지 않습니다.</p>}
       {loading && <p role="status">업체 정보를 불러오는 중입니다…</p>}
       {error && <p role="alert">{error} <button onClick={() => setRetry(v => v + 1)} className="underline">다시 시도</button></p>}
       <div className="flex min-h-[600px] flex-1 flex-col gap-4 xl:flex-row">
-        <ProspectMap items={filtered} selected={selected} onSelect={choose} onBounds={changeBounds} />
+        <ProspectMap items={filtered} maxVehicles={fleetScaleMaximum} selected={selected} onSelect={choose} onBounds={changeBounds} />
         <aside className="flex max-h-[850px] w-full flex-col gap-3 overflow-auto rounded-xl border bg-white p-4 xl:w-[380px] xl:shrink-0" aria-label="업체 목록 및 영업 메모">
           {office && <section className="rounded-lg border border-blue-200 bg-blue-50 p-3">
             <h2 className="font-semibold">{office.name}</h2><p className="text-sm">{office.officeType} · {office.address}</p>
@@ -170,7 +189,7 @@ function ProspectWorkspace() {
           {missing.length > 0 && <details><summary className="cursor-pointer text-sm">좌표 미제공 업체 {missing.length}곳 (지도 표시 불가)</summary>{missing.map(p => <button key={p.id} onClick={() => choose(p.id)} className="block w-full border-b py-2 text-left text-sm">{p.name} · {p.address}</button>)}</details>}
         </aside>
       </div>
-      <footer className="text-xs text-slate-500">원 크기: 총 보유 차량 수 (최소·최대 크기 제한, 미제공은 작은 점) · 파랑: 대상 / 회색: 제외 · 차종별 수치는 원천값이며 전기차를 총량에 중복 합산하지 않습니다.<br />
+      <footer className="text-xs text-slate-500">원 반지름: 총 보유 차량 수에 로그 비례 (4~14px, 미제공 4px) · 파랑: 대상 / 회색: 제외 · 크기 기준은 전체 원천자료의 최대 보유 대수로 고정됩니다. 차종별 수치는 원천값이며 전기차를 총량에 중복 합산하지 않습니다.<br />
         <a href={data?.sourceUrl || 'https://www.data.go.kr/data/15025689/standard.do'} target="_blank" rel="noreferrer" className="underline">출처: 공공데이터포털 전국렌터카업체정보표준데이터</a> · 수집일 {data?.fetchedAt?.slice(0, 10) || '—'} · 경기도 주소가 있는 공개 사업장 기준이며 전체 업체를 보장하지 않습니다.
       </footer>
     </div>
