@@ -14,6 +14,7 @@ import Login from './pages/Login';
 import Notifications from './pages/Notifications';
 import Reservations from './pages/Reservations';
 import Revenue from './pages/Revenue';
+import RentalProspects from './pages/RentalProspects';
 import Settings from './pages/Settings';
 import SignUp from './pages/SignUp';
 import SupportCenter from './pages/SupportCenter';
@@ -54,6 +55,7 @@ export const router = createBrowserRouter([
   {
     Component: RequireAuthenticatedRoute,
     children: [
+      { path: '/admin/rental-prospects', Component: RentalProspects },
       {
         Component: RequireRentalBusinessRoute,
         children: [
