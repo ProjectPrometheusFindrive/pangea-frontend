@@ -11,6 +11,7 @@ import GeotabAdmin from './pages/GeotabAdmin';
 import Forbidden from './pages/Forbidden';
 import Home from './pages/Home';
 import Login from './pages/Login';
+import AccountRecovery from './pages/AccountRecovery';
 import Notifications from './pages/Notifications';
 import Reservations from './pages/Reservations';
 import Revenue from './pages/Revenue';
@@ -36,6 +37,9 @@ function RequireDeviceInstallerRoute() {
 }
 
 export const router = createBrowserRouter([
+  { path: '/forgot-password', Component: AccountRecovery },
+  { path: '/reset-password', Component: AccountRecovery },
+  { path: '/forgot-id', Component: AccountRecovery },
   {
     path: '/login',
     Component: Login,
