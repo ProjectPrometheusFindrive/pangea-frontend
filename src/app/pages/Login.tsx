@@ -255,7 +255,7 @@ export default function Login() {
           <form className="mt-6 space-y-4 sm:mt-8" onSubmit={handleLogin}>
             <div>
               <label htmlFor="userId" className="mb-2 block text-sm font-semibold text-slate-700">
-                아이디
+                아이디(가입 이메일)
               </label>
               <input
                 id="userId"
@@ -264,7 +264,7 @@ export default function Login() {
                 value={userId}
                 onChange={(event) => setUserId(event.target.value)}
                 autoComplete="username"
-                placeholder="아이디"
+                placeholder="가입 이메일"
                 className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-base outline-none transition focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-100 sm:text-sm"
                 disabled={isBusy}
               />
@@ -303,6 +303,10 @@ export default function Login() {
               로그인
             </button>
           </form>
+          <div className="mt-4 flex flex-wrap justify-center gap-4 text-sm text-blue-700">
+            <Link to="/forgot-password">비밀번호 재설정</Link>
+            <Link to="/forgot-id">가입 이메일을 잊으셨나요?</Link>
+          </div>
 
           <div className="mt-6 flex items-center gap-4 text-xs text-slate-500 sm:text-slate-400">
             <div className="h-px flex-1 bg-slate-200" />

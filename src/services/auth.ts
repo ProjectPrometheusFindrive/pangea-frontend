@@ -157,3 +157,11 @@ export async function postRegister(payload: AuthRegisterPayload): Promise<AuthRe
     throw error;
   }
 }
+
+export function postForgotPassword(userId: string): Promise<{ message: string }> {
+  return apiClient.requestData({ path: '/api/v2/auth/forgot-password', method: 'POST', body: { userId }, skipAuth: true });
+}
+
+export function postResetPassword(token: string, password: string): Promise<{ message: string }> {
+  return apiClient.requestData({ path: '/api/v2/auth/reset-password', method: 'POST', body: { token, password }, skipAuth: true });
+}
