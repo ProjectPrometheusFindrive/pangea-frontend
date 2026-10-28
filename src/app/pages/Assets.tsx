@@ -757,7 +757,7 @@ function toAssetRecord(row: unknown, index: number): Asset | null {
     return null;
   }
 
-  const hasDevice = toBooleanValue(row.hasDevice) ?? toBooleanValue(row.hasPremiumDevice) ?? false;
+  const hasDevice = (toBooleanValue(row.hasDevice) === true || toBooleanValue(row.hasPremiumDevice) === true || Boolean(toStringValue(row.deviceSerialNumber) || toStringValue(row.deviceSerial)));
   const plateValue = toStringValue(row.plate) ?? toStringValue(row.vehicleNumber) ?? vehicleNumber;
   const statusValue = toStringValue(row.status)
     ?? toStringValue(row.assetStatus)
@@ -3504,6 +3504,8 @@ export default function Assets() {
         {/* 자산 상세 모달 - VehicleDetailModal 컴포넌트 사용 */}
         {selectedAsset && (
           <VehicleDetailModal
+            key={selectedAsset.id}
+            initialTab={searchParams.get('tab') === 'sensor' ? 'sensor' : 'info'}
             asset={selectedAsset}
             visibleInsuranceDocument={detailRemovedDocuments.insurance ? null : selectedAsset.insuranceDocument ?? null}
             visibleInspectionDocument={detailRemovedDocuments.inspection ? null : selectedAsset.inspectionDocument ?? null}

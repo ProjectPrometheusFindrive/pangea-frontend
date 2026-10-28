@@ -1,3 +1,4 @@
+import { VehicleIncidentHistory } from './VehicleIncidentHistory';
 import React, { useState } from 'react';
 import { X, Activity, History, Info, Zap, AlertTriangle, Loader2 } from 'lucide-react';
 import type { AssetStoredDocument, VehicleAsset } from '../types/assets';
@@ -55,6 +56,7 @@ interface VehicleDetailModalProps {
   activityError: string | null;
   onActivityRetry: () => void;
   onConflictRefresh: () => void;
+  initialTab?: 'info' | 'sensor';
   isOpen: boolean;
   onClose: () => boolean;
   editForm: AssetEditForm;
@@ -206,6 +208,7 @@ export function VehicleDetailModal({
   activityError,
   onActivityRetry,
   onConflictRefresh,
+  initialTab = 'info',
   isOpen,
   onClose,
   editForm,
@@ -228,7 +231,7 @@ export function VehicleDetailModal({
   onRemoveStoredInspectionDocument,
   onRemoveStoredLoanScheduleDocument,
 }: VehicleDetailModalProps) {
-  const [detailTab, setDetailTab] = useState<'info' | 'history' | 'sensor'>('info');
+  const [detailTab, setDetailTab] = useState<'info' | 'history' | 'sensor'>(initialTab);
   const [previewDocument, setPreviewDocument] = useState<AssetStoredDocument | null>(null);
   const navigate = useNavigate();
 
@@ -670,14 +673,15 @@ export function VehicleDetailModal({
 
           {detailTab === 'sensor' && (
             <div className="space-y-4">
+              <VehicleIncidentHistory key={asset.id || asset.vin} assetId={asset.id || asset.vin} />
               {asset.hasPremiumDevice ? (
                 <div className="space-y-4">
                   <div className="rounded-lg border border-green-200 bg-green-50 p-4">
                     <div className="mb-2 flex items-center gap-2">
                       <Zap className="h-5 w-5 text-green-600" />
-                      <span className="font-bold text-green-800">{'프리미엄 단말 연동'}</span>
+                      <span className="font-bold text-green-800">{'차량 단말 연동'}</span>
                     </div>
-                    <p className="text-sm text-green-700">{'실시간 차량 상태 모니터링 중입니다.'}</p>
+                    <p className="text-sm text-green-700">{'차량에 연결된 단말이 있습니다.'}</p>
                     <p className="mt-1 text-xs text-green-600">
                       {`마지막 업데이트: ${asset.deviceStatus ? formatDateTimeKst(asset.deviceStatus.lastUpdate, '-') : '-'}`}
                     </p>
