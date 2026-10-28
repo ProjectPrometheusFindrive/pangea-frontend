@@ -12,7 +12,8 @@ const fault = {
   subCategory: '차량 이상', issueCode: 'vehicle.malfunction', reasonType: 'vehicle_fault',
   title: '차량 이상', vehicleNumber: '282누7485', geotabVehicleId: 'VIN-POWER', customerName: '-',
   status: 'open', statusCode: 'open', severity: 'medium', createdAt: '2026-10-27T04:25:06Z',
-  notificationType: 'vehicle-anomaly', faultDetails,
+  faultDetails, // The production v2 action API omits notificationType.
+
 };
 const asset = { id: 'VIN-POWER', vin: 'VIN-POWER', vehicleNumber: '282누7485', plate: '282누7485', model: '아반떼', status: 'Available', hasDevice: true, version: 1 };
 
@@ -35,7 +36,10 @@ test('fault evidence, asset navigation, newest-first incident cards and return t
   } });
   await page.goto('/action-required?actionItemId=GEOTAB-ACTION%3Apower');
   const evidence = page.getByRole('region', { name: '차량 이상 진단 정보' });
+  await expect(evidence).toContainText('고장 코드');
   await expect(evidence).toContainText('290');
+  await expect(evidence).toContainText('고장 내용');
+  await expect(evidence).toContainText('점검 안내');
   await expect(evidence).toContainText('다음 정차 시 점검');
   await expect(evidence).toContainText('Check voltage data');
   await expect(evidence).toContainText('단말 공급 전압 저하');
@@ -43,7 +47,14 @@ test('fault evidence, asset navigation, newest-first incident cards and return t
   await expect(evidence).toBeVisible();
   expect(await evidence.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
   await page.setViewportSize({ width: 1280, height: 720 });
-  await page.screenshot({ path: 'docs/screenshots/vehicle-fault-evidence.png', fullPage: true });
+  const plateButton = page.getByRole('button', { name: '282누7485', exact: true });
+  await plateButton.scrollIntoViewIfNeeded();
+  const labelBounds = await page.getByText('차량번호', { exact: true }).last().boundingBox();
+  const plateBounds = await plateButton.boundingBox();
+  expect(labelBounds).not.toBeNull();
+  expect(plateBounds).not.toBeNull();
+  expect(plateBounds!.y).toBeGreaterThanOrEqual(labelBounds!.y + labelBounds!.height);
+  await evidence.screenshot({ path: 'docs/screenshots/vehicle-fault-evidence.png' });
   await page.getByRole('button', { name: '282누7485', exact: true }).click();
   const modal = page.getByTestId('asset-detail-modal');
   await expect(modal).toBeVisible();
@@ -79,4 +90,28 @@ test('vehicle without a device retains installation prompt and empty history', a
   await modal.getByRole('button', { name: '차량 이상 히스토리' }).click();
   await expect(modal.getByText('기록된 차량 이상 사건이 없습니다.')).toBeVisible();
   await expect(modal.getByRole('button', { name: '프리미엄으로 업그레이드' })).toBeVisible();
+});
+
+test('unfamiliar fault codes display provider text verbatim without alert-type metadata', async ({ page }) => {
+  const name = 'Unfamiliar component fault: Provider-defined condition';
+  const recommendation = 'Initial Checks: Inspect the connector.\nDiagnostic Procedures: Refer to the service manual.';
+  const unknown = {
+    ...fault, id: 'GEOTAB-ACTION:unknown', reasonType: 'provider_specific_fault', issueCode: 'provider.unclassified',
+    faultDetails: { ...faultDetails, code: '98765', name, recommendation, effectOnComponent: 'Provider-defined effect.' },
+  };
+  await seedAuthSession(page, 'admin');
+  await installApiMocks(page, { user: { role: 'admin' }, handlers: {
+    'GET /api/v2/action-items': async ({ route }) => fulfillSuccess(route, { items: [unknown], totalCount: 1 }),
+    'GET /api/v2/action-items/GEOTAB-ACTION%3Aunknown': async ({ route }) => fulfillSuccess(route, unknown),
+  } });
+  await page.goto('/action-required?actionItemId=GEOTAB-ACTION%3Aunknown');
+  const evidence = page.getByRole('region', { name: '차량 이상 진단 정보' });
+  await expect(evidence).toContainText('고장 코드');
+  await expect(evidence).toContainText('98765');
+  await expect(evidence.getByText(name, { exact: true })).toBeVisible();
+  expect(await evidence.locator('p').filter({ hasText: '고장 내용 (Geotab 원문)' }).textContent()).toBe(`고장 내용 (Geotab 원문)${name}`);
+  const providerRecommendation = evidence.locator('p').filter({ hasText: '점검 안내 (Geotab 원문)' });
+  expect(await providerRecommendation.textContent()).toBe(`점검 안내 (Geotab 원문)${recommendation}`);
+  await expect(evidence).not.toContainText('MyGeotab Measurements에서 발생 시점의 전압 기록 확인');
+  await expect(page.getByText('차량 이상 알림', { exact: true })).toHaveCount(0);
 });
