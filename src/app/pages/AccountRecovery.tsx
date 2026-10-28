@@ -53,7 +53,7 @@ export default function AccountRecovery() {
   return (
     <main className="flex min-h-screen items-center justify-center bg-slate-50 px-4 py-10">
       <section className="w-full max-w-md rounded-3xl bg-white p-8 shadow-lg">
-        <h1 className="text-2xl font-bold text-slate-900">{isHelp ? '가입 이메일을 잊으셨나요?' : isReset ? '새 비밀번호 설정' : '비밀번호 재설정'}</h1>
+        <h1 className="text-2xl font-bold text-slate-900">{isHelp ? '가입 이메일을 잊으셨나요?' : isReset ? (done ? '비밀번호 변경 완료' : '새 비밀번호 설정') : '비밀번호 재설정'}</h1>
         {isHelp ? <div className="mt-5 space-y-4 text-sm leading-6 text-slate-600">
           <p>Pangea 아이디는 가입할 때 사용한 이메일입니다.</p>
           <p>사용 중인 메일함에서 Pangea 또는 Prometheus 가입·초대 메일을 찾아보세요.</p>
@@ -61,7 +61,7 @@ export default function AccountRecovery() {
           <p>관리자는 기존에 등록된 연락 수단 등으로 본인을 확인한 후 계정을 안내합니다.</p>
           <Link className="block text-blue-700 underline" to="/forgot-password">가입 이메일을 알고 있어요</Link>
         </div> : <>
-          <p className="mt-4 text-sm leading-6 text-slate-600">{isReset ? '영문과 숫자를 포함해 8~128자로 설정해주세요. 변경 후 모든 기기에서 다시 로그인해야 합니다.' : '가입 이메일로 15분 동안 사용할 수 있는 재설정 링크를 보내드립니다. 새 비밀번호를 설정하기 전까지 기존 비밀번호는 유지됩니다.'}</p>
+          {!done && <p className="mt-4 text-sm leading-6 text-slate-600">{isReset ? '영문과 숫자를 포함해 8~128자로 설정해주세요. 변경 후 모든 기기에서 다시 로그인해야 합니다.' : '가입 이메일로 15분 동안 사용할 수 있는 재설정 링크를 보내드립니다. 새 비밀번호를 설정하기 전까지 기존 비밀번호는 유지됩니다.'}</p>}
           {isReset && !token && <p role="alert" className="mt-4 text-red-700">재설정 링크가 없습니다. 메일의 링크를 다시 열거나 새 링크를 요청해주세요.</p>}
           {!done && (!isReset || token) && <form onSubmit={submit} className="mt-6 space-y-4">
             {isReset ? <>

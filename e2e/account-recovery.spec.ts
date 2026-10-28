@@ -35,3 +35,20 @@ test('missing link can request another one', async ({ page }) => {
   await page.getByRole('link', { name: '새 링크 요청' }).click();
   await expect(page.getByRole('heading', { name: '비밀번호 재설정' })).toBeVisible();
 });
+
+
+test('completed reset replaces setup instructions with login guidance', async ({ page }) => {
+  await page.route('**/api/v2/auth/reset-password', route => route.fulfill({ json: { status: 'success', data: { message: '비밀번호가 변경되었습니다. 새 비밀번호로 로그인해주세요.' } } }));
+  await page.goto('/reset-password#token=test-token');
+  await expect(page.getByText('영문과 숫자를 포함해 8~128자로 설정해주세요.', { exact: false })).toBeVisible();
+  await page.getByLabel('새 비밀번호', { exact: true }).fill('Password123');
+  await page.getByLabel('새 비밀번호 확인').fill('Password123');
+  await page.getByRole('button', { name: '비밀번호 변경' }).click();
+  await expect(page.getByRole('heading', { name: '비밀번호 변경 완료' })).toBeVisible();
+  await expect(page.getByRole('status')).toHaveText('비밀번호가 변경되었습니다. 새 비밀번호로 로그인해주세요.');
+  await expect(page.getByText('영문과 숫자를 포함해 8~128자로 설정해주세요.', { exact: false })).toHaveCount(0);
+  await expect(page.getByLabel('새 비밀번호', { exact: true })).toHaveCount(0);
+  await expect(page.getByRole('link', { name: '새 링크 요청' })).toHaveCount(0);
+  await page.getByRole('link', { name: '로그인으로 돌아가기' }).click();
+  await expect(page).toHaveURL(/\/login$/);
+});
