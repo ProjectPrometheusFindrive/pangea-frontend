@@ -1,3 +1,5 @@
+import { VehicleIncidentHistory } from '../components/VehicleIncidentHistory';
+import { VehicleFaultEvidence, type FaultDetails } from '../components/VehicleFaultEvidence';
 import { Layout } from '../components/Layout';
 import { useSearchParams, useNavigate, useLocation } from 'react-router';
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
@@ -121,6 +123,7 @@ interface ActionItem {
   notificationType?: 'theft-suspicion' | 'accident-confirmation' | 'vehicle-anomaly';
   customerConfirmationStatus?: 'pending' | 'confirmed' | 'rejected' | 'not_required';
   telemetryCardStatus?: string;
+  faultDetails?: FaultDetails;
   evidenceSummary?: {
     geofenceName?: string;
     thresholdMinutes?: number;
@@ -1724,10 +1727,7 @@ function RelatedContextDrawer({
             )}
 
             {!isLoading && !error && kind === 'asset' && detailTab === 'sensor' && (
-              <div className="rounded-lg border border-purple-200 bg-purple-50 p-6">
-                <p className="font-bold text-purple-800">차량 이상 히스토리</p>
-                <p className="mt-2 text-sm text-purple-700">단말/센서 상세 이력은 차량 자산 상세 controller 공통화 후 표시됩니다.</p>
-              </div>
+              <VehicleIncidentHistory key={pickString(row, ['id', 'vin'])} assetId={pickString(row, ['id', 'vin']) || ''} />
             )}
           </div>
 
@@ -2465,6 +2465,11 @@ function toActionItem(row: unknown, index: number, fallbackId?: string): ActionI
     })(),
     customerConfirmationStatus: pickString(row, ['customerConfirmationStatus', 'customerConfirmation', 'confirmationStatus']) as ActionItem['customerConfirmationStatus'] | undefined,
     telemetryCardStatus: pickString(row, ['telemetryCardStatus']) ?? undefined,
+    faultDetails: isRecord(row.faultDetails) ? Object.fromEntries(
+      ['code', 'name', 'diagnosticType', 'state', 'severity', 'occurredAt', 'effectOnComponent', 'recommendation']
+        .filter((key) => typeof row.faultDetails[key] === 'string')
+        .map((key) => [key, row.faultDetails[key]]),
+    ) as FaultDetails : undefined,
     evidenceSummary: isRecord(row.evidenceSummary) ? {
       geofenceName: pickString(row.evidenceSummary, ['geofenceName']) ?? undefined,
       thresholdMinutes: toNumberValue(row.evidenceSummary.thresholdMinutes) ?? undefined,
@@ -5141,7 +5146,7 @@ export default function ActionRequired() {
                         className="px-6 py-4 whitespace-nowrap text-sm font-medium text-blue-600 hover:text-blue-800 cursor-pointer hover:underline"
                         onClick={(e) => {
                           e.stopPropagation();
-                          navigate(`/assets?vehicle=${encodeURIComponent(item.vehicleNumber)}`);
+                          navigate(`/assets?vehicle=${encodeURIComponent(item.vehicleNumber)}&tab=sensor${item.geotabVehicleId ? `&assetId=${encodeURIComponent(item.geotabVehicleId)}` : ""}`);
                         }}
                       >
                         {item.vehicleNumber}
@@ -5300,6 +5305,7 @@ export default function ActionRequired() {
                         {!selectedItem.evidenceSummary?.firstObservedAt && <p>이전 기록에 저장되지 않은 관측 시각은 추정하지 않습니다.</p>}
                       </section>
                     )}
+                    {selectedItem.faultDetails && Object.keys(selectedItem.faultDetails).length > 0 && <VehicleFaultEvidence details={selectedItem.faultDetails} />}
                     {selectedItem.customerConfirmationStatus && selectedItem.customerConfirmationStatus !== 'not_required' && <p className="mt-1 text-xs">고객 확인 상태: {selectedItem.customerConfirmationStatus === 'confirmed' ? '사고 확인됨' : selectedItem.customerConfirmationStatus === 'rejected' ? '사고 아님 확인됨' : '확인 대기'}</p>}
                     {selectedItem.telemetryCardStatus === 'accident_intake' && <p className="mt-1 text-xs font-semibold">사고접수 단계로 전환되었습니다.</p>}
                     {(selectedItem.notificationType === 'theft-suspicion' || selectedItem.notificationType === 'accident-confirmation') && (selectedItem.geotabVehicleId || selectedItem.vehicleNumber) && <button type="button" className="mt-2 rounded-md bg-white px-3 py-1.5 text-xs font-semibold text-indigo-700 shadow-sm ring-1 ring-indigo-200 hover:bg-indigo-50" onClick={() => setRecentPositionItem(selectedItem)}>최근 위치 조회</button>}
@@ -5318,7 +5324,7 @@ export default function ActionRequired() {
                 <div className="grid grid-cols-1 gap-3 rounded-lg border border-gray-200 bg-gray-50 p-3 sm:grid-cols-2">
                   <div>
                     <label className="text-xs font-semibold text-gray-500">차량번호</label>
-                    <p className="mt-1 text-sm font-bold text-gray-900">{selectedItem.vehicleNumber}</p>
+                    <button type="button" className="mt-1 text-sm font-bold text-blue-700 hover:underline" onClick={() => navigate(`/assets?vehicle=${encodeURIComponent(selectedItem.vehicleNumber)}&tab=sensor${selectedItem.geotabVehicleId ? `&assetId=${encodeURIComponent(selectedItem.geotabVehicleId)}` : ""}`)}>{selectedItem.vehicleNumber}</button>
                   </div>
                   <div>
                     <label className="text-xs font-semibold text-gray-500">고객명</label>

@@ -1,3 +1,4 @@
+import type { FaultDetails } from '../app/components/VehicleFaultEvidence';
 import { apiClient } from './api';
 
 export interface AssetsRequestOptions {
@@ -194,5 +195,26 @@ export function getAssetActivities(
     method: 'GET',
     query: { page, size },
     signal,
+  });
+}
+
+
+export interface VehicleIncident {
+  id: string;
+  actionItemId?: string;
+  type: string;
+  title: string;
+  status: string;
+  severity?: string;
+  occurredAt?: string;
+  createdAt?: string;
+  faultDetails?: FaultDetails;
+  evidenceSummary?: { geofenceName?: string; thresholdMinutes?: number };
+}
+
+export function getAssetIncidents(assetId: string, { page = 1, signal }: { page?: number; signal?: AbortSignal } = {}) {
+  return apiClient.requestData<{ items: VehicleIncident[]; total: number }>({
+    path: `/api/v2/assets/${encodeURIComponent(assetId)}/incidents`,
+    method: 'GET', query: { page, pageSize: 50 }, signal,
   });
 }
