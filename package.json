@@ -12,7 +12,17 @@
     "test:e2e:mobile:webkit": "E2E_ENABLE_WEBKIT=1 playwright test e2e/mobile-responsive.spec.ts --project=mobile-webkit",
     "test:e2e:headed": "playwright test --headed",
     "test:e2e:ui": "playwright test --ui",
-    "test:e2e:install": "playwright install chromium webkit"
+    "test:e2e:install": "playwright install chromium webkit",
+    "check:runtime": "node scripts/check-node-runtime.mjs",
+    "prebuild": "npm run check:runtime",
+    "predev": "npm run check:runtime",
+    "prepreview": "npm run check:runtime",
+    "pretest:e2e": "npm run check:runtime",
+    "pretest:e2e:mobile": "npm run check:runtime",
+    "pretest:e2e:mobile:webkit": "npm run check:runtime",
+    "pretest:e2e:headed": "npm run check:runtime",
+    "pretest:e2e:ui": "npm run check:runtime",
+    "pretest:e2e:install": "npm run check:runtime"
   },
   "dependencies": {
     "@emotion/react": "11.14.0",
@@ -97,5 +107,8 @@
     "overrides": {
       "vite": "6.3.5"
     }
+  },
+  "engines": {
+    "node": ">=22.23.4 <23"
   }
 }
