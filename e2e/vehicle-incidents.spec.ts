@@ -41,7 +41,10 @@ test('fault evidence, asset navigation, newest-first incident cards and return t
   await expect(evidence).toContainText('고장 내용');
   await expect(evidence).toContainText('점검 안내');
   await expect(evidence).toContainText('다음 정차 시 점검');
-  await expect(evidence).toContainText('Check voltage data');
+  await expect(evidence).toContainText('Check voltage data in device management system Measurements. Check the installation.');
+  await expect(evidence).toContainText('단말기 진단');
+  await expect(evidence).toContainText('단말기 원문');
+  await expect(evidence).not.toContainText(/mygeotab|geotab|GoFault/i);
   await expect(evidence).toContainText('단말 공급 전압 저하');
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(evidence).toBeVisible();
@@ -109,9 +112,9 @@ test('unfamiliar fault codes display provider text verbatim without alert-type m
   await expect(evidence).toContainText('고장 코드');
   await expect(evidence).toContainText('98765');
   await expect(evidence.getByText(name, { exact: true })).toBeVisible();
-  expect(await evidence.locator('p').filter({ hasText: '고장 내용 (Geotab 원문)' }).textContent()).toBe(`고장 내용 (Geotab 원문)${name}`);
-  const providerRecommendation = evidence.locator('p').filter({ hasText: '점검 안내 (Geotab 원문)' });
-  expect(await providerRecommendation.textContent()).toBe(`점검 안내 (Geotab 원문)${recommendation}`);
-  await expect(evidence).not.toContainText('MyGeotab Measurements에서 발생 시점의 전압 기록 확인');
+  expect(await evidence.locator('p').filter({ hasText: '고장 내용 (단말기 원문)' }).textContent()).toBe(`고장 내용 (단말기 원문)${name}`);
+  const providerRecommendation = evidence.locator('p').filter({ hasText: '점검 안내 (단말기 원문)' });
+  expect(await providerRecommendation.textContent()).toBe(`점검 안내 (단말기 원문)${recommendation}`);
+  await expect(evidence).not.toContainText('단말기 관리 시스템에서 발생 시점의 전압 기록 확인');
   await expect(page.getByText('차량 이상 알림', { exact: true })).toHaveCount(0);
 });
