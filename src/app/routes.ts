@@ -8,6 +8,7 @@ import Assets from './pages/Assets';
 import DeviceInstallation from './pages/DeviceInstallation';
 import DemoSimulationAdmin from './pages/DemoSimulationAdmin';
 import GeotabAdmin from './pages/GeotabAdmin';
+import ContractSafety from './pages/ContractSafety';
 import Forbidden from './pages/Forbidden';
 import Home from './pages/Home';
 import Login from './pages/Login';
@@ -100,6 +101,7 @@ export const router = createBrowserRouter([
             Component: DemoSimulationAdmin,
           },
           { path: '/admin/geotab', Component: GeotabAdmin },
+          { path: '/contract-safety', Component: ContractSafety },
         ],
       },
       {
