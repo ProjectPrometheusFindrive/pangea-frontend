@@ -210,7 +210,7 @@ export function resolveRoutePermissionForPath(pathname: string): AppRoutePermiss
   if (pathname.startsWith('/assets')) {
     return ROUTE_PERMISSIONS.assets;
   }
-  if (pathname.startsWith('/reservations')) {
+  if (pathname.startsWith('/reservations') || pathname.startsWith('/contract-safety')) {
     return ROUTE_PERMISSIONS.reservations;
   }
   if (pathname.startsWith('/revenue')) {
