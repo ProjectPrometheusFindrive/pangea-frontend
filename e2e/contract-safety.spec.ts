@@ -91,3 +91,89 @@ test('generated demo aggregates show real formula scores and explicit demo detai
   await expect(region).toContainText('3회');
   await expect(region.getByRole('button', { name: '평가 제외', exact: true })).toHaveCount(0);
 });
+
+test('right-side detail preserves global filters, pagination, scroll and trigger focus', async ({ page }) => {
+  const calls: URL[] = [];
+  await seedAuthSession(page, 'admin');
+  await installApiMocks(page, { user: { role: 'admin' }, handlers: { ...base,
+    'GET /api/v2/safety/contracts': async ({ route, request }) => {
+      const url = new URL(request.url()); calls.push(url);
+      const second = url.searchParams.get('offset') === '20';
+      await fulfillSuccess(route, { items: [{ ...item, contractId: second ? 'R21' : 'R1' }], hasMore: !second, totalCount: 21, unfilteredCount: 45 });
+    },
+    'GET /api/v2/safety/contracts/R21': async ({ route }) => fulfillSuccess(route, { ...detail, contractId: 'R21' }),
+  } });
+  await page.goto('/contract-safety?minDistanceKm=300&sort=score_desc');
+  await page.getByRole('button', { name: '다음', exact: true }).click();
+  const row = page.getByRole('row').filter({ hasText: 'R21' });
+  await expect(row).toBeVisible();
+  const count = calls.length;
+  const scroll = await page.getByRole('main').evaluate(e => e.scrollTop);
+  const trigger = row.getByRole('button', { name: '상세 보기' });
+  await trigger.click();
+  const panel = page.getByRole('dialog', { name: '계약 안전운전 상세' });
+  await expect(panel.getByRole('region', { name: '계약 평가 상세' })).toContainText('85.6점');
+  await expect(panel).toHaveCSS('right', '0px');
+  await expect.poll(async () => (await panel.boundingBox())?.x).toBe(page.viewportSize()!.width - (await panel.boundingBox())!.width);
+  await page.screenshot({ path: '/tmp/pangea-safety-drawer-local.png', fullPage: true });
+  const box = await panel.boundingBox();
+  expect(box?.y).toBe(0); expect(box!.width).toBeLessThan(page.viewportSize()!.width);
+  await page.keyboard.press('Escape');
+  await expect(panel).toBeHidden();
+  await expect(trigger).toBeFocused();
+  expect(await page.getByRole('main').evaluate(e => e.scrollTop)).toBe(scroll);
+  expect(calls.length).toBe(count);
+  expect(new URL(page.url()).searchParams.get('sort')).toBe('score_desc');
+  expect(new URL(page.url()).searchParams.get('minDistanceKm')).toBe('300');
+  expect(calls.at(-1)?.searchParams.get('offset')).toBe('20');
+});
+
+test('time/distance filters validate ranges, send global query and reset', async ({ page }) => {
+  const calls: URL[] = [];
+  await seedAuthSession(page, 'admin');
+  await installApiMocks(page, { user: { role: 'admin' }, handlers: { ...base,
+    'GET /api/v2/safety/contracts': async ({ route, request }) => {
+      const url = new URL(request.url()); calls.push(url);
+      await fulfillSuccess(route, { items: [item], totalCount: 1, unfilteredCount: 45, hasMore: false });
+    },
+  } });
+  await page.goto('/contract-safety');
+  await expect(page.getByRole('row').filter({ hasText: 'R1' })).toBeVisible();
+  await page.getByLabel('최소 주행거리 필터 (km)', { exact: true }).fill('900');
+  await page.getByLabel('최대 주행거리 필터 (km)', { exact: true }).fill('300');
+  const before = calls.length;
+  await page.getByRole('button', { name: '필터 적용', exact: true }).click();
+  await expect(page.getByRole('alert')).toContainText('최대값');
+  expect(calls.length).toBe(before);
+  await page.getByLabel('최소 주행거리 필터 (km)', { exact: true }).fill('300');
+  await page.getByLabel('최대 주행거리 필터 (km)', { exact: true }).fill('900');
+  await page.getByLabel('최소 주행시간 (시간)', { exact: true }).fill('2.5');
+  await page.getByLabel('최대 주행시간 (시간)', { exact: true }).fill('12');
+  await page.getByLabel('평가 기간 시작일', { exact: true }).fill('2026-10-01');
+  await page.getByLabel('평가 기간 종료일', { exact: true }).fill('2026-11-02');
+  await page.getByLabel('평가 상태', { exact: true }).selectOption('final');
+  await page.getByRole('button', { name: '필터 적용', exact: true }).click();
+  await expect(page.getByText('조회 1건 / 전체 45건', { exact: true })).toBeVisible();
+  await page.getByLabel('점수 정렬', { exact: true }).selectOption('score_asc');
+  await expect.poll(() => calls.at(-1)?.searchParams.get('sort')).toBe('score_asc');
+  for (const [key, value] of Object.entries({ minDistanceKm: '300', maxDistanceKm: '900', minDrivingHours: '2.5', maxDrivingHours: '12', fromDate: '2026-10-01', toDate: '2026-11-02', status: 'final', offset: '0' })) expect(calls.at(-1)?.searchParams.get(key)).toBe(value);
+  await page.getByRole('button', { name: '필터 초기화', exact: true }).click();
+  await expect(page.getByLabel('최소 주행거리 필터 (km)', { exact: true })).toHaveValue('');
+  await expect(page.getByLabel('점수 정렬', { exact: true })).toHaveValue('newest');
+});
+
+test('mobile drawer uses full width and reports inaccessible deep-link target inside the panel', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await seedAuthSession(page, 'admin');
+  await installApiMocks(page, { user: { role: 'admin' }, handlers: { ...base,
+    'GET /api/v2/safety/contracts/missing': async ({ route }) => route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ status: 'error', error: { code: 'NOT_FOUND', message: '계약을 찾을 수 없습니다.' } }) }),
+  } });
+  await page.goto('/contract-safety?contractId=missing');
+  const panel = page.getByRole('dialog', { name: '계약 안전운전 상세' });
+  await expect(panel.getByRole('alert')).toContainText('계약을 찾을 수 없습니다.');
+  await expect.poll(async () => (await panel.boundingBox())?.x).toBe(0);
+  const box = await panel.boundingBox();
+  expect(box?.width).toBe(390);
+  await panel.getByRole('button', { name: '상세 닫기', exact: true }).click();
+  await expect(panel).toBeHidden();
+});
