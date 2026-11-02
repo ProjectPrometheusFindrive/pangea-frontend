@@ -9,3 +9,5 @@ The approved formula weights harsh acceleration/braking/cornering 20% each, spee
 No discount, refund, billing or eligibility logic is included. See the BE `docs/features/contract-safety.md` for source qualifications, exact formulas, endpoint contracts and return watermark semantics.
 
 Validation: `npm run build`; three interaction E2E tests in `e2e/contract-safety.spec.ts`. `e2e/contract-safety-live.spec.ts` is opt-in with `E2E_SAFETY_LIVE=1` and the BE disposable localhost fixture; it must never target production.
+
+Demo simulation uses final aggregate examples and the same approved formula. Score rows show a demo/scenario label, a notice identifies fictional input, and detail shows aggregate counts/components/monthly references rather than nonexistent individual raw records. The super-admin simulation page reports the number of generated safety assessments. Reset/regeneration automatically replaces the demo scores/history/exclusions; real tenant scoring is unchanged.
