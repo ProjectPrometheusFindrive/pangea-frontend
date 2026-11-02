@@ -35,6 +35,38 @@ const settingsMocks: Record<string, ApiMockHandler> = Object.fromEntries([
   '/api/v2/assets', '/api/v2/reservations', '/api/v2/settings/geotab-thresholds',
 ].map((path) => [`GET ${path}`, async ({ route }: Parameters<ApiMockHandler>[0]) => fulfillSuccess(route, { items: [], totalCount: 0, unreadCount: 0 })]));
 
+test('device off shows observed interruption and recovery history and tenant-scoped recent location', async ({ page }) => {
+  const item = { id: 'off-1', companyId: 'tenant-a', category: '단말 OFF', type: '단말 OFF',
+    reasonType: 'terminal_off', issueCode: 'vehicle.terminal_off', vehicleNumber: '282누7485',
+    geotabVehicleId: 'VIN-OFF', status: 'open', severity: 'medium',
+    connectionEpisodes: [{ firstOfflineAt: '2026-10-30T05:50:04Z', recoveredAt: '2026-10-30T10:35:04Z', recoverySource: 'ingest_received_at' },
+      { firstOfflineAt: '2026-11-01T01:00:00Z' }] };
+  const scopes: (string | null)[] = [];
+  await seedAuthSession(page, 'super_admin', { companyId: '' });
+  await installApiMocks(page, { user: { role: 'super_admin', companyId: '' }, handlers: {
+    ...settingsMocks,
+    'GET /api/v2/action-items': async ({ route }) => fulfillSuccess(route, { items: [item], totalCount: 1 }),
+    'GET /api/v2/action-items/off-1': async ({ route }) => fulfillSuccess(route, item),
+    'GET /api/v2/geotab/vehicles/VIN-OFF/positions': async ({ route, request }) => {
+      scopes.push(new URL(request.url()).searchParams.get('companyId'));
+      await fulfillSuccess(route, { positions: [{ latitude: 37.4, longitude: 127.1, recordedAt: '2026-11-02T01:00:00Z' }] });
+    },
+  } });
+  await page.goto('/action-required');
+  const row = page.getByRole('row').filter({ hasText: '282누7485' });
+  await row.getByRole('button', { name: '보기', exact: true }).click();
+  const history = page.getByRole('region', { name: '단말 통신 이력' });
+  await expect(history).toContainText('2026-10-30 14:50');
+  await expect(history).toContainText('2026-10-30 19:35');
+  await expect(history).toContainText('2026-11-01 10:00');
+  await expect(history).toContainText('확인 시각 미기록');
+  await expect(history).toContainText('실제 탈거·재장착 시각과 다를 수 있습니다');
+  await expect(history).toContainText('저장된 수집 시각');
+  await history.getByRole('button', { name: '최근 위치 조회' }).click();
+  await expect(page.getByRole('dialog', { name: '최근 위치 조회' })).toContainText('37.40000, 127.10000');
+  expect(scopes).toEqual(['tenant-a']);
+});
+
 test('Geotab accident card shows recent path and moves to accident intake after confirmation', async ({ page }) => {
   let currentItem = { ...pendingAccidentItem };
   let domainActionBody: Record<string, unknown> | null = null;

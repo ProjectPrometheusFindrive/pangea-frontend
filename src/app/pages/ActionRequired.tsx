@@ -124,6 +124,7 @@ interface ActionItem {
   customerConfirmationStatus?: 'pending' | 'confirmed' | 'rejected' | 'not_required';
   telemetryCardStatus?: string;
   faultDetails?: FaultDetails;
+  connectionEpisodes?: { firstOfflineAt: string; detectedAt?: string; recoveredAt?: string; recoverySource?: string }[];
   evidenceSummary?: {
     geofenceName?: string;
     thresholdMinutes?: number;
@@ -2470,6 +2471,12 @@ function toActionItem(row: unknown, index: number, fallbackId?: string): ActionI
         .filter((key) => typeof row.faultDetails[key] === 'string')
         .map((key) => [key, row.faultDetails[key]]),
     ) as FaultDetails : undefined,
+    connectionEpisodes: Array.isArray(row.connectionEpisodes) ? row.connectionEpisodes.filter(isRecord).map((episode) => ({
+      firstOfflineAt: pickString(episode, ['firstOfflineAt']) || '',
+      detectedAt: pickString(episode, ['detectedAt']) ?? undefined,
+      recoveredAt: pickString(episode, ['recoveredAt']) ?? undefined,
+      recoverySource: pickString(episode, ['recoverySource']) ?? undefined,
+    })).filter((episode) => episode.firstOfflineAt) : undefined,
     evidenceSummary: isRecord(row.evidenceSummary) ? {
       geofenceName: pickString(row.evidenceSummary, ['geofenceName']) ?? undefined,
       thresholdMinutes: toNumberValue(row.evidenceSummary.thresholdMinutes) ?? undefined,
@@ -5178,7 +5185,7 @@ export default function ActionRequired() {
                       <td className="px-6 py-4 whitespace-nowrap text-sm">
                         <div className="flex items-center gap-3">
                           <button className="text-blue-600 hover:text-blue-800 font-medium" onClick={() => handleOpenDetail(item)}>보기</button>
-                          {(item.notificationType === 'theft-suspicion' || item.notificationType === 'accident-confirmation') && (item.geotabVehicleId || item.vehicleNumber) && (
+                          {(item.notificationType === 'theft-suspicion' || item.notificationType === 'accident-confirmation' || item.reasonType === 'terminal_off' || item.issueCode === 'vehicle.terminal_off') && (item.geotabVehicleId || item.vehicleNumber) && (
                             <button type="button" className="font-medium text-indigo-600 hover:text-indigo-800" onClick={() => setRecentPositionItem(item)}>최근 위치 조회</button>
                           )}
                         </div>
@@ -5312,6 +5319,19 @@ export default function ActionRequired() {
                 )}
                 {selectedItem.faultDetails && Object.keys(selectedItem.faultDetails).length > 0 && (
                   <VehicleFaultEvidence details={selectedItem.faultDetails} />
+                )}
+                {(selectedItem.reasonType === 'terminal_off' || selectedItem.issueCode === 'vehicle.terminal_off') && (
+                  <section aria-label="단말 통신 이력" className="space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
+                    <h3 className="font-semibold">단말 통신 이력</h3>
+                    {(selectedItem.connectionEpisodes || []).length === 0 ? <p>기록된 통신 중단 시각이 없습니다.</p> :
+                      [...(selectedItem.connectionEpisodes || [])].reverse().map((episode, index) => <div key={`${episode.firstOfflineAt}-${index}`} className="rounded border border-amber-100 bg-white p-3">
+                        <p>통신 중단 최초 확인: {formatDateTimeKst(episode.firstOfflineAt, '미기록')}</p>
+                        <p>통신 복구 확인: {episode.recoveredAt ? formatDateTimeKst(episode.recoveredAt, '미기록') : '확인 시각 미기록'}</p>
+                        {episode.recoverySource === 'ingest_received_at' && <p className="mt-1 text-xs">복구 시각은 저장된 수집 시각을 기준으로 확인했습니다.</p>}
+                      </div>)}
+                    <p className="text-xs">표시된 시각은 통신 상태를 확인한 시각이며 실제 탈거·재장착 시각과 다를 수 있습니다.</p>
+                    {(selectedItem.geotabVehicleId || selectedItem.vehicleNumber) && <button type="button" className="rounded-md bg-white px-3 py-1.5 text-xs font-semibold text-indigo-700 shadow-sm ring-1 ring-indigo-200 hover:bg-indigo-50" onClick={() => setRecentPositionItem(selectedItem)}>최근 위치 조회</button>}
+                  </section>
                 )}
                 <div>
                   <label className="text-sm font-semibold text-gray-600">유형</label>
