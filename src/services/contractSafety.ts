@@ -13,9 +13,13 @@ export interface SafetyDetail extends SafetyContract {
   monthly: (SafetyMetrics & { month: string })[];
   history?: { type: string; at: string; actor: string; score?: number | null; beforeScore?: number | null; reason?: string; excluded?: boolean; revision?: number; }[];
 }
+export interface SafetyListFilters {
+  fromDate?: string; toDate?: string; minDistanceKm?: string; maxDistanceKm?: string;
+  minDrivingHours?: string; maxDrivingHours?: string; status?: string; sort?: string;
+}
 const path = '/api/v2/safety';
 export const getSafetySettings = (companyId: string, signal?: AbortSignal) => apiClient.requestData<SafetyPolicy>({ path: `${path}/settings`, query: { companyId }, signal });
 export const saveSafetySettings = (companyId: string, minimumDistanceKm: number, revision: number) => apiClient.requestData<SafetyPolicy>({ path: `${path}/settings`, method: 'PATCH', query: { companyId }, body: { minimumDistanceKm, revision } });
-export const listSafetyContracts = (companyId: string, offset: number, signal?: AbortSignal) => apiClient.requestData<{ items: SafetyContract[]; hasMore: boolean; totalCount: number }>({ path: `${path}/contracts`, query: { companyId, offset }, signal });
+export const listSafetyContracts = (companyId: string, offset: number, signal?: AbortSignal, filters: SafetyListFilters = {}) => apiClient.requestData<{ items: SafetyContract[]; hasMore: boolean; totalCount: number; unfilteredCount?: number }>({ path: `${path}/contracts`, query: { companyId, offset, ...filters }, signal });
 export const getSafetyContract = (companyId: string, id: string, signal?: AbortSignal) => apiClient.requestData<SafetyDetail>({ path: `${path}/contracts/${encodeURIComponent(id)}`, query: { companyId }, signal });
 export const excludeSafetyRecord = (companyId: string, id: string, recordKey: string, excluded: boolean, reason: string) => apiClient.requestData<SafetyDetail>({ path: `${path}/contracts/${encodeURIComponent(id)}/exclusions`, method: 'PATCH', query: { companyId }, body: { recordKey, excluded, reason } });
