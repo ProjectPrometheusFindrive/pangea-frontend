@@ -38,7 +38,7 @@ const settingsMocks: Record<string, ApiMockHandler> = Object.fromEntries([
 test('device off shows observed interruption and recovery history and tenant-scoped recent location', async ({ page }) => {
   const item = { id: 'off-1', companyId: 'tenant-a', category: '단말 OFF', type: '단말 OFF',
     reasonType: 'terminal_off', issueCode: 'vehicle.terminal_off', vehicleNumber: '282누7485',
-    geotabVehicleId: 'VIN-OFF', status: 'open', severity: 'medium',
+    geotabVehicleId: 'VIN-OFF', status: 'open', severity: 'medium', description: 'Geotab에서 통신 복구가 확인되었습니다.',
     connectionEpisodes: [{ firstOfflineAt: '2026-10-30T05:50:04Z', recoveredAt: '2026-10-30T10:35:04Z', recoverySource: 'ingest_received_at' },
       { firstOfflineAt: '2026-11-01T01:00:00Z' }] };
   const scopes: (string | null)[] = [];
@@ -62,6 +62,8 @@ test('device off shows observed interruption and recovery history and tenant-sco
   await expect(history).toContainText('확인 시각 미기록');
   await expect(history).toContainText('실제 탈거·재장착 시각과 다를 수 있습니다');
   await expect(history).toContainText('저장된 수집 시각');
+  await expect(page.getByText('단말에서 통신 복구가 확인되었습니다.')).toBeVisible();
+  await expect(page.getByText('Geotab에서 통신 복구가 확인되었습니다.')).toHaveCount(0);
   await history.getByRole('button', { name: '최근 위치 조회' }).click();
   await expect(page.getByRole('dialog', { name: '최근 위치 조회' })).toContainText('37.40000, 127.10000');
   expect(scopes).toEqual(['tenant-a']);

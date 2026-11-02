@@ -691,6 +691,9 @@ function buildInspectionWindowExpiryDescription(daysLeft: number): string {
 function getIssueAssetDescription(item: ActionItem, issueAsset: IssueAssetRecord | null): string | null {
   const assetKind = getIssueAssetKind(item);
   if (!assetKind || !issueAsset) {
+    if (item.reasonType === 'terminal_off' || item.issueCode === 'vehicle.terminal_off') {
+      return item.description?.replace(/geotab에서/gi, '단말에서').replace(/geotab이/gi, '단말이') ?? null;
+    }
     return item.description ?? null;
   }
   if (item.statusCode === 'resolved' || item.status === '완료') {
