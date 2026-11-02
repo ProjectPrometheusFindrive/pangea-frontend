@@ -71,3 +71,23 @@ test('super admin selects company by name and sends the company scope', async ({
   await expect(page.getByRole('row').filter({ hasText: 'R1' })).toContainText('85.6점');
   expect(scopes).toEqual(['A']);
 });
+
+test('generated demo aggregates show real formula scores and explicit demo detail', async ({ page }) => {
+  await seedAuthSession(page, 'admin');
+  const demoItem = { ...item, isDemo: true, demoScenarioLabel: '기본 산식 예시' };
+  await installApiMocks(page, { user: { role: 'admin' }, handlers: { ...base,
+    'GET /api/v2/safety/contracts': async ({ route }) => fulfillSuccess(route, { items: [demoItem], hasMore: false }),
+    'GET /api/v2/safety/contracts/R1': async ({ route }) => fulfillSuccess(route, { ...detail, ...demoItem, events: [], trips: [] }),
+  } });
+  await page.goto('/contract-safety');
+  await expect(page.getByRole('note')).toContainText('데모용 안전운전 데이터');
+  const row = page.getByRole('row').filter({ hasText: 'R1' });
+  await expect(row).toContainText('85.6점');
+  await expect(row).toContainText('데모 · 기본 산식 예시');
+  await row.getByRole('button', { name: '상세 보기' }).click();
+  const region = page.getByRole('region', { name: '계약 평가 상세' });
+  await expect(region).toContainText('집계형 데모 예시');
+  await expect(region).toContainText('개별 운행·이벤트 기록은 생성하지 않습니다');
+  await expect(region).toContainText('3회');
+  await expect(region.getByRole('button', { name: '평가 제외', exact: true })).toHaveCount(0);
+});

@@ -4,6 +4,7 @@ export interface SafetyPolicy { minimumDistanceKm: number; settlementDelayMinute
 export interface SafetyMetrics { distanceKm: number; drivingSeconds: number; speedingSeconds: number; speedingPercent: number; counts: Record<string, number>; components: Record<string, number>; score: number | null; }
 export interface SafetyRecord { key: string; sourceId: string; vin: string; start: string; stop: string; excluded: boolean; exclusionReason?: string; category?: string; distanceKm?: number; drivingSeconds?: number; boundary?: boolean; }
 export interface SafetyContract {
+  isDemo?: boolean; demoScenarioLabel?: string;
   contractId: string; representativeName: string; vehicleNumber: string; startedAt?: string; returnedAt?: string;
   status: string; score: number | null; metrics: Partial<SafetyMetrics>; policy: Partial<SafetyPolicy>;
 }
